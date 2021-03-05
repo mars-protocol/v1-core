@@ -23,6 +23,12 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
+    // Check valid token info
+    msg.validate()?;
+
+    // Create initial accounts
+    let total_supply = create_accounts(deps, &msg.initial_balances)?;
+
     let mint = match msg.mint {
         Some(m) => Some(MinterData {
             minter: deps.api.canonical_address(&m.minter)?,

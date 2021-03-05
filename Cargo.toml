@@ -1,3 +1,7 @@
 [workspace]
-
 members = ["contracts/*"]
+
+[profile.release]
+rpath = false
+lto = true
+overflow-checks = true
