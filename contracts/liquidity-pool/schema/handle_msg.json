@@ -5,29 +5,38 @@
     {
       "type": "object",
       "required": [
-        "increment"
+        "init_asset"
       ],
       "properties": {
-        "increment": {
-          "type": "object"
+        "init_asset": {
+          "type": "object",
+          "required": [
+            "symbol"
+          ],
+          "properties": {
+            "symbol": {
+              "description": "Symbol used in Terra",
+              "type": "string"
+            }
+          }
         }
       }
     },
     {
       "type": "object",
       "required": [
-        "reset"
+        "init_asset_token_callback"
       ],
       "properties": {
-        "reset": {
+        "init_asset_token_callback": {
           "type": "object",
           "required": [
-            "count"
+            "id"
           ],
           "properties": {
-            "count": {
-              "type": "integer",
-              "format": "int32"
+            "id": {
+              "description": "Either the Ticker for a terra native asset or address for a cw20 token",
+              "type": "string"
             }
           }
         }

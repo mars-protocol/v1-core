@@ -3,8 +3,8 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use protocol::msg::{CountResponse, HandleMsg, InitMsg, QueryMsg};
-use protocol::state::State;
+use liquidity_pool::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
+use liquidity_pool::state::Config;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();
@@ -15,6 +15,6 @@ fn main() {
     export_schema(&schema_for!(InitMsg), &out_dir);
     export_schema(&schema_for!(HandleMsg), &out_dir);
     export_schema(&schema_for!(QueryMsg), &out_dir);
-    export_schema(&schema_for!(State), &out_dir);
-    export_schema(&schema_for!(CountResponse), &out_dir);
+    export_schema(&schema_for!(Config), &out_dir);
+    export_schema(&schema_for!(ConfigResponse), &out_dir);
 }

@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     to_binary, Api, Binary, CosmosMsg, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdError, StdResult, Storage, WasmMsg
+    InitResponse, log, Querier, StdError, StdResult, Storage, WasmMsg
 };
 
 use cw20::MinterResponse;
@@ -96,13 +96,30 @@ pub fn try_init_asset<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn try_init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _id: String,
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    id: String,
 ) -> StdResult<HandleResponse> {
-    // TODO: Get by id (fail if not there or if it's already registered)
-    // store debt token address
-    Ok(HandleResponse::default())
+    let mut state = reserves_state(&mut deps.storage);
+    let mut reserve = state.load(&id.as_bytes())?;
+
+    if reserve.ma_token_address == CanonicalAddr::default() {
+        reserve.ma_token_address = deps.api.canonical_address(&env.message.sender)?;
+        state.save(&id.as_bytes(), &reserve)?;
+        Ok(HandleResponse {
+            messages: vec![],
+            log: vec![
+                log("action", "asset_initialized"),
+                log("asset", &id),
+                log("m_token_address", &env.message.sender)
+            ],
+            data: None,
+        })
+    } else {
+        // Can do this only once
+        Err(StdError::unauthorized())
+    }
+
 }
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -196,8 +213,17 @@ mod tests {
         );
 
         // callback comes back with created token
-        //let env = mock_env("mtokencontract", &[]);
-        //let msg = HandleMsg::Re
+        let env = mock_env("mtokencontract", &[]);
+        let msg = HandleMsg::InitAssetTokenCallback { id: String::from("luna") };
+        let _res = handle(&mut deps, env, msg).unwrap();
+
+        // should have asset reserve with contract address
+        let reserve = reserves_state_read(&deps.storage).load(b"luna").unwrap();
+        assert_eq!(
+            deps.api.canonical_address(&HumanAddr::from("mtokencontract")).unwrap(),
+            reserve.ma_token_address
+        );
+
     }
 
 }

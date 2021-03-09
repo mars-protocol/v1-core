@@ -1,14 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "CountResponse",
+  "title": "ConfigResponse",
   "type": "object",
   "required": [
-    "count"
+    "ma_token_contract_id"
   ],
   "properties": {
-    "count": {
+    "ma_token_contract_id": {
       "type": "integer",
-      "format": "int32"
+      "format": "uint64",
+      "minimum": 0.0
     }
   }
 }

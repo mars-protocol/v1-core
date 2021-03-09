@@ -8,7 +8,7 @@ use cw20::{
     TokenInfoResponse,
 };
 use cw20_base::msg::{HandleMsg, MigrateMsg, QueryMsg};
-use terraswap::token::InitMsg;
+use ma_token::msg::InitMsg;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();

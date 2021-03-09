@@ -72,6 +72,7 @@
       "type": "string"
     },
     "InitHook": {
+      "description": "Hook to be called after token initialization",
       "type": "object",
       "required": [
         "contract_addr",
