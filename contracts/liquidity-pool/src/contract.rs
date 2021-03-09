@@ -4,6 +4,7 @@ use cosmwasm_std::{
 };
 
 use cw20::MinterResponse;
+use mars::ma_token;
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
 use crate::state::{

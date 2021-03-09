@@ -1,0 +1,2 @@
+fd1b1097c0ea0dc9fac5a97b76039c7863655ec60f8155c5fe2792bd3e1692c3  liquidity_pool.wasm
+2657fe2dfe296f8be0e5bf3357117ff03fb5f2e894e0e6f6bec5a2c0d4108f03  ma_token.wasm

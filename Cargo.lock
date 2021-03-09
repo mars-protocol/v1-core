@@ -163,7 +163,7 @@ dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw20",
- "ma-token",
+ "mars",
  "schemars",
  "serde",
  "snafu",
@@ -179,9 +179,20 @@ dependencies = [
  "cw2",
  "cw20",
  "cw20-base",
+ "mars",
  "schemars",
  "serde",
  "snafu",
+]
+
+[[package]]
+name = "mars"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-std",
+ "cw20",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
