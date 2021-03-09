@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, HumanAddr, StdResult, Uint128};
+use cosmwasm_std::{Binary, HumanAddr, StdResult, StdError, Uint128};
 use cw20::{Cw20CoinHuman, MinterResponse};
 
 /// TokenContract InitMsg

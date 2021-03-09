@@ -1,5 +1,5 @@
 [package]
-name = "protocol"
+name = "liquidity-pool"
 version = "0.1.0"
 authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
 edition = "2018"
@@ -20,6 +20,8 @@ crate-type = ["cdylib", "rlib"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
+ma-token = { path = "../ma-token", version = "0.1.0" }
+cw20 = "0.2"
 cosmwasm-std = { version = "0.10.1" }
 cosmwasm-storage = { version = "0.10.1" }
 schemars = "0.7"
