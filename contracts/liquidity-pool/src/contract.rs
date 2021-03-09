@@ -109,7 +109,7 @@ pub fn try_init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
         Ok(HandleResponse {
             messages: vec![],
             log: vec![
-                log("action", "asset_initialized"),
+                log("action", "init_asset"),
                 log("asset", &id),
                 log("m_token_address", &env.message.sender)
             ],
@@ -215,7 +215,16 @@ mod tests {
         // callback comes back with created token
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback { id: String::from("luna") };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "init_asset"),
+                log("asset", "luna"),
+                log("m_token_address", "mtokencontract"),
+            ]
+        );
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage).load(b"luna").unwrap();
@@ -224,6 +233,24 @@ mod tests {
             reserve.ma_token_address
         );
 
+        // calling this again should not be allowed
+        let env = mock_env("mtokencontract", &[]);
+        let msg = HandleMsg::InitAssetTokenCallback { id: String::from("luna") };
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+    }
+
+    #[test]
+    fn init_asset_callback_cannot_be_called_on_its_own() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        let msg = InitMsg { ma_token_contract_id: 1u64 };
+        let env = mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        let env = mock_env("mtokencontract", &[]);
+        let msg = HandleMsg::InitAssetTokenCallback { id: String::from("luna") };
+        let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
 }
