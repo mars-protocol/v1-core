@@ -17,7 +17,7 @@ function upload_contract(filepath) {
 }
 
 function instantiate_contract(code_id, msg) {
-  const instantiate_msg = new MsgInstantiateContract(sender, 1, msg);
+  const instantiate_msg = new MsgInstantiateContract(sender, 31, msg);
   return perform_transaction(instantiate_msg).then(res => {
     return res.logs[0].events[0].attributes[2].value //contract address
   });
