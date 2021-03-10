@@ -2,6 +2,7 @@ use cosmwasm_std::{
     log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
     InitResponse, Querier, StdError, StdResult, Storage, WasmMsg,
 };
+use cosmwasm_bignumber::{Decimal256};
 
 use cw20::MinterResponse;
 use mars::ma_token;
@@ -61,6 +62,7 @@ pub fn try_init_asset<S: Storage, A: Api, Q: Querier>(
                 symbol.as_bytes(),
                 &Reserve {
                     ma_token_address: CanonicalAddr::default(),
+                    liquidity_index: Decimal256::one(),
                 },
             )?;
         }
@@ -248,6 +250,7 @@ mod tests {
                 .unwrap(),
             reserve.ma_token_address
         );
+        assert_eq!(Decimal256::one(), reserve.liquidity_index);
 
         // calling this again should not be allowed
         let env = mock_env("mtokencontract", &[]);

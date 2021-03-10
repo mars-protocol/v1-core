@@ -6,6 +6,7 @@ use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use cosmwasm_bignumber::Decimal256;
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -33,6 +34,7 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 pub struct Reserve {
     /// maToken contract address
     pub ma_token_address: CanonicalAddr,
+    pub liquidity_index: Decimal256,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
