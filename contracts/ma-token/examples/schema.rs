@@ -8,7 +8,7 @@ use cw20::{
     TokenInfoResponse,
 };
 use cw20_base::msg::{HandleMsg, MigrateMsg, QueryMsg};
-use ma_token::msg::InitMsg;
+use mars::ma_token::msg::InitMsg;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();
