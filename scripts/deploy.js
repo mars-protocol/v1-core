@@ -51,12 +51,12 @@ async function deploy() {
   console.log("MA Code ID: " + ma_code_id);
   const lp_init_msg = {"ma_token_code_id": ma_code_id};
   const lp_contract_address = await instantiate_contract(test1, lp_code_id, lp_init_msg);
-  // console.log("LP contract_address: " + lp_contract_address);
-  // const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
+  console.log("LP contract_address: " + lp_contract_address);
+  const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
   const lp_usd_execute_msg = {"init_asset": {"symbol": "usd"}};
-  // let luna_result = await execute_contract(test1, lp_contract_address, lp_luna_execute_msg);
+  let luna_result = await execute_contract(test1, lp_contract_address, lp_luna_execute_msg);
   let usd_result = await execute_contract(test1, lp_contract_address, lp_usd_execute_msg);
-  // console.log("Luna result: " + luna_result);
+  console.log("Luna result: " + luna_result);
   console.log("USD result: " + usd_result);
 }
 
