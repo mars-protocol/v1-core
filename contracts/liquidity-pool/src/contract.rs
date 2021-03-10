@@ -77,7 +77,7 @@ pub fn try_init_asset<S: Storage, A: Api, Q: Querier>(
                 code_id: 1u64,
                 msg: to_binary(&ma_token::msg::InitMsg {
                     name: format!("mars {} debt token", symbol),
-                    symbol: format!("m{}", symbol),
+                    symbol: format!("ma{}", symbol),
                     decimals: 6,
                     initial_balances: vec![],
                     mint: Some(MinterResponse {
@@ -112,7 +112,7 @@ pub fn try_init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
             log: vec![
                 log("action", "init_asset"),
                 log("asset", &id),
-                log("m_token_address", &env.message.sender)
+                log("ma_token_address", &env.message.sender)
             ],
             data: None,
         })
@@ -190,7 +190,7 @@ mod tests {
                     code_id: 1u64,
                     msg: to_binary(&ma_token::msg::InitMsg {
                         name: String::from("mars luna debt token"),
-                        symbol: String::from("mluna"),
+                        symbol: String::from("maluna"),
                         decimals: 6,
                         initial_balances: vec![],
                         mint: Some(MinterResponse {
@@ -223,7 +223,7 @@ mod tests {
             vec![
                 log("action", "init_asset"),
                 log("asset", "luna"),
-                log("m_token_address", "mtokencontract"),
+                log("ma_token_address", "mtokencontract"),
             ]
         );
 
