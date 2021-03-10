@@ -85,9 +85,7 @@ pub fn try_init_asset<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(ma_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitAssetTokenCallback {
-                        id: String::from("luna"),
-                    })?,
+                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: symbol })?,
                     contract_addr: env.contract.address,
                 }),
             })?,
@@ -179,19 +177,21 @@ mod tests {
         // non owner is not authorized
         let env = mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
-            symbol: String::from("luna"),
+            symbol: String::from("someasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
         // owner is authorized
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            symbol: String::from("luna"),
+            symbol: String::from("someasset"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with Canonical default address
-        let reserve = reserves_state_read(&deps.storage).load(b"luna").unwrap();
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"someasset")
+            .unwrap();
         assert_eq!(CanonicalAddr::default(), reserve.ma_token_address);
 
         // should instantiate a debt token
@@ -200,8 +200,8 @@ mod tests {
             vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
                 code_id: 5u64,
                 msg: to_binary(&ma_token::msg::InitMsg {
-                    name: String::from("mars luna debt token"),
-                    symbol: String::from("maluna"),
+                    name: String::from("mars someasset debt token"),
+                    symbol: String::from("masomeasset"),
                     decimals: 6,
                     initial_balances: vec![],
                     mint: Some(MinterResponse {
@@ -210,7 +210,7 @@ mod tests {
                     }),
                     init_hook: Some(ma_token::msg::InitHook {
                         msg: to_binary(&HandleMsg::InitAssetTokenCallback {
-                            id: String::from("luna")
+                            id: String::from("someasset")
                         })
                         .unwrap(),
                         contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
@@ -225,7 +225,7 @@ mod tests {
         // callback comes back with created token
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
-            id: String::from("luna"),
+            id: String::from("someasset"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
@@ -233,13 +233,15 @@ mod tests {
             res.log,
             vec![
                 log("action", "init_asset"),
-                log("asset", "luna"),
+                log("asset", "someasset"),
                 log("ma_token_address", "mtokencontract"),
             ]
         );
 
         // should have asset reserve with contract address
-        let reserve = reserves_state_read(&deps.storage).load(b"luna").unwrap();
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"someasset")
+            .unwrap();
         assert_eq!(
             deps.api
                 .canonical_address(&HumanAddr::from("mtokencontract"))
@@ -250,7 +252,7 @@ mod tests {
         // calling this again should not be allowed
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
-            id: String::from("luna"),
+            id: String::from("someasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
