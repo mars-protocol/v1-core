@@ -51,17 +51,15 @@ async function deploy() {
   console.log("MA Code ID: " + ma_code_id);
   const lp_init_msg = {"ma_token_code_id": ma_code_id};
   const lp_contract_address = await instantiate_contract(test1, lp_code_id, lp_init_msg);
-  console.log("LP contract_address: " + lp_contract_address);
-  const lp_execute_msg = {"init_asset": {"symbol": "luna"}};
-  return await execute_contract(test1, lp_contract_address, lp_execute_msg);
-}
-
-async function test_deploy() {
-  const code_id = await upload_contract(test1, './my_first_contract.wasm');
-  const contract_address = await instantiate_contract(test1, code_id, {"count": 0});
-  return await execute_contract(test1, contract_address, {"increment": {}});
+  // console.log("LP contract_address: " + lp_contract_address);
+  // const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
+  const lp_usd_execute_msg = {"init_asset": {"symbol": "usd"}};
+  // let luna_result = await execute_contract(test1, lp_contract_address, lp_luna_execute_msg);
+  let usd_result = await execute_contract(test1, lp_contract_address, lp_usd_execute_msg);
+  // console.log("Luna result: " + luna_result);
+  console.log("USD result: " + usd_result);
 }
 
 const terra = new LocalTerra();
 const test1 = terra.wallets.test1;
-deploy().then(res => console.log("deployed", res));
+deploy();
