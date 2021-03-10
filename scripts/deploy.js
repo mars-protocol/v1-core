@@ -1,4 +1,11 @@
-import {isTxError, LocalTerra, MsgExecuteContract, MsgInstantiateContract, MsgStoreCode} from '@terra-money/terra.js';
+import {
+  isTxError,
+  LCDClient,
+  LocalTerra, MnemonicKey,
+  MsgExecuteContract,
+  MsgInstantiateContract,
+  MsgStoreCode
+} from '@terra-money/terra.js';
 import {readFileSync} from 'fs';
 
 async function perform_transaction(wallet, msg) {
@@ -6,7 +13,7 @@ async function perform_transaction(wallet, msg) {
   const result = await terra.tx.broadcast(tx);
   if (isTxError(result)) {
     throw new Error(
-      `instantiate failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
+      `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
     );
   }
   return result
@@ -33,16 +40,28 @@ async function execute_contract(wallet, contract_address, msg) {
 async function query_contract(contract_address, query) {
   return await terra.wasm.contractQuery(
     contract_address,
-    query  // query msg
+    query
   )
 }
 
+async function deploy() {
+  const lp_code_id = await upload_contract(test1, '../artifacts/liquidity_pool.wasm');
+  const ma_code_id = await upload_contract(test1, '../artifacts/ma_token.wasm');
+  console.log("LP Code ID: " + lp_code_id);
+  console.log("MA Code ID: " + ma_code_id);
+  const lp_init_msg = {"ma_token_contract_id": ma_code_id};
+  const lp_contract_address = await instantiate_contract(test1, lp_code_id, lp_init_msg);
+  console.log("LP contract_address: " + lp_contract_address);
+  const lp_execute_msg = {"init_asset": {"symbol": "luna"}};
+  return await execute_contract(test1, lp_contract_address, lp_execute_msg);
+}
+
+async function test_deploy() {
+  const code_id = await upload_contract(test1, './my_first_contract.wasm');
+  const contract_address = await instantiate_contract(test1, code_id, {"count": 0});
+  return await execute_contract(test1, contract_address, {"increment": {}});
+}
 
 const terra = new LocalTerra();
 const test1 = terra.wallets.test1;
-const code_id = await upload_contract(test1, './my_first_contract.wasm');
-const contract_address = await instantiate_contract(test1, code_id, {"count": 0});
-let result = await execute_contract(test1, contract_address, {"reset": {"count": 5}});
-console.log(result);
-let query_result = await query_contract(contract_address, {"get_count": {}});
-console.log(query_result)
+deploy().then(res => console.log("deployed", res));
