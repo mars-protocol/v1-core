@@ -17,8 +17,8 @@ pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
 pub struct Config {
     /// Contract owner
     pub owner: CanonicalAddr,
-    /// maToken contract id used to instantiate new tokens
-    pub ma_token_contract_id: u64,
+    /// maToken code id used to instantiate new tokens
+    pub ma_token_code_id: u64,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {

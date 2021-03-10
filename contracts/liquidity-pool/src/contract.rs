@@ -18,7 +18,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
-        ma_token_contract_id: msg.ma_token_contract_id,
+        ma_token_code_id: msg.ma_token_code_id,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -74,7 +74,7 @@ pub fn try_init_asset<S: Storage, A: Api, Q: Querier>(
         log: vec![],
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-            code_id: 1u64,
+            code_id: config.ma_token_code_id,
             msg: to_binary(&ma_token::msg::InitMsg {
                 name: format!("mars {} debt token", symbol),
                 symbol: format!("ma{}", symbol),
@@ -137,7 +137,7 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<ConfigResponse> {
     let state = config_state_read(&deps.storage).load()?;
     Ok(ConfigResponse {
-        ma_token_contract_id: state.ma_token_contract_id,
+        ma_token_code_id: state.ma_token_code_id,
     })
 }
 
@@ -152,7 +152,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            ma_token_contract_id: 1u64,
+            ma_token_code_id: 10u64,
         };
         let env = mock_env("owner", &[]);
 
@@ -163,7 +163,7 @@ mod tests {
         // it worked, let's query the state
         let res = query(&deps, QueryMsg::GetConfig {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!(1, value.ma_token_contract_id);
+        assert_eq!(10, value.ma_token_code_id);
     }
 
     #[test]
@@ -171,7 +171,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            ma_token_contract_id: 1u64,
+            ma_token_code_id: 5u64,
         };
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-                code_id: 1u64,
+                code_id: 5u64,
                 msg: to_binary(&ma_token::msg::InitMsg {
                     name: String::from("mars luna debt token"),
                     symbol: String::from("maluna"),
@@ -260,7 +260,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            ma_token_contract_id: 1u64,
+            ma_token_code_id: 1u64,
         };
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
