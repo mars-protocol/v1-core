@@ -49,7 +49,7 @@ async function deploy() {
   const ma_code_id = await upload_contract(test1, '../artifacts/ma_token.wasm');
   console.log("LP Code ID: " + lp_code_id);
   console.log("MA Code ID: " + ma_code_id);
-  const lp_init_msg = {"ma_token_contract_id": ma_code_id};
+  const lp_init_msg = {"ma_token_code_id": ma_code_id};
   const lp_contract_address = await instantiate_contract(test1, lp_code_id, lp_init_msg);
   console.log("LP contract_address: " + lp_contract_address);
   const lp_execute_msg = {"init_asset": {"symbol": "luna"}};

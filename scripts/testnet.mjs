@@ -24,7 +24,3 @@ const terra = new LCDClient({
 });
 
 
-let wallet = initialize(process.env.TEST_MAIN);
-let wallet2 = recover(process.env.TEST_MAIN);
-console.log(wallet.key.accAddress);
-console.log(wallet2.key.accAddress);
