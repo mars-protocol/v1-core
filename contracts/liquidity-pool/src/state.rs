@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{CanonicalAddr, Storage};
 use cosmwasm_storage::{
-        bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket,
-        ReadonlySingleton, Singleton,
+    bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
+    Singleton,
 };
 
 // keys (for singleton)

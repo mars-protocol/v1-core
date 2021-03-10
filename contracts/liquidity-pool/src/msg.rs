@@ -11,11 +11,11 @@ pub struct InitMsg {
 pub enum HandleMsg {
     InitAsset {
         /// Symbol used in Terra
-        symbol: String
+        symbol: String,
     },
     InitAssetTokenCallback {
         /// Either the Ticker for a terra native asset or address for a cw20 token
-        id: String
+        id: String,
     },
 }
 

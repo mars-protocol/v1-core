@@ -2,7 +2,7 @@ pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use cosmwasm_std::{Binary, HumanAddr, StdResult, StdError, Uint128};
+    use cosmwasm_std::{Binary, HumanAddr, StdError, StdResult, Uint128};
     use cw20::{Cw20CoinHuman, MinterResponse};
     /// TokenContract InitMsg
     #[derive(Serialize, Deserialize, JsonSchema)]
@@ -66,5 +66,4 @@ pub mod msg {
         }
         true
     }
-
 }
