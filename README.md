@@ -1,5 +1,8 @@
 # Mars
 
+### Build
+1. Run `./scripts/build_artifacts.sh`
+
 ### Deploy Dev
 1. Run `cd scripts && yarn install`
 2. Ensure you have LocalTerra running
