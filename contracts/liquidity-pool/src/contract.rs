@@ -7,7 +7,7 @@ use cosmwasm_std::{
 use cw20::{Cw20HandleMsg, MinterResponse};
 use mars::ma_token;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReserveResponse};
 use crate::state::{
     config_state, config_state_read, reserves_state, reserves_state_read, Config, Reserve,
 };
@@ -186,6 +186,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetConfig {} => to_binary(&query_config(deps)?),
+        QueryMsg::QueryReserve { symbol } => to_binary(&query_reserve(deps, symbol)?),
     }
 }
 
@@ -196,6 +197,15 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     Ok(ConfigResponse {
         ma_token_code_id: state.ma_token_code_id,
     })
+}
+
+fn query_reserve<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    symbol: String,
+) -> StdResult<ReserveResponse> {
+    let reserve = reserves_state_read(&deps.storage).load(symbol.as_bytes())?;
+    let ma_token_address = deps.api.human_address(&reserve.ma_token_address)?;
+    Ok(ReserveResponse { ma_token_address })
 }
 
 #[cfg(test)]

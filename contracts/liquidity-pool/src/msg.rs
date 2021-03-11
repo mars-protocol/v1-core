@@ -1,3 +1,4 @@
+use cosmwasm_std::HumanAddr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -29,10 +30,16 @@ pub enum HandleMsg {
 pub enum QueryMsg {
     // GetCount returns the current count as a json-encoded number
     GetConfig {},
+    QueryReserve { symbol: String },
 }
 
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub ma_token_code_id: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ReserveResponse {
+    pub ma_token_address: HumanAddr,
 }

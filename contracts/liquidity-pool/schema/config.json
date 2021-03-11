@@ -3,12 +3,12 @@
   "title": "Config",
   "type": "object",
   "required": [
-    "ma_token_contract_id",
+    "ma_token_code_id",
     "owner"
   ],
   "properties": {
-    "ma_token_contract_id": {
-      "description": "maToken contract id used to instantiate new tokens",
+    "ma_token_code_id": {
+      "description": "maToken code id used to instantiate new tokens",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0

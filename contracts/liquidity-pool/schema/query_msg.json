@@ -12,6 +12,25 @@
           "type": "object"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "query_reserve"
+      ],
+      "properties": {
+        "query_reserve": {
+          "type": "object",
+          "required": [
+            "symbol"
+          ],
+          "properties": {
+            "symbol": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   ]
 }

@@ -3,10 +3,10 @@
   "title": "ConfigResponse",
   "type": "object",
   "required": [
-    "ma_token_contract_id"
+    "ma_token_code_id"
   ],
   "properties": {
-    "ma_token_contract_id": {
+    "ma_token_code_id": {
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
