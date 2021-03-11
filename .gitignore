@@ -19,3 +19,6 @@
 
 # Scripts
 scripts/node_modules/
+
+# Artifacts
+artifacts/

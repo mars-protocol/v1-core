@@ -15,7 +15,7 @@
           ],
           "properties": {
             "symbol": {
-              "description": "Symbol used in Terra",
+              "description": "Symbol used in Terra (e.g: luna, usd)",
               "type": "string"
             }
           }
@@ -36,6 +36,27 @@
           "properties": {
             "id": {
               "description": "Either the Ticker for a terra native asset or address for a cw20 token",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Deposit Terra native coins",
+      "type": "object",
+      "required": [
+        "deposit_native"
+      ],
+      "properties": {
+        "deposit_native": {
+          "type": "object",
+          "required": [
+            "symbol"
+          ],
+          "properties": {
+            "symbol": {
+              "description": "Symbol used in Terra (e.g: luna, usd)",
               "type": "string"
             }
           }
