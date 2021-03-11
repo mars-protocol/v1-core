@@ -1,18 +1,14 @@
-import {
-  isTxError,
-  MsgExecuteContract,
-  MsgInstantiateContract,
-  MsgStoreCode
-} from '@terra-money/terra.js';
+import {isTxError, MsgExecuteContract, MsgInstantiateContract, MsgStoreCode} from '@terra-money/terra.js';
 import {readFileSync} from 'fs';
 
 export class Helpers {
-  constructor(terra) {
+  constructor(terra, wallet) {
     this.terra = terra;
+    this.wallet = wallet;
   }
 
-  async perform_transaction(wallet, msg) {
-    const tx = await wallet.createAndSignTx({msgs: [msg]});
+  async perform_transaction(msg) {
+    const tx = await this.wallet.createAndSignTx({msgs: [msg]});
     const result = await this.terra.tx.broadcast(tx);
     if (isTxError(result)) {
       throw new Error(
@@ -22,22 +18,22 @@ export class Helpers {
     return result
   }
 
-  async upload_contract(wallet, filepath) {
+  async upload_contract(filepath) {
     const contract = readFileSync(filepath, 'base64');
-    const upload_msg = new MsgStoreCode(wallet.key.accAddress, contract);
-    let result = await this.perform_transaction(wallet, upload_msg);
+    const upload_msg = new MsgStoreCode(this.wallet.key.accAddress, contract);
+    let result = await this.perform_transaction(upload_msg);
     return Number(result.logs[0].events[1].attributes[1].value) //code_id
   }
 
-  async instantiate_contract(wallet, code_id, msg) {
-    const instantiate_msg = new MsgInstantiateContract(wallet.key.accAddress, code_id, msg);
-    let result = await this.perform_transaction(wallet, instantiate_msg)
+  async instantiate_contract(code_id, msg) {
+    const instantiate_msg = new MsgInstantiateContract(this.wallet.key.accAddress, code_id, msg);
+    let result = await this.perform_transaction(instantiate_msg)
     return result.logs[0].events[0].attributes[2].value //contract address
   }
 
-  async execute_contract(wallet, contract_address, msg) {
-    const execute_msg = new MsgExecuteContract(wallet.key.accAddress, contract_address, msg);
-    return await this.perform_transaction(wallet, execute_msg);
+  async execute_contract(contract_address, msg) {
+    const execute_msg = new MsgExecuteContract(this.wallet.key.accAddress, contract_address, msg);
+    return await this.perform_transaction(execute_msg);
   }
 
   async query_contract(contract_address, query) {
@@ -45,6 +41,11 @@ export class Helpers {
       contract_address,
       query
     )
+  }
+
+  async deploy_contract(filepath, init_msg) {
+    const code_id = await this.upload_contract(filepath);
+    return await this.instantiate_contract(code_id, init_msg);
   }
 }
 
