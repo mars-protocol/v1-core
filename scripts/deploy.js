@@ -58,7 +58,7 @@ async function deploy() {
   let usd_result = await execute_contract(test1, lp_contract_address, lp_usd_execute_msg);
   console.log("Luna result: " + luna_result);
   console.log("USD result: " + usd_result);
-  let query_reserve = await query_contract(lp_contract_address, {"query_reserve": {"symbol":"usd"}});
+  let query_reserve = await query_contract(lp_contract_address, {"reserve": {"symbol":"usd"}});
   console.log(query_reserve);
 }
 

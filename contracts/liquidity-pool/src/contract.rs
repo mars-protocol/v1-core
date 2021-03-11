@@ -185,8 +185,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     msg: QueryMsg,
 ) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetConfig {} => to_binary(&query_config(deps)?),
-        QueryMsg::QueryReserve { symbol } => to_binary(&query_reserve(deps, symbol)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Reserve { symbol } => to_binary(&query_reserve(deps, symbol)?),
     }
 }
 
@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(&deps, QueryMsg::GetConfig {}).unwrap();
+        let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
     }
