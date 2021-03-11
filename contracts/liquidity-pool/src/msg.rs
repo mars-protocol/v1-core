@@ -10,12 +10,17 @@ pub struct InitMsg {
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     InitAsset {
-        /// Symbol used in Terra
+        /// Symbol used in Terra (e.g: luna, usd)
         symbol: String,
     },
     InitAssetTokenCallback {
         /// Either the Ticker for a terra native asset or address for a cw20 token
         id: String,
+    },
+    /// Deposit Terra native coins
+    DepositNative {
+        /// Symbol used in Terra (e.g: luna, usd)
+        symbol: String,
     },
 }
 
