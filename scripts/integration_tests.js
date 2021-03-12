@@ -1,6 +1,5 @@
-import {LocalTerra} from "@terra-money/terra.js";
-import { deploy_local } from "./deploy_local.mjs";
-import { query_contract } from "./helpers.mjs";
+import { LocalTerra } from "@terra-money/terra.js";
+import { deploy, query_contract } from "./helpers.mjs";
 
 async function test_reserve_query(terra, address, symbol) {
   let query_msg = {"reserve": {"symbol": symbol}};
@@ -28,7 +27,7 @@ async function test_config_query(terra, address) {
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
-const contract_address = await deploy_local(terra, wallet);
+const contract_address = await deploy(terra, wallet);
 
 await test_reserve_query(terra, contract_address, "usd")
 await test_reserve_query(terra, contract_address, "luna");
