@@ -81,7 +81,7 @@ more on how to run tests and develop code. Or go through the
 of how to develop.
 
 [Publishing](./Publishing.md) contains useful information on how to publish your contract
-to the world, once you are ready to deploy_local it on a running blockchain. And
+to the world, once you are ready to deploy it on a running blockchain. And
 [Importing](./Importing.md) contains information about pulling in other contracts or crates
 that have been published.
 

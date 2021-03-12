@@ -1,29 +1,28 @@
-import { Helpers } from "./helpers.mjs";
+import { upload_contract, deploy_contract, execute_contract } from "./helpers.mjs";
 import { LocalTerra } from "@terra-money/terra.js";
+import { fileURLToPath } from 'url'
 
-export class LocalEnv extends Helpers {
+export async function deploy_local(terra, wallet) {
+  let ma_code_id = await upload_contract(terra, wallet, '../artifacts/ma_token.wasm');
 
-  constructor() {
-    const terra = new LocalTerra();
-    const wallet = terra.wallets.test1;
-    super(terra, wallet);
-  }
+  const lp_init_msg = {"ma_token_code_id": ma_code_id};
+  const lp_contract_address = await deploy_contract(terra, wallet,'../artifacts/liquidity_pool.wasm', lp_init_msg)
 
-  async deploy_local() {
-    let ma_code_id = await super.upload_contract('../artifacts/ma_token.wasm');
+  const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
+  const lp_usd_execute_msg = {"init_asset": {"symbol": "usd"}};
 
-    const lp_init_msg = {"ma_token_code_id": ma_code_id};
-    const lp_contract_address = await super.deploy_contract('../artifacts/liquidity_pool.wasm', lp_init_msg)
+  await execute_contract(terra, wallet, lp_contract_address, lp_luna_execute_msg);
+  await execute_contract(terra, wallet, lp_contract_address, lp_usd_execute_msg);
 
-    const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
-    const lp_usd_execute_msg = {"init_asset": {"symbol": "usd"}};
+  console.log("LP Contract Address: " + lp_contract_address);
 
-    await super.execute_contract(lp_contract_address, lp_luna_execute_msg);
-    await super.execute_contract(lp_contract_address, lp_usd_execute_msg);
-
-    console.log("LP Contract Address: " + lp_contract_address);
-
-    return lp_contract_address;
-  }
-
+  return lp_contract_address;
 }
+
+// Checks if running directly
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const terra = new LocalTerra();
+  const wallet = terra.wallets.test1;
+  deploy_local(terra, wallet);
+}
+

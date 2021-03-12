@@ -1,8 +1,10 @@
-import { LocalEnv } from "./deploy_local.mjs";
+import {LocalTerra} from "@terra-money/terra.js";
+import { deploy_local } from "./deploy_local.mjs";
+import { query_contract } from "./helpers.mjs";
 
-async function test_reserve_query(address, symbol) {
+async function test_reserve_query(terra, address, symbol) {
   let query_msg = {"reserve": {"symbol": symbol}};
-  let result = await local.query_contract(address, query_msg);
+  let result = await query_contract(terra, address, query_msg);
 
   if (!result.hasOwnProperty("ma_token_address")) {
     throw new Error("Reserve Query for symbol {symbol} failed")
@@ -12,9 +14,9 @@ async function test_reserve_query(address, symbol) {
   console.log(result);
 }
 
-async function test_config_query(address) {
+async function test_config_query(terra, address) {
   let query_msg = {"config": {}};
-  let result = await local.query_contract(address, query_msg);
+  let result = await query_contract(terra, address, query_msg);
 
   if (!result.hasOwnProperty("ma_token_code_id")) {
     throw new Error("Config query failed")
@@ -24,8 +26,10 @@ async function test_config_query(address) {
   console.log(result);
 }
 
-const local = new LocalEnv();
-const contract_address = await local.deploy_local();
-await test_reserve_query(contract_address, "usd")
-await test_reserve_query(contract_address, "luna");
-await test_config_query(contract_address);
+const terra = new LocalTerra();
+const wallet = terra.wallets.test1;
+const contract_address = await deploy_local(terra, wallet);
+
+await test_reserve_query(terra, contract_address, "usd")
+await test_reserve_query(terra, contract_address, "luna");
+await test_config_query(terra, contract_address);
