@@ -1,13 +1,14 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, Querier, StdError, StdResult, Storage, WasmMsg,
+    from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
+    HandleResponse, HumanAddr, InitResponse, Querier, StdError, StdResult, Storage, Uint128,
+    WasmMsg,
 };
 
-use cw20::{Cw20HandleMsg, MinterResponse};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReserveResponse};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse};
 use crate::state::{
     config_state, config_state_read, reserves_state, reserves_state_read, Config, Reserve,
 };
@@ -35,10 +36,76 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitAsset { symbol } => init_asset(deps, env, symbol),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { symbol } => deposit_native(deps, env, symbol),
     }
+}
+
+/// cw20 receive implementation
+pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    cw20_msg: Cw20ReceiveMsg,
+) -> StdResult<HandleResponse> {
+    if let Some(msg) = cw20_msg.msg {
+        match from_binary(&msg)? {
+            ReceiveMsg::Redeem { id } => {
+                let reserve = reserves_state_read(&deps.storage).load(id.as_bytes())?;
+                if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
+                    return Err(StdError::unauthorized());
+                }
+
+                // TODO: if cw20s are added, then this needs some extra handling
+                redeem_native(deps, env, id, reserve, cw20_msg.sender, cw20_msg.amount)
+            }
+        }
+    } else {
+        Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
+    }
+}
+
+/// Burns sent maAsset in exchange of underlying asset
+pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    symbol: String,
+    reserve: Reserve,
+    to: HumanAddr,
+    burn_amount: Uint128,
+) -> StdResult<HandleResponse> {
+    // TODO: Recompute interest rates
+    // TODO: Check the withdraw can actually be made
+    let redeem_amount = Uint256::from(burn_amount) * reserve.liquidity_index;
+
+    Ok(HandleResponse {
+        messages: vec![
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Burn {
+                    amount: burn_amount,
+                })?,
+            }),
+            CosmosMsg::Bank(BankMsg::Send {
+                from_address: env.contract.address,
+                to_address: to.clone(),
+                amount: vec![Coin {
+                    denom: ["u", &symbol[..]].concat(),
+                    amount: redeem_amount.into(),
+                }],
+            }),
+        ],
+        log: vec![
+            log("action", "redeem"),
+            log("reserve", symbol),
+            log("user", to),
+            log("burn_amount", burn_amount),
+            log("redeem_amount", redeem_amount),
+        ],
+        data: None,
+    })
 }
 
 /// Initialize asset so it can be deposited and borrowed.
@@ -208,11 +275,16 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
     Ok(ReserveResponse { ma_token_address })
 }
 
+// TESTS
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, from_binary, Uint128};
+    use cosmwasm_std::testing::{
+        mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR,
+    };
+    use cosmwasm_std::{coin, from_binary, Extern};
+    use cosmwasm_storage::Bucket;
 
     #[test]
     fn proper_initialization() {
@@ -355,18 +427,13 @@ mod tests {
         let _res = init(&mut deps, env, msg).unwrap();
 
         let mut reserves = reserves_state(&mut deps.storage);
-        reserves
-            .save(
-                b"somecoin",
-                &Reserve {
-                    ma_token_address: deps
-                        .api
-                        .canonical_address(&HumanAddr::from("matoken"))
-                        .unwrap(),
-                    liquidity_index: Decimal256::from_ratio(11, 10),
-                },
-            )
-            .unwrap();
+        th_init_reserve(
+            &deps.api,
+            &mut reserves,
+            b"somecoin",
+            "matoken",
+            Decimal256::from_ratio(11, 10),
+        );
 
         let env = mock_env("depositer", &[coin(110000, "usomecoin")]);
         let msg = HandleMsg::DepositNative {
@@ -419,5 +486,98 @@ mod tests {
             symbol: String::from("somecoin"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    #[test]
+    fn redeem_native() {
+        let mut deps = th_setup();
+
+        let mut reserves = reserves_state(&mut deps.storage);
+        th_init_reserve(
+            &deps.api,
+            &mut reserves,
+            b"somecoin",
+            "matoken",
+            Decimal256::from_ratio(15, 10),
+        );
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::Redeem {
+                    id: String::from("somecoin"),
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("redeemer"),
+            amount: Uint128(2000),
+        });
+
+        let env = mock_env("matoken", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("matoken"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Burn {
+                        amount: Uint128(2000),
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("redeemer"),
+                    amount: vec![Coin {
+                        denom: String::from("usomecoin"),
+                        amount: Uint128(3000),
+                    },],
+                }),
+            ]
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "redeem"),
+                log("reserve", "somecoin"),
+                log("user", "redeemer"),
+                log("burn_amount", 2000),
+                log("redeem_amount", 3000),
+            ]
+        );
+    }
+
+    // TEST HELPERS
+    fn th_setup() -> Extern<MockStorage, MockApi, MockQuerier> {
+        let mut deps = mock_dependencies(20, &[]);
+
+        let msg = InitMsg {
+            ma_token_code_id: 1u64,
+        };
+        let env = mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        deps
+    }
+
+    fn th_init_reserve<S: Storage, A: Api>(
+        api: &A,
+        bucket: &mut Bucket<S, Reserve>,
+        key: &[u8],
+        token_address: &str,
+        liquidity_index: Decimal256,
+    ) {
+        bucket
+            .save(
+                key,
+                &Reserve {
+                    ma_token_address: api
+                        .canonical_address(&HumanAddr::from(token_address))
+                        .unwrap(),
+                    liquidity_index: liquidity_index,
+                },
+            )
+            .unwrap();
     }
 }
