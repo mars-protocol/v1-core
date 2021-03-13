@@ -19,6 +19,7 @@ async function testReserveQuery(terra, address, symbol) {
   console.log(reserveQueryMsg);
 }
 
+
 async function main() {
   const terra = new LocalTerra();
   const wallet = terra.wallets.test1;
@@ -60,6 +61,7 @@ async function main() {
   if (depositContractDiff !== depositAmount) {
     throw new Error(`[Deposit]: expected to have luna balance increase by ${depositAmount} for address \
     ${lpContractAddress}, got ${depositContractDiff}`);
+
   }
 
   let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
@@ -117,5 +119,4 @@ async function main() {
 }
 
 main().catch(err => console.log(err));
-
 

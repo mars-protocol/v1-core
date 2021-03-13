@@ -48,12 +48,17 @@ export async function deploy(terra, wallet) {
 
 
 <<<<<<< HEAD
+<<<<<<< HEAD
   const lpInitMsg = {"ma_token_code_id": maCodeId};
   const lpContractAddress = await deployContract(terra, wallet,'./artifacts/liquidity_pool.wasm', lpInitMsg);
 =======
   const lp_init_msg = {"ma_token_code_id": ma_code_id};
   const lp_contract_address = await deploy_contract(terra, wallet,'./artifacts/liquidity_pool.wasm', lp_init_msg);
 >>>>>>> WIP: redeem test
+=======
+  const lpInitMsg = {"ma_token_code_id": maCodeId};
+  const lpContractAddress = await deployContract(terra, wallet,'./artifacts/liquidity_pool.wasm', lpInitMsg);
+>>>>>>> formatting fixes for js
   console.log("Uploaded and instantiated liquidity_pool contract");
 
   const lpLunaExecuteMsg = {"init_asset": {"symbol": "luna"}};
