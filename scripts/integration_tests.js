@@ -48,21 +48,29 @@ async function test_deposit(terra, wallet, contract_address) {
   console.log(result);
 }
 
-async function test_redeem(terra, wallet, contract_address) {
+async function test_redeem(terra, wallet, lp_contract_address) {
   let reserve_query_msg = {"reserve": {"symbol": "luna"}};
-  let { ma_token_address } = await query_contract(terra, contract_address, reserve_query_msg);
+  let { ma_token_address } = await query_contract(terra, lp_contract_address, reserve_query_msg);
 
-  //encode in base64
-  const receive_msg = {"redeem": {"id": "luna"}};
+  const execute_msg = {
+    "send": {
+      "contract": lp_contract_address,
+      "amount": "500",
+      "msg": toEncodedBinary({ "redeem": {"id": "luna"} }),
+    }
+  };
 
-  const execute_msg = {"send": {"contract": contract_address, "amount": "500", receive_msg}};
   const send_msg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, execute_msg);
-  await perform_transaction(terra, wallet, send_msg);
+  const res = await perform_transaction(terra, wallet, send_msg);
 
   const balance_query_msg = {"balance": {"address": wallet.key.accAddress}};
   let result = await query_contract(terra, ma_token_address, balance_query_msg);
   console.log(result);
   // verify ma_balance is 500 and uluna is 500 (converted 1:1)
+}
+
+function toEncodedBinary(object) {
+  return Buffer.from(JSON.stringify(object)).toString('base64');
 }
 
 const terra = new LocalTerra();
