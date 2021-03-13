@@ -1,6 +1,7 @@
 import {Coin, LocalTerra, MsgExecuteContract} from "@terra-money/terra.js";
 import {deploy, performTransaction, queryContract} from "./helpers.mjs";
 
+
 function toEncodedBinary(object) {
   return Buffer.from(JSON.stringify(object)).toString('base64');
 }
@@ -63,7 +64,7 @@ async function main() {
 
   let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
   const depositTxFee = Number(txInfo.tx.fee.amount._coins.uluna.amount);
-  
+
   let {_coins: {uluna: {amount: depositorEndingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
   let depositorBalanceDiff = depositorStartingBalance - depositorEndingBalance;
 
@@ -111,9 +112,10 @@ async function main() {
     got ${redeemerLunaBalanceDiff}`);
   }
 
-  console.log("Redeem Message Sent:")
+  console.log("Redeem Message Sent:");
   console.log(sendMsg);
 }
 
 main().catch(err => console.log(err));
+
 
