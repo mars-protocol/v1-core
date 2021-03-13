@@ -1,10 +1,10 @@
 import {Coin, LocalTerra, MsgExecuteContract} from "@terra-money/terra.js";
-import {deploy, perform_transaction, query_contract} from "./helpers.mjs";
+import {deploy, performTransaction, queryContract} from "./helpers.mjs";
 
-async function test_reserve_query(terra, address, symbol) {
+async function testReserveQuery(terra, address, symbol) {
   console.log("### Testing Reserve...")
-  let query_msg = {"reserve": {"symbol": symbol}};
-  let result = await query_contract(terra, address, query_msg);
+  let queryMsg = {"reserve": {"symbol": symbol}};
+  let result = await queryContract(terra, address, queryMsg);
 
   if (!result.hasOwnProperty("ma_token_address")) {
     throw new Error(`Reserve Query for symbol ${symbol} failed`)
@@ -14,10 +14,10 @@ async function test_reserve_query(terra, address, symbol) {
   console.log(result);
 }
 
-async function test_config_query(terra, address) {
+async function testConfigQuery(terra, address) {
   console.log("### Testing Config...")
-  let query_msg = {"config": {}};
-  let result = await query_contract(terra, address, query_msg);
+  let queryMsg = {"config": {}};
+  let result = await queryContract(terra, address, queryMsg);
 
   if (!result.hasOwnProperty("ma_token_code_id")) {
     throw new Error("Config query failed. Result has no property ma_token_code_id.")
@@ -27,45 +27,45 @@ async function test_config_query(terra, address) {
   console.log(result);
 }
 
-async function test_deposit(terra, wallet, contract_address) {
+async function testDeposit(terra, wallet, contractAddress) {
   console.log("### Testing Deposit...")
-  const deposit_msg = {"deposit_native": {"symbol": "luna"}};
+  const depositMsg = {"deposit_native": {"symbol": "luna"}};
   const coins = new Coin("uluna", 1000);
-  const execute_msg = new MsgExecuteContract(wallet.key.accAddress, contract_address, deposit_msg, [coins]);
-  await perform_transaction(terra, wallet, execute_msg);
+  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, depositMsg, [coins]);
+  await performTransaction(terra, wallet, executeMsg);
 
-  let reserve_query_msg = {"reserve": {"symbol": "luna"}};
-  let { ma_token_address } = await query_contract(terra, contract_address, reserve_query_msg);
+  let reserveQueryMsg = {"reserve": {"symbol": "luna"}};
+  let { ma_token_address } = await queryContract(terra, contractAddress, reserveQueryMsg);
 
-  const balance_query_msg = {"balance": {"address": wallet.key.accAddress}};
-  let result = await query_contract(terra, ma_token_address, balance_query_msg);
+  const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
+  let result = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
   if (result.balance !== "1000") {
-    throw new Error(`[Deposit]: expected to have balance = 1000 for address ${contract_address}, got ${result.balance}`);
+    throw new Error(`[Deposit]: expected to have balance = 1000 for address ${contractAddress}, got ${result.balance}`);
   }
 
   console.log("Query Result: ");
   console.log(result);
 }
 
-async function test_redeem(terra, wallet, lp_contract_address) {
-  let reserve_query_msg = {"reserve": {"symbol": "luna"}};
-  let { ma_token_address } = await query_contract(terra, lp_contract_address, reserve_query_msg);
+async function testRedeem(terra, wallet, lpContractAddress) {
+  let reserveQueryMsg = {"reserve": {"symbol": "luna"}};
+  let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
 
-  const execute_msg = {
+  const executeMsg = {
     "send": {
-      "contract": lp_contract_address,
+      "contract": lpContractAddress,
       "amount": "500",
       "msg": toEncodedBinary({ "redeem": {"id": "luna"} }),
     }
   };
 
 
-  const send_msg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, execute_msg);
-  const res = await perform_transaction(terra, wallet, send_msg);
+  const sendMsg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, executeMsg);
+  await performTransaction(terra, wallet, sendMsg);
 
-  const balance_query_msg = {"balance": {"address": wallet.key.accAddress}};
-  let result = await query_contract(terra, ma_token_address, balance_query_msg);
+  const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
+  let result = await queryContract(terra, ma_token_address, balanceQueryMsg);
   console.log(result);
   // verify ma_balance is 500 and uluna is 500 (converted 1:1)
 }
@@ -76,11 +76,10 @@ function toEncodedBinary(object) {
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
-const lp_contract_address = await deploy(terra, wallet);
+const lpContractAddress = await deploy(terra, wallet);
 
-
-await test_reserve_query(terra, lp_contract_address, "usd")
-await test_reserve_query(terra, lp_contract_address, "luna");
-await test_config_query(terra, lp_contract_address);
-await test_deposit(terra, wallet, lp_contract_address);
-await test_redeem(terra, wallet, lp_contract_address);
+await testReserveQuery(terra, lpContractAddress, "usd")
+await testReserveQuery(terra, lpContractAddress, "luna");
+await testConfigQuery(terra, lpContractAddress);
+await testDeposit(terra, wallet, lpContractAddress);
+await testRedeem(terra, wallet, lpContractAddress);
