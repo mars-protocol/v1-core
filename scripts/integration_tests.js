@@ -63,7 +63,7 @@ async function main() {
 
   let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
   const depositTxFee = Number(txInfo.tx.fee.amount._coins.uluna.amount);
-
+  
   let {_coins: {uluna: {amount: depositorEndingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
   let depositorBalanceDiff = depositorStartingBalance - depositorEndingBalance;
 
@@ -74,7 +74,7 @@ async function main() {
 
   console.log("Deposit Message Sent: ");
   console.log(executeDepositMsg);
-  
+
 
   console.log("### Testing Redeem...");
   let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} = await terra.bank.balance(wallet.key.accAddress);
@@ -116,3 +116,4 @@ async function main() {
 }
 
 main().catch(err => console.log(err));
+
