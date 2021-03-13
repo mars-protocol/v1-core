@@ -3,7 +3,9 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use liquidity_pool::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReserveResponse, ReceiveMsg};
+use liquidity_pool::msg::{
+    ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse,
+};
 use liquidity_pool::state::Config;
 
 fn main() {

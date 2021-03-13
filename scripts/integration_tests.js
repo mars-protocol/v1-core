@@ -52,29 +52,25 @@ async function test_redeem(terra, wallet, contract_address) {
   let reserve_query_msg = {"reserve": {"symbol": "luna"}};
   let { ma_token_address } = await query_contract(terra, contract_address, reserve_query_msg);
 
-  const receive_msg = {
-    "redeem":
-    {"id": "luna"}
-  }
+  //encode in base64
+  const receive_msg = {"redeem": {"id": "luna"}};
 
-  const execute_msg = {"send": {"contract": contract_address, "amount": 500, receive_msg}}
+  const execute_msg = {"send": {"contract": contract_address, "amount": "500", receive_msg}};
   const send_msg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, execute_msg);
   await perform_transaction(terra, wallet, send_msg);
 
-  // const balance_query_msg = {"balance": {"address": wallet.key.accAddress}};
-  // let result = await query_contract(terra, ma_token_address, balance_query_msg);
-  // console.log(result);
+  const balance_query_msg = {"balance": {"address": wallet.key.accAddress}};
+  let result = await query_contract(terra, ma_token_address, balance_query_msg);
+  console.log(result);
   // verify ma_balance is 500 and uluna is 500 (converted 1:1)
 }
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
-// const result = await deploy(terra, wallet);
-// const lp_contract_address = result.lp_contract_address;
-const lp_contract_address = 'terra13urdf0tt35xhlzna4kw4l05cfjpcxlphc75cgt';
+const lp_contract_address = await deploy(terra, wallet);
 
-// await test_reserve_query(terra, lp_contract_address, "usd")
-// await test_reserve_query(terra, lp_contract_address, "luna");
-// await test_config_query(terra, lp_contract_address);
-// await test_deposit(terra, wallet, lp_contract_address);
+await test_reserve_query(terra, lp_contract_address, "usd")
+await test_reserve_query(terra, lp_contract_address, "luna");
+await test_config_query(terra, lp_contract_address);
+await test_deposit(terra, wallet, lp_contract_address);
 await test_redeem(terra, wallet, lp_contract_address);

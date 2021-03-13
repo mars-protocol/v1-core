@@ -1,20 +1,17 @@
-import {LCDClient, MnemonicKey, MsgSend, Wallet} from "@terra-money/terra.js";
+import {LCDClient, MnemonicKey} from "@terra-money/terra.js";
 
-export function initialize(mnemonic) {
-  const mk = new MnemonicKey({mnemonic: mnemonic});
-  const wallet = terra.wallet(mk);
+export function initialize() {
+  const mk = new MnemonicKey();
 
-  let accountAddress = wallet.key.accAddress
-  let publicKey = wallet.key.accPubKey
+  console.log(`Account Address: ${mk.accAddress}`);
+  console.log(`MnemonicKey: ${mk.mnemonic}`);
 
-  console.log(`Account Address: ${accountAddress}`)
-  console.log(`Public Key: ${publicKey}`)
-
-  return wallet
+  return terra.wallet(mk);
 }
 
 export function recover(mnemonic) {
   const mk = new MnemonicKey({mnemonic: mnemonic});
+  console.log(mk.accAddress);
   return terra.wallet(mk);
 }
 
@@ -23,4 +20,6 @@ const terra = new LCDClient({
   chainID: 'tequila-0004'
 });
 
+const wallet = initialize();
+// const wallet = await recover(process.env.TEST_MAIN);
 
