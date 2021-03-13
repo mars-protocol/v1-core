@@ -74,7 +74,7 @@ async function main() {
 
   console.log("Deposit Message Sent: ");
   console.log(executeDepositMsg);
-
+  
 
   console.log("### Testing Redeem...");
   let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} = await terra.bank.balance(wallet.key.accAddress);
