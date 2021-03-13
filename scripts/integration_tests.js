@@ -44,6 +44,7 @@ async function main() {
   console.log("### Testing Deposit...");
   let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
+
   let reserveQueryMsg = {"reserve": {"symbol": "luna"}};
   let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
   const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
@@ -119,4 +120,3 @@ async function main() {
 }
 
 main().catch(err => console.log(err));
-
