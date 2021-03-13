@@ -3,6 +3,19 @@
   "title": "HandleMsg",
   "anyOf": [
     {
+      "description": "Implementaton cw20 receive msg",
+      "type": "object",
+      "required": [
+        "receive"
+      ],
+      "properties": {
+        "receive": {
+          "$ref": "#/definitions/Cw20ReceiveMsg"
+        }
+      }
+    },
+    {
+      "description": "Initialize an asset on the money market",
       "type": "object",
       "required": [
         "init_asset"
@@ -23,6 +36,7 @@
       }
     },
     {
+      "description": "Callback sent from maToken contract after instantiated",
       "type": "object",
       "required": [
         "init_asset_token_callback"
@@ -35,7 +49,7 @@
           ],
           "properties": {
             "id": {
-              "description": "Either the Ticker for a terra native asset or address for a cw20 token",
+              "description": "Either the symbol for a terra native asset or address for a cw20 token",
               "type": "string"
             }
           }
@@ -63,5 +77,43 @@
         }
       }
     }
-  ]
+  ],
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "Cw20ReceiveMsg": {
+      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a HandleMsg",
+      "type": "object",
+      "required": [
+        "amount",
+        "sender"
+      ],
+      "properties": {
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "msg": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Binary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sender": {
+          "$ref": "#/definitions/HumanAddr"
+        }
+      }
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "Uint128": {
+      "type": "string"
+    }
+  }
 }

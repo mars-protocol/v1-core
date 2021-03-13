@@ -46,8 +46,9 @@ export async function deploy(terra, wallet) {
   let ma_code_id = await upload_contract(terra, wallet, './artifacts/ma_token.wasm');
   console.log("Uploaded wa_token contract");
 
+
   const lp_init_msg = {"ma_token_code_id": ma_code_id};
-  const lp_contract_address = await deploy_contract(terra, wallet,'./artifacts/liquidity_pool.wasm', lp_init_msg)
+  const lp_contract_address = await deploy_contract(terra, wallet,'./artifacts/liquidity_pool.wasm', lp_init_msg);
   console.log("Uploaded and instantiated liquidity_pool contract");
 
   const lp_luna_execute_msg = {"init_asset": {"symbol": "luna"}};
