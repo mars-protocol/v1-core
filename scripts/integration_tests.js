@@ -66,7 +66,7 @@ async function main() {
 
   let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
   const depositTxFee = Number(txInfo.tx.fee.amount._coins.uluna.amount);
-  
+
   let {_coins: {uluna: {amount: depositorEndingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
   let depositorBalanceDiff = depositorStartingBalance - depositorEndingBalance;
 
