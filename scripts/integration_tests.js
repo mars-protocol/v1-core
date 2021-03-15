@@ -30,15 +30,15 @@ async function main() {
   await testReserveQuery(terra, lpContractAddress, "luna");
 
   console.log("### Testing Config...")
-  let queryMsg = {"config": {}};
-  let configResult = await queryContract(terra, lpContractAddress, queryMsg);
+  let configQueryMsg = {"config": {}};
+  let configResult = await queryContract(terra, lpContractAddress, configQueryMsg);
 
   if (!configResult.hasOwnProperty("ma_token_code_id")) {
     throw new Error("[Config]: Config query failed. Result has no property ma_token_code_id.")
   }
 
   console.log("Config Query Sent:");
-  console.log(queryMsg);
+  console.log(configQueryMsg);
 
 
   console.log("### Testing Deposit...");
@@ -59,9 +59,8 @@ async function main() {
   const depositContractDiff = depositContractEndingBalance - depositContractStartingBalance;
 
   if (depositContractDiff !== depositAmount) {
-    throw new Error(`[Deposit]: expected to have luna balance increase by ${depositAmount} for address \
+    throw new Error(`[Deposit]: expected luna balance to increase by ${depositAmount} for address \
     ${lpContractAddress}, got ${depositContractDiff}`);
-
   }
 
   let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
@@ -94,8 +93,8 @@ async function main() {
     }
   };
 
-  const sendMsg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, executeMsg);
-  let redeemTxResult = await performTransaction(terra, wallet, sendMsg);
+  const redeemSendMsg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, executeMsg);
+  let redeemTxResult = await performTransaction(terra, wallet, redeemSendMsg);
   let redeemTxInfo = await terra.tx.txInfo(redeemTxResult.txhash);
   const redeemTxFee = Number(redeemTxInfo.tx.fee.amount._coins.uluna.amount);
 
@@ -115,7 +114,7 @@ async function main() {
   }
 
   console.log("Redeem Message Sent:");
-  console.log(sendMsg);
+  console.log(redeemSendMsg);
 }
 
 main().catch(err => console.log(err));
