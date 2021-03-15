@@ -1,4 +1,11 @@
-import {isTxError, MsgExecuteContract, MsgInstantiateContract, MsgStoreCode} from '@terra-money/terra.js';
+import {
+  isTxError,
+  MsgExecuteContract,
+  MsgInstantiateContract,
+  MsgStoreCode,
+  MsgSend,
+  Coin
+} from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
 
 export async function performTransaction(terra, wallet, msg) {
@@ -57,11 +64,19 @@ export async function deploy(terra, wallet) {
 
 export async function setup(terra, wallet, contractAddress, options) {
   const initialAssets = options.initialAssets ?? [];
+  const initialDeposits = options.initialDeposits ?? [];
 
   for (let asset of initialAssets) {
     let initAssetMsg = {"init_asset": {"symbol": asset}};
     await executeContract(terra, wallet, contractAddress, initAssetMsg);
     console.log("Initialized " + asset);
+  }
+
+  for (let deposit of initialDeposits) {
+    const { account, amount, asset } = deposit;
+    const coins = new Coin(asset, amount);
+    const sendMsg = new MsgSend(wallet.key.accAddress, account.key.accAddress, [coins]);
+    await performTransaction(terra, wallet, sendMsg);
   }
 }
 

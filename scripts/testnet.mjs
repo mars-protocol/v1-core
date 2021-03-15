@@ -1,6 +1,6 @@
 import {LCDClient, MnemonicKey} from "@terra-money/terra.js";
 
-export function initialize() {
+export function initialize(terra) {
   const mk = new MnemonicKey();
 
   console.log(`Account Address: ${mk.accAddress}`);
@@ -20,6 +20,6 @@ const terra = new LCDClient({
   chainID: 'tequila-0004'
 });
 
-const wallet = initialize();
-// const wallet = await recover(process.env.TEST_MAIN);
+const wallet = initialize(terra);
+// const wallet = await recover(terra, process.env.TEST_MAIN);
 
