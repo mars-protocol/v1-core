@@ -1,5 +1,5 @@
 import {Coin, LocalTerra, MsgExecuteContract} from "@terra-money/terra.js";
-import {deploy, performTransaction, queryContract} from "./helpers.mjs";
+import {deploy, performTransaction, queryContract, setup} from "./helpers.mjs";
 
 
 function toEncodedBinary(object) {
@@ -22,6 +22,8 @@ async function main() {
   const wallet = terra.wallets.test1;
 
   const lpContractAddress = await deploy(terra, wallet);
+  const initialAssets = ["luna", "usd"];
+  await setup(terra, wallet, lpContractAddress, {initialAssets});
 
   await testReserveQuery(terra, lpContractAddress, "usd")
   await testReserveQuery(terra, lpContractAddress, "luna");

@@ -51,15 +51,18 @@ export async function deploy(terra, wallet) {
 
   console.log("Uploaded and instantiated liquidity_pool contract");
 
-  const lpLunaExecuteMsg = {"init_asset": {"symbol": "luna"}};
-  const lpUsdExecuteMsg = {"init_asset": {"symbol": "usd"}};
-
-  await executeContract(terra, wallet, lpContractAddress, lpLunaExecuteMsg);
-  await executeContract(terra, wallet, lpContractAddress, lpUsdExecuteMsg);
-  console.log("Initialized luna and usd assets for liquidity_pool");
-
   console.log("LP Contract Address: " + lpContractAddress);
   return lpContractAddress;
+}
+
+export async function setup(terra, wallet, contractAddress, options) {
+  const initialAssets = options.initialAssets ?? [];
+
+  for (let asset of initialAssets) {
+    let initAssetMsg = {"init_asset": {"symbol": asset}};
+    await executeContract(terra, wallet, contractAddress, initAssetMsg);
+    console.log("Initialized " + asset);
+  }
 }
 
 
