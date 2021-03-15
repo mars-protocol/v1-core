@@ -14,9 +14,6 @@ async function testReserveQuery(terra, address, symbol) {
   if (!reserveResult.hasOwnProperty("ma_token_address")) {
     throw new Error(`[Reserve]: Reserve Query for symbol ${symbol} failed. Result has no property ma_token_address.`)
   }
-
-  console.log("Reserve Query Sent:");
-  console.log(reserveQueryMsg);
 }
 
 
@@ -33,12 +30,12 @@ async function main() {
   let configQueryMsg = {"config": {}};
   let configResult = await queryContract(terra, lpContractAddress, configQueryMsg);
 
+  console.log("Config Query Sent:");
+  console.log(configQueryMsg);
+
   if (!configResult.hasOwnProperty("ma_token_code_id")) {
     throw new Error("[Config]: Config query failed. Result has no property ma_token_code_id.")
   }
-
-  console.log("Config Query Sent:");
-  console.log(configQueryMsg);
 
 
   console.log("### Testing Deposit...");
@@ -54,6 +51,9 @@ async function main() {
   const coins = new Coin("uluna", depositAmount);
   const executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
   const depositTxResult = await performTransaction(terra, wallet, executeDepositMsg);
+
+  console.log("Deposit Message Sent: ");
+  console.log(executeDepositMsg);
 
   const { balance: depositContractEndingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
   const depositContractDiff = depositContractEndingBalance - depositContractStartingBalance;
@@ -74,9 +74,6 @@ async function main() {
     got ${depositorBalanceDiff}`);
   }
 
-  console.log("Deposit Message Sent: ");
-  console.log(executeDepositMsg);
-
 
   console.log("### Testing Redeem...");
   let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} = await terra.bank.balance(wallet.key.accAddress);
@@ -95,6 +92,10 @@ async function main() {
 
   const redeemSendMsg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, executeMsg);
   let redeemTxResult = await performTransaction(terra, wallet, redeemSendMsg);
+
+  console.log("Redeem Message Sent:");
+  console.log(redeemSendMsg);
+
   let redeemTxInfo = await terra.tx.txInfo(redeemTxResult.txhash);
   const redeemTxFee = Number(redeemTxInfo.tx.fee.amount._coins.uluna.amount);
 
@@ -112,9 +113,6 @@ async function main() {
     throw new Error(`[Redeem]: expected depositor's balance to increase by ${redeemAmount - redeemTxFee}, \
     got ${redeemerLunaBalanceDiff}`);
   }
-
-  console.log("Redeem Message Sent:");
-  console.log(redeemSendMsg);
 }
 
 main().catch(err => console.log(err));
