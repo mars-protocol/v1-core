@@ -135,6 +135,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     ma_token_address: CanonicalAddr::default(),
                     liquidity_index: Decimal256::one(),
                     index: config.reserve_count,
+                    borrow_index: Decimal256::one(),
                 },
             )?;
 
@@ -441,13 +442,7 @@ mod tests {
 
     #[test]
     fn init_asset_callback_cannot_be_called_on_its_own() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        let msg = InitMsg {
-            ma_token_code_id: 1u64,
-        };
-        let env = mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let mut deps = th_setup();
 
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
@@ -458,22 +453,15 @@ mod tests {
 
     #[test]
     fn deposit_native_asset() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        let msg = InitMsg {
-            ma_token_code_id: 1u64,
-        };
-        let env = mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let mut deps = th_setup();
 
         let mut reserves = reserves_state(&mut deps.storage);
-        th_init_reserve(
-            &deps.api,
-            &mut reserves,
-            b"somecoin",
-            "matoken",
-            Decimal256::from_ratio(11, 10),
-        );
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: Decimal256::from_ratio(11, 10),
+            ..Default::default()
+        };
+        th_init_reserve(&deps.api, &mut reserves, b"somecoin", mock_reserve);
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
@@ -513,13 +501,7 @@ mod tests {
 
     #[test]
     fn cannot_deposit_if_no_reserve() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        let msg = InitMsg {
-            ma_token_code_id: 1u64,
-        };
-        let env = mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let mut deps = th_setup();
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
@@ -533,13 +515,14 @@ mod tests {
         let mut deps = th_setup();
 
         let mut reserves = reserves_state(&mut deps.storage);
-        th_init_reserve(
-            &deps.api,
-            &mut reserves,
-            b"somecoin",
-            "matoken",
-            Decimal256::from_ratio(15, 10),
-        );
+
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: Decimal256::from_ratio(15, 10),
+            ..Default::default()
+        };
+
+        th_init_reserve(&deps.api, &mut reserves, b"somecoin", mock_reserve);
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
@@ -589,6 +572,14 @@ mod tests {
     }
 
     // TEST HELPERS
+    #[derive(Default)]
+    struct MockReserve<'a> {
+        ma_token_address: &'a str,
+        liquidity_index: Decimal256,
+        borrow_index: Decimal256,
+        index: u32,
+    }
+
     fn th_setup() -> Extern<MockStorage, MockApi, MockQuerier> {
         let mut deps = mock_dependencies(20, &[]);
 
@@ -605,18 +596,18 @@ mod tests {
         api: &A,
         bucket: &mut Bucket<S, Reserve>,
         key: &[u8],
-        token_address: &str,
-        liquidity_index: Decimal256,
+        reserve: MockReserve,
     ) {
         bucket
             .save(
                 key,
                 &Reserve {
                     ma_token_address: api
-                        .canonical_address(&HumanAddr::from(token_address))
+                        .canonical_address(&HumanAddr::from(reserve.ma_token_address))
                         .unwrap(),
-                    liquidity_index,
-                    index: 0,
+                    index: reserve.index,
+                    liquidity_index: reserve.liquidity_index,
+                    borrow_index: reserve.borrow_index,
                 },
             )
             .unwrap();
