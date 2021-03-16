@@ -73,10 +73,15 @@ export async function setup(terra, wallet, contractAddress, options) {
   }
 
   for (let deposit of initialDeposits) {
-    const { account, amount, asset } = deposit;
-    const coins = new Coin(asset, amount);
-    const sendMsg = new MsgSend(wallet.key.accAddress, account.key.accAddress, [coins]);
-    await performTransaction(terra, wallet, sendMsg);
+    const { account, assets } = deposit;
+    console.log(`### Deposits for account ${account.key.accAddress}: `);
+    for (const [asset, amount] of Object.entries(assets)) {
+      const coins = new Coin(asset, amount);
+      const depositMsg = {"deposit_native": {"denom": asset}};
+      const executeDepositMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, depositMsg, [coins]);
+      await performTransaction(terra, account, executeDepositMsg);
+      console.log(`Deposited ${amount} ${asset}`);
+    }
   }
 }
 
