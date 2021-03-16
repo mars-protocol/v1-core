@@ -451,7 +451,7 @@ mod tests {
 
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
-            id: String::from("luna"),
+            id: String::from("uluna"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
@@ -475,7 +475,7 @@ mod tests {
             Decimal256::from_ratio(11, 10),
         );
 
-        let env = mock_env("depositer", &[coin(110000, "usomecoin")]);
+        let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
             symbol: String::from("somecoin"),
         };
@@ -521,7 +521,7 @@ mod tests {
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
 
-        let env = mock_env("depositer", &[coin(110000, "usomecoin")]);
+        let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
             symbol: String::from("somecoin"),
         };
@@ -570,7 +570,7 @@ mod tests {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("redeemer"),
                     amount: vec![Coin {
-                        denom: String::from("usomecoin"),
+                        denom: String::from("somecoin"),
                         amount: Uint128(3000),
                     },],
                 }),
