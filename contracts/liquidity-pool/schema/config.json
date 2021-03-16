@@ -4,7 +4,8 @@
   "type": "object",
   "required": [
     "ma_token_code_id",
-    "owner"
+    "owner",
+    "reserve_count"
   ],
   "properties": {
     "ma_token_code_id": {
@@ -20,6 +21,12 @@
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
+    },
+    "reserve_count": {
+      "description": "Reserve count",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
     }
   },
   "definitions": {

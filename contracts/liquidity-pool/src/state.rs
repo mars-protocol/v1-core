@@ -20,6 +20,8 @@ pub struct Config {
     pub owner: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
+    /// Reserve count
+    pub reserve_count: u32,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
@@ -32,8 +34,11 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Reserve {
+    /// Reserve index (Bit position on data)
+    pub index: u32,
     /// maToken contract address
     pub ma_token_address: CanonicalAddr,
+    /// Liquidity index (Used to compute deposit interest)
     pub liquidity_index: Decimal256,
 }
 

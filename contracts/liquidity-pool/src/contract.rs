@@ -21,6 +21,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         ma_token_code_id: msg.ma_token_code_id,
+        reserve_count: 0,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -116,7 +117,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     symbol: String,
 ) -> StdResult<HandleResponse> {
     // Get config
-    let config = config_state_read(&deps.storage).load()?;
+    let mut config = config_state_read(&deps.storage).load()?;
 
     // Only owner can do this
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
@@ -133,8 +134,13 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 &Reserve {
                     ma_token_address: CanonicalAddr::default(),
                     liquidity_index: Decimal256::one(),
+                    index: config.reserve_count,
                 },
             )?;
+
+            // increment reserve count
+            config.reserve_count += 1;
+            config_state(&mut deps.storage).save(&config)?;
         }
         Ok(Some(_)) => return Err(StdError::generic_err("Asset already initialized")),
         Err(err) => return Err(err),
@@ -260,9 +266,10 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 fn query_config<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ConfigResponse> {
-    let state = config_state_read(&deps.storage).load()?;
+    let config = config_state_read(&deps.storage).load()?;
     Ok(ConfigResponse {
-        ma_token_code_id: state.ma_token_code_id,
+        ma_token_code_id: config.ma_token_code_id,
+        reserve_count: config.reserve_count,
     })
 }
 
@@ -303,6 +310,7 @@ mod tests {
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
+        assert_eq!(0, value.reserve_count);
     }
 
     #[test]
@@ -315,14 +323,18 @@ mod tests {
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
 
+        // *
         // non owner is not authorized
+        // *
         let env = mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
             symbol: String::from("someasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
+        // *
         // owner is authorized
+        // *
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
             symbol: String::from("someasset"),
@@ -334,6 +346,12 @@ mod tests {
             .load(b"someasset")
             .unwrap();
         assert_eq!(CanonicalAddr::default(), reserve.ma_token_address);
+        // should have 0 index
+        assert_eq!(0, reserve.index);
+
+        // Should have reserve count of 1
+        let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(config.reserve_count, 1);
 
         // should instantiate a debt token
         assert_eq!(
@@ -363,7 +381,9 @@ mod tests {
             }),]
         );
 
+        // *
         // callback comes back with created token
+        // *
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             id: String::from("someasset"),
@@ -391,12 +411,32 @@ mod tests {
         );
         assert_eq!(Decimal256::one(), reserve.liquidity_index);
 
+        // *
         // calling this again should not be allowed
+        // *
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             id: String::from("someasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // *
+        // calling with a different asset increments count
+        // *
+        let env = mock_env("owner", &[]);
+        let msg = HandleMsg::InitAsset {
+            symbol: String::from("otherasset"),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap();
+
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"otherasset")
+            .unwrap();
+        assert_eq!(1, reserve.index);
+
+        // Should have reserve count of 2
+        let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(2, config.reserve_count);
     }
 
     #[test]
@@ -576,6 +616,7 @@ mod tests {
                         .canonical_address(&HumanAddr::from(token_address))
                         .unwrap(),
                     liquidity_index: liquidity_index,
+                    index: 0,
                 },
             )
             .unwrap();
