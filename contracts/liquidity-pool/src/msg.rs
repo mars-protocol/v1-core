@@ -17,7 +17,7 @@ pub enum HandleMsg {
     /// Initialize an asset on the money market
     InitAsset {
         /// Symbol used in Terra (e.g: luna, usd)
-        symbol: String,
+        denom: String,
     },
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {
@@ -27,7 +27,7 @@ pub enum HandleMsg {
     /// Deposit Terra native coins
     DepositNative {
         /// Symbol used in Terra (e.g: luna, usd)
-        symbol: String,
+        denom: String,
     },
 }
 
@@ -48,7 +48,7 @@ pub enum ReceiveMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    Reserve { symbol: String },
+    Reserve { denom: String },
 }
 
 // We define a custom struct for each query response

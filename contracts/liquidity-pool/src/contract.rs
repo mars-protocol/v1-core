@@ -38,9 +38,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitAsset { symbol } => init_asset(deps, env, symbol),
+        HandleMsg::InitAsset { denom } => init_asset(deps, env, denom),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
-        HandleMsg::DepositNative { symbol } => deposit_native(deps, env, symbol),
+        HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
     }
 }
 
@@ -71,7 +71,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
 pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    symbol: String,
+    denom: String,
     reserve: Reserve,
     to: HumanAddr,
     burn_amount: Uint128,
@@ -93,14 +93,14 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
                 from_address: env.contract.address,
                 to_address: to.clone(),
                 amount: vec![Coin {
-                    denom: symbol.clone(),
+                    denom: denom.clone(),
                     amount: redeem_amount.into(),
                 }],
             }),
         ],
         log: vec![
             log("action", "redeem"),
-            log("reserve", symbol),
+            log("reserve", denom),
             log("user", to),
             log("burn_amount", burn_amount),
             log("redeem_amount", redeem_amount),
@@ -114,7 +114,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
 pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    symbol: String,
+    denom: String,
 ) -> StdResult<HandleResponse> {
     // Get config
     let mut config = config_state_read(&deps.storage).load()?;
@@ -126,11 +126,11 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
-    match reserves.may_load(symbol.as_bytes()) {
+    match reserves.may_load(denom.as_bytes()) {
         Ok(None) => {
             // create asset reserve
             reserves.save(
-                symbol.as_bytes(),
+                denom.as_bytes(),
                 &Reserve {
                     ma_token_address: CanonicalAddr::default(),
                     liquidity_index: Decimal256::one(),
@@ -154,8 +154,8 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
             msg: to_binary(&ma_token::msg::InitMsg {
-                name: format!("mars {} debt token", symbol),
-                symbol: format!("ma{}", symbol),
+                name: format!("mars {} debt token", denom),
+                symbol: format!("ma{}", denom),
                 decimals: 6,
                 initial_balances: vec![],
                 mint: Some(MinterResponse {
@@ -163,7 +163,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(ma_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: symbol })?,
+                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: denom })?,
                     contract_addr: env.contract.address,
                 }),
             })?,
@@ -203,9 +203,9 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
 pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    symbol: String,
+    denom: String,
 ) -> StdResult<HandleResponse> {
-    let reserve = reserves_state_read(&deps.storage).load(symbol.as_bytes())?;
+    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
 
     // Get deposit amount
     // TODO: asumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
@@ -216,7 +216,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         .message
         .sent_funds
         .iter()
-        .find(|c| c.denom == symbol)
+        .find(|c| c.denom == denom)
         .map(|c| Uint256::from(c.amount))
         .unwrap_or_else(Uint256::zero);
 
@@ -224,7 +224,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     if deposit_amount.is_zero() {
         return Err(StdError::generic_err(format!(
             "Deposit amount must be greater than 0 {}",
-            symbol,
+            denom,
         )));
     }
 
@@ -236,7 +236,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         data: None,
         log: vec![
             log("action", "deposit"),
-            log("reserve", symbol),
+            log("reserve", denom),
             log("user", env.message.sender.clone()),
             log("amount", deposit_amount),
         ],
@@ -259,7 +259,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Reserve { symbol } => to_binary(&query_reserve(deps, symbol)?),
+        QueryMsg::Reserve { denom } => to_binary(&query_reserve(deps, denom)?),
     }
 }
 
@@ -275,9 +275,9 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 
 fn query_reserve<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    symbol: String,
+    denom: String,
 ) -> StdResult<ReserveResponse> {
-    let reserve = reserves_state_read(&deps.storage).load(symbol.as_bytes())?;
+    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
     let ma_token_address = deps.api.human_address(&reserve.ma_token_address)?;
     Ok(ReserveResponse { ma_token_address })
 }
@@ -328,7 +328,7 @@ mod tests {
         // *
         let env = mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
-            symbol: String::from("someasset"),
+            denom: String::from("someasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -337,7 +337,7 @@ mod tests {
         // *
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            symbol: String::from("someasset"),
+            denom: String::from("someasset"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
@@ -425,7 +425,7 @@ mod tests {
         // *
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            symbol: String::from("otherasset"),
+            denom: String::from("otherasset"),
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 
@@ -477,7 +477,7 @@ mod tests {
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
-            symbol: String::from("somecoin"),
+            denom: String::from("somecoin"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
         // mints coin_amount/liquidity_index
@@ -506,7 +506,7 @@ mod tests {
         // empty deposit fails
         let env = mock_env("depositer", &[]);
         let msg = HandleMsg::DepositNative {
-            symbol: String::from("somecoin"),
+            denom: String::from("somecoin"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
@@ -523,7 +523,7 @@ mod tests {
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
-            symbol: String::from("somecoin"),
+            denom: String::from("somecoin"),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
@@ -615,7 +615,7 @@ mod tests {
                     ma_token_address: api
                         .canonical_address(&HumanAddr::from(token_address))
                         .unwrap(),
-                    liquidity_index: liquidity_index,
+                    liquidity_index,
                     index: 0,
                 },
             )

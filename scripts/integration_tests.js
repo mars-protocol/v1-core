@@ -6,13 +6,13 @@ function toEncodedBinary(object) {
   return Buffer.from(JSON.stringify(object)).toString('base64');
 }
 
-async function testReserveQuery(terra, address, symbol) {
+async function testReserveQuery(terra, address, denom) {
   console.log("### Testing Reserve...")
-  let reserveQueryMsg = {"reserve": {"symbol": symbol}};
+  let reserveQueryMsg = {"reserve": {"denom": denom}};
   let reserveResult = await queryContract(terra, address, reserveQueryMsg);
 
   if (!reserveResult.hasOwnProperty("ma_token_address")) {
-    throw new Error(`[Reserve]: Reserve Query for symbol ${symbol} failed. Result has no property ma_token_address.`)
+    throw new Error(`[Reserve]: Reserve Query for symbol ${denom} failed. Result has no property ma_token_address.`)
   }
 }
 
@@ -43,12 +43,12 @@ async function main() {
   console.log("### Testing Deposit...");
   let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
-  let reserveQueryMsg = {"reserve": {"symbol": "uluna"}};
+  let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
   let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
   const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
-  const depositMsg = {"deposit_native": {"symbol": "uluna"}};
+  const depositMsg = {"deposit_native": {"denom": "uluna"}};
   const depositAmount = 10000;
   const coins = new Coin("uluna", depositAmount);
   const executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
