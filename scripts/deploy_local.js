@@ -10,11 +10,11 @@ const initialAssets = ["uluna", "uusd", "umnt", "ukrw", "usdr"];
 const initialDeposits = [
   {
     account: terra.wallets.test1,
-    assets: {"uluna": 1000, "uusd": 2000, "umnt": 3000, "ukrw": 4000, "usdr": 5000}
+    assets: {"uluna": 6000000000, "uusd": 5000000000, "umnt": 7000000000, "ukrw": 3000000000, "usdr": 8000000000}
   },
   {
     account: terra.wallets.test2,
-    assets: {"uluna": 6000, "uusd": 7000, "umnt": 8000, "ukrw": 9000, "usdr": 10000}
+    assets: {"uluna": 2000000000, "uusd": 9000000000, "umnt": 4000000000, "ukrw": 7000000000, "usdr": 1000000000}
   }
 ]
 
