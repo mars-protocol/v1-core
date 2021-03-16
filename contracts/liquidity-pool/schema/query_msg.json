@@ -22,10 +22,10 @@
         "reserve": {
           "type": "object",
           "required": [
-            "symbol"
+            "denom"
           ],
           "properties": {
-            "symbol": {
+            "denom": {
               "type": "string"
             }
           }

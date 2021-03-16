@@ -1,8 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_bignumber::Decimal256;
-use cosmwasm_std::{CanonicalAddr, Storage};
+use cosmwasm_bignumber::{Decimal256, Uint256};
+use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -13,7 +13,8 @@ pub static CONFIG_KEY: &[u8] = b"config";
 
 // namespaces (for buckets)
 pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
-pub static DEBTS_NAMESPACE: &[u8] = b"debt";
+pub static DEBTS_NAMESPACE: &[u8] = b"debts";
+pub static USERS_NAMESPACE: &[u8] = b"users";
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -43,6 +44,7 @@ pub struct Reserve {
     pub ma_token_address: CanonicalAddr,
     /// Liquidity index (Used to compute deposit interest)
     pub liquidity_index: Decimal256,
+    /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal256,
 }
 
@@ -54,40 +56,37 @@ pub fn reserves_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Reserve
     bucket_read(RESERVES_NAMESPACE, storage)
 }
 
-/// Data for individual borrowers
+/// Data for individual users
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Borrower {
-    /// list of borrowed assets ids
-    // TODO: Could just be a uint256 that has dedicated bits for each asset.
-    pub borrowed_assets: Vec<String>,
+pub struct User {
+    /// bitmap representing borrowed asset. 1 on the corresponding bit means asset is
+    /// being borrowed
+    pub borrowed_assets: Uint128,
 }
 
-pub fn borrowers_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
-    bucket(RESERVES_NAMESPACE, storage)
+pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {
+    bucket(USERS_NAMESPACE, storage)
 }
 
-pub fn borrowers_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Reserve> {
-    bucket_read(RESERVES_NAMESPACE, storage)
+pub fn users_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, User> {
+    bucket_read(USERS_NAMESPACE, storage)
 }
 
 /// Debt for each asset and user
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Debt {
-    /// Id list of borrowed assets
-    // TODO: Could just be a uint256 that has dedicated bits for each asset.
-    pub borrowed_assets: Vec<String>,
+    /// Scaled debt amount
+    // TODO(does this amount always have six decimals? How do we manage this?)
+    pub amount_scaled: Uint256,
 }
 
-pub fn debt_asset_state<'a, S: Storage>(
-    storage: &'a mut S,
-    asset: &[u8],
-) -> Bucket<'a, S, Reserve> {
+pub fn debts_asset_state<'a, S: Storage>(storage: &'a mut S, asset: &[u8]) -> Bucket<'a, S, Debt> {
     Bucket::multilevel(&[DEBTS_NAMESPACE, asset], storage)
 }
 
-pub fn debt_asset_state_read<'a, S: Storage>(
+pub fn debts_asset_state_read<'a, S: Storage>(
     storage: &'a S,
     asset: &[u8],
-) -> ReadonlyBucket<'a, S, Reserve> {
+) -> ReadonlyBucket<'a, S, Debt> {
     ReadonlyBucket::multilevel(&[DEBTS_NAMESPACE, asset], storage)
 }

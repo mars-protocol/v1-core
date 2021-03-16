@@ -24,11 +24,11 @@
         "init_asset": {
           "type": "object",
           "required": [
-            "symbol"
+            "denom"
           ],
           "properties": {
-            "symbol": {
-              "description": "Symbol used in Terra (e.g: luna, usd)",
+            "denom": {
+              "description": "Symbol used in Terra (e.g: uluna, uusd)",
               "type": "string"
             }
           }
@@ -49,7 +49,7 @@
           ],
           "properties": {
             "id": {
-              "description": "Either the symbol for a terra native asset or address for a cw20 token",
+              "description": "Either the denom for a terra native asset or address for a cw20 token",
               "type": "string"
             }
           }
@@ -66,11 +66,36 @@
         "deposit_native": {
           "type": "object",
           "required": [
-            "symbol"
+            "denom"
           ],
           "properties": {
-            "symbol": {
-              "description": "Symbol used in Terra (e.g: luna, usd)",
+            "denom": {
+              "description": "Denom used in Terra (e.g: uluna, uusd)",
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Borrow Terra native coins",
+      "type": "object",
+      "required": [
+        "borrow_native"
+      ],
+      "properties": {
+        "borrow_native": {
+          "type": "object",
+          "required": [
+            "amount",
+            "denom"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint256"
+            },
+            "denom": {
+              "description": "Denom used in Terra (e.g: uluna, uusd)",
               "type": "string"
             }
           }
@@ -113,6 +138,9 @@
       "type": "string"
     },
     "Uint128": {
+      "type": "string"
+    },
+    "Uint256": {
       "type": "string"
     }
   }

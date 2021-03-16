@@ -1,3 +1,4 @@
+use cosmwasm_bignumber::Uint256;
 use cosmwasm_std::HumanAddr;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -16,18 +17,24 @@ pub enum HandleMsg {
 
     /// Initialize an asset on the money market
     InitAsset {
-        /// Symbol used in Terra (e.g: luna, usd)
+        /// Symbol used in Terra (e.g: uluna, uusd)
         denom: String,
     },
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {
-        /// Either the symbol for a terra native asset or address for a cw20 token
+        /// Either the denom for a terra native asset or address for a cw20 token
         id: String,
     },
     /// Deposit Terra native coins
     DepositNative {
-        /// Symbol used in Terra (e.g: luna, usd)
+        /// Denom used in Terra (e.g: uluna, uusd)
         denom: String,
+    },
+    /// Borrow Terra native coins
+    BorrowNative {
+        /// Denom used in Terra (e.g: uluna, uusd)
+        denom: String,
+        amount: Uint256,
     },
 }
 

@@ -10,7 +10,8 @@ use mars::ma_token;
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse};
 use crate::state::{
-    config_state, config_state_read, reserves_state, reserves_state_read, Config, Reserve,
+    config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
+    users_state, Config, Debt, Reserve, User,
 };
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -41,6 +42,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitAsset { denom } => init_asset(deps, env, denom),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
+        HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
     }
 }
 
@@ -252,6 +254,74 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Add debt for the borrower and send the borrowed funds
+pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    denom: String,
+    borrow_amount: Uint256,
+) -> StdResult<HandleResponse> {
+    // Cannot borrow zero amount
+    if borrow_amount.is_zero() {
+        return Err(StdError::generic_err(format!(
+            "Borrow amount must be greater than 0 {}",
+            denom,
+        )));
+    }
+
+    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
+    let mut users_bucket = users_state(&mut deps.storage);
+    let borrower_addr = deps.api.canonical_address(&env.message.sender)?;
+    let mut user: User = match users_bucket.may_load(borrower_addr.as_slice()) {
+        Ok(Some(user)) => user,
+        Ok(None) => User {
+            borrowed_assets: Uint128(0),
+        },
+        Err(error) => return Err(error),
+    };
+
+    // TODO: Interest rate update and computing goes somwhere around here
+    // TODO: Check the user can actually borrow (has enough collateral, contract has
+    // enough funds to safely lend them)
+
+    let is_borrowing_asset = get_bit(user.borrowed_assets, reserve.index)?;
+    if !is_borrowing_asset {
+        set_bit(&mut user.borrowed_assets, reserve.index)?;
+        users_bucket.save(borrower_addr.as_slice(), &user)?;
+    }
+
+    // Set new debt
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, denom.as_bytes());
+    let mut debt: Debt = match debts_asset_bucket.may_load(borrower_addr.as_slice()) {
+        Ok(Some(debt)) => debt,
+        Ok(None) => Debt {
+            amount_scaled: Uint256::zero(),
+        },
+        Err(error) => return Err(error),
+    };
+    let debt_amount = borrow_amount / reserve.borrow_index;
+    debt.amount_scaled += debt_amount;
+    debts_asset_bucket.save(borrower_addr.as_slice(), &debt)?;
+
+    Ok(HandleResponse {
+        data: None,
+        log: vec![
+            log("action", "borrow"),
+            log("reserve", denom.clone()),
+            log("user", env.message.sender.clone()),
+            log("amount", borrow_amount),
+        ],
+        messages: vec![CosmosMsg::Bank(BankMsg::Send {
+            from_address: env.contract.address,
+            to_address: env.message.sender,
+            amount: vec![Coin {
+                denom: denom,
+                amount: borrow_amount.into(),
+            }],
+        })],
+    })
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -283,19 +353,37 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
     Ok(ReserveResponse { ma_token_address })
 }
 
+// HELPERS
+/// Gets bit: true: 1, false: 0
+fn get_bit(bitmap: Uint128, index: u32) -> StdResult<bool> {
+    if index >= 128 {
+        return Err(StdError::generic_err("index out of range"));
+    }
+    Ok(((bitmap.u128() >> index) & 1) == 1)
+}
+
+/// Sets bit to 1
+fn set_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
+    if index >= 128 {
+        return Err(StdError::generic_err("index out of range"));
+    }
+    *bitmap = Uint128(bitmap.u128() | (1 << index));
+    Ok(())
+}
+
 // TESTS
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{
         mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR,
     };
     use cosmwasm_std::{coin, from_binary, Extern};
-    use cosmwasm_storage::Bucket;
 
     #[test]
-    fn proper_initialization() {
+    fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
@@ -315,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn init_native_asset() {
+    fn test_init_native_asset() {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
@@ -441,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn init_asset_callback_cannot_be_called_on_its_own() {
+    fn test_init_asset_callback_cannot_be_called_on_its_own() {
         let mut deps = th_setup();
 
         let env = mock_env("mtokencontract", &[]);
@@ -452,16 +540,15 @@ mod tests {
     }
 
     #[test]
-    fn deposit_native_asset() {
+    fn test_deposit_native_asset() {
         let mut deps = th_setup();
 
-        let mut reserves = reserves_state(&mut deps.storage);
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
             liquidity_index: Decimal256::from_ratio(11, 10),
             ..Default::default()
         };
-        th_init_reserve(&deps.api, &mut reserves, b"somecoin", mock_reserve);
+        th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", mock_reserve);
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
@@ -500,7 +587,7 @@ mod tests {
     }
 
     #[test]
-    fn cannot_deposit_if_no_reserve() {
+    fn test_cannot_deposit_if_no_reserve() {
         let mut deps = th_setup();
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
@@ -511,10 +598,8 @@ mod tests {
     }
 
     #[test]
-    fn redeem_native() {
+    fn test_redeem_native() {
         let mut deps = th_setup();
-
-        let mut reserves = reserves_state(&mut deps.storage);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -522,7 +607,7 @@ mod tests {
             ..Default::default()
         };
 
-        th_init_reserve(&deps.api, &mut reserves, b"somecoin", mock_reserve);
+        th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", mock_reserve);
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
@@ -571,13 +656,135 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_borrow_native() {
+        let mut deps = th_setup();
+
+        let mock_reserve_1 = MockReserve {
+            ma_token_address: "matoken1",
+            borrow_index: Decimal256::from_ratio(12, 10),
+            ..Default::default()
+        };
+        let mock_reserve_2 = MockReserve {
+            ma_token_address: "matoken2",
+            borrow_index: Decimal256::one(),
+            ..Default::default()
+        };
+
+        // should get index 0
+        th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"borrowedcoin1",
+            mock_reserve_1,
+        );
+        // shoudl get index 1
+        th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"borrowedcoin2",
+            mock_reserve_2,
+        );
+
+        // *
+        // Borrow coin 1
+        // *
+        let env = mock_env("borrower", &[]);
+        let msg = HandleMsg::BorrowNative {
+            denom: String::from("borrowedcoin1"),
+            amount: Uint256::from(2400 as u128),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        // check correct messages and logging
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Bank(BankMsg::Send {
+                from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                to_address: HumanAddr::from("borrower"),
+                amount: vec![Coin {
+                    denom: String::from("borrowedcoin1"),
+                    amount: Uint128(2400),
+                },],
+            }),]
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "borrow"),
+                log("reserve", "borrowedcoin1"),
+                log("user", "borrower"),
+                log("amount", 2400),
+            ]
+        );
+
+        let borrower_addr_canonical = deps
+            .api
+            .canonical_address(&HumanAddr::from("borrower"))
+            .unwrap();
+
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+
+        let debt = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+
+        assert_eq!(Uint256::from(2000 as u128), debt.amount_scaled);
+
+        // *
+        // Borrow coin 1 (again)
+        // *
+        let env = mock_env("borrower", &[]);
+        let msg = HandleMsg::BorrowNative {
+            denom: String::from("borrowedcoin1"),
+            amount: Uint256::from(1200 as u128),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap();
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        let debt = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+
+        assert_eq!(Uint256::from(3000 as u128), debt.amount_scaled);
+
+        // *
+        // Borrow coin 2
+        // *
+        let env = mock_env("borrower", &[]);
+        let msg = HandleMsg::BorrowNative {
+            denom: String::from("borrowedcoin2"),
+            amount: Uint256::from(4000 as u128),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap();
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
+        let debt1 = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(3000 as u128), debt1.amount_scaled);
+        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(4000 as u128), debt2.amount_scaled);
+    }
+
     // TEST HELPERS
     #[derive(Default)]
     struct MockReserve<'a> {
         ma_token_address: &'a str,
         liquidity_index: Decimal256,
         borrow_index: Decimal256,
-        index: u32,
     }
 
     fn th_setup() -> Extern<MockStorage, MockApi, MockQuerier> {
@@ -594,18 +801,29 @@ mod tests {
 
     fn th_init_reserve<S: Storage, A: Api>(
         api: &A,
-        bucket: &mut Bucket<S, Reserve>,
+        storage: &mut S,
         key: &[u8],
         reserve: MockReserve,
     ) {
-        bucket
+        let mut index = 0;
+
+        config_state(storage)
+            .update(|mut c: Config| -> StdResult<Config> {
+                index = c.reserve_count;
+                c.reserve_count += 1;
+                Ok(c)
+            })
+            .unwrap();
+
+        let mut reserve_bucket = reserves_state(storage);
+        reserve_bucket
             .save(
                 key,
                 &Reserve {
                     ma_token_address: api
                         .canonical_address(&HumanAddr::from(reserve.ma_token_address))
                         .unwrap(),
-                    index: reserve.index,
+                    index: index,
                     liquidity_index: reserve.liquidity_index,
                     borrow_index: reserve.borrow_index,
                 },

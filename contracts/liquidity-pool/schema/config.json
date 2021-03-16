@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
+  "description": "Lending pool global configuration",
   "type": "object",
   "required": [
     "ma_token_code_id",
