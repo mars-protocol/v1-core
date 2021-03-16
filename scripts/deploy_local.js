@@ -5,7 +5,7 @@ const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
 let lpContractAddress = await deploy(terra, wallet);
 
-const initialAssets = ["luna", "usd", "mnt", "krw", "sdt"];
+const initialAssets = ["uluna", "uusd", "umnt", "ukrw", "usdt"];
 await setup(terra, wallet, lpContractAddress, {initialAssets});
 
 

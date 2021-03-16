@@ -22,6 +22,5 @@ const terra = new LCDClient({
 });
 
 // const wallet = initialize(terra);
-console.log(process.env.TEST_MAIN)
 const wallet = await recover(terra, process.env.TEST_MAIN);
 

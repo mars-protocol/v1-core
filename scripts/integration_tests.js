@@ -22,11 +22,11 @@ async function main() {
   const wallet = terra.wallets.test1;
 
   const lpContractAddress = await deploy(terra, wallet);
-  const initialAssets = ["luna", "usd"];
+  const initialAssets = ["uluna", "uusd"];
   await setup(terra, wallet, lpContractAddress, {initialAssets});
 
-  await testReserveQuery(terra, lpContractAddress, "usd")
-  await testReserveQuery(terra, lpContractAddress, "luna");
+  await testReserveQuery(terra, lpContractAddress, "uusd")
+  await testReserveQuery(terra, lpContractAddress, "uluna");
 
   console.log("### Testing Config...")
   let configQueryMsg = {"config": {}};
@@ -43,12 +43,12 @@ async function main() {
   console.log("### Testing Deposit...");
   let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
-  let reserveQueryMsg = {"reserve": {"symbol": "luna"}};
+  let reserveQueryMsg = {"reserve": {"symbol": "uluna"}};
   let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
   const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
-  const depositMsg = {"deposit_native": {"symbol": "luna"}};
+  const depositMsg = {"deposit_native": {"symbol": "uluna"}};
   const depositAmount = 10000;
   const coins = new Coin("uluna", depositAmount);
   const executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
@@ -88,7 +88,7 @@ async function main() {
     "send": {
       "contract": lpContractAddress,
       "amount": redeemAmount.toString(),
-      "msg": toEncodedBinary({ "redeem": {"id": "luna"} }),
+      "msg": toEncodedBinary({ "redeem": {"id": "uluna"} }),
     }
   };
 

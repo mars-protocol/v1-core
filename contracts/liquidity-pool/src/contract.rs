@@ -93,7 +93,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
                 from_address: env.contract.address,
                 to_address: to.clone(),
                 amount: vec![Coin {
-                    denom: ["u", &symbol[..]].concat(),
+                    denom: symbol.clone(),
                     amount: redeem_amount.into(),
                 }],
             }),
@@ -216,7 +216,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         .message
         .sent_funds
         .iter()
-        .find(|c| &c.denom[1..] == symbol)
+        .find(|c| c.denom == symbol)
         .map(|c| Uint256::from(c.amount))
         .unwrap_or_else(Uint256::zero);
 
