@@ -19,7 +19,6 @@
 
 # Scripts
 node_modules/
-scripts/playground.js
 
 # Artifacts
 artifacts/
