@@ -1,3 +1,4 @@
+import 'dotenv/config.js';
 import {LCDClient, MnemonicKey} from "@terra-money/terra.js";
 
 export function initialize(terra) {
@@ -9,7 +10,7 @@ export function initialize(terra) {
   return terra.wallet(mk);
 }
 
-export function recover(mnemonic) {
+export function recover(terra, mnemonic) {
   const mk = new MnemonicKey({mnemonic: mnemonic});
   console.log(mk.accAddress);
   return terra.wallet(mk);
@@ -20,6 +21,7 @@ const terra = new LCDClient({
   chainID: 'tequila-0004'
 });
 
-const wallet = initialize(terra);
-// const wallet = await recover(terra, process.env.TEST_MAIN);
+// const wallet = initialize(terra);
+console.log(process.env.TEST_MAIN)
+const wallet = await recover(terra, process.env.TEST_MAIN);
 

@@ -18,7 +18,7 @@
 *.env
 
 # Scripts
-scripts/node_modules/
+node_modules/
 scripts/playground.js
 
 # Artifacts
