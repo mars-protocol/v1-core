@@ -101,6 +101,27 @@
           }
         }
       }
+    },
+    {
+      "description": "Repay Terra native coins loan",
+      "type": "object",
+      "required": [
+        "repay_native"
+      ],
+      "properties": {
+        "repay_native": {
+          "type": "object",
+          "required": [
+            "denom"
+          ],
+          "properties": {
+            "denom": {
+              "description": "Denom used in Terra (e.g: uluna, uusd)",
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

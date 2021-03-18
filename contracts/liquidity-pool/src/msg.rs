@@ -36,6 +36,11 @@ pub enum HandleMsg {
         denom: String,
         amount: Uint256,
     },
+    /// Repay Terra native coins loan
+    RepayNative {
+        /// Denom used in Terra (e.g: uluna, uusd)
+        denom: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

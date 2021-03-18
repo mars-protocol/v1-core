@@ -43,6 +43,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
+        HandleMsg::RepayNative { denom } => repay_native(deps, env, denom),
     }
 }
 
@@ -322,6 +323,82 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Handle the repay of native tokens. Refund extra funds if they exist
+pub fn repay_native<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    denom: String,
+) -> StdResult<HandleResponse> {
+    // TODO: asumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
+    // but double check that's the case
+    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
+
+    // Get repay amount
+    // TODO: Evaluate refunding the rest of the coins sent (or failing if more
+    // than one coin sent)
+    let repay_amount = get_denom_amount_from_coins(env.message.sent_funds, &denom);
+
+    // Cannot repay zero amount
+    if repay_amount.is_zero() {
+        return Err(StdError::generic_err(format!(
+            "Repay amount must be greater than 0 {}",
+            denom,
+        )));
+    }
+
+    // TODO: Interest rate update and computing goes somewhere around here
+    let borrower_addr = deps.api.canonical_address(&env.message.sender)?;
+
+    // Check new debt
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, denom.as_bytes());
+    let mut debt = debts_asset_bucket.load(borrower_addr.as_slice())?;
+
+    if debt.amount_scaled.is_zero() {
+        return Err(StdError::generic_err("Cannot repay 0 debt"));
+    }
+
+    let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
+
+    let mut messages = vec![];
+    let mut refund_amount = Uint256::zero();
+    if repay_amount_scaled > debt.amount_scaled {
+        // refund any excess amounts
+        // TODO: Should we log this?
+        refund_amount = (repay_amount_scaled - debt.amount_scaled) * reserve.borrow_index;
+        messages.push(CosmosMsg::Bank(BankMsg::Send {
+            from_address: env.contract.address,
+            to_address: env.message.sender.clone(),
+            amount: vec![Coin {
+                denom: denom.clone(),
+                amount: refund_amount.into(),
+            }],
+        }));
+        repay_amount_scaled = debt.amount_scaled;
+    }
+
+    debt.amount_scaled = debt.amount_scaled - repay_amount_scaled;
+    debts_asset_bucket.save(borrower_addr.as_slice(), &debt)?;
+
+    if debt.amount_scaled == Uint256::zero() {
+        // Remove asset from borrowed assets
+        let mut users_bucket = users_state(&mut deps.storage);
+        let mut user = users_bucket.load(borrower_addr.as_slice())?;
+        unset_bit(&mut user.borrowed_assets, reserve.index)?;
+        users_bucket.save(borrower_addr.as_slice(), &user)?;
+    }
+
+    Ok(HandleResponse {
+        data: None,
+        log: vec![
+            log("action", "repay"),
+            log("reserve", denom),
+            log("user", env.message.sender.clone()),
+            log("amount", repay_amount - refund_amount),
+        ],
+        messages: messages,
+    })
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -354,6 +431,16 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
 }
 
 // HELPERS
+// native coins
+fn get_denom_amount_from_coins(coins: Vec<Coin>, denom: &str) -> Uint256 {
+    coins
+        .iter()
+        .find(|c| c.denom == denom)
+        .map(|c| Uint256::from(c.amount))
+        .unwrap_or_else(Uint256::zero)
+}
+
+// bitwise operations
 /// Gets bit: true: 1, false: 0
 fn get_bit(bitmap: Uint128, index: u32) -> StdResult<bool> {
     if index >= 128 {
@@ -368,6 +455,15 @@ fn set_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
         return Err(StdError::generic_err("index out of range"));
     }
     *bitmap = Uint128(bitmap.u128() | (1 << index));
+    Ok(())
+}
+
+/// Sets bit to 0
+fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
+    if index >= 128 {
+        return Err(StdError::generic_err("index out of range"));
+    }
+    *bitmap = Uint128(bitmap.u128() & !(1 << index));
     Ok(())
 }
 
@@ -657,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn test_borrow_native() {
+    fn test_borrow_and_repay_native() {
         let mut deps = th_setup();
 
         let mock_reserve_1 = MockReserve {
@@ -777,6 +873,105 @@ mod tests {
             .load(&borrower_addr_canonical.as_slice())
             .unwrap();
         assert_eq!(Uint256::from(4000 as u128), debt2.amount_scaled);
+
+        // *
+        // Repay some debt 2
+        // *
+        let env = mock_env("borrower", &[coin(2000, "borrowedcoin2")]);
+        let msg = HandleMsg::RepayNative {
+            denom: String::from("borrowedcoin2"),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(res.messages, vec![],);
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "repay"),
+                log("reserve", "borrowedcoin2"),
+                log("user", "borrower"),
+                log("amount", 2000),
+            ]
+        );
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
+        let debt1 = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(3000 as u128), debt1.amount_scaled);
+        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(2000 as u128), debt2.amount_scaled);
+
+        // *
+        // Repay all debt 2
+        // *
+        let env = mock_env("borrower", &[coin(2000, "borrowedcoin2")]);
+        let msg = HandleMsg::RepayNative {
+            denom: String::from("borrowedcoin2"),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap();
+
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        let debt1 = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(3000 as u128), debt1.amount_scaled);
+        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(0 as u128), debt2.amount_scaled);
+
+        // *
+        // Repay all debt 2 (and then some)
+        // *
+        let env = mock_env("borrower", &[coin(4800, "borrowedcoin1")]);
+        let msg = HandleMsg::RepayNative {
+            denom: String::from("borrowedcoin1"),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Bank(BankMsg::Send {
+                from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                to_address: HumanAddr::from("borrower"),
+                amount: vec![Coin {
+                    denom: String::from("borrowedcoin1"),
+                    amount: Uint128(1200), // scaled * borrow_index = 1000 * 1.2
+                },],
+            }),],
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "repay"),
+                log("reserve", "borrowedcoin1"),
+                log("user", "borrower"),
+                log("amount", 3600),
+            ]
+        );
+        let user = users_state_read(&deps.storage)
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(false, get_bit(user.borrowed_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        let debt1 = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(0 as u128), debt1.amount_scaled);
+        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
+            .load(&borrower_addr_canonical.as_slice())
+            .unwrap();
+        assert_eq!(Uint256::from(0 as u128), debt2.amount_scaled);
     }
 
     // TEST HELPERS
