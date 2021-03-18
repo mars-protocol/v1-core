@@ -45,7 +45,7 @@ async function main() {
 
   let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
   let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
-  const balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
+  let balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
   const depositMsg = {"deposit_native": {"denom": "uluna"}};
@@ -114,6 +114,41 @@ async function main() {
   if (redeemerLunaBalanceDiff !== (redeemAmount - redeemTxFee)) {
     throw new Error(`[Redeem]: expected depositor's balance to increase by ${redeemAmount - redeemTxFee}, \
     got ${redeemerLunaBalanceDiff}`);
+  }
+
+
+  console.log("### Testing Borrow...");
+  const borrower = terra.wallets.test2;
+  let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
+
+  const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
+  console.log("contract starting balance: " + borrowContractStartingBalance);
+
+  const borrowAmount = 3000;
+  const borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
+  const executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
+  const borrowTxResult = await performTransaction(terra, borrower, executeBorrowMsg);
+
+  console.log("Borrow Message Sent: ");
+  console.log(borrowMsg);
+
+  let borrowTxInfo = await terra.tx.txInfo(borrowTxResult.txhash);
+  const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins.uluna.amount);
+
+  let {_coins: {uluna: {amount: borrowerEndingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
+
+  const borrowerLunaBalanceDiff = borrowerEndingLunaBalance - borrowerStartingLunaBalance;
+  if (borrowerLunaBalanceDiff !== (borrowAmount - borrowTxFee)) {
+    throw new Error(`[Borrow]: expected depositor's balance to increase by ${borrowAmount - borrowTxFee}, \
+    got ${borrowerLunaBalanceDiff}`);
+  }
+
+  const {_coins: {uluna: {amount: borrowContractEndingBalance}}}  = await terra.bank.balance(lpContractAddress);
+  const borrowContractDiff = borrowContractStartingBalance - borrowContractEndingBalance;
+
+  if (borrowContractDiff !== borrowAmount) {
+    throw new Error(`[Borrow]: expected luna balance to decrease by ${borrowAmount} for address \
+    ${lpContractAddress}, got ${borrowContractDiff}`);
   }
 }
 
