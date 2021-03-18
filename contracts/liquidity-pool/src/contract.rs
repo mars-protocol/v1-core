@@ -875,6 +875,15 @@ mod tests {
         assert_eq!(Uint256::from(4000 as u128), debt2.amount_scaled);
 
         // *
+        // Repay zero debt 2 (should fail)
+        // *
+        let env = mock_env("borrower", &[]);
+        let msg = HandleMsg::RepayNative {
+            denom: String::from("borrowedcoin2"),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // *
         // Repay some debt 2
         // *
         let env = mock_env("borrower", &[coin(2000, "borrowedcoin2")]);
@@ -931,7 +940,16 @@ mod tests {
         assert_eq!(Uint256::from(0 as u128), debt2.amount_scaled);
 
         // *
-        // Repay all debt 2 (and then some)
+        // Repay more debt 2 (should fail)
+        // *
+        let env = mock_env("borrower", &[coin(2000, "borrowedcoin2")]);
+        let msg = HandleMsg::RepayNative {
+            denom: String::from("borrowedcoin2"),
+        };
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // *
+        // Repay all debt 1 (and then some)
         // *
         let env = mock_env("borrower", &[coin(4800, "borrowedcoin1")]);
         let msg = HandleMsg::RepayNative {
