@@ -2,13 +2,13 @@ use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
     HandleResponse, HumanAddr, InitResponse, Querier, StdError, StdResult, Storage, Uint128,
-    WasmMsg,
+    WasmMsg, MigrateResponse, MigrateResult
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse, MigrateMsg};
 use crate::state::{
     config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
     users_state, Config, Debt, Reserve, User,
@@ -428,6 +428,14 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
     let ma_token_address = deps.api.human_address(&reserve.ma_token_address)?;
     Ok(ReserveResponse { ma_token_address })
+}
+
+pub fn migrate<S: Storage, A: Api, Q: Querier>(
+    _deps: &mut Extern<S, A, Q>,
+    _env: Env,
+    _msg: MigrateMsg,
+) -> MigrateResult {
+    Ok(MigrateResponse::default())
 }
 
 // HELPERS

@@ -74,3 +74,7 @@ pub struct ConfigResponse {
 pub struct ReserveResponse {
     pub ma_token_address: HumanAddr,
 }
+
+/// We currently take no arguments for migrations
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}

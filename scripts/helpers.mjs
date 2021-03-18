@@ -4,6 +4,7 @@ import {
   MsgInstantiateContract,
   MsgStoreCode,
   MsgSend,
+  MsgMigrateContract,
   Coin
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
@@ -27,7 +28,7 @@ export async function uploadContract(terra, wallet, filepath) {
 }
 
 export async function instantiateContract(terra, wallet, codeId, msg) {
-  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg);
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg, undefined, true);
   let result = await performTransaction(terra, wallet, instantiateMsg)
   return result.logs[0].events[0].attributes[2].value //contract address
 }
@@ -97,5 +98,10 @@ export async function setup(terra, wallet, contractAddress, options) {
   }
 }
 
+export async function migrate(terra, wallet, contractAddress) {
+  const newCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
+  const migrateMsg = new MsgMigrateContract(wallet.key.accAddress, contractAddress, newCodeId, {});
+  await performTransaction(terra, wallet, migrateMsg);
+}
 
 
