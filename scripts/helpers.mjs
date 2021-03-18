@@ -65,6 +65,7 @@ export async function deploy(terra, wallet) {
 export async function setup(terra, wallet, contractAddress, options) {
   const initialAssets = options.initialAssets ?? [];
   const initialDeposits = options.initialDeposits ?? [];
+  const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
     let initAssetMsg = {"init_asset": {"denom": asset}};
@@ -81,6 +82,17 @@ export async function setup(terra, wallet, contractAddress, options) {
       const executeDepositMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, depositMsg, [coins]);
       await performTransaction(terra, account, executeDepositMsg);
       console.log(`Deposited ${amount} ${asset}`);
+    }
+  }
+
+  for (let borrow of initialBorrows) {
+    const { account, assets } = borrow;
+    console.log(`### Borrows for account ${account.key.accAddress}: `);
+    for (const [asset, amount] of Object.entries(assets)) {
+      const borrowMsg = {"borrow_native": {"denom": asset, "amount": amount.toString()}};
+      const executeBorrowMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, borrowMsg);
+      await performTransaction(terra, account, executeBorrowMsg);
+      console.log(`Borrowed ${amount} ${asset}`);
     }
   }
 }

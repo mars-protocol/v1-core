@@ -7,6 +7,7 @@ const wallet = terra.wallets.test1;
 let lpContractAddress = await deploy(terra, wallet);
 
 const initialAssets = ["uluna", "uusd", "umnt", "ukrw", "usdr"];
+
 const initialDeposits = [
   {
     account: terra.wallets.test1,
@@ -18,4 +19,16 @@ const initialDeposits = [
   }
 ]
 
-await setup(terra, wallet, lpContractAddress, {initialAssets, initialDeposits});
+const initialBorrows = [
+  {
+    account: terra.wallets.test3,
+    assets: {"uluna": 4000000000, "uusd": 7000000000, "umnt": 5500000000}
+  },
+  {
+    account: terra.wallets.test4,
+    assets: {"ukrw": 5000000000, "usdr": 4500000000}
+  }
+]
+
+await setup(terra, wallet, lpContractAddress, {initialAssets, initialDeposits, initialBorrows});
+
