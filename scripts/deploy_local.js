@@ -11,23 +11,23 @@ const initialAssets = ["uluna", "uusd", "umnt", "ukrw", "usdr"];
 const initialDeposits = [
   {
     account: terra.wallets.test1,
-    assets: {"uluna": 6000000000, "uusd": 5000000000, "umnt": 7000000000, "ukrw": 3000000000, "usdr": 8000000000}
+    assets: {"uluna": 6000000000, "uusd": 5000000000, "umnt": 7000000000}
   },
   {
     account: terra.wallets.test2,
-    assets: {"uluna": 2000000000, "uusd": 9000000000, "umnt": 4000000000, "ukrw": 7000000000, "usdr": 1000000000}
+    assets: {"ukrw": 7000000000, "usdr": 8000000000}
   }
 ]
 
 const initialBorrows = [
   {
-    account: terra.wallets.test3,
-    assets: {"uluna": 4000000000, "uusd": 7000000000, "umnt": 5500000000}
+    account: terra.wallets.test1,
+    assets: {"ukrw": 3500000000, "usdr": 4000000000}
   },
   {
-    account: terra.wallets.test4,
-    assets: {"ukrw": 5000000000, "usdr": 4500000000}
-  }
+    account: terra.wallets.test2,
+    assets: {"uluna": 3000000000, "uusd": 2500000000, "umnt": 3500000000}
+  },
 ]
 
 await setup(terra, wallet, lpContractAddress, {initialAssets, initialDeposits, initialBorrows});
