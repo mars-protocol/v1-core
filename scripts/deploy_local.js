@@ -31,4 +31,3 @@ const initialBorrows = [
 ]
 
 await setup(terra, wallet, lpContractAddress, {initialAssets, initialDeposits, initialBorrows});
-

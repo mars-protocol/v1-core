@@ -101,7 +101,8 @@ export async function setup(terra, wallet, contractAddress, options) {
 export async function migrate(terra, wallet, contractAddress) {
   const newCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
   const migrateMsg = new MsgMigrateContract(wallet.key.accAddress, contractAddress, newCodeId, {});
-  await performTransaction(terra, wallet, migrateMsg);
+  const ret = await performTransaction(terra, wallet, migrateMsg);
+  return ret;
 }
 
 
