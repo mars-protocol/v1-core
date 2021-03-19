@@ -1,14 +1,16 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, Querier, StdError, StdResult, Storage, Uint128,
-    WasmMsg, MigrateResponse, MigrateResult
+    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Querier, StdError,
+    StdResult, Storage, Uint128, WasmMsg,
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, QueryMsg, ReceiveMsg, ReserveResponse, MigrateMsg};
+use crate::msg::{
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse,
+};
 use crate::state::{
     config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
     users_state, Config, Debt, Reserve, User,

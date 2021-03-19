@@ -1,13 +1,12 @@
 import {
+  Coin,
   isTxError,
   MsgExecuteContract,
   MsgInstantiateContract,
-  MsgStoreCode,
-  MsgSend,
   MsgMigrateContract,
-  Coin
+  MsgStoreCode
 } from '@terra-money/terra.js';
-import { readFileSync } from 'fs';
+import {readFileSync} from 'fs';
 
 export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({msgs: [msg]});
@@ -101,8 +100,7 @@ export async function setup(terra, wallet, contractAddress, options) {
 export async function migrate(terra, wallet, contractAddress) {
   const newCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
   const migrateMsg = new MsgMigrateContract(wallet.key.accAddress, contractAddress, newCodeId, {});
-  const ret = await performTransaction(terra, wallet, migrateMsg);
-  return ret;
+  return await performTransaction(terra, wallet, migrateMsg);
 }
 
 
