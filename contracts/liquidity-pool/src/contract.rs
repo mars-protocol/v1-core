@@ -1,15 +1,13 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{
-    from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Querier, StdError,
-    StdResult, Storage, Uint128, WasmMsg,
-};
+use cosmwasm_std::{from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg,
+                   Env, Extern, HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult,
+                   Querier, StdError, StdResult, Storage, Uint128, WasmMsg, Order};
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
 use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse,
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse, ReservesListResponse
 };
 use crate::state::{
     config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
@@ -410,6 +408,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Reserve { denom } => to_binary(&query_reserve(deps, denom)?),
+        QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
     }
 }
 
@@ -430,6 +429,21 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
     let ma_token_address = deps.api.human_address(&reserve.ma_token_address)?;
     Ok(ReserveResponse { ma_token_address })
+}
+
+fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<ReservesListResponse> {
+    let reserves = reserves_state_read(&deps.storage);
+
+    let reserves_list: StdResult<Vec<HumanAddr>> = reserves
+        .range(None, None, Order::Ascending)
+        .map(|item| {
+            let (_k, v) = item?;
+            Ok(deps.api.human_address(&CanonicalAddr::from(v.ma_token_address))?)
+        } )
+        .collect();
+    Ok(ReservesListResponse {reserves_list: reserves_list?})
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(

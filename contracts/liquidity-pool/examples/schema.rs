@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 use liquidity_pool::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse,
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse, ReservesListResponse
 };
 
 use liquidity_pool::state::Config;
@@ -22,4 +22,5 @@ fn main() {
     export_schema(&schema_for!(ReserveResponse), &out_dir);
     export_schema(&schema_for!(ReceiveMsg), &out_dir);
     export_schema(&schema_for!(MigrateMsg), &out_dir);
+    export_schema(&schema_for!(ReservesListResponse), &out_dir);
 }
