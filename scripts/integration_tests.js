@@ -49,7 +49,7 @@ async function main() {
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
   const depositMsg = {"deposit_native": {"denom": "uluna"}};
-  const depositAmount = 10000;
+  const depositAmount = 10_000_000;
   const coins = new Coin("uluna", depositAmount);
   const executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
   const depositTxResult = await performTransaction(terra, wallet, executeDepositMsg);
@@ -83,7 +83,7 @@ async function main() {
   const senderMaLunaBalanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   let { balance: redeemerStartingMaLunaBalance} = await queryContract(terra, ma_token_address, senderMaLunaBalanceQueryMsg);
 
-  const redeemAmount = 5000;
+  const redeemAmount = 5_000_000;
   const executeMsg = {
     "send": {
       "contract": lpContractAddress,
@@ -122,15 +122,14 @@ async function main() {
   let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
 
   const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
-  console.log("contract starting balance: " + borrowContractStartingBalance);
 
-  const borrowAmount = 3000;
+  const borrowAmount = 4_000_000;
   const borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
   const executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
   const borrowTxResult = await performTransaction(terra, borrower, executeBorrowMsg);
 
   console.log("Borrow Message Sent: ");
-  console.log(borrowMsg);
+  console.log(executeBorrowMsg);
 
   let borrowTxInfo = await terra.tx.txInfo(borrowTxResult.txhash);
   const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins.uluna.amount);
@@ -150,6 +149,58 @@ async function main() {
     throw new Error(`[Borrow]: expected luna balance to decrease by ${borrowAmount} for address \
     ${lpContractAddress}, got ${borrowContractDiff}`);
   }
+
+
+  console.log("### Testing Repay...");
+  const repayer = terra.wallets.test2;
+  let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
+
+  const repayMsg = {"repay_native": {"denom": "uluna"}};
+  let repayAmount = 2_000_000;
+  let repayCoins = new Coin("uluna", repayAmount);
+  const executeRepayMsg = new MsgExecuteContract(repayer.key.accAddress, lpContractAddress, repayMsg, [repayCoins]);
+  const repayTxResult = await performTransaction(terra, repayer, executeRepayMsg);
+
+  console.log("Repay Message Sent: ");
+  console.log(executeRepayMsg);
+
+  let repayTxInfo = await terra.tx.txInfo(repayTxResult.txhash);
+  const repayTxFee = Number(repayTxInfo.tx.fee.amount._coins.uluna.amount);
+
+  let {_coins: {uluna: {amount: repayerEndingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
+  const partialRepayDiff = repayerStartingLunaBalance - repayerEndingLunaBalance;
+
+  if (partialRepayDiff !== (repayAmount + repayTxFee)) {
+    throw new Error(`[Repay]: expected repayer's balance to decrease by ${partialRepayDiff + repayTxFee}, \
+    got ${partialRepayDiff}`);
+  }
+
+  console.log(await terra.bank.balance(lpContractAddress));
+
+  let overpayAmount = 3_000_000;
+  let overpayCoins = new Coin("uluna", overpayAmount);
+  const executeOverpayMsg = new MsgExecuteContract(repayer.key.accAddress, lpContractAddress, repayMsg, [overpayCoins]);
+  const overpayTxResult = await performTransaction(terra, repayer, executeOverpayMsg);
+  console.log(overpayTxResult.logs[0].events[3].attributes);
+
+  let overpayTxInfo = await terra.tx.txInfo(overpayTxResult.txhash);
+  const overpayTxFee = Number(overpayTxInfo.tx.fee.amount._coins.uluna.amount);
+  console.log("overpay tx fee: " + overpayTxFee);
+
+  let {_coins: {uluna: {amount: overpayEndingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
+  console.log("ending luna balance:  " + repayerEndingLunaBalance);
+  console.log("overpay ending luna balance: " + overpayEndingLunaBalance);
+  console.log("Diff in Luna Balance after overpaying: " + (overpayEndingLunaBalance - repayerEndingLunaBalance));
+
+  const overpayRepayDiff = overpayEndingLunaBalance - repayerEndingLunaBalance;
+  console.log("overpay repay diff: " + overpayRepayDiff);
+  // if (overpayRepayDiff !== (overpayAmount + overpayTxFee - (borrowAmount - repayAmount))) {
+  //   throw new Error(`[Repay]: expected repayer to be refunded ${overpayAmount - overpayTxFee - (borrowAmount - repayAmount)}, \
+  // got ${overpayRepayDiff}`);
+  // }
+
+  console.log(await terra.bank.balance(repayer.key.accAddress));
+  console.log(await terra.bank.balance(lpContractAddress));
 }
 
 main().catch(err => console.log(err));
