@@ -1,13 +1,29 @@
 import 'dotenv/config.js';
-import {migrate, executeContract, deploy} from "./helpers.mjs";
-import {LocalTerra} from "@terra-money/terra.js";
+import {migrate, uploadContract} from "./helpers.mjs";
+import {LCDClient, LocalTerra} from "@terra-money/terra.js";
+import {recover} from "./testnet.mjs";
 
 async function main() {
-  const terra = new LocalTerra();
-  const wallet = terra.wallets.test1;
-  const contractAddress = await deploy(terra, wallet);
+  let terra;
+  let wallet;
+
+  if (process.env.NETWORK === "testnet") {
+    terra = new LCDClient({
+      URL: 'https://tequila-lcd.terra.dev',
+      chainID: 'tequila-0004'
+    })
+
+    wallet = await recover(terra, process.env.TEST_MAIN);
+  } else {
+    terra = new LocalTerra();
+    wallet = terra.wallets.test1;
+  }
+
+  console.log("uploading...");
+  const newCodeId = await uploadContract(terra, wallet, process.env.LP_FILEPATH);
+
   console.log('migrating...');
-  const migrateResult = await migrate(terra, wallet, contractAddress);
+  const migrateResult = await migrate(terra, wallet, process.env.LP_CONTRACT_ADDRESS, newCodeId);
 
   console.log("migration complete: ");
   console.log(migrateResult);

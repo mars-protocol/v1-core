@@ -13,7 +13,6 @@ export function initialize(terra) {
 
 export function recover(terra, mnemonic) {
   const mk = new MnemonicKey({mnemonic: mnemonic});
-  console.log(mk.accAddress);
   return terra.wallet(mk);
 }
 
