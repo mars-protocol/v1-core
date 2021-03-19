@@ -7,12 +7,10 @@ async function main() {
   const wallet = terra.wallets.test1;
   const contractAddress = await deploy(terra, wallet);
   console.log('migrating...');
-  let res = await migrate(terra, wallet, contractAddress);
-  console.log(res);
+  const migrateResult = await migrate(terra, wallet, contractAddress);
 
-  let initAssetMsg = {"init_asset": {"denom": "uusd"}};
-  res = await executeContract(terra, wallet, contractAddress, initAssetMsg);
-  console.log(res);
+  console.log("migration complete: ");
+  console.log(migrateResult);
 }
 
 main().catch(err => console.log(err));
