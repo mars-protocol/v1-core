@@ -175,32 +175,21 @@ async function main() {
     got ${partialRepayDiff}`);
   }
 
-  console.log(await terra.bank.balance(lpContractAddress));
-
   let overpayAmount = 3_000_000;
   let overpayCoins = new Coin("uluna", overpayAmount);
   const executeOverpayMsg = new MsgExecuteContract(repayer.key.accAddress, lpContractAddress, repayMsg, [overpayCoins]);
   const overpayTxResult = await performTransaction(terra, repayer, executeOverpayMsg);
-  console.log(overpayTxResult.logs[0].events[3].attributes);
 
   let overpayTxInfo = await terra.tx.txInfo(overpayTxResult.txhash);
   const overpayTxFee = Number(overpayTxInfo.tx.fee.amount._coins.uluna.amount);
-  console.log("overpay tx fee: " + overpayTxFee);
 
   let {_coins: {uluna: {amount: overpayEndingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
-  console.log("ending luna balance:  " + repayerEndingLunaBalance);
-  console.log("overpay ending luna balance: " + overpayEndingLunaBalance);
-  console.log("Diff in Luna Balance after overpaying: " + (overpayEndingLunaBalance - repayerEndingLunaBalance));
+  const overpayRepayDiff = repayerEndingLunaBalance - overpayEndingLunaBalance;
 
-  const overpayRepayDiff = overpayEndingLunaBalance - repayerEndingLunaBalance;
-  console.log("overpay repay diff: " + overpayRepayDiff);
-  // if (overpayRepayDiff !== (overpayAmount + overpayTxFee - (borrowAmount - repayAmount))) {
-  //   throw new Error(`[Repay]: expected repayer to be refunded ${overpayAmount - overpayTxFee - (borrowAmount - repayAmount)}, \
-  // got ${overpayRepayDiff}`);
-  // }
-
-  console.log(await terra.bank.balance(repayer.key.accAddress));
-  console.log(await terra.bank.balance(lpContractAddress));
+  if (overpayRepayDiff !== ((borrowAmount - repayAmount) + overpayTxFee)) {
+    throw new Error(`[Repay]: expected repayer balance to decrease by ${(borrowAmount - repayAmount) + overpayTxFee}, \
+  got ${overpayRepayDiff}`);
+  }
 }
 
 main().catch(err => console.log(err));
