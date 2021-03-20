@@ -1,13 +1,16 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg,
-                   Env, Extern, HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult,
-                   Querier, StdError, StdResult, Storage, Uint128, WasmMsg, Order};
+use cosmwasm_std::{
+    from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
+    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
+    StdError, StdResult, Storage, Uint128, WasmMsg,
+};
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
 use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse, ReservesListResponse
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse,
+    ReservesListResponse,
 };
 use crate::state::{
     config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
@@ -440,10 +443,14 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (_k, v) = item?;
-            Ok(deps.api.human_address(&CanonicalAddr::from(v.ma_token_address))?)
-        } )
+            Ok(deps
+                .api
+                .human_address(&CanonicalAddr::from(v.ma_token_address))?)
+        })
         .collect();
-    Ok(ReservesListResponse {reserves_list: reserves_list?})
+    Ok(ReservesListResponse {
+        reserves_list: reserves_list?,
+    })
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(

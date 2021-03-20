@@ -31,6 +31,17 @@
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "reserves_list"
+      ],
+      "properties": {
+        "reserves_list": {
+          "type": "object"
+        }
+      }
     }
   ]
 }

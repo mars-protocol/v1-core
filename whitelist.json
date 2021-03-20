@@ -1,0 +1,37 @@
+{
+  "contracts": {
+    "lpContractAddress": "terra12jc40azjta9xrspl5pumxp97xwecyxctza5aqm"
+  },
+  "whitelist": {
+    "terra1z9qv8vya2pq3v0mterq379n0akm4f4h69lvld7": {
+      "name": "mars ukrw debt token",
+      "symbol": "maukrw",
+      "decimals": 6,
+      "total_supply": "0"
+    },
+    "terra12vmjhsfzprrsh4uep3mqvhf28ldvmedv8tljmg": {
+      "name": "mars uluna debt token",
+      "symbol": "mauluna",
+      "decimals": 6,
+      "total_supply": "0"
+    },
+    "terra17urpq49tptxfspzur8pze3h3qvyz0j2kfmfz2k": {
+      "name": "mars umnt debt token",
+      "symbol": "maumnt",
+      "decimals": 6,
+      "total_supply": "0"
+    },
+    "terra1hch9z30ksurescth4wwl6g7nw2ykle2qp493nj": {
+      "name": "mars usdr debt token",
+      "symbol": "mausdr",
+      "decimals": 6,
+      "total_supply": "0"
+    },
+    "terra1lt4r9d6euk4ds05lagjs7hll6euvpr777c57vf": {
+      "name": "mars uusd debt token",
+      "symbol": "mauusd",
+      "decimals": 6,
+      "total_supply": "0"
+    }
+  }
+}
