@@ -1,4 +1,4 @@
-use cosmwasm_bignumber::Uint256;
+use cosmwasm_bignumber::{Uint256, Decimal256};
 use cosmwasm_std::HumanAddr;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -19,6 +19,8 @@ pub enum HandleMsg {
     InitAsset {
         /// Symbol used in Terra (e.g: uluna, uusd)
         denom: String,
+        /// Borrow slope to calculate borrow rate
+        borrow_slope: Decimal256,
     },
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {

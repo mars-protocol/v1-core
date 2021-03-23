@@ -4,6 +4,7 @@ use cosmwasm_std::{
     HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
     QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
+use cosmwasm_storage::{Bucket};
 
 use cw20::{BalanceResponse, Cw20HandleMsg, Cw20QueryMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
@@ -44,7 +45,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitAsset { denom } => init_asset(deps, env, denom),
+        HandleMsg::InitAsset { denom, borrow_slope } => init_asset(deps, env, denom, borrow_slope),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
@@ -130,6 +131,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     denom: String,
+    borrow_slope: Decimal256,
 ) -> StdResult<HandleResponse> {
     // Get config
     let mut config = config_state_read(&deps.storage).load()?;
@@ -147,11 +149,20 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
             reserves.save(
                 denom.as_bytes(),
                 &Reserve {
-                    ma_token_address: CanonicalAddr::default(),
-                    liquidity_index: Decimal256::one(),
                     index: config.reserve_count,
+                    ma_token_address: CanonicalAddr::default(),
+
                     borrow_index: Decimal256::one(),
+                    liquidity_index: Decimal256::one(),
+                    borrow_rate: Decimal256::zero(),
+                    liquidity_rate: Decimal256::zero(),
+
+                    borrow_slope: borrow_slope,
+
                     loan_to_value: Decimal256::from_ratio(8, 10),
+
+                    interests_last_updated: env.block.time,
+                    total_debt_scaled: Uint256::zero(),
                 },
             )?;
 
@@ -623,6 +634,47 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
     Ok(MigrateResponse::default())
 }
 
+// INTEREST
+
+/// Update indexes and interest rates for given reserve
+pub fn reserve_update_indexes_and_rates<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    reserve_bucket: &mut Bucket<S, Reserve>,
+    denom: &str,
+    reserve: &mut Reserve,
+    ) -> StdResult<()> {
+
+    // TODO: handle cw20
+    let denom_coin = 
+        deps
+        .querier
+        .query_balance(env.contract.address, denom)?;
+
+    let available_liquidity = Decimal256::from_uint256(denom_coin.amount);
+    let total_debt = Decimal256::from_uint256(reserve.total_debt_scaled) * reserve.borrow_index;
+
+    let mut utilization_rate = Decimal256::zero();
+    if total_debt > Decimal256::zero() {
+        utilization_rate = total_debt / (available_liquidity + total_debt); 
+    }
+    // 1. Update indexes
+    let current_timestamp = env.block.time;
+    let time_elapsed: Decimal256 = Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
+    let seconds_per_year = Decimal256::from_uint256(31536000u64);
+    reserve.borrow_index = reserve.borrow_index * reserve.borrow_rate * time_elapsed / seconds_per_year;
+    reserve.liquidity_index = reserve.liquidity_index * reserve.liquidity_rate * time_elapsed / seconds_per_year;
+
+    reserve.interests_last_updated = current_timestamp;
+
+    // 2. Update interest rates
+    reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
+    reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
+
+    reserve_bucket.save(denom.as_bytes(), reserve)?;
+    Ok(())
+}
+
 // HELPERS
 // native coins
 fn get_denom_amount_from_coins(coins: Vec<Coin>, denom: &str) -> Uint256 {
@@ -706,6 +758,7 @@ mod tests {
         let env = mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
             denom: String::from("someasset"),
+            borrow_slope: Decimal256::from_ratio(4, 100)
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -715,6 +768,7 @@ mod tests {
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
             denom: String::from("someasset"),
+            borrow_slope: Decimal256::from_ratio(4, 100)
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
@@ -803,6 +857,7 @@ mod tests {
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
             denom: String::from("otherasset"),
+            borrow_slope: Decimal256::from_ratio(4, 100)
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 
@@ -1267,7 +1322,15 @@ mod tests {
         ma_token_address: &'a str,
         liquidity_index: Decimal256,
         borrow_index: Decimal256,
+
+        borrow_rate: Decimal256,
+        liquidity_rate: Decimal256,
+
+        borrow_slope: Decimal256,
         loan_to_value: Decimal256,
+
+        interests_last_updated: u64,
+        total_debt_scaled: Uint256,
     }
 
     fn th_setup() -> Extern<MockStorage, MockApi, WasmMockQuerier> {
@@ -1307,9 +1370,14 @@ mod tests {
                         .canonical_address(&HumanAddr::from(reserve.ma_token_address))
                         .unwrap(),
                     index,
-                    liquidity_index: reserve.liquidity_index,
                     borrow_index: reserve.borrow_index,
+                    liquidity_index: reserve.liquidity_index,
+                    borrow_rate: reserve.borrow_rate,
+                    liquidity_rate: reserve.liquidity_rate,
+                    borrow_slope: reserve.borrow_slope,
                     loan_to_value: reserve.loan_to_value,
+                    interests_last_updated: reserve.interests_last_updated,
+                    total_debt_scaled: reserve.total_debt_scaled,
                 },
             )
             .unwrap();

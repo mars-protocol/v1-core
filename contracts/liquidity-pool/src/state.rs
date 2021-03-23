@@ -43,12 +43,25 @@ pub struct Reserve {
     pub index: u32,
     /// maToken contract address
     pub ma_token_address: CanonicalAddr,
-    /// Liquidity index (Used to compute deposit interest)
-    pub liquidity_index: Decimal256,
+
     /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal256,
-    // Loan to value (Used to determine if user has sufficient collateral to borrow)
+    /// Liquidity index (Used to compute deposit interest)
+    pub liquidity_index: Decimal256,
+    /// Rate charged to borrowers
+    pub borrow_rate: Decimal256,
+    /// Rate paid to depositors
+    pub liquidity_rate: Decimal256,
+
+    /// Variable debt interest slope
+    pub borrow_slope: Decimal256,
+    /// Max percentage of collateral that can be borrowed 
     pub loan_to_value: Decimal256,
+
+    /// timestamp (seconds) where indexes and rates where last updated
+    pub interests_last_updated: u64,
+    /// Total debt scaled for the reserve's currency
+    pub total_debt_scaled: Uint256,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
