@@ -6,6 +6,7 @@ import {recover} from "./testnet.mjs";
 async function main() {
   let terra;
   let wallet;
+  let lpContractAddress;
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
@@ -14,16 +15,18 @@ async function main() {
     })
 
     wallet = await recover(terra, process.env.TEST_MAIN);
+    lpContractAddress = process.env.LP_TESTNET;
   } else {
     terra = new LocalTerra();
     wallet = terra.wallets.test1;
+    lpContractAddress = process.env.LP_LOCAL;
   }
 
   console.log("uploading...");
   const newCodeId = await uploadContract(terra, wallet, process.env.LP_FILEPATH);
 
   console.log('migrating...');
-  const migrateResult = await migrate(terra, wallet, process.env.LP_CONTRACT_ADDRESS, newCodeId);
+  const migrateResult = await migrate(terra, wallet, lpContractAddress, newCodeId);
 
   console.log("migration complete: ");
   console.log(migrateResult);
