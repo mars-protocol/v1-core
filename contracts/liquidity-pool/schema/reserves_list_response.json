@@ -9,13 +9,28 @@
     "reserves_list": {
       "type": "array",
       "items": {
-        "$ref": "#/definitions/HumanAddr"
+        "$ref": "#/definitions/ReserveInfo"
       }
     }
   },
   "definitions": {
     "HumanAddr": {
       "type": "string"
+    },
+    "ReserveInfo": {
+      "type": "object",
+      "required": [
+        "denom",
+        "ma_token_address"
+      ],
+      "properties": {
+        "denom": {
+          "type": "string"
+        },
+        "ma_token_address": {
+          "$ref": "#/definitions/HumanAddr"
+        }
+      }
     }
   }
 }

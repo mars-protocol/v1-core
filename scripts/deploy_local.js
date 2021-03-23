@@ -1,5 +1,5 @@
 import 'dotenv/config.js';
-import {deploy, migrate, queryContract, setup} from "./helpers.mjs";
+import {deploy, setup} from "./helpers.mjs";
 import {LocalTerra} from "@terra-money/terra.js";
 
 const terra = new LocalTerra();

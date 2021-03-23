@@ -8,10 +8,7 @@ use cosmwasm_std::{
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
-use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse,
-    ReservesListResponse,
-};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveResponse, ReservesListResponse, ReserveInfo};
 use crate::state::{
     config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
     users_state, Config, Debt, Reserve, User,
@@ -439,17 +436,23 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<ReservesListResponse> {
     let reserves = reserves_state_read(&deps.storage);
 
-    let reserves_list: StdResult<Vec<HumanAddr>> = reserves
+    let reserves_list: StdResult<Vec<_>> = reserves
         .range(None, None, Order::Ascending)
         .map(|item| {
-            let (_k, v) = item?;
-            Ok(deps
+            let (k, v) = item?;
+            let denom = String::from_utf8(k).unwrap();
+            let ma_token_address = deps
                 .api
-                .human_address(&CanonicalAddr::from(v.ma_token_address))?)
+                .human_address(&CanonicalAddr::from(v.ma_token_address))?;
+            Ok(ReserveInfo {
+                denom,
+                ma_token_address
+            })
         })
         .collect();
+
     Ok(ReservesListResponse {
-        reserves_list: reserves_list?,
+        reserves_list: reserves_list?
     })
 }
 

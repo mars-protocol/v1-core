@@ -78,7 +78,13 @@ pub struct ReserveResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ReservesListResponse {
-    pub reserves_list: Vec<HumanAddr>,
+    pub reserves_list: Vec<ReserveInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ReserveInfo {
+    pub denom: String,
+    pub ma_token_address: HumanAddr,
 }
 
 /// We currently take no arguments for migrations
