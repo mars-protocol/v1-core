@@ -443,7 +443,11 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-            let denom = String::from_utf8(k).unwrap();
+            let denom = String::from_utf8(k);
+            let denom = match denom {
+                Ok(denom) => denom,
+                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+            };
             let ma_token_address = deps
                 .api
                 .human_address(&CanonicalAddr::from(v.ma_token_address))?;

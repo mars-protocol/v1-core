@@ -6,7 +6,7 @@ import {recover} from "./testnet.mjs";
 async function main() {
   let terra;
   let wallet;
-  let lpContractAddress;
+  let lpContractAddress = process.env.LP_ADDRESS;
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
@@ -15,11 +15,9 @@ async function main() {
     })
 
     wallet = await recover(terra, process.env.TEST_MAIN);
-    lpContractAddress = process.env.LP_TESTNET;
   } else {
     terra = new LocalTerra();
     wallet = terra.wallets.test1;
-    lpContractAddress = process.env.LP_LOCAL;
   }
 
   console.log("uploading...");

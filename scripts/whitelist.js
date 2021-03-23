@@ -5,17 +5,15 @@ import {writeFileSync} from 'fs';
 
 async function main() {
   let terra;
-  let lpContractAddress;
+  let lpContractAddress = process.env.LP_ADDRESS;
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
       URL: 'https://tequila-lcd.terra.dev',
       chainID: 'tequila-0004'
     })
-    lpContractAddress = process.env.LP_TESTNET;
   } else {
     terra = new LocalTerra();
-    lpContractAddress = process.env.LP_LOCAL;
   }
 
   const reservesListResult = await queryContract(terra, lpContractAddress, {"reserves_list": {}});
