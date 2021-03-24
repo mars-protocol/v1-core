@@ -252,13 +252,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     // but double check that's the case
     // TODO: Evaluate refunding the rest of the coins sent (or failing if more
     // than one coin sent)
-    let deposit_amount = env
-        .message
-        .sent_funds
-        .iter()
-        .find(|c| c.denom == denom)
-        .map(|c| Uint256::from(c.amount))
-        .unwrap_or_else(Uint256::zero);
+    let deposit_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
@@ -483,7 +477,7 @@ pub fn repay_native<S: Storage, A: Api, Q: Querier>(
     // Get repay amount
     // TODO: Evaluate refunding the rest of the coins sent (or failing if more
     // than one coin sent)
-    let repay_amount = get_denom_amount_from_coins(env.message.sent_funds, &denom);
+    let repay_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
 
     // Cannot repay zero amount
     if repay_amount.is_zero() {
@@ -692,7 +686,6 @@ pub fn reserve_update_indexes_and_interests<S: Storage, Q: Querier>(
     // 1. Update indexes
     let current_timestamp = env.block.time;
 
-    // TODO: overflow
     if reserve.interests_last_updated < current_timestamp {
         let time_elapsed =
             Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
@@ -721,7 +714,7 @@ pub fn reserve_update_indexes_and_interests<S: Storage, Q: Querier>(
 
 // HELPERS
 // native coins
-fn get_denom_amount_from_coins(coins: Vec<Coin>, denom: &str) -> Uint256 {
+fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
     coins
         .iter()
         .find(|c| c.denom == denom)
