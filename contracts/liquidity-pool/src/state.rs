@@ -61,7 +61,7 @@ pub struct Reserve {
     /// timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,
     /// Total debt scaled for the reserve's currency
-    pub total_debt_scaled: Uint256,
+    pub debt_total_scaled: Uint256,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {

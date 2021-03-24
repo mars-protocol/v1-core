@@ -1,4 +1,4 @@
-use cosmwasm_bignumber::{Uint256, Decimal256};
+use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::HumanAddr;
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
