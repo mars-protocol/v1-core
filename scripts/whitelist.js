@@ -18,18 +18,16 @@ async function main() {
 
   const reservesListResult = await queryContract(terra, lpContractAddress, {"reserves_list": {}});
   const { reserves_list } = reservesListResult;
-
-  const reserveToTokenInfo = {};
+  const reserveInfo = {};
 
   for (let reserve of reserves_list) {
-    const {ma_token_address} = reserve;
-    const tokenInfoQuery = {"token_info": {}};
-    reserveToTokenInfo[ma_token_address] = await queryContract(terra, ma_token_address, tokenInfoQuery);
+    const {denom, ma_token_address} = reserve;
+    reserveInfo[ma_token_address] = {denom}
   }
 
   const output = {};
   output.contracts = {lpContractAddress};
-  output.whitelist = reserveToTokenInfo;
+  output.whitelist = reserveInfo;
 
   const json = JSON.stringify(output);
   writeFileSync('artifacts/whitelist.json', json, {'encoding': 'utf8'});
