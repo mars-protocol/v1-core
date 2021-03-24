@@ -244,7 +244,8 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     env: Env,
     denom: String,
 ) -> StdResult<HandleResponse> {
-    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
+    let mut reserves_bucket = reserves_state(&mut deps.storage);
+    let mut reserve = reserves_bucket.load(denom.as_bytes())?;
 
     // Get deposit amount
     // TODO: assumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
@@ -266,6 +267,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
             denom,
         )));
     }
+<<<<<<< HEAD
 
     let mut users_bucket = users_state(&mut deps.storage);
     let depositer_addr = deps.api.canonical_address(&env.message.sender)?;
@@ -286,6 +288,22 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
 
     // TODO: Interest rate update and computing goes here
 
+=======
+    println!("{:?}", reserve.liquidity_index);
+
+    reserve_update_indexes_and_interests(
+        &deps.querier,
+        &env,
+        &mut reserves_bucket,
+        &denom,
+        &mut reserve
+    )?;
+
+    println!("{:?}", reserve.liquidity_index);
+    if reserve.liquidity_index.is_zero() {
+        return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
+    }
+>>>>>>> b99861a (Add overflow checks and fix interest calculation)
     let mint_amount = deposit_amount / reserve.liquidity_index;
 
     Ok(HandleResponse {
@@ -654,15 +672,15 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 // INTEREST
 
 /// Update indexes and interest rates for given reserve
-pub fn reserve_update_indexes_and_rates<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
+pub fn reserve_update_indexes_and_interests<S: Storage, Q: Querier>(
+    querier: &Q,
+    env: &Env,
     reserve_bucket: &mut Bucket<S, Reserve>,
     denom: &str,
     reserve: &mut Reserve,
 ) -> StdResult<()> {
     // TODO: handle cw20
-    let denom_coin = deps.querier.query_balance(env.contract.address, denom)?;
+    let denom_coin = querier.query_balance(&env.contract.address, denom)?;
 
     let available_liquidity = Decimal256::from_uint256(denom_coin.amount);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
@@ -673,15 +691,25 @@ pub fn reserve_update_indexes_and_rates<S: Storage, A: Api, Q: Querier>(
     }
     // 1. Update indexes
     let current_timestamp = env.block.time;
-    let time_elapsed: Decimal256 =
-        Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
-    let seconds_per_year = Decimal256::from_uint256(31536000u64);
-    reserve.borrow_index =
-        reserve.borrow_index * reserve.borrow_rate * time_elapsed / seconds_per_year;
-    reserve.liquidity_index =
-        reserve.liquidity_index * reserve.liquidity_rate * time_elapsed / seconds_per_year;
 
-    reserve.interests_last_updated = current_timestamp;
+    // TODO: overflow
+    if reserve.interests_last_updated < current_timestamp {
+        let time_elapsed =
+            Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
+        let seconds_per_year = Decimal256::from_uint256(31536000u64);
+
+        if reserve.borrow_rate > Decimal256::zero() {
+            let accumulated_interest =
+                Decimal256::one() + reserve.borrow_rate * time_elapsed / seconds_per_year;
+            reserve.borrow_index = reserve.borrow_index * accumulated_interest;
+        }
+        if reserve.liquidity_rate > Decimal256::zero() {
+            let accumulated_interest =
+                Decimal256::one() + reserve.liquidity_rate * time_elapsed / seconds_per_year;
+            reserve.liquidity_index = reserve.liquidity_index * accumulated_interest;
+        }
+        reserve.interests_last_updated = current_timestamp;
+    }
 
     // 2. Update interest rates
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
@@ -889,7 +917,7 @@ mod tests {
 
     #[test]
     fn test_init_asset_callback_cannot_be_called_on_its_own() {
-        let mut deps = th_setup();
+        let mut deps = th_setup(&[]);
 
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
@@ -900,7 +928,7 @@ mod tests {
 
     #[test]
     fn test_deposit_native_asset() {
-        let mut deps = th_setup();
+        let mut deps = th_setup(&[coin(10000000, "somecoin")]);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -948,7 +976,7 @@ mod tests {
 
     #[test]
     fn test_cannot_deposit_if_no_reserve() {
-        let mut deps = th_setup();
+        let mut deps = th_setup(&[]);
 
         let env = mock_env("depositer", &[coin(110000, "somecoin")]);
         let msg = HandleMsg::DepositNative {
@@ -959,12 +987,7 @@ mod tests {
 
     #[test]
     fn test_redeem_native() {
-        let mut deps = mock_dependencies(20, &[coin(10000, "somecoin")]);
-        let msg = InitMsg {
-            ma_token_code_id: 1u64,
-        };
-        let env = mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let mut deps = th_setup(&[coin(10000, "somecoin")]);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -1023,7 +1046,7 @@ mod tests {
 
     #[test]
     fn redeem_cannot_exceed_balance() {
-        let mut deps = th_setup();
+        let mut deps = th_setup(&[]);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -1050,7 +1073,7 @@ mod tests {
 
     #[test]
     fn test_borrow_and_repay_native() {
-        let mut deps = th_setup();
+        let mut deps = th_setup(&[]);
 
         let exchange_rates = [
             (&String::from("borrowedcoin1"), &Decimal::one()),
@@ -1395,8 +1418,8 @@ mod tests {
         debt_total_scaled: Uint256,
     }
 
-    fn th_setup() -> Extern<MockStorage, MockApi, WasmMockQuerier> {
-        let mut deps = mock_dependencies(20, &[]);
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
+        let mut deps = mock_dependencies(20, contract_balances);
 
         let msg = InitMsg {
             ma_token_code_id: 1u64,
