@@ -480,7 +480,9 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
     let users_bucket = users_state_read(&deps.storage);
     let user: User = match users_bucket.may_load(debtor_address.as_slice()) {
         Ok(Some(user)) => user,
-        Ok(None) => return Err(StdError::generic_err("user does not exist")),
+        Ok(None) => User {
+            borrowed_assets: Uint128::zero(),
+        },
         Err(error) => return Err(error),
     };
 
