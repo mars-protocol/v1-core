@@ -62,6 +62,7 @@ pub enum QueryMsg {
     Config {},
     Reserve { denom: String },
     ReservesList {},
+    Debt { address: HumanAddr },
 }
 
 // We define a custom struct for each query response
@@ -85,6 +86,17 @@ pub struct ReservesListResponse {
 pub struct ReserveInfo {
     pub denom: String,
     pub ma_token_address: HumanAddr,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct DebtResponse {
+    pub debts: Vec<DebtInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct DebtInfo {
+    pub denom: String,
+    pub amount: Uint256,
 }
 
 /// We currently take no arguments for migrations

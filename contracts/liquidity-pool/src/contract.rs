@@ -9,12 +9,12 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::ma_token;
 
 use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
-    ReserveResponse, ReservesListResponse,
+    ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
+    ReserveInfo, ReserveResponse, ReservesListResponse,
 };
 use crate::state::{
-    config_state, config_state_read, debts_asset_state, reserves_state, reserves_state_read,
-    users_state, Config, Debt, Reserve, User,
+    config_state, config_state_read, debts_asset_state, debts_asset_state_read, reserves_state,
+    reserves_state_read, users_state, users_state_read, Config, Debt, Reserve, User,
 };
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -291,7 +291,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         Err(error) => return Err(error),
     };
 
-    // TODO: Interest rate update and computing goes somwhere around here
+    // TODO: Interest rate update and computing goes somewhere around here
     // TODO: Check the user can actually borrow (has enough collateral, contract has
     // enough funds to safely lend them)
 
@@ -419,6 +419,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Reserve { denom } => to_binary(&query_reserve(deps, denom)?),
         QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
+        QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
     }
 }
 
@@ -468,6 +469,48 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
     Ok(ReservesListResponse {
         reserves_list: reserves_list?,
     })
+}
+
+fn query_debt<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+) -> StdResult<DebtResponse> {
+    let reserves = reserves_state_read(&deps.storage);
+    let debtor_address = deps.api.canonical_address(&address)?;
+    let users_bucket = users_state_read(&deps.storage);
+    let user: User = match users_bucket.may_load(debtor_address.as_slice()) {
+        Ok(Some(user)) => user,
+        Ok(None) => return Err(StdError::generic_err("user does not exist")),
+        Err(error) => return Err(error),
+    };
+
+    let debts: StdResult<Vec<_>> = reserves
+        .range(None, None, Order::Ascending)
+        .map(|item| {
+            let (k, v) = item?;
+            let denom = String::from_utf8(k);
+            let denom = match denom {
+                Ok(denom) => denom,
+                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+            };
+            let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
+            if is_borrowing_asset {
+                let debts_asset_bucket = debts_asset_state_read(&deps.storage, denom.as_bytes());
+                let debt = debts_asset_bucket.load(debtor_address.as_slice())?;
+                Ok(DebtInfo {
+                    denom,
+                    amount: debt.amount_scaled,
+                })
+            } else {
+                Ok(DebtInfo {
+                    denom,
+                    amount: Uint256::zero(),
+                })
+            }
+        })
+        .collect();
+
+    Ok(DebtResponse { debts: debts? })
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(
