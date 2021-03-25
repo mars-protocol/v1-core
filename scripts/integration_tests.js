@@ -155,6 +155,13 @@ async function main() {
   const repayer = terra.wallets.test2;
   let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
 
+  const {debts: debtBeforeRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
+  for (let debt of debtBeforeRepay) {
+    if (debt.denom === "uluna" && Number(debt.amount) !== borrowAmount) {
+      throw new Error(`[Debt]: expected repayer's uluna debt to be ${borrowAmount} before payment, got ${debt.amount}`);
+    }
+  }
+
   const repayMsg = {"repay_native": {"denom": "uluna"}};
   let repayAmount = 2_000_000;
   let repayCoins = new Coin("uluna", repayAmount);
