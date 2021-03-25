@@ -262,6 +262,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         )));
     }
 <<<<<<< HEAD
+<<<<<<< HEAD
 
     let mut users_bucket = users_state(&mut deps.storage);
     let depositer_addr = deps.api.canonical_address(&env.message.sender)?;
@@ -284,6 +285,8 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
 
 =======
     println!("{:?}", reserve.liquidity_index);
+=======
+>>>>>>> 8b60bf2 (Add interest rate update on deposits)
 
     reserve_update_indexes_and_interests(
         &deps.querier,
@@ -293,7 +296,6 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         &mut reserve
     )?;
 
-    println!("{:?}", reserve.liquidity_index);
     if reserve.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
     }
@@ -683,6 +685,7 @@ pub fn reserve_update_indexes_and_interests<S: Storage, Q: Querier>(
     if total_debt > Decimal256::zero() {
         utilization_rate = total_debt / (available_liquidity + total_debt);
     }
+
     // 1. Update indexes
     let current_timestamp = env.block.time;
 
@@ -926,7 +929,13 @@ mod tests {
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
             liquidity_index: Decimal256::from_ratio(11, 10),
+<<<<<<< HEAD
             loan_to_value: Decimal256::one(),
+=======
+            borrow_index: Decimal256::from_ratio(1, 1),
+            borrow_slope: Decimal256::from_ratio(1, 10),
+            debt_total_scaled: Uint256::from(10000000u128),
+>>>>>>> 8b60bf2 (Add interest rate update on deposits)
             ..Default::default()
         };
         th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", mock_reserve);
@@ -958,6 +967,12 @@ mod tests {
                 log("amount", "110000"),
             ]
         );
+
+        let reserve = reserves_state_read(&deps.storage).load(b"somecoin").unwrap();
+        // BR = U * Bslope = 0.5 * 0.01 = 0.05
+        assert_eq!(reserve.borrow_rate, Decimal256::from_ratio(5, 100));
+        // LR = BR * U = 0.05 * 0.5 = 0.025
+        assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(25, 1000));
 
         // empty deposit fails
         let env = mock_env("depositer", &[]);
@@ -1395,6 +1410,21 @@ mod tests {
     }
 
     // TEST HELPERS
+
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MockQuerier> {
+        let mut deps = mock_dependencies(20, contract_balances);
+
+        let msg = InitMsg {
+            ma_token_code_id: 1u64,
+        };
+        let env = mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        deps
+    }
+
+    fn th_mock_env
+
     #[derive(Default)]
     struct MockReserve<'a> {
         ma_token_address: &'a str,
