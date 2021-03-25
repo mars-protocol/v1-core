@@ -20,6 +20,12 @@ use crate::state::{
 };
 use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
 
+// CONSTANTS
+
+const SECONDS_PER_YEAR: u64 = 31536000u64;
+
+// INIT
+
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -261,8 +267,6 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
             denom,
         )));
     }
-<<<<<<< HEAD
-<<<<<<< HEAD
 
     let mut users_bucket = users_state(&mut deps.storage);
     let depositer_addr = deps.api.canonical_address(&env.message.sender)?;
@@ -283,24 +287,19 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
 
     // TODO: Interest rate update and computing goes here
 
-=======
-    println!("{:?}", reserve.liquidity_index);
-=======
->>>>>>> 8b60bf2 (Add interest rate update on deposits)
-
     reserve_update_indexes_and_interests(
         &deps.querier,
         &env,
         &mut reserves_bucket,
         &denom,
-        &mut reserve
+        &mut reserve,
     )?;
 
     if reserve.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
     }
->>>>>>> b99861a (Add overflow checks and fix interest calculation)
     let mint_amount = deposit_amount / reserve.liquidity_index;
+    println!("Deposit: {}", mint_amount);
 
     Ok(HandleResponse {
         data: None,
@@ -692,7 +691,7 @@ pub fn reserve_update_indexes_and_interests<S: Storage, Q: Querier>(
     if reserve.interests_last_updated < current_timestamp {
         let time_elapsed =
             Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
-        let seconds_per_year = Decimal256::from_uint256(31536000u64);
+        let seconds_per_year = Decimal256::from_uint256(SECONDS_PER_YEAR);
 
         if reserve.borrow_rate > Decimal256::zero() {
             let accumulated_interest =
@@ -759,8 +758,8 @@ mod tests {
     use super::*;
     use crate::mock_querier::{mock_dependencies, WasmMockQuerier};
     use crate::state::{debts_asset_state_read, users_state_read};
-    use cosmwasm_std::testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, from_binary, Decimal, Extern};
+    use cosmwasm_std::testing::{coin, from_binary, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::{coin, from_binary, BlockInfo, ContractInfo, Decimal, Env, Extern, MessageInfo};
 
     #[test]
     fn test_proper_initialization() {
@@ -929,22 +928,37 @@ mod tests {
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
             liquidity_index: Decimal256::from_ratio(11, 10),
-<<<<<<< HEAD
             loan_to_value: Decimal256::one(),
-=======
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_slope: Decimal256::from_ratio(1, 10),
+            liquidity_rate: Decimal256::from_ratio(10, 100),
             debt_total_scaled: Uint256::from(10000000u128),
->>>>>>> 8b60bf2 (Add interest rate update on deposits)
+            interests_last_updated: 10000000,
             ..Default::default()
         };
         th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", mock_reserve);
 
-        let env = mock_env("depositer", &[coin(110000, "somecoin")]);
+        let deposit_amount = 110000;
+        let env = th_mock_env(MockEnvParams {
+            sender: "depositer",
+            sent_funds: &[coin(deposit_amount, "somecoin")],
+            block_time: Some(10000100),
+        });
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
+
+        // previous * (1 + rate * time / 31536000)
+        let expected_accumulated_interest = Decimal256::one()
+            + (Decimal256::from_ratio(10, 100) * Decimal256::from_uint256(100u64)
+                / Decimal256::from_uint256(SECONDS_PER_YEAR));
+
+        let expected_liquidity_index =
+            Decimal256::from_ratio(11, 10) * expected_accumulated_interest;
+        let expected_mint_amount =
+            (Uint256::from(deposit_amount) / expected_liquidity_index).into();
+
         // mints coin_amount/liquidity_index
         assert_eq!(
             res.messages,
@@ -953,7 +967,7 @@ mod tests {
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Mint {
                     recipient: HumanAddr::from("depositer"),
-                    amount: Uint128(100000),
+                    amount: expected_mint_amount,
                 })
                 .unwrap(),
             }),]
@@ -964,15 +978,19 @@ mod tests {
                 log("action", "deposit"),
                 log("reserve", "somecoin"),
                 log("user", "depositer"),
-                log("amount", "110000"),
+                log("amount", deposit_amount),
             ]
         );
 
-        let reserve = reserves_state_read(&deps.storage).load(b"somecoin").unwrap();
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
         // BR = U * Bslope = 0.5 * 0.01 = 0.05
         assert_eq!(reserve.borrow_rate, Decimal256::from_ratio(5, 100));
         // LR = BR * U = 0.05 * 0.5 = 0.025
         assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(25, 1000));
+        assert_eq!(reserve.liquidity_index, expected_liquidity_index);
+        assert_eq!(reserve.borrow_index, Decimal256::from_ratio(1, 1));
 
         // empty deposit fails
         let env = mock_env("depositer", &[]);
@@ -1423,7 +1441,32 @@ mod tests {
         deps
     }
 
-    fn th_mock_env
+    #[derive(Default)]
+    struct MockEnvParams<'a> {
+        sender: &'a str,
+        sent_funds: &'a [Coin],
+        block_time: Option<u64>,
+    }
+
+    /// A custom mock env to make it more cofigurable than the one provided by cosmwasm_std
+    fn th_mock_env(mock_env: MockEnvParams) -> Env {
+        let block_time = mock_env.block_time.unwrap_or(1_571_797_419);
+
+        Env {
+            block: BlockInfo {
+                height: 12_345,
+                time: block_time,
+                chain_id: "cosmos-testnet-14002".to_string(),
+            },
+            message: MessageInfo {
+                sender: HumanAddr::from(mock_env.sender),
+                sent_funds: mock_env.sent_funds.to_vec(),
+            },
+            contract: ContractInfo {
+                address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+            },
+        }
+    }
 
     #[derive(Default)]
     struct MockReserve<'a> {
