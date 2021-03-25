@@ -175,6 +175,13 @@ async function main() {
     got ${partialRepayDiff}`);
   }
 
+  const {debts: debtBeforeFullRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
+  for (let debt of debtBeforeFullRepay) {
+    if (debt.denom === "uluna" && Number(debt.amount) !== (borrowAmount - repayAmount)) {
+      throw new Error(`[Debt]: expected repayer's uluna debt to be ${borrowAmount - repayAmount} after ${repayAmount} payment, got ${debt.amount}`);
+    }
+  }
+
   let overpayAmount = 3_000_000;
   let overpayCoins = new Coin("uluna", overpayAmount);
   const executeOverpayMsg = new MsgExecuteContract(repayer.key.accAddress, lpContractAddress, repayMsg, [overpayCoins]);
@@ -189,6 +196,13 @@ async function main() {
   if (overpayRepayDiff !== ((borrowAmount - repayAmount) + overpayTxFee)) {
     throw new Error(`[Repay]: expected repayer balance to decrease by ${(borrowAmount - repayAmount) + overpayTxFee}, \
   got ${overpayRepayDiff}`);
+  }
+
+  const {debts: debtAfterRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
+  for (let debt of debtAfterRepay) {
+    if (debt.denom === "uluna" && debt.amount !== "0") {
+      throw new Error(`[Debt]: expected repayer's uluna debt to be 0 after full repayment, got ${debt.amount}`);
+    }
   }
 }
 
