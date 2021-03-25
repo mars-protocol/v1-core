@@ -86,6 +86,13 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
     // TODO: Check the withdraw can actually be made
     let redeem_amount = Uint256::from(burn_amount) * reserve.liquidity_index;
 
+    let balance = deps.querier.query_balance(&env.contract.address, &denom)?;
+    if redeem_amount > Uint256::from(balance.amount) {
+        return Err(StdError::generic_err(
+            "Redeem amount exceeds contract balance",
+        ));
+    }
+
     Ok(HandleResponse {
         messages: vec![
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -736,7 +743,12 @@ mod tests {
 
     #[test]
     fn test_redeem_native() {
-        let mut deps = th_setup();
+        let mut deps = mock_dependencies(20, &[coin(10000, "somecoin")]);
+        let msg = InitMsg {
+            ma_token_code_id: 1u64,
+        };
+        let env = mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -791,6 +803,33 @@ mod tests {
                 log("redeem_amount", 3000),
             ]
         );
+    }
+
+    #[test]
+    fn redeem_cannot_exceed_balance() {
+        let mut deps = th_setup();
+
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: Decimal256::from_ratio(15, 10),
+            ..Default::default()
+        };
+
+        th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", mock_reserve);
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::Redeem {
+                    id: String::from("somecoin"),
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("redeemer"),
+            amount: Uint128(2000),
+        });
+
+        let env = mock_env("matoken", &[]);
+        let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
