@@ -989,9 +989,9 @@ mod tests {
             loan_to_value: Decimal256::one(),
             ..Default::default()
         };
-
         let mock_reserve_3 = MockReserve {
             ma_token_address: "matoken3",
+            borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::from_ratio(11, 10),
             loan_to_value: Decimal256::one(),
             ..Default::default()
@@ -1018,16 +1018,18 @@ mod tests {
             mock_reserve_3,
         );
 
-        //Deposit coins
         let env = mock_env("borrower", &[coin(110000, "depositedcoin")]);
         let msg = HandleMsg::DepositNative {
             denom: String::from("depositedcoin"),
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 
-        // *
-        // Borrow coin 1
-        // *
+        deps.querier
+            .with_balances(&[(&HumanAddr(String::from("borrower")), &Uint128(7000))]);
+        //
+        // // *
+        // // Borrow coin 1
+        // // *
         let env = mock_env("borrower", &[]);
         let msg = HandleMsg::BorrowNative {
             denom: String::from("borrowedcoin1"),
@@ -1116,6 +1118,25 @@ mod tests {
             .load(&borrower_addr_canonical.as_slice())
             .unwrap();
         assert_eq!(Uint256::from(4000 as u128), debt2.amount_scaled);
+
+        // *
+        // Borrow coin 2 again (should fail due to insufficient collateral)
+        // *
+        let env = mock_env("borrower", &[]);
+        let msg = HandleMsg::BorrowNative {
+            denom: String::from("borrowedcoin2"),
+            amount: Uint256::from(1000 as u128),
+        };
+        let res = handle(&mut deps, env, msg);
+        match res {
+            Err(StdError::GenericErr { msg, .. }) => {
+                assert_eq!(
+                    msg,
+                    "borrow amount exceeds maximum allowed given current collateral value"
+                )
+            }
+            _ => panic!("should have errored out due to insufficient collateral"),
+        }
 
         // *
         // Repay zero debt 2 (should fail)

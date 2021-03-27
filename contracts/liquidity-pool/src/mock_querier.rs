@@ -1,8 +1,9 @@
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
-    from_slice, to_binary, Api, Coin, Decimal, Extern, HumanAddr, Querier, QuerierResult,
-    QueryRequest, StdError, StdResult, SystemError,
+    from_binary, from_slice, to_binary, Api, Coin, Decimal, Extern, HumanAddr, Querier,
+    QuerierResult, QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
 };
+use cw20::{BalanceResponse, Cw20QueryMsg};
 use std::collections::HashMap;
 use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
@@ -31,6 +32,7 @@ pub fn mock_dependencies(
 pub struct WasmMockQuerier {
     base: MockQuerier<TerraQueryWrapper>,
     exchange_rate_querier: ExchangeRateQuerier,
+    balance_querier: BalanceQuerier,
     canonical_length: usize,
 }
 
@@ -61,6 +63,28 @@ pub(crate) fn exchange_rates_to_map(
         exchange_rates_map.insert((**denom.clone()).parse().unwrap(), denom_exchange_rates_map);
     }
     exchange_rates_map
+}
+
+#[derive(Clone, Default)]
+pub struct BalanceQuerier {
+    // maps address to balances
+    balances: HashMap<HumanAddr, Uint128>,
+}
+
+impl BalanceQuerier {
+    pub fn new(balances: &[(&HumanAddr, &Uint128)]) -> Self {
+        BalanceQuerier {
+            balances: balances_to_map(balances),
+        }
+    }
+}
+
+pub(crate) fn balances_to_map(balances: &[(&HumanAddr, &Uint128)]) -> HashMap<HumanAddr, Uint128> {
+    let mut balances_map: HashMap<HumanAddr, Uint128> = HashMap::new();
+    for (address, balance) in balances.iter() {
+        balances_map.insert((*address).clone(), **balance);
+    }
+    balances_map
 }
 
 impl Querier for WasmMockQuerier {
@@ -133,6 +157,21 @@ impl WasmMockQuerier {
                     panic!("DO NOT ENTER HERE")
                 }
             }
+            QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: _,
+                msg,
+            }) => match from_binary(&msg).unwrap() {
+                Cw20QueryMsg::Balance { address } => {
+                    match self.balance_querier.balances.get(&address) {
+                        Some(balance) => Ok(to_binary(&BalanceResponse { balance: *balance })),
+                        None => Err(SystemError::InvalidRequest {
+                            error: "No balance exists for this account".to_string(),
+                            request: msg.as_slice().into(),
+                        }),
+                    }
+                }
+                _ => panic!("DO NOT ENTER HERE"),
+            },
             _ => self.base.handle_query(request),
         }
     }
@@ -147,6 +186,7 @@ impl WasmMockQuerier {
         WasmMockQuerier {
             base,
             exchange_rate_querier: ExchangeRateQuerier::default(),
+            balance_querier: BalanceQuerier::default(),
             canonical_length,
         }
     }
@@ -154,5 +194,10 @@ impl WasmMockQuerier {
     // configure the exchange rates mock querier
     pub fn with_exchange_rates(&mut self, exchange_rates: &[(&String, &[(&String, &Decimal)])]) {
         self.exchange_rate_querier = ExchangeRateQuerier::new(exchange_rates);
+    }
+
+    // configure the balances mock querier
+    pub fn with_balances(&mut self, balances: &[(&HumanAddr, &Uint128)]) {
+        self.balance_querier = BalanceQuerier::new(balances);
     }
 }
