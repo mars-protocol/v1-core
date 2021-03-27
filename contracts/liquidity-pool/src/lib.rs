@@ -1,4 +1,5 @@
 pub mod contract;
+mod mock_querier;
 pub mod msg;
 pub mod state;
 

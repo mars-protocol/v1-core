@@ -7,7 +7,7 @@ use liquidity_pool::msg::{
     ReserveResponse, ReservesListResponse,
 };
 
-use liquidity_pool::state::{Config, Debt};
+use liquidity_pool::state::Config;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();

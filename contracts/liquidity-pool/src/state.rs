@@ -46,6 +46,8 @@ pub struct Reserve {
     pub liquidity_index: Decimal256,
     /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal256,
+    // Loan to value (Used to determine if user has sufficient collateral to borrow)
+    pub loan_to_value: Decimal256,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
@@ -62,6 +64,7 @@ pub struct User {
     /// bitmap representing borrowed asset. 1 on the corresponding bit means asset is
     /// being borrowed
     pub borrowed_assets: Uint128,
+    pub deposited_assets: Uint128,
 }
 
 pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {
