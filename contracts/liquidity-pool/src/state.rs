@@ -55,7 +55,7 @@ pub struct Reserve {
 
     /// Variable debt interest slope
     pub borrow_slope: Decimal256,
-    /// Max percentage of collateral that can be borrowed 
+    /// Max percentage of collateral that can be borrowed
     pub loan_to_value: Decimal256,
 
     /// timestamp (seconds) where indexes and rates where last updated
