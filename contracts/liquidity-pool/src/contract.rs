@@ -322,7 +322,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     // Check the contract has enough funds to safely lend them
 
     // Validate user has enough collateral
-    let mut denoms_to_query: Vec<String> = vec![];
+    let mut denoms_to_query: Vec<String> = vec![denom.clone()];
     let mut user_balances: Vec<(String, Uint256, Uint256)> = vec![]; // (denom, collateral_amount, debt_amount)
     for i in 0..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
@@ -380,7 +380,14 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
     let max_borrow_allowed = reserve.loan_to_value * total_collateral_in_uusd;
 
-    if total_debt_in_uusd + borrow_amount > max_borrow_allowed {
+    let borrow_amount_rate = exchange_rates
+        .exchange_rates
+        .iter()
+        .find(|e| e.quote_denom == denom)
+        .unwrap();
+    let borrow_amount_in_uusd = borrow_amount * Decimal256::from(borrow_amount_rate.exchange_rate);
+
+    if total_debt_in_uusd + borrow_amount_in_uusd > max_borrow_allowed {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
         ));
