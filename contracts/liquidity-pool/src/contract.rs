@@ -13,8 +13,9 @@ use crate::msg::{
     ReserveInfo, ReserveResponse, ReservesListResponse,
 };
 use crate::state::{
-    config_state, config_state_read, debts_asset_state, debts_asset_state_read, reserves_state,
-    reserves_state_read, users_state, users_state_read, Config, Debt, Reserve, User,
+    config_state, config_state_read, debts_asset_state, debts_asset_state_read,
+    reserve_denoms_state, reserve_denoms_state_read, reserves_state, reserves_state_read,
+    users_state, users_state_read, Config, Debt, Reserve, ReserveDenoms, User,
 };
 use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
 
@@ -151,6 +152,14 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     index: config.reserve_count,
                     borrow_index: Decimal256::one(),
                     loan_to_value: Decimal256::from_ratio(8, 10),
+                },
+            )?;
+
+            // save index to denom mapping
+            reserve_denoms_state(&mut deps.storage).save(
+                &config.reserve_count.to_be_bytes(),
+                &ReserveDenoms {
+                    denom: denom.clone(),
                 },
             )?;
 
@@ -299,9 +308,10 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
-    let reserves = reserves_state_read(&deps.storage);
-    let users_bucket = users_state_read(&deps.storage);
+    let config = config_state_read(&deps.storage).load()?;
     let borrower_addr = deps.api.canonical_address(&env.message.sender)?;
+
+    let users_bucket = users_state_read(&deps.storage);
     let mut user: User = match users_bucket.may_load(borrower_addr.as_slice()) {
         Ok(Some(user)) => user,
         Ok(None) => return Err(StdError::generic_err("user has no collateral deposited")),
@@ -309,71 +319,68 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     };
 
     // TODO: Interest rate update and computing goes somewhere around here
-    // TODO: Check the user can actually borrow (has enough collateral, contract has
-    // enough funds to safely lend them)
+    // Check the contract has enough funds to safely lend them
 
-    let deposit_values: StdResult<Vec<Uint128>> = reserves
-        .range(None, None, Order::Ascending)
-        .map(|item| {
-            let (k, v) = item?;
-            let denom = String::from_utf8(k);
-            let denom = match denom {
-                Ok(denom) => denom,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
-            };
-            let has_deposited_asset = get_bit(user.deposited_assets, v.index)?;
-            if has_deposited_asset {
-                // query ma_token_address for borrower's balance
-                let balance: BalanceResponse =
+    // Validate user has enough collateral
+    let mut denoms_to_query: Vec<String> = vec![];
+    let mut user_balances: Vec<(String, Uint256, Uint256)> = vec![]; // (denom, collateral_amount, debt_amount)
+    for i in 0..config.reserve_count {
+        let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
+        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
+        if user_is_using_as_collateral || user_is_borrowing {
+            let denom = reserve_denoms_state_read(&deps.storage)
+                .load(&i.to_be_bytes())?
+                .denom;
+            let reserve = reserves_state_read(&deps.storage).load(&denom.as_bytes())?;
+
+            let mut collateral = Uint256::zero();
+            let mut debt = Uint256::zero();
+
+            if user_is_using_as_collateral {
+                // query asset balance (ma_token contract gives back a scaled value)
+                let asset_balance: BalanceResponse =
                     deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                        contract_addr: deps.api.human_address(&v.ma_token_address)?,
+                        contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
                         msg: to_binary(&Cw20QueryMsg::Balance {
                             address: deps.api.human_address(&borrower_addr)?,
                         })?,
                     }))?;
 
-                let querier = TerraQuerier::new(&deps.querier);
-                let exchange_rates: ExchangeRatesResponse =
-                    querier.query_exchange_rates("uusd", vec![&denom])?;
-                let normalized_balance =
-                    balance.balance * exchange_rates.exchange_rates[0].exchange_rate;
-                Ok(normalized_balance)
-            } else {
-                Ok(Uint128::zero())
+                collateral = Uint256::from(asset_balance.balance) * reserve.liquidity_index;
             }
-        })
-        .collect();
 
-    let total_deposit_value = deposit_values?
-        .into_iter()
-        .fold(Uint128::zero(), |acc, x| acc + x);
+            if user_is_borrowing {
+                // query debt
+                let debts_asset_bucket = debts_asset_state(&mut deps.storage, denom.as_bytes());
+                let borrower_debt: Debt = debts_asset_bucket.load(borrower_addr.as_slice())?;
+                debt = borrower_debt.amount_scaled * reserve.borrow_index;
+            }
 
-    // calculate total borrowed amount
-    let debts: DebtResponse = query_debt(&deps, deps.api.human_address(&borrower_addr)?)?;
-    let normalized_borrowed_amounts: StdResult<Vec<Uint256>> = debts
-        .debts
-        .into_iter()
-        .map(|item| {
-            let denom = item.denom;
-            let amount = item.amount;
+            user_balances.push((denom.clone(), collateral, debt));
+            denoms_to_query.push(denom.clone());
+        }
+    }
 
-            let querier = TerraQuerier::new(&deps.querier);
-            let exchange_rates: ExchangeRatesResponse =
-                querier.query_exchange_rates("uusd", vec![&denom])?;
-            let normalized_debt =
-                amount * Decimal256::from(exchange_rates.exchange_rates[0].exchange_rate);
-            Ok(normalized_debt)
-        })
-        .collect();
-
-    let total_value_borrowed = normalized_borrowed_amounts?
-        .into_iter()
-        .fold(Uint256::zero(), |acc, x| acc + x);
+    let querier = TerraQuerier::new(&deps.querier);
+    let denoms_to_query: Vec<&str> = denoms_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
+    let exchange_rates: ExchangeRatesResponse =
+        querier.query_exchange_rates("uusd", denoms_to_query)?;
+    let mut total_debt_in_uusd = Uint256::zero();
+    let mut total_collateral_in_uusd = Uint256::zero();
+    for (denom, collateral, debt) in user_balances {
+        for rate in &exchange_rates.exchange_rates {
+            if rate.quote_denom == denom {
+                let exchange_rate = Decimal256::from(rate.exchange_rate);
+                total_debt_in_uusd += debt * exchange_rate;
+                total_collateral_in_uusd += collateral * exchange_rate;
+            }
+        }
+    }
 
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
-    let max_borrow_allowed = reserve.loan_to_value * Uint256::from(total_deposit_value);
+    let max_borrow_allowed = reserve.loan_to_value * Uint256::from(total_collateral_in_uusd);
 
-    if total_value_borrowed + borrow_amount > max_borrow_allowed {
+    if Uint256::from(total_debt_in_uusd) + borrow_amount > max_borrow_allowed {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
         ));
@@ -1127,16 +1134,7 @@ mod tests {
             denom: String::from("borrowedcoin2"),
             amount: Uint256::from(1000 as u128),
         };
-        let res = handle(&mut deps, env, msg);
-        match res {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(
-                    msg,
-                    "borrow amount exceeds maximum allowed given current collateral value"
-                )
-            }
-            _ => panic!("should have errored out due to insufficient collateral"),
-        }
+        let _res = handle(&mut deps, env, msg).unwrap_err();
 
         // *
         // Repay zero debt 2 (should fail)
@@ -1305,6 +1303,15 @@ mod tests {
                     liquidity_index: reserve.liquidity_index,
                     borrow_index: reserve.borrow_index,
                     loan_to_value: reserve.loan_to_value,
+                },
+            )
+            .unwrap();
+
+        reserve_denoms_state(storage)
+            .save(
+                &index.to_be_bytes(),
+                &ReserveDenoms {
+                    denom: String::from_utf8(key.to_vec()).unwrap(),
                 },
             )
             .unwrap();

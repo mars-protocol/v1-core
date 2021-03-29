@@ -15,6 +15,7 @@ pub static CONFIG_KEY: &[u8] = b"config";
 pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
 pub static DEBTS_NAMESPACE: &[u8] = b"debts";
 pub static USERS_NAMESPACE: &[u8] = b"users";
+pub static RESERVE_DENOMS_NAMESPACE: &[u8] = b"reserve_denoms";
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -92,4 +93,18 @@ pub fn debts_asset_state_read<'a, S: Storage>(
     asset: &[u8],
 ) -> ReadonlyBucket<'a, S, Debt> {
     ReadonlyBucket::multilevel(&[DEBTS_NAMESPACE, asset], storage)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ReserveDenoms {
+    /// Denom of reserve
+    pub denom: String,
+}
+
+pub fn reserve_denoms_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveDenoms> {
+    bucket(RESERVE_DENOMS_NAMESPACE, storage)
+}
+
+pub fn reserve_denoms_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, ReserveDenoms> {
+    bucket_read(RESERVE_DENOMS_NAMESPACE, storage)
 }
