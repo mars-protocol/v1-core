@@ -378,9 +378,9 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     }
 
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
-    let max_borrow_allowed = reserve.loan_to_value * Uint256::from(total_collateral_in_uusd);
+    let max_borrow_allowed = reserve.loan_to_value * total_collateral_in_uusd;
 
-    if Uint256::from(total_debt_in_uusd) + borrow_amount > max_borrow_allowed {
+    if total_debt_in_uusd + borrow_amount > max_borrow_allowed {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
         ));
