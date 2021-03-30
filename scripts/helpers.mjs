@@ -4,12 +4,21 @@ import {
   MsgExecuteContract,
   MsgInstantiateContract,
   MsgMigrateContract,
-  MsgStoreCode
+  MsgStoreCode, StdFee
 } from '@terra-money/terra.js';
 import {readFileSync} from 'fs';
 
 export async function performTransaction(terra, wallet, msg) {
-  const tx = await wallet.createAndSignTx({msgs: [msg]});
+  const tx = await wallet.createAndSignTx({
+    msgs: [msg],
+    fee: new StdFee(30000000, [
+      new Coin('uluna', 4000000),
+      new Coin('uusd', 4000000),
+      new Coin('umnt', 4000000),
+      new Coin('ukrw', 4000000),
+      new Coin('usdr', 4000000)
+    ]),
+  });
   const result = await terra.tx.broadcast(tx);
   if (isTxError(result)) {
     throw new Error(

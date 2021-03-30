@@ -1,4 +1,4 @@
-import {Coin, LocalTerra, MsgExecuteContract} from "@terra-money/terra.js";
+import {Coin, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
 import {deploy, performTransaction, queryContract, setup} from "./helpers.mjs";
 
 
@@ -48,11 +48,11 @@ async function main() {
   let balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
-  const depositMsg = {"deposit_native": {"denom": "uluna"}};
-  const depositAmount = 10_000_000;
-  const coins = new Coin("uluna", depositAmount);
-  const executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
-  const depositTxResult = await performTransaction(terra, wallet, executeDepositMsg);
+  let depositMsg = {"deposit_native": {"denom": "uluna"}};
+  let depositAmount = 10_000_000;
+  let coins = new Coin("uluna", depositAmount);
+  let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
+  let depositTxResult = await performTransaction(terra, wallet, executeDepositMsg);
 
   console.log("Deposit Message Sent: ");
   console.log(executeDepositMsg);
@@ -119,13 +119,34 @@ async function main() {
 
   console.log("### Testing Borrow...");
   const borrower = terra.wallets.test2;
-  let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
-
-  const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
-
   const borrowAmount = 4_000_000;
   const borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
   const executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
+
+  const tx = await borrower.createAndSignTx({
+    msgs: [executeBorrowMsg],
+    fee: new StdFee(30000000, [
+      new Coin('uluna', 4000000),
+    ]),
+  });
+
+  const failedBorrowResult = await terra.tx.broadcast(tx);
+  if (!isTxError(failedBorrowResult) || !failedBorrowResult.raw_log.includes("user has no collateral deposited")) {
+    throw new Error("Borrower has no collateral deposited. Should not be able to borrow.");
+  }
+
+  depositAmount = 10_000_000;
+  coins = new Coin("uusd", depositAmount);
+  depositMsg = {"deposit_native": {"denom": "uusd"}}
+  executeDepositMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, depositMsg, [coins]);
+  await performTransaction(terra, borrower, executeDepositMsg);
+  let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
+  const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
+
+  // borrow again, this time with collateral deposited
+  let { amount: uusd_to_luna_rate } = await terra.oracle.exchangeRate("uusd");
+  let borrowerCollateral = depositAmount / uusd_to_luna_rate;
+  console.log(borrowerCollateral);
   const borrowTxResult = await performTransaction(terra, borrower, executeBorrowMsg);
 
   console.log("Borrow Message Sent: ");
