@@ -1,4 +1,4 @@
-import {Coin, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
+import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
 import {deploy, performTransaction, queryContract, setup} from "./helpers.mjs";
 
 
@@ -119,11 +119,11 @@ async function main() {
 
   console.log("### Testing Borrow...");
   const borrower = terra.wallets.test2;
-  const borrowAmount = 4_000_000;
-  const borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
-  const executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
+  let borrowAmount = 4_000_000;
+  let borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
+  let executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
 
-  const tx = await borrower.createAndSignTx({
+  let tx = await borrower.createAndSignTx({
     msgs: [executeBorrowMsg],
     fee: new StdFee(30000000, [
       new Coin('uluna', 4000000),
@@ -135,18 +135,35 @@ async function main() {
     throw new Error("Borrower has no collateral deposited. Should not be able to borrow.");
   }
 
-  depositAmount = 10_000_000;
+  depositAmount = 80_000_000;
   coins = new Coin("uusd", depositAmount);
   depositMsg = {"deposit_native": {"denom": "uusd"}}
   executeDepositMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, depositMsg, [coins]);
   await performTransaction(terra, borrower, executeDepositMsg);
+
+  // borrow again, still with insufficient collateral deposited
+  tx = await borrower.createAndSignTx({
+    msgs: [executeBorrowMsg],
+    fee: new StdFee(30000000, [
+      new Coin('uluna', 4000000),
+    ]),
+  });
+  
+  const secondFailedBorrowResult = await terra.tx.broadcast(tx);
+  if (!isTxError(secondFailedBorrowResult) || !secondFailedBorrowResult.raw_log.includes("borrow amount exceeds maximum allowed given current collateral value")) {
+    throw new Error("Borrower has insufficient collateral and should not be able to borrow.");
+  }
+
   let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
   const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
 
-  // borrow again, this time with collateral deposited
+  // send smaller borrow that should succeed
   let { amount: uusd_to_luna_rate } = await terra.oracle.exchangeRate("uusd");
   let borrowerCollateral = depositAmount / uusd_to_luna_rate;
-  console.log(borrowerCollateral);
+  let loan_to_value = 0.8;
+  borrowAmount = new Int(borrowerCollateral * loan_to_value) - 10_000;
+  borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
+  executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
   const borrowTxResult = await performTransaction(terra, borrower, executeBorrowMsg);
 
   console.log("Borrow Message Sent: ");
