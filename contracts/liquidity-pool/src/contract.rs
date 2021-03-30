@@ -323,7 +323,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
 
     // Validate user has enough collateral
     let mut denoms_to_query: Vec<String> = vec![denom.clone()];
-    let mut user_balances: Vec<(String, Uint256, Uint256, Decimal256)> = vec![]; // (denom, collateral_amount, debt_amount, max_borrow_native)
+    let mut user_balances: Vec<(String, Uint256, Decimal256)> = vec![]; // (denom, debt_amount, max_borrow)
     for i in 0..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
@@ -333,9 +333,8 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
                 .denom;
             let reserve = reserves_state_read(&deps.storage).load(&denom.as_bytes())?;
 
-            let mut collateral = Uint256::zero();
             let mut debt = Uint256::zero();
-            let mut max_borrow_native = Decimal256::zero();
+            let mut max_borrow = Decimal256::zero();
 
             if user_is_using_as_collateral {
                 // query asset balance (ma_token contract gives back a scaled value)
@@ -347,8 +346,8 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
                         })?,
                     }))?;
 
-                collateral = Uint256::from(asset_balance.balance) * reserve.liquidity_index;
-                max_borrow_native = Decimal256::from_uint256(collateral) * reserve.loan_to_value;
+                let collateral = Uint256::from(asset_balance.balance) * reserve.liquidity_index;
+                max_borrow = Decimal256::from_uint256(collateral) * reserve.loan_to_value;
             }
 
             if user_is_borrowing {
@@ -358,7 +357,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
                 debt = borrower_debt.amount_scaled * reserve.borrow_index;
             }
 
-            user_balances.push((denom.clone(), collateral, debt, max_borrow_native));
+            user_balances.push((denom.clone(), debt, max_borrow));
             denoms_to_query.push(denom.clone());
         }
     }
@@ -368,15 +367,13 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     let exchange_rates: ExchangeRatesResponse =
         querier.query_exchange_rates("uusd", denoms_to_query)?;
     let mut total_debt_in_uusd = Uint256::zero();
-    let mut total_collateral_in_uusd = Uint256::zero();
-    let mut max_borrow_allowed = Decimal256::zero();
-    for (denom, collateral, debt, max_borrow_native) in user_balances {
+    let mut max_borrow_in_uusd = Decimal256::zero();
+    for (denom, debt, max_borrow) in user_balances {
         for rate in &exchange_rates.exchange_rates {
             if rate.quote_denom == denom {
                 let exchange_rate = Decimal256::from(rate.exchange_rate);
                 total_debt_in_uusd += debt * exchange_rate;
-                total_collateral_in_uusd += collateral * exchange_rate;
-                max_borrow_allowed += max_borrow_native * exchange_rate;
+                max_borrow_in_uusd += max_borrow * exchange_rate;
             }
         }
     }
@@ -390,7 +387,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         .unwrap();
     let borrow_amount_in_uusd = borrow_amount * Decimal256::from(borrow_amount_rate.exchange_rate);
 
-    if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_allowed {
+    if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
         ));
