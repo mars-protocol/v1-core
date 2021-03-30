@@ -1,8 +1,8 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
-    QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
+    HandleResponse, HumanAddr, InitResponse, LogAttribute, MigrateResponse, MigrateResult, Order,
+    Querier, QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
 use cw20::{BalanceResponse, Cw20HandleMsg, Cw20QueryMsg, Cw20ReceiveMsg, MinterResponse};
@@ -100,7 +100,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
     to: HumanAddr,
     burn_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    reserve_update_market_indexes(&env, &mut reserve);
+    reserve_update_market_indexes(&env, &mut reserve)?;
     reserve_update_interest_rates(&deps.querier, &env, &denom, &mut reserve, burn_amount)?;
     reserves_state(&mut deps.storage).save(&denom.as_bytes(), &reserve)?;
 
@@ -113,6 +113,16 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
             "Redeem amount exceeds contract balance",
         ));
     }
+
+    let mut log = vec![
+        log("action", "redeem"),
+        log("reserve", denom.clone()),
+        log("user", to.clone()),
+        log("burn_amount", burn_amount),
+        log("redeem_amount", redeem_amount),
+    ];
+
+    append_indices_and_rates_to_logs(&mut log, &reserve)?;
 
     Ok(HandleResponse {
         messages: vec![
@@ -132,13 +142,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
                 }],
             }),
         ],
-        log: vec![
-            log("action", "redeem"),
-            log("reserve", denom),
-            log("user", to),
-            log("burn_amount", burn_amount),
-            log("redeem_amount", redeem_amount),
-        ],
+        log,
         data: None,
     })
 }
@@ -175,7 +179,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     borrow_rate: Decimal256::zero(),
                     liquidity_rate: Decimal256::zero(),
 
-                    borrow_slope: borrow_slope,
+                    borrow_slope,
 
                     loan_to_value: Decimal256::from_ratio(8, 10),
 
@@ -292,7 +296,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         users_state(&mut deps.storage).save(depositer_addr.as_slice(), &user)?;
     }
 
-    reserve_update_market_indexes(&env, &mut reserve);
+    reserve_update_market_indexes(&env, &mut reserve)?;
     reserve_update_interest_rates(&deps.querier, &env, &denom, &mut reserve, Uint256::zero())?;
     reserves_state(&mut deps.storage).save(denom.as_bytes(), &reserve)?;
 
@@ -301,14 +305,18 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
     }
     let mint_amount = deposit_amount / reserve.liquidity_index;
 
+    let mut log = vec![
+        log("action", "deposit"),
+        log("reserve", denom),
+        log("user", env.message.sender.clone()),
+        log("amount", deposit_amount),
+    ];
+
+    append_indices_and_rates_to_logs(&mut log, &reserve)?;
+
     Ok(HandleResponse {
         data: None,
-        log: vec![
-            log("action", "deposit"),
-            log("reserve", denom),
-            log("user", env.message.sender.clone()),
-            log("amount", deposit_amount),
-        ],
+        log,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
@@ -418,7 +426,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    reserve_update_market_indexes(&env, &mut borrow_reserve);
+    reserve_update_market_indexes(&env, &mut borrow_reserve)?;
 
     // Set borrowing asset for user
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_reserve.index)?;
@@ -452,14 +460,18 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     )?;
     reserves_state(&mut deps.storage).save(&denom.as_bytes(), &borrow_reserve)?;
 
+    let mut log = vec![
+        log("action", "borrow"),
+        log("reserve", denom.clone()),
+        log("user", env.message.sender.clone()),
+        log("amount", borrow_amount),
+    ];
+
+    append_indices_and_rates_to_logs(&mut log, &borrow_reserve)?;
+
     Ok(HandleResponse {
         data: None,
-        log: vec![
-            log("action", "borrow"),
-            log("reserve", denom.clone()),
-            log("user", env.message.sender.clone()),
-            log("amount", borrow_amount),
-        ],
+        log,
         messages: vec![CosmosMsg::Bank(BankMsg::Send {
             from_address: env.contract.address,
             to_address: env.message.sender,
@@ -505,7 +517,7 @@ pub fn repay_native<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    reserve_update_market_indexes(&env, &mut reserve);
+    reserve_update_market_indexes(&env, &mut reserve)?;
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
@@ -546,14 +558,18 @@ pub fn repay_native<S: Storage, A: Api, Q: Querier>(
         users_bucket.save(borrower_addr.as_slice(), &user)?;
     }
 
+    let mut log = vec![
+        log("action", "repay"),
+        log("reserve", denom),
+        log("user", env.message.sender.clone()),
+        log("amount", repay_amount - refund_amount),
+    ];
+
+    append_indices_and_rates_to_logs(&mut log, &reserve)?;
+
     Ok(HandleResponse {
         data: None,
-        log: vec![
-            log("action", "repay"),
-            log("reserve", denom),
-            log("user", env.message.sender.clone()),
-            log("amount", repay_amount - refund_amount),
-        ],
+        log,
         messages,
     })
 }
@@ -677,7 +693,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 /// Updates reserve indexes by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indexes(env: &Env, reserve: &mut Reserve) {
+pub fn reserve_update_market_indexes(
+    env: &Env,
+    reserve: &mut Reserve,
+) -> StdResult<(Decimal256, Decimal256)> {
     let current_timestamp = env.block.time;
 
     if reserve.interests_last_updated < current_timestamp {
@@ -697,6 +716,8 @@ pub fn reserve_update_market_indexes(env: &Env, reserve: &mut Reserve) {
         }
         reserve.interests_last_updated = current_timestamp;
     }
+
+    Ok((reserve.borrow_index, reserve.liquidity_index))
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -707,7 +728,7 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     denom: &str,
     reserve: &mut Reserve,
     liquidity_taken: Uint256,
-) -> StdResult<()> {
+) -> StdResult<(Decimal256, Decimal256)> {
     // TODO: handle cw20
     let denom_coin = querier.query_balance(env.contract.address.clone(), denom)?;
 
@@ -731,7 +752,7 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
     reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
 
-    Ok(())
+    Ok((reserve.borrow_rate, reserve.liquidity_rate))
 }
 
 // HELPERS
@@ -768,6 +789,17 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
         return Err(StdError::generic_err("index out of range"));
     }
     *bitmap = Uint128(bitmap.u128() & !(1 << index));
+    Ok(())
+}
+
+fn append_indices_and_rates_to_logs(
+    logs: &mut Vec<LogAttribute>,
+    reserve: &Reserve,
+) -> StdResult<()> {
+    logs.push(log("borrow_index", reserve.borrow_index));
+    logs.push(log("liquidity_index", reserve.liquidity_index));
+    logs.push(log("borrow_rate", reserve.borrow_rate));
+    logs.push(log("liquidity_rate", reserve.liquidity_rate));
     Ok(())
 }
 
@@ -945,7 +977,8 @@ mod tests {
 
     #[test]
     fn test_deposit_native_asset() {
-        let mut deps = th_setup(&[coin(10000000, "somecoin")]);
+        let initial_liquidity = 10000000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -958,7 +991,7 @@ mod tests {
             interests_last_updated: 10000000,
             ..Default::default()
         };
-        th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
 
         let deposit_amount = 110000;
         let env = th_mock_env(MockEnvParams {
@@ -969,7 +1002,7 @@ mod tests {
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = handle(&mut deps, env.clone(), msg).unwrap();
 
         // previous * (1 + rate * time / 31536000)
         let expected_accumulated_interest = Decimal256::one()
@@ -980,6 +1013,9 @@ mod tests {
             Decimal256::from_ratio(11, 10) * expected_accumulated_interest;
         let expected_mint_amount =
             (Uint256::from(deposit_amount) / expected_liquidity_index).into();
+
+        let expected_params =
+            th_get_expected_indexes_and_rates(&reserve, env.block.time, initial_liquidity, 0);
 
         // mints coin_amount/liquidity_index
         assert_eq!(
@@ -1001,6 +1037,10 @@ mod tests {
                 log("reserve", "somecoin"),
                 log("user", "depositer"),
                 log("amount", deposit_amount),
+                log("borrow_index", expected_params.borrow_index),
+                log("liquidity_index", expected_params.liquidity_index),
+                log("borrow_rate", expected_params.borrow_rate),
+                log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -1112,6 +1152,10 @@ mod tests {
                 log("user", "redeemer"),
                 log("burn_amount", burn_amount),
                 log("redeem_amount", expected_asset_amount),
+                log("borrow_index", expected_params.borrow_index),
+                log("liquidity_index", expected_params.liquidity_index),
+                log("borrow_rate", expected_params.borrow_rate),
+                log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -1203,7 +1247,7 @@ mod tests {
         };
 
         // should get index 0
-        let reserve_1_initial = th_init_reserve(
+        let _reserve_1_initial = th_init_reserve(
             &deps.api,
             &mut deps.storage,
             b"borrowedcoin1",
@@ -1262,6 +1306,16 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let reserve_1_after_borrow = reserves_state_read(&deps.storage)
+            .load(b"borrowedcoin1")
+            .unwrap();
+        let expected_params_1 = th_get_expected_indexes_and_rates(
+            &reserve_1_after_borrow,
+            block_time,
+            available_liquidity_1,
+            borrow_amount,
+        );
+
         // check correct messages and logging
         assert_eq!(
             res.messages,
@@ -1281,6 +1335,10 @@ mod tests {
                 log("reserve", "borrowedcoin1"),
                 log("user", "borrower"),
                 log("amount", borrow_amount),
+                log("borrow_index", expected_params_1.borrow_index),
+                log("liquidity_index", expected_params_1.liquidity_index),
+                log("borrow_rate", expected_params_1.borrow_rate),
+                log("liquidity_rate", expected_params_1.liquidity_rate),
             ]
         );
 
@@ -1290,21 +1348,12 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
         assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
 
-        let expected_params_1 = th_get_expected_indexes_and_rates(
-            &reserve_1_initial,
-            block_time,
-            available_liquidity_1,
-            borrow_amount,
-        );
-
         let debt = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
             .load(&borrower_addr_canonical.as_slice())
             .unwrap();
-        let reserve_1_after_borrow = reserves_state_read(&deps.storage)
-            .load(b"borrowedcoin1")
-            .unwrap();
         let expected_debt_scaled_1_after_borrow =
             Uint256::from(borrow_amount) / expected_params_1.borrow_index;
+
         assert_eq!(expected_debt_scaled_1_after_borrow, debt.amount_scaled);
         assert_eq!(
             expected_debt_scaled_1_after_borrow,
@@ -1463,6 +1512,13 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let expected_params_2 = th_get_expected_indexes_and_rates(
+            &reserve_2_after_borrow_2,
+            block_time,
+            available_liquidity_2,
+            0,
+        );
+
         assert_eq!(res.messages, vec![],);
         assert_eq!(
             res.log,
@@ -1471,6 +1527,10 @@ mod tests {
                 log("reserve", "borrowedcoin2"),
                 log("user", "borrower"),
                 log("amount", repay_amount),
+                log("borrow_index", expected_params_2.borrow_index),
+                log("liquidity_index", expected_params_2.liquidity_index),
+                log("borrow_rate", expected_params_2.borrow_rate),
+                log("liquidity_rate", expected_params_2.liquidity_rate),
             ]
         );
 
@@ -1480,12 +1540,6 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
-        let expected_params_2 = th_get_expected_indexes_and_rates(
-            &reserve_2_after_borrow_2,
-            block_time,
-            available_liquidity_2,
-            0,
-        );
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
             .load(&borrower_addr_canonical.as_slice())
             .unwrap();
@@ -1537,6 +1591,10 @@ mod tests {
                 log("reserve", "borrowedcoin2"),
                 log("user", "borrower"),
                 log("amount", repay_amount),
+                log("borrow_index", expected_params_2.borrow_index),
+                log("liquidity_index", expected_params_2.liquidity_index),
+                log("borrow_rate", expected_params_2.borrow_rate),
+                log("liquidity_rate", expected_params_2.liquidity_rate),
             ]
         );
 
@@ -1616,6 +1674,10 @@ mod tests {
                 log("reserve", "borrowedcoin1"),
                 log("user", "borrower"),
                 log("amount", Uint128(repay_amount - expected_refund_amount)),
+                log("borrow_index", expected_params_1.borrow_index),
+                log("liquidity_index", expected_params_1.liquidity_index),
+                log("borrow_rate", expected_params_1.borrow_rate),
+                log("liquidity_rate", expected_params_1.liquidity_rate),
             ]
         );
         let user = users_state_read(&deps.storage)
@@ -1628,7 +1690,7 @@ mod tests {
             .load(&borrower_addr_canonical.as_slice())
             .unwrap();
         let reserve_1_after_repay_1 = reserves_state_read(&deps.storage)
-            .load(b"borrowedcoin2")
+            .load(b"borrowedcoin1")
             .unwrap();
         assert_eq!(Uint256::from(0 as u128), debt1.amount_scaled);
         assert_eq!(
