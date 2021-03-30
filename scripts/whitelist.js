@@ -22,7 +22,9 @@ async function main() {
 
   for (let reserve of reserves_list) {
     const {denom, ma_token_address} = reserve;
-    reserveInfo[ma_token_address] = {denom}
+    const tokenInfoQuery = {"token_info": {}};
+    let { decimals } = await queryContract(terra, ma_token_address, tokenInfoQuery);
+    reserveInfo[ma_token_address] = {denom, decimals}
   }
 
   const output = {};
