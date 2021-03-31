@@ -6,7 +6,13 @@ const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
 let lpContractAddress = await deploy(terra, wallet);
 
-const initialAssets = ["uluna", "uusd", "umnt", "ukrw", "usdr"];
+const initialAssets = [
+  {denom: "uluna", borrow_slope: "0.1", loan_to_value: "1"},
+  {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"},
+  {denom: "umnt", borrow_slope: "0.3", loan_to_value: "0.7"},
+  {denom: "ukrw", borrow_slope: "0.2", loan_to_value: "0.6"},
+  {denom: "usdr", borrow_slope: "0.6", loan_to_value: "0.5"},
+];
 
 const initialDeposits = [
   {
@@ -26,7 +32,7 @@ const initialBorrows = [
   },
   {
     account: terra.wallets.test2,
-    assets: {"uluna": 3000000000, "uusd": 2500000000, "umnt": 3500000000}
+    assets: {"uluna": 3000000, "uusd": 2500000, "umnt": 3500000}
   },
 ]
 

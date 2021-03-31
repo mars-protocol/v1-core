@@ -22,11 +22,20 @@ async function main() {
   const wallet = terra.wallets.test1;
 
   const lpContractAddress = await deploy(terra, wallet);
-  const initialAssets = ["uluna", "uusd"];
+  const initialAssets = [
+    {denom: "uluna", borrow_slope: "0.1", loan_to_value: "1"},
+    {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"},
+    {denom: "umnt", borrow_slope: "0.3", loan_to_value: "0.7"},
+    {denom: "ukrw", borrow_slope: "0.2", loan_to_value: "0.6"},
+    {denom: "usdr", borrow_slope: "0.6", loan_to_value: "0.5"},
+  ];
   await setup(terra, wallet, lpContractAddress, {initialAssets});
 
   await testReserveQuery(terra, lpContractAddress, "uusd")
   await testReserveQuery(terra, lpContractAddress, "uluna");
+  await testReserveQuery(terra, lpContractAddress, "umnt")
+  await testReserveQuery(terra, lpContractAddress, "ukrw");
+  await testReserveQuery(terra, lpContractAddress, "usdr");
 
   console.log("### Testing Config...")
   let configQueryMsg = {"config": {}};
@@ -131,7 +140,7 @@ async function main() {
   });
 
   const failedBorrowResult = await terra.tx.broadcast(tx);
-  if (!isTxError(failedBorrowResult) || !failedBorrowResult.raw_log.includes("user has no collateral deposited")) {
+  if (!isTxError(failedBorrowResult) || !failedBorrowResult.raw_log.includes("address has no collateral deposited")) {
     throw new Error("Borrower has no collateral deposited. Should not be able to borrow.");
   }
 
@@ -148,8 +157,9 @@ async function main() {
       new Coin('uluna', 4000000),
     ]),
   });
-  
+
   const secondFailedBorrowResult = await terra.tx.broadcast(tx);
+  console.log(secondFailedBorrowResult);
   if (!isTxError(secondFailedBorrowResult) || !secondFailedBorrowResult.raw_log.includes("borrow amount exceeds maximum allowed given current collateral value")) {
     throw new Error("Borrower has insufficient collateral and should not be able to borrow.");
   }
@@ -222,7 +232,7 @@ async function main() {
 
   const {debts: debtBeforeFullRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
   for (let debt of debtBeforeFullRepay) {
-    if (debt.denom === "uluna" && Number(debt.amount) !== (borrowAmount - repayAmount)) {
+    if (debt.denom === "uluna" && (Math.abs(Number(debt.amount) - (borrowAmount - repayAmount)) > 10)) {
       throw new Error(`[Debt]: expected repayer's uluna debt to be ${borrowAmount - repayAmount} after ${repayAmount} payment, got ${debt.amount}`);
     }
   }
@@ -238,8 +248,8 @@ async function main() {
   let {_coins: {uluna: {amount: overpayEndingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
   const overpayRepayDiff = repayerEndingLunaBalance - overpayEndingLunaBalance;
 
-  if (overpayRepayDiff !== ((borrowAmount - repayAmount) + overpayTxFee)) {
-    throw new Error(`[Repay]: expected repayer balance to decrease by ${(borrowAmount - repayAmount) + overpayTxFee}, \
+  if (Math.abs(overpayRepayDiff - ((borrowAmount - repayAmount) + overpayTxFee)) > 10) {
+    throw new Error(`[Repay]: expected repayer's balance to decrease by ${(borrowAmount - repayAmount) + overpayTxFee}, \
   got ${overpayRepayDiff}`);
   }
 

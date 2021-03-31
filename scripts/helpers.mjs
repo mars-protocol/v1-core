@@ -77,9 +77,9 @@ export async function setup(terra, wallet, contractAddress, options) {
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
-    let initAssetMsg = {"init_asset": {"denom": asset}};
+    let initAssetMsg = {"init_asset": {"denom": asset.denom, "borrow_slope": asset.borrow_slope, "loan_to_value": asset.loan_to_value}};
     await executeContract(terra, wallet, contractAddress, initAssetMsg);
-    console.log("Initialized " + asset);
+    console.log("Initialized " + asset.denom);
   }
 
   for (let deposit of initialDeposits) {
