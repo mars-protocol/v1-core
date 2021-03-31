@@ -100,7 +100,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
     to: HumanAddr,
     burn_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    reserve_update_market_indexes(&env, &mut reserve)?;
+    reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps.querier, &env, &denom, &mut reserve, burn_amount)?;
     reserves_state(&mut deps.storage).save(&denom.as_bytes(), &reserve)?;
 
@@ -122,7 +122,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
         log("redeem_amount", redeem_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve)?;
+    append_indices_and_rates_to_logs(&mut log, &reserve);
 
     Ok(HandleResponse {
         messages: vec![
@@ -296,7 +296,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         users_state(&mut deps.storage).save(depositer_addr.as_slice(), &user)?;
     }
 
-    reserve_update_market_indexes(&env, &mut reserve)?;
+    reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps.querier, &env, &denom, &mut reserve, Uint256::zero())?;
     reserves_state(&mut deps.storage).save(denom.as_bytes(), &reserve)?;
 
@@ -312,7 +312,7 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
         log("amount", deposit_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve)?;
+    append_indices_and_rates_to_logs(&mut log, &reserve);
 
     Ok(HandleResponse {
         data: None,
@@ -426,7 +426,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    reserve_update_market_indexes(&env, &mut borrow_reserve)?;
+    reserve_update_market_indices(&env, &mut borrow_reserve);
 
     // Set borrowing asset for user
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_reserve.index)?;
@@ -445,11 +445,11 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         },
         Err(error) => return Err(error),
     };
-    let debt_amount_scaled = borrow_amount / borrow_reserve.borrow_index;
-    debt.amount_scaled += debt_amount_scaled;
+    let borrow_amount_scaled = borrow_amount / borrow_reserve.borrow_index;
+    debt.amount_scaled += borrow_amount_scaled;
     debts_asset_bucket.save(borrower_addr.as_slice(), &debt)?;
 
-    borrow_reserve.debt_total_scaled += debt_amount_scaled;
+    borrow_reserve.debt_total_scaled += borrow_amount_scaled;
 
     reserve_update_interest_rates(
         &deps.querier,
@@ -467,7 +467,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         log("amount", borrow_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &borrow_reserve)?;
+    append_indices_and_rates_to_logs(&mut log, &borrow_reserve);
 
     Ok(HandleResponse {
         data: None,
@@ -517,7 +517,7 @@ pub fn repay_native<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    reserve_update_market_indexes(&env, &mut reserve)?;
+    reserve_update_market_indices(&env, &mut reserve);
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
@@ -565,7 +565,7 @@ pub fn repay_native<S: Storage, A: Api, Q: Querier>(
         log("amount", repay_amount - refund_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve)?;
+    append_indices_and_rates_to_logs(&mut log, &reserve);
 
     Ok(HandleResponse {
         data: None,
@@ -691,12 +691,9 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 // INTEREST
 
-/// Updates reserve indexes by applying current interest rates on the time between last interest update
+/// Updates reserve indices by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indexes(
-    env: &Env,
-    reserve: &mut Reserve,
-) -> StdResult<(Decimal256, Decimal256)> {
+pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let current_timestamp = env.block.time;
 
     if reserve.interests_last_updated < current_timestamp {
@@ -716,8 +713,6 @@ pub fn reserve_update_market_indexes(
         }
         reserve.interests_last_updated = current_timestamp;
     }
-
-    Ok((reserve.borrow_index, reserve.liquidity_index))
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -728,7 +723,7 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     denom: &str,
     reserve: &mut Reserve,
     liquidity_taken: Uint256,
-) -> StdResult<(Decimal256, Decimal256)> {
+) -> StdResult<()> {
     // TODO: handle cw20
     let denom_coin = querier.query_balance(env.contract.address.clone(), denom)?;
 
@@ -743,7 +738,6 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     }
     let available_liquidity = Decimal256::from_uint256(current_balance - liquidity_taken);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
-
     let mut utilization_rate = Decimal256::zero();
     if total_debt > Decimal256::zero() {
         utilization_rate = total_debt / (available_liquidity + total_debt);
@@ -752,7 +746,7 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
     reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
 
-    Ok((reserve.borrow_rate, reserve.liquidity_rate))
+    Ok(())
 }
 
 // HELPERS
@@ -792,15 +786,11 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     Ok(())
 }
 
-fn append_indices_and_rates_to_logs(
-    logs: &mut Vec<LogAttribute>,
-    reserve: &Reserve,
-) -> StdResult<()> {
+fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Reserve) {
     logs.push(log("borrow_index", reserve.borrow_index));
     logs.push(log("liquidity_index", reserve.liquidity_index));
     logs.push(log("borrow_rate", reserve.borrow_rate));
     logs.push(log("liquidity_rate", reserve.liquidity_rate));
-    Ok(())
 }
 
 // TESTS
@@ -1014,8 +1004,12 @@ mod tests {
         let expected_mint_amount =
             (Uint256::from(deposit_amount) / expected_liquidity_index).into();
 
-        let expected_params =
-            th_get_expected_indexes_and_rates(&reserve, env.block.time, initial_liquidity, 0);
+        let expected_params = th_get_expected_indices_and_rates(
+            &reserve,
+            env.block.time,
+            initial_liquidity,
+            Default::default(),
+        );
 
         // mints coin_amount/liquidity_index
         assert_eq!(
@@ -1113,11 +1107,14 @@ mod tests {
         });
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let expected_params = th_get_expected_indexes_and_rates(
+        let expected_params = th_get_expected_indices_and_rates(
             &reserve,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
-            burn_amount,
+            TestUtilizationDeltas {
+                less_liquidity: burn_amount,
+                ..Default::default()
+            },
         );
 
         let expected_asset_amount: Uint128 =
@@ -1247,7 +1244,7 @@ mod tests {
         };
 
         // should get index 0
-        let _reserve_1_initial = th_init_reserve(
+        let reserve_1_initial = th_init_reserve(
             &deps.api,
             &mut deps.storage,
             b"borrowedcoin1",
@@ -1306,14 +1303,15 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let reserve_1_after_borrow = reserves_state_read(&deps.storage)
-            .load(b"borrowedcoin1")
-            .unwrap();
-        let expected_params_1 = th_get_expected_indexes_and_rates(
-            &reserve_1_after_borrow,
+        let expected_params_1 = th_get_expected_indices_and_rates(
+            &reserve_1_initial,
             block_time,
             available_liquidity_1,
-            borrow_amount,
+            TestUtilizationDeltas {
+                less_liquidity: borrow_amount,
+                more_debt: borrow_amount,
+                ..Default::default()
+            },
         );
 
         // check correct messages and logging
@@ -1354,18 +1352,22 @@ mod tests {
         let expected_debt_scaled_1_after_borrow =
             Uint256::from(borrow_amount) / expected_params_1.borrow_index;
 
+        let reserve_1_after_borrow = reserves_state_read(&deps.storage)
+            .load(b"borrowedcoin1")
+            .unwrap();
+
         assert_eq!(expected_debt_scaled_1_after_borrow, debt.amount_scaled);
         assert_eq!(
             expected_debt_scaled_1_after_borrow,
             reserve_1_after_borrow.debt_total_scaled
         );
         assert_eq!(
-            expected_params_1.borrow_index,
-            reserve_1_after_borrow.borrow_index
+            expected_params_1.borrow_rate,
+            reserve_1_after_borrow.borrow_rate
         );
         assert_eq!(
-            expected_params_1.liquidity_index,
-            reserve_1_after_borrow.liquidity_index
+            expected_params_1.liquidity_rate,
+            reserve_1_after_borrow.liquidity_rate
         );
 
         // *
@@ -1390,11 +1392,15 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
         assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
 
-        let expected_params_1 = th_get_expected_indexes_and_rates(
+        let expected_params_1 = th_get_expected_indices_and_rates(
             &reserve_1_after_borrow,
             block_time,
             available_liquidity_1,
-            borrow_amount,
+            TestUtilizationDeltas {
+                less_liquidity: borrow_amount,
+                more_debt: borrow_amount,
+                ..Default::default()
+            },
         );
         let debt = debts_asset_state_read(&deps.storage, b"borrowedcoin1")
             .load(&borrower_addr_canonical.as_slice())
@@ -1414,12 +1420,12 @@ mod tests {
             reserve_1_after_borrow_again.debt_total_scaled
         );
         assert_eq!(
-            expected_params_1.borrow_index,
-            reserve_1_after_borrow_again.borrow_index
+            expected_params_1.borrow_rate,
+            reserve_1_after_borrow_again.borrow_rate
         );
         assert_eq!(
-            expected_params_1.liquidity_index,
-            reserve_1_after_borrow_again.liquidity_index
+            expected_params_1.liquidity_rate,
+            reserve_1_after_borrow_again.liquidity_rate
         );
 
         // *
@@ -1445,11 +1451,15 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
-        let expected_params_2 = th_get_expected_indexes_and_rates(
+        let expected_params_2 = th_get_expected_indices_and_rates(
             &reserve_2_initial,
             block_time,
             available_liquidity_2,
-            borrow_amount,
+            TestUtilizationDeltas {
+                less_liquidity: borrow_amount,
+                more_debt: borrow_amount,
+                ..Default::default()
+            },
         );
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoin2")
             .load(&borrower_addr_canonical.as_slice())
@@ -1466,12 +1476,12 @@ mod tests {
             reserve_2_after_borrow_2.debt_total_scaled
         );
         assert_eq!(
-            expected_params_2.borrow_index,
-            reserve_2_after_borrow_2.borrow_index
+            expected_params_2.borrow_rate,
+            reserve_2_after_borrow_2.borrow_rate
         );
         assert_eq!(
-            expected_params_2.liquidity_index,
-            reserve_2_after_borrow_2.liquidity_index
+            expected_params_2.liquidity_rate,
+            reserve_2_after_borrow_2.liquidity_rate
         );
 
         // *
@@ -1512,11 +1522,14 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let expected_params_2 = th_get_expected_indexes_and_rates(
+        let expected_params_2 = th_get_expected_indices_and_rates(
             &reserve_2_after_borrow_2,
             block_time,
             available_liquidity_2,
-            0,
+            TestUtilizationDeltas {
+                less_debt: repay_amount,
+                ..Default::default()
+            },
         );
 
         assert_eq!(res.messages, vec![],);
@@ -1556,17 +1569,28 @@ mod tests {
             expected_debt_scaled_2_after_repay_some_2,
             reserve_2_after_repay_some_2.debt_total_scaled
         );
+        assert_eq!(
+            expected_params_2.borrow_rate,
+            reserve_2_after_repay_some_2.borrow_rate
+        );
+        assert_eq!(
+            expected_params_2.liquidity_rate,
+            reserve_2_after_repay_some_2.liquidity_rate
+        );
 
         // *
         // Repay all debt 2
         // *
         let block_time = reserve_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
-        let expected_params_2 = th_get_expected_indexes_and_rates(
+        let expected_params_2 = th_get_expected_indices_and_rates(
             &reserve_2_after_repay_some_2,
             block_time,
             available_liquidity_2,
-            0,
+            TestUtilizationDeltas {
+                less_debt: 9999999999999, // hack: Just do a big number to repay all debt,
+                ..Default::default()
+            },
         );
         // TODO: There's a rounding error when multiplying a dividing by a Decimal256
         // probably because intermediate result is cast to Uint256. doing everything in Decimal256
@@ -1630,14 +1654,17 @@ mod tests {
         // Repay all debt 1 (and then some)
         // *
         let block_time = reserve_2_after_repay_all_2.interests_last_updated + 5000u64;
-        let expected_params_1 = th_get_expected_indexes_and_rates(
+        let repay_amount = 4800u128;
+
+        let expected_params_1 = th_get_expected_indices_and_rates(
             &reserve_1_after_borrow_again,
             block_time,
             available_liquidity_1,
-            0,
+            TestUtilizationDeltas {
+                less_debt: repay_amount,
+                ..Default::default()
+            },
         );
-
-        let repay_amount = 4800u128;
 
         let env = th_mock_env(MockEnvParams {
             sender: "borrower",
@@ -1810,15 +1837,25 @@ mod tests {
         liquidity_rate: Decimal256,
     }
 
-    fn th_get_expected_indexes_and_rates(
+    /// Deltas to be using in expected indices/rates results
+    #[derive(Default, Debug)]
+    struct TestUtilizationDeltas {
+        less_liquidity: u128,
+        more_debt: u128,
+        less_debt: u128,
+    }
+
+    /// Takes a reserve before an action (ie: a borrow) among some test parameters
+    /// used in that action and computes the expected indices and rates after that action.
+    fn th_get_expected_indices_and_rates(
         reserve: &Reserve,
         block_time: u64,
         initial_liquidity: u128,
-        less_liquidity: u128,
+        deltas: TestUtilizationDeltas,
     ) -> TestInterestResults {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
 
-        // market indexes
+        // market indices
         let expected_accumulated_liquidity_interest = Decimal256::one()
             + (reserve.liquidity_rate * Decimal256::from_uint256(seconds_elapsed)
                 / Decimal256::from_uint256(SECONDS_PER_YEAR));
@@ -1830,13 +1867,22 @@ mod tests {
                 / Decimal256::from_uint256(SECONDS_PER_YEAR));
         let expected_borrow_index = reserve.borrow_index * expected_accumulated_borrow_interest;
 
-        // utilization rate
-        let dec_debt_after_redeem =
-            Decimal256::from_uint256(reserve.debt_total_scaled) * expected_borrow_index;
-        let dec_liquidity_after_redeem =
-            Decimal256::from_uint256(initial_liquidity - less_liquidity);
-        let expected_utilization_rate =
-            dec_debt_after_redeem / (dec_liquidity_after_redeem + dec_debt_after_redeem);
+        // When borrowing, new computed index is used for scaled amount
+        let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
+        // When repaying, new computed index is used for scaled amount
+        let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_borrow_index;
+        let mut new_debt_total = Uint256::zero();
+        // NOTE: Don't panick here so that the total repay of debt can be simulated
+        // when less debt is greater than outstanding debt
+        // TODO: Maybe split index and interest rate calculations and take the needed inputs
+        // for each
+        if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
+            new_debt_total = reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled;
+        }
+        let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
+        let dec_liquidity_total =
+            Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
+        let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
