@@ -22,3 +22,5 @@ node_modules/
 
 # Artifacts
 artifacts/
+
+whitelists/localterra.json

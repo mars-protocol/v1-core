@@ -32,7 +32,7 @@ async function main() {
   output.whitelist = reserveInfo;
 
   const json = JSON.stringify(output);
-  writeFileSync('artifacts/whitelist.json', json, {'encoding': 'utf8'});
+  writeFileSync(`whitelists/${process.env.NETWORK || 'localterra'}.json`, json, {'encoding': 'utf8'});
 }
 
 main().catch(err => console.log(err));
