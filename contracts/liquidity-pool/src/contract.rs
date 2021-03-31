@@ -53,7 +53,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitAsset {
             denom,
             borrow_slope,
-        } => init_asset(deps, env, denom, borrow_slope),
+            loan_to_value,
+        } => init_asset(deps, env, denom, borrow_slope, loan_to_value),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
@@ -154,6 +155,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     env: Env,
     denom: String,
     borrow_slope: Decimal256,
+    loan_to_value: Decimal256,
 ) -> StdResult<HandleResponse> {
     // Get config
     let mut config = config_state_read(&deps.storage).load()?;
@@ -181,7 +183,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 
                     borrow_slope,
 
-                    loan_to_value: Decimal256::from_ratio(8, 10),
+                    loan_to_value,
 
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
@@ -845,6 +847,7 @@ mod tests {
         let msg = HandleMsg::InitAsset {
             denom: String::from("someasset"),
             borrow_slope: Decimal256::from_ratio(4, 100),
+            loan_to_value: Decimal256::from_ratio(8, 10),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -855,6 +858,7 @@ mod tests {
         let msg = HandleMsg::InitAsset {
             denom: String::from("someasset"),
             borrow_slope: Decimal256::from_ratio(4, 100),
+            loan_to_value: Decimal256::from_ratio(8, 10),
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
@@ -944,6 +948,7 @@ mod tests {
         let msg = HandleMsg::InitAsset {
             denom: String::from("otherasset"),
             borrow_slope: Decimal256::from_ratio(4, 100),
+            loan_to_value: Decimal256::from_ratio(8, 10),
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 

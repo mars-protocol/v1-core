@@ -12,7 +12,7 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    /// Implementaton cw20 receive msg
+    /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
     /// Initialize an asset on the money market
@@ -21,6 +21,8 @@ pub enum HandleMsg {
         denom: String,
         /// Borrow slope to calculate borrow rate
         borrow_slope: Decimal256,
+        /// Max percentage of collateral that can be borrowed
+        loan_to_value: Decimal256,
     },
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {
