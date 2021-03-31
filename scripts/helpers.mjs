@@ -4,9 +4,11 @@ import {
   MsgExecuteContract,
   MsgInstantiateContract,
   MsgMigrateContract,
-  MsgStoreCode, StdFee
+  MsgStoreCode,
+  StdFee,
+  MnemonicKey
 } from '@terra-money/terra.js';
-import {readFileSync} from 'fs';
+import { readFileSync } from 'fs';
 
 export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({
@@ -111,4 +113,7 @@ export async function migrate(terra, wallet, contractAddress, newCodeId) {
   return await performTransaction(terra, wallet, migrateMsg);
 }
 
-
+export function recover(terra, mnemonic) {
+  const mk = new MnemonicKey({ mnemonic: mnemonic });
+  return terra.wallet(mk);
+}
