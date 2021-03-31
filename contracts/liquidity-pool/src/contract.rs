@@ -749,6 +749,16 @@ pub fn reserve_update_interest_rates<Q: Querier>(
     Ok(())
 }
 
+fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Reserve) {
+    let mut interest_logs = vec![
+        log("borrow_index", reserve.borrow_index),
+        log("liquidity_index", reserve.liquidity_index),
+        log("borrow_rate", reserve.borrow_rate),
+        log("liquidity_rate", reserve.liquidity_rate),
+    ];
+    logs.append(&mut interest_logs);
+}
+
 // HELPERS
 // native coins
 fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
@@ -784,13 +794,6 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     }
     *bitmap = Uint128(bitmap.u128() & !(1 << index));
     Ok(())
-}
-
-fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Reserve) {
-    logs.push(log("borrow_index", reserve.borrow_index));
-    logs.push(log("liquidity_index", reserve.liquidity_index));
-    logs.push(log("borrow_rate", reserve.borrow_rate));
-    logs.push(log("liquidity_rate", reserve.liquidity_rate));
 }
 
 // TESTS
