@@ -7,11 +7,11 @@ const wallet = terra.wallets.test1;
 let lpContractAddress = await deploy(terra, wallet);
 
 const initialAssets = [
-  {denom: "uluna", borrow_slope: "0.1", loan_to_value: "1"},
+  {denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5"},
   {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"},
   {denom: "umnt", borrow_slope: "0.3", loan_to_value: "0.7"},
   {denom: "ukrw", borrow_slope: "0.2", loan_to_value: "0.6"},
-  {denom: "usdr", borrow_slope: "0.6", loan_to_value: "0.5"},
+  {denom: "usdr", borrow_slope: "0.6", loan_to_value: "0.9"},
 ];
 
 const initialDeposits = [
