@@ -117,3 +117,12 @@ export function recover(terra, mnemonic) {
   const mk = new MnemonicKey({ mnemonic: mnemonic });
   return terra.wallet(mk);
 }
+
+export function initialize(terra) {
+  const mk = new MnemonicKey();
+
+  console.log(`Account Address: ${mk.accAddress}`);
+  console.log(`MnemonicKey: ${mk.mnemonic}`);
+
+  return terra.wallet(mk);
+}
