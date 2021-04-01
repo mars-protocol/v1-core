@@ -19,7 +19,7 @@ async function testReserveQuery(terra, address, denom) {
 
 async function main() {
   const terra = new LocalTerra();
-  const wallet = terra.wallets.test1;
+  let wallet = terra.wallets.test1;
 
   const lpContractAddress = await deploy(terra, wallet);
   const initialAssets = [
@@ -127,7 +127,7 @@ async function main() {
 
 
   console.log("### Testing Borrow...");
-  const borrower = terra.wallets.test2;
+  let borrower = terra.wallets.test2;
   let borrowAmount = 4_000_000;
   let borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
   let executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
@@ -258,6 +258,65 @@ async function main() {
     if (debt.denom === "uluna" && debt.amount !== "0") {
       throw new Error(`[Debt]: expected repayer's uluna debt to be 0 after full repayment, got ${debt.amount}`);
     }
+  }
+
+  
+  console.log("### Testing Collateral Check...");
+  wallet = terra.wallets.test3;
+  let deposits = [
+      {denom: "uluna", amount: 10_000_000},
+      {denom: "uusd", amount: 5_000_000},
+      {denom: "umnt", amount: 15_000_000},
+      {denom: "ukrw", amount: 50_000_000},
+      {denom: "usdr", amount: 25_000_000}
+    ];
+
+  await depositAssets(terra, wallet, lpContractAddress, deposits);
+
+  let reserve_ltv = {"uluna": 0.5, "uusd": 0.8, "umnt": 0.7, "ukrw": 0.6, "usdr": 0.5};
+  let {_coins: exchangeRates} = await terra.oracle.exchangeRates();
+
+  let max_borrow_allowed_in_uluna = 10_000_000 * reserve_ltv["uluna"];
+  for (let deposit of deposits) {
+    if (exchangeRates.hasOwnProperty(deposit.denom)) {
+      max_borrow_allowed_in_uluna += reserve_ltv[deposit.denom] * deposit.amount / exchangeRates[deposit.denom].amount;
+    }
+  }
+
+  let max_borrow_allowed_in_uusd = new Int(max_borrow_allowed_in_uluna / exchangeRates['uusd'].amount);
+
+  let excessiveBorrowAmount = max_borrow_allowed_in_uusd + 100;
+  let validBorrowAmount = max_borrow_allowed_in_uusd - 100;
+
+  borrowMsg = {"borrow_native": {"denom": "uusd", "amount": excessiveBorrowAmount.toString()}};
+  executeBorrowMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, borrowMsg);
+  tx = await wallet.createAndSignTx({
+    msgs: [executeBorrowMsg],
+    fee: new StdFee(30000000, [
+      new Coin('uluna', 4000000),
+    ]),
+  });
+
+  const insufficientCollateralResult = await terra.tx.broadcast(tx);
+  if (!isTxError(insufficientCollateralResult) || !insufficientCollateralResult.raw_log.includes("borrow amount exceeds maximum allowed given current collateral value")) {
+    throw new Error("[Collateral]: Borrower has insufficient collateral and should not be able to borrow.");
+  }
+
+  borrowMsg = {"borrow_native": {"denom": "uusd", "amount": validBorrowAmount.toString()}};
+  executeBorrowMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, borrowMsg);
+  await performTransaction(terra, wallet, executeBorrowMsg);
+
+  console.log("Borrow Message Sent: ");
+  console.log(executeBorrowMsg);
+}
+
+async function depositAssets(terra, wallet, lpContractAddress, deposits) {
+  for (let deposit of deposits) {
+    let depositMsg = {"deposit_native": {"denom": deposit.denom}};
+    let depositAmount = deposit.amount;
+    let coins = new Coin(deposit.denom, depositAmount);
+    let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
+    await performTransaction(terra, wallet, executeDepositMsg);
   }
 }
 
