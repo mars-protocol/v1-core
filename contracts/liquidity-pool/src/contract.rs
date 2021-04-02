@@ -1749,9 +1749,9 @@ mod tests {
             coin(available_liquidity_3, "depositedcoin3"),
         ]);
 
-        let exchange_rate_1 = Decimal::from_ratio(13 as u128, 2 as u128);
-        let exchange_rate_2 = Decimal::from_ratio(15 as u128, 4 as u128);
-        let exchange_rate_3 = Decimal::from_ratio(1 as u128, 2 as u128);
+        let exchange_rate_1 = Decimal::from_ratio(13u128, 2u128);
+        let exchange_rate_2 = Decimal::from_ratio(15u128, 4u128);
+        let exchange_rate_3 = Decimal::from_ratio(1u128, 2u128);
 
         let exchange_rates = [
             (&String::from("depositedcoin1"), &exchange_rate_1),
@@ -1813,7 +1813,7 @@ mod tests {
             .canonical_address(&HumanAddr::from("borrower"))
             .unwrap();
 
-        // Set user as having the reserve_collateral deposited
+        // Set user as having all the reserves as collateral
         let mut user = User {
             borrowed_assets: Uint128::zero(),
             deposited_assets: Uint128::zero(),
