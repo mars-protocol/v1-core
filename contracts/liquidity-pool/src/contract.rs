@@ -6,7 +6,7 @@ use cosmwasm_std::{
 };
 
 use cw20::{BalanceResponse, Cw20HandleMsg, Cw20QueryMsg, Cw20ReceiveMsg, MinterResponse};
-use mars::ma_token;
+use mars::cw20_token;
 
 use crate::msg::{
     ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
@@ -213,7 +213,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
-            msg: to_binary(&ma_token::msg::InitMsg {
+            msg: to_binary(&cw20_token::msg::InitMsg {
                 name: format!("mars {} debt token", denom),
                 symbol: format!("ma{}", denom),
                 decimals: 6,
@@ -222,7 +222,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     minter: HumanAddr::from(env.contract.address.as_str()),
                     cap: None,
                 }),
-                init_hook: Some(ma_token::msg::InitHook {
+                init_hook: Some(cw20_token::msg::InitHook {
                     msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: denom })?,
                     contract_addr: env.contract.address,
                 }),
@@ -394,7 +394,9 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
             }
 
             user_balances.push((denom.clone(), debt, max_borrow));
-            denoms_to_query.push(denom.clone());
+            if(denom != "uusd") {
+                denoms_to_query.push(denom.clone());
+            }
         }
     }
 
@@ -878,7 +880,7 @@ mod tests {
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
                 code_id: 5u64,
-                msg: to_binary(&ma_token::msg::InitMsg {
+                msg: to_binary(&cw20_token::msg::InitMsg {
                     name: String::from("mars someasset debt token"),
                     symbol: String::from("masomeasset"),
                     decimals: 6,
@@ -887,7 +889,7 @@ mod tests {
                         minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         cap: None,
                     }),
-                    init_hook: Some(ma_token::msg::InitHook {
+                    init_hook: Some(cw20_token::msg::InitHook {
                         msg: to_binary(&HandleMsg::InitAssetTokenCallback {
                             id: String::from("someasset")
                         })

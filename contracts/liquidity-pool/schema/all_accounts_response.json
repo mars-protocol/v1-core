@@ -1,13 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ReserveResponse",
+  "title": "AllAccountsResponse",
   "type": "object",
   "required": [
-    "ma_token_address"
+    "accounts"
   ],
   "properties": {
-    "ma_token_address": {
-      "$ref": "#/definitions/HumanAddr"
+    "accounts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/HumanAddr"
+      }
     }
   },
   "definitions": {

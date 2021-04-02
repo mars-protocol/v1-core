@@ -1,5 +1,5 @@
 [package]
-name = "ma-token"
+name = "cw20-token"
 version = "0.1.0"
 authors = ["Spike Spiegel"]
 edition = "2018"

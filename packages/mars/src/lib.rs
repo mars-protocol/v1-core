@@ -1,1 +1,1 @@
-pub mod ma_token;
+pub mod cw20_token;

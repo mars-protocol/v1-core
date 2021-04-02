@@ -10,7 +10,7 @@ use cw20_base::contract::{
 use cw20_base::msg::{HandleMsg, MigrateMsg, QueryMsg};
 use cw20_base::state::{token_info, MinterData, TokenInfo};
 
-use mars::ma_token::msg::InitMsg;
+use mars::cw20_token::msg::InitMsg;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:cw20-base";

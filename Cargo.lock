@@ -166,6 +166,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cw20-token"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw2",
+ "cw20",
+ "cw20-base",
+ "mars",
+ "schemars",
+ "serde",
+ "snafu",
+]
+
+[[package]]
 name = "doc-comment"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -203,22 +219,6 @@ dependencies = [
  "serde",
  "snafu",
  "terra-cosmwasm",
-]
-
-[[package]]
-name = "ma-token"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw2",
- "cw20",
- "cw20-base",
- "mars",
- "schemars",
- "serde",
- "snafu",
 ]
 
 [[package]]
