@@ -394,7 +394,7 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
             }
 
             user_balances.push((denom.clone(), debt, max_borrow));
-            if(denom != "uusd") {
+            if denom != "uusd" {
                 denoms_to_query.push(denom.clone());
             }
         }
@@ -407,14 +407,30 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
     for (denom, debt, max_borrow) in user_balances {
-        for rate in &exchange_rates.exchange_rates {
-            if rate.quote_denom == denom {
-                let exchange_rate = Decimal256::from(rate.exchange_rate);
-                total_debt_in_uusd += debt * exchange_rate;
-                max_borrow_in_uusd += max_borrow * exchange_rate;
-                break;
+        let mut maybe_exchange_rate: Option<Decimal256> = None;
+        if denom == "uusd" {
+            maybe_exchange_rate = Some(Decimal256::one());
+        } else {
+            for rate in &exchange_rates.exchange_rates {
+                if rate.quote_denom == denom {
+                    maybe_exchange_rate = Some(Decimal256::from(rate.exchange_rate));
+                    break;
+                }
             }
         }
+
+        let exchange_rate = match maybe_exchange_rate {
+            Some(rate) => rate,
+            None => {
+                return Err(StdError::generic_err(format!(
+                    "Exchange rate not found for denom {}",
+                    denom
+                )))
+            }
+        };
+
+        total_debt_in_uusd += debt * exchange_rate;
+        max_borrow_in_uusd += max_borrow * exchange_rate;
     }
 
     let borrow_amount_rate = exchange_rates
@@ -1748,17 +1764,16 @@ mod tests {
         let mut deps = th_setup(&[
             coin(available_liquidity_1, "depositedcoin1"),
             coin(available_liquidity_2, "depositedcoin2"),
-            coin(available_liquidity_3, "depositedcoin3"),
+            coin(available_liquidity_3, "uusd"),
         ]);
 
         let exchange_rate_1 = Decimal::from_ratio(13u128, 2u128);
         let exchange_rate_2 = Decimal::from_ratio(15u128, 4u128);
-        let exchange_rate_3 = Decimal::from_ratio(1u128, 2u128);
+        let exchange_rate_3 = Decimal::one();
 
         let exchange_rates = [
             (&String::from("depositedcoin1"), &exchange_rate_1),
             (&String::from("depositedcoin2"), &exchange_rate_2),
-            (&String::from("depositedcoin3"), &exchange_rate_3),
         ];
         deps.querier
             .with_exchange_rates(&[(&String::from("uusd"), &exchange_rates)]);
@@ -1803,12 +1818,8 @@ mod tests {
             &mock_reserve_2,
         );
         // should get index 2
-        let reserve_3_initial = th_init_reserve(
-            &deps.api,
-            &mut deps.storage,
-            b"depositedcoin3",
-            &mock_reserve_3,
-        );
+        let reserve_3_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"uusd", &mock_reserve_3);
 
         let borrower_addr_canonical = deps
             .api
