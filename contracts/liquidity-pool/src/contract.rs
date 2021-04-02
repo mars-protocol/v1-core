@@ -421,7 +421,6 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
         .find(|e| e.quote_denom == denom)
         .unwrap();
     let borrow_amount_in_uusd = borrow_amount * Decimal256::from(borrow_amount_rate.exchange_rate);
-
     if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
@@ -1290,8 +1289,11 @@ mod tests {
             .unwrap();
 
         // Set the querier to return a certain collateral balance
-        deps.querier
-            .with_balances(&[(&HumanAddr(String::from("borrower")), &Uint128(10000))]);
+        let deposit_coin_address = HumanAddr::from("matoken3");
+        deps.querier.with_balances(&[(
+            &deposit_coin_address,
+            &[(&HumanAddr(String::from("borrower")), &Uint128(10000))],
+        )]);
 
         // TODO: probably some variables (ie: borrow_amount, expected_params) that are repeated
         // in all calls could be enclosed in local scopes somehow)
@@ -1734,6 +1736,147 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_collateral_check() {
+        // NOTE: available liquidity stays fixed as the test environment does not get changes in
+        // contract balances on subsequent calls. They would change from call to call in practice
+        let available_liquidity_1 = 1000000000u128;
+        let available_liquidity_2 = 2000000000u128;
+        let available_liquidity_3 = 3000000000u128;
+        let mut deps = th_setup(&[
+            coin(available_liquidity_1, "depositedcoin1"),
+            coin(available_liquidity_2, "depositedcoin2"),
+            coin(available_liquidity_3, "depositedcoin3"),
+        ]);
+
+        let exchange_rate_1 = Decimal::from_ratio(13 as u128, 2 as u128);
+        let exchange_rate_2 = Decimal::from_ratio(15 as u128, 4 as u128);
+        let exchange_rate_3 = Decimal::from_ratio(1 as u128, 2 as u128);
+
+        let exchange_rates = [
+            (&String::from("depositedcoin1"), &exchange_rate_1),
+            (&String::from("depositedcoin2"), &exchange_rate_2),
+            (&String::from("depositedcoin3"), &exchange_rate_3),
+        ];
+        deps.querier
+            .with_exchange_rates(&[(&String::from("uusd"), &exchange_rates)]);
+
+        let mock_reserve_1 = MockReserve {
+            ma_token_address: "matoken1",
+            loan_to_value: Decimal256::from_ratio(8, 10),
+            debt_total_scaled: Uint256::zero(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            ..Default::default()
+        };
+        let mock_reserve_2 = MockReserve {
+            ma_token_address: "matoken2",
+            loan_to_value: Decimal256::from_ratio(6, 10),
+            debt_total_scaled: Uint256::zero(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            ..Default::default()
+        };
+        let mock_reserve_3 = MockReserve {
+            ma_token_address: "matoken3",
+            loan_to_value: Decimal256::from_ratio(4, 10),
+            debt_total_scaled: Uint256::zero(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            ..Default::default()
+        };
+
+        // should get index 0
+        let reserve_1_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"depositedcoin1",
+            &mock_reserve_1,
+        );
+        // should get index 1
+        let reserve_2_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"depositedcoin2",
+            &mock_reserve_2,
+        );
+        // should get index 2
+        let reserve_3_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"depositedcoin3",
+            &mock_reserve_3,
+        );
+
+        let borrower_addr_canonical = deps
+            .api
+            .canonical_address(&HumanAddr::from("borrower"))
+            .unwrap();
+
+        // Set user as having the reserve_collateral deposited
+        let mut user = User {
+            borrowed_assets: Uint128::zero(),
+            deposited_assets: Uint128::zero(),
+        };
+        set_bit(&mut user.deposited_assets, reserve_1_initial.index).unwrap();
+        set_bit(&mut user.deposited_assets, reserve_2_initial.index).unwrap();
+        set_bit(&mut user.deposited_assets, reserve_3_initial.index).unwrap();
+
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(borrower_addr_canonical.as_slice(), &user)
+            .unwrap();
+
+        let ma_token_address_1 = HumanAddr::from("matoken1");
+        let ma_token_address_2 = HumanAddr::from("matoken2");
+        let ma_token_address_3 = HumanAddr::from("matoken3");
+
+        let balance_1 = Uint128(4_000_000);
+        let balance_2 = Uint128(7_000_000);
+        let balance_3 = Uint128(3_000_000);
+
+        let borrower_addr = HumanAddr(String::from("borrower"));
+
+        // Set the querier to return a certain collateral balance
+        deps.querier.with_balances(&[
+            (&ma_token_address_1, &[(&borrower_addr, &balance_1)]),
+            (&ma_token_address_2, &[(&borrower_addr, &balance_2)]),
+            (&ma_token_address_3, &[(&borrower_addr, &balance_3)]),
+        ]);
+
+        let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
+            * Uint256::from(balance_1)
+            * Decimal256::from(exchange_rate_1))
+            + (reserve_2_initial.loan_to_value
+                * Uint256::from(balance_2)
+                * Decimal256::from(exchange_rate_2))
+            + (reserve_3_initial.loan_to_value
+                * Uint256::from(balance_3)
+                * Decimal256::from(exchange_rate_3));
+        let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
+            / Decimal256::from(exchange_rate_1))
+            + Uint256::from(100 as u64);
+        let permissible_borrow_amount = (max_borrow_allowed_in_uusd
+            / Decimal256::from(exchange_rate_1))
+            - Uint256::from(100 as u64);
+
+        // borrow above the allowed amount given current collateral, should fail
+        let borrow_msg = HandleMsg::BorrowNative {
+            denom: "depositedcoin1".to_string(),
+            amount: exceeding_borrow_amount,
+        };
+        let env = mock_env("borrower", &[]);
+        let _res = handle(&mut deps, env, borrow_msg).unwrap_err();
+
+        // borrow permissible amount given current collateral, should succeed
+        let borrow_msg = HandleMsg::BorrowNative {
+            denom: "depositedcoin1".to_string(),
+            amount: permissible_borrow_amount,
+        };
+        let env = mock_env("borrower", &[]);
+        let _res = handle(&mut deps, env, borrow_msg).unwrap();
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
@@ -1755,7 +1898,7 @@ mod tests {
         block_time: Option<u64>,
     }
 
-    /// A custom mock env to make it more cofigurable than the one provided by cosmwasm_std
+    /// A custom mock env to make it more configurable than the one provided by cosmwasm_std
     fn th_mock_env(mock_env: MockEnvParams) -> Env {
         let block_time = mock_env.block_time.unwrap_or(1_571_797_419);
 

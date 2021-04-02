@@ -65,24 +65,30 @@ pub(crate) fn exchange_rates_to_map(
 
 #[derive(Clone, Default)]
 pub struct BalanceQuerier {
-    // maps address to balances
-    balances: HashMap<HumanAddr, Uint128>,
+    // maps contract address to user balances
+    balances: HashMap<HumanAddr, HashMap<HumanAddr, Uint128>>,
 }
 
 impl BalanceQuerier {
-    pub fn new(balances: &[(&HumanAddr, &Uint128)]) -> Self {
+    pub fn new(balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])]) -> Self {
         BalanceQuerier {
             balances: balances_to_map(balances),
         }
     }
 }
 
-pub(crate) fn balances_to_map(balances: &[(&HumanAddr, &Uint128)]) -> HashMap<HumanAddr, Uint128> {
-    let mut balances_map: HashMap<HumanAddr, Uint128> = HashMap::new();
-    for (address, balance) in balances.iter() {
-        balances_map.insert((*address).clone(), **balance);
+pub(crate) fn balances_to_map(
+    balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])],
+) -> HashMap<HumanAddr, HashMap<HumanAddr, Uint128>> {
+    let mut contract_balances_map: HashMap<HumanAddr, HashMap<HumanAddr, Uint128>> = HashMap::new();
+    for (contract, balances) in balances.iter() {
+        let mut account_balances_map: HashMap<HumanAddr, Uint128> = HashMap::new();
+        for (account, balance) in balances.iter() {
+            account_balances_map.insert((*account).clone(), **balance);
+        }
+        contract_balances_map.insert((*contract).clone(), account_balances_map);
     }
-    balances_map
+    contract_balances_map
 }
 
 impl Querier for WasmMockQuerier {
@@ -155,18 +161,36 @@ impl WasmMockQuerier {
                     panic!("DO NOT ENTER HERE")
                 }
             }
-            QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: _,
-                msg,
-            }) => match from_binary(&msg).unwrap() {
+            QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => match from_binary(&msg)
+                .unwrap()
+            {
                 Cw20QueryMsg::Balance { address } => {
-                    match self.balance_querier.balances.get(&address) {
-                        Some(balance) => Ok(to_binary(&BalanceResponse { balance: *balance })),
-                        None => Err(SystemError::InvalidRequest {
-                            error: "No balance exists for this account".to_string(),
-                            request: msg.as_slice().into(),
-                        }),
-                    }
+                    let contract_balances = match self.balance_querier.balances.get(&contract_addr)
+                    {
+                        Some(balances) => balances,
+                        None => {
+                            return Err(SystemError::InvalidRequest {
+                                error: "no balances available for provided contract address"
+                                    .to_string(),
+                                request: msg.as_slice().into(),
+                            })
+                        }
+                    };
+
+                    let user_balance = match contract_balances.get(&address) {
+                        Some(balance) => balance,
+                        None => {
+                            return Err(SystemError::InvalidRequest {
+                                error: "no balance available for provided account address"
+                                    .to_string(),
+                                request: msg.as_slice().into(),
+                            })
+                        }
+                    };
+
+                    Ok(to_binary(&BalanceResponse {
+                        balance: *user_balance,
+                    }))
                 }
                 _ => panic!("DO NOT ENTER HERE"),
             },
@@ -190,7 +214,7 @@ impl WasmMockQuerier {
     }
 
     // configure the balances mock querier
-    pub fn with_balances(&mut self, balances: &[(&HumanAddr, &Uint128)]) {
+    pub fn with_balances(&mut self, balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])]) {
         self.balance_querier = BalanceQuerier::new(balances);
     }
 }
