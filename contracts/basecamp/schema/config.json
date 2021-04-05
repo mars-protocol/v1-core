@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Config",
+  "description": "Lending pool global configuration",
+  "type": "object",
+  "required": [
+    "mars_token_address",
+    "owner",
+    "xmars_token_address"
+  ],
+  "properties": {
+    "mars_token_address": {
+      "description": "Mars token address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "owner": {
+      "description": "Contract owner",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "xmars_token_address": {
+      "description": "xMars token address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "CanonicalAddr": {
+      "$ref": "#/definitions/Binary"
+    }
+  }
+}
