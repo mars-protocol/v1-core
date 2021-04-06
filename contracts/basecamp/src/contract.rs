@@ -235,9 +235,7 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {
-            cw20_code_id: 11,
-        };
+        let msg = InitMsg { cw20_code_id: 11 };
         let env = mock_env("owner", &[]);
 
         let res = init(&mut deps, env, msg).unwrap();
@@ -288,6 +286,12 @@ mod tests {
         );
 
         let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(
+            deps.api
+                .canonical_address(&HumanAddr::from("owner"))
+                .unwrap(),
+            config.owner
+        );
         assert_eq!(CanonicalAddr::default(), config.mars_token_address);
         assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
 
