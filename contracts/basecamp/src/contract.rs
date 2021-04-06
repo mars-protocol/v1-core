@@ -1,12 +1,13 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, WasmMsg,
+    from_binary, log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern,
+    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Querier, StdError,
+    StdResult, Storage, Uint128, WasmMsg,
 };
 
-use cw20::{Cw20ReceiveMsg, MinterResponse};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{config_state, config_state_read, Config};
 
 // INIT
@@ -81,25 +82,67 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitTokenCallback { token_id } => init_token_callback(deps, env, token_id),
+        HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
+        HandleMsg::InitTokenCallback { token_id } => {
+            handle_init_token_callback(deps, env, token_id)
+        }
     }
 }
 
 /// cw20 receive implementation
-pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _cw20_msg: Cw20ReceiveMsg,
+pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    cw20_msg: Cw20ReceiveMsg,
 ) -> StdResult<HandleResponse> {
-    // NOTE: Noop for now
-    Ok(HandleResponse::default())
+    if let Some(msg) = cw20_msg.msg {
+        match from_binary(&msg)? {
+            ReceiveMsg::Bond => handle_bond(deps, env, cw20_msg.sender, cw20_msg.amount),
+        }
+    } else {
+        Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
+    }
+}
+
+/// Mint xMars tokens to bonder
+pub fn handle_bond<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    staker: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    if amount == Uint128(0) {
+        return Err(StdError::generic_err("Bond amount must be greater than 0"));
+    }
+
+    let config = config_state_read(&deps.storage).load()?;
+    if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
+        return Err(StdError::unauthorized());
+    }
+
+    Ok(HandleResponse {
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&config.xmars_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: staker.clone(),
+                amount: amount,
+            })
+            .unwrap(),
+        })],
+        log: vec![
+            log("action", "bond"),
+            log("user", staker),
+            log("bond_amount", amount),
+        ],
+        data: None,
+    })
 }
 
 /// Handles token post initialization storing the addresses
 /// in config
 /// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
-pub fn init_token_callback<S: Storage, A: Api, Q: Querier>(
+pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     token_id: u8,
@@ -183,8 +226,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::from_binary;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::testing::{
+        mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR,
+    };
+    use cosmwasm_std::{from_binary, Coin};
 
     #[test]
     fn test_proper_initialization() {
@@ -328,5 +373,75 @@ mod tests {
         let config: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(HumanAddr::from("mars_token"), config.mars_token_address);
         assert_eq!(HumanAddr::from("xmars_token"), config.xmars_token_address);
+    }
+
+    #[test]
+    fn test_bond() {
+        let mut deps = th_setup(&[]);
+
+        // bond Mars -> should receive xMars
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Bond).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: Uint128(2_000_000),
+        });
+
+        let env = mock_env("mars_token", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("xmars_token"),
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Mint {
+                    recipient: HumanAddr::from("staker"),
+                    amount: Uint128(2_000_000),
+                })
+                .unwrap(),
+            })],
+            res.messages
+        );
+        assert_eq!(
+            vec![
+                log("action", "bond"),
+                log("user", HumanAddr::from("staker")),
+                log("bond_amount", 2_000_000),
+            ],
+            res.log
+        );
+
+        // bond other token -> Unauthorized
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Bond).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: Uint128(2_000_000),
+        });
+
+        let env = mock_env("other_token", &[]);
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    // TEST HELPERS
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MockQuerier> {
+        let mut deps = mock_dependencies(20, contract_balances);
+
+        // TODO: Do we actually need the init to happen on tests?
+        let msg = InitMsg { cw20_code_id: 1u64 };
+        let env = mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        let mut config_singleton = config_state(&mut deps.storage);
+        let mut config = config_singleton.load().unwrap();
+        config.mars_token_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("mars_token"))
+            .unwrap();
+        config.xmars_token_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("xmars_token"))
+            .unwrap();
+        config_singleton.save(&config).unwrap();
+
+        deps
     }
 }
