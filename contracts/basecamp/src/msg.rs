@@ -1,4 +1,4 @@
-use cosmwasm_std::HumanAddr;
+use cosmwasm_std::{HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,8 +13,12 @@ pub struct InitMsg {
 pub enum HandleMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
-    InitTokenCallback {
-        token_id: u8,
+    /// Callback to initialize Mars and xMars tokens
+    InitTokenCallback { token_id: u8 },
+    /// Mint Mars tokens to receiver (Temp action for Testing)
+    MintMars {
+        recipient: HumanAddr,
+        amount: Uint128,
     },
 }
 

@@ -86,6 +86,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitTokenCallback { token_id } => {
             handle_init_token_callback(deps, env, token_id)
         }
+        HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
 }
 
@@ -191,7 +192,37 @@ pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
     };
 }
 
+/// Mints Mars token to receiver (Temp action for testing)
+pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    recipient: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    // Only owner can trigger a mint
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    Ok(HandleResponse {
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: recipient,
+                amount: amount,
+            })
+            .unwrap(),
+        })],
+        log: vec![],
+        data: None,
+    })
+}
+
 // QUERIES
+
 pub fn query<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     msg: QueryMsg,
@@ -422,6 +453,42 @@ mod tests {
         });
 
         let env = mock_env("other_token", &[]);
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_mint_mars() {
+        let mut deps = th_setup(&[]);
+
+        // bond Mars -> should receive xMars
+        let msg = HandleMsg::MintMars {
+            recipient: HumanAddr::from("recipient"),
+            amount: Uint128(3_500_000),
+        };
+
+        let env = mock_env("owner", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("mars_token"),
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Mint {
+                    recipient: HumanAddr::from("recipient"),
+                    amount: Uint128(3_500_000),
+                })
+                .unwrap(),
+            })],
+            res.messages
+        );
+
+        // mint by non owner -> Unauthorized
+        let msg = HandleMsg::MintMars {
+            recipient: HumanAddr::from("recipient"),
+            amount: Uint128(3_500_000),
+        };
+
+        let env = mock_env("someoneelse", &[]);
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
