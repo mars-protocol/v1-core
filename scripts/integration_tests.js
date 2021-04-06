@@ -24,18 +24,12 @@ async function main() {
   const lpContractAddress = await deploy(terra, wallet);
   const initialAssets = [
     {denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5"},
-    {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"},
-    {denom: "umnt", borrow_slope: "0.3", loan_to_value: "0.7"},
-    {denom: "ukrw", borrow_slope: "0.2", loan_to_value: "0.6"},
-    {denom: "usdr", borrow_slope: "0.6", loan_to_value: "0.5"},
+    {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"}
   ];
   await setup(terra, wallet, lpContractAddress, {initialAssets});
 
   await testReserveQuery(terra, lpContractAddress, "uusd")
   await testReserveQuery(terra, lpContractAddress, "uluna");
-  await testReserveQuery(terra, lpContractAddress, "umnt")
-  await testReserveQuery(terra, lpContractAddress, "ukrw");
-  await testReserveQuery(terra, lpContractAddress, "usdr");
 
   console.log("### Testing Config...")
   let configQueryMsg = {"config": {}};
@@ -53,7 +47,7 @@ async function main() {
   let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
   let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  let { ma_token_address } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+  let { ma_token_address, loan_to_value } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
   let balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
 
@@ -140,6 +134,8 @@ async function main() {
   });
 
   const failedBorrowResult = await terra.tx.broadcast(tx);
+  console.log('First Failed Borrow Message Sent:')
+  console.log(failedBorrowResult);
   if (!isTxError(failedBorrowResult) || !failedBorrowResult.raw_log.includes("address has no collateral deposited")) {
     throw new Error("Borrower has no collateral deposited. Should not be able to borrow.");
   }
@@ -159,6 +155,7 @@ async function main() {
   });
 
   const secondFailedBorrowResult = await terra.tx.broadcast(tx);
+  console.log('Second Failed Borrow Message Sent:')
   console.log(secondFailedBorrowResult);
   if (!isTxError(secondFailedBorrowResult) || !secondFailedBorrowResult.raw_log.includes("borrow amount exceeds maximum allowed given current collateral value")) {
     throw new Error("Borrower has insufficient collateral and should not be able to borrow.");
@@ -170,7 +167,6 @@ async function main() {
   // send smaller borrow that should succeed
   let { amount: uusd_to_luna_rate } = await terra.oracle.exchangeRate("uusd");
   let borrowerCollateral = depositAmount / uusd_to_luna_rate;
-  let loan_to_value = 0.8;
   borrowAmount = new Int(borrowerCollateral * loan_to_value) - 10_000;
   borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
   executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
