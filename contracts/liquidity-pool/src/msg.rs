@@ -79,6 +79,11 @@ pub struct ConfigResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ReserveResponse {
     pub ma_token_address: HumanAddr,
+    pub borrow_index: Decimal256,
+    pub liquidity_index: Decimal256,
+    pub borrow_rate: Decimal256,
+    pub liquidity_rate: Decimal256,
+    pub loan_to_value: Decimal256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
