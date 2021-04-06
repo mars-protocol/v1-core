@@ -236,7 +236,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            cw20_code_id: 11u64,
+            cw20_code_id: 11,
         };
         let env = mock_env("owner", &[]);
 
@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(
             vec![
                 CosmosMsg::Wasm(WasmMsg::Instantiate {
-                    code_id: 11u64,
+                    code_id: 11,
                     msg: to_binary(&cw20_token::msg::InitMsg {
                         name: "Mars token".to_string(),
                         symbol: "Mars".to_string(),
@@ -426,7 +426,7 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
-        let msg = InitMsg { cw20_code_id: 1u64 };
+        let msg = InitMsg { cw20_code_id: 1 };
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
 

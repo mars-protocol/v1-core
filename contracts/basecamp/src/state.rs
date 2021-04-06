@@ -7,12 +7,6 @@ use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
 
-// namespaces (for buckets)
-pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
-pub static DEBTS_NAMESPACE: &[u8] = b"debts";
-pub static USERS_NAMESPACE: &[u8] = b"users";
-pub static RESERVE_DENOMS_NAMESPACE: &[u8] = b"reserve_denoms";
-
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
