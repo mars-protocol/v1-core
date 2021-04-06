@@ -99,6 +99,7 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
             ReceiveMsg::Bond => handle_bond(deps, env, cw20_msg.sender, cw20_msg.amount),
+            ReceiveMsg::Unbond => handle_unbond(deps, env, cw20_msg.sender, cw20_msg.amount),
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
@@ -112,13 +113,13 @@ pub fn handle_bond<S: Storage, A: Api, Q: Querier>(
     staker: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    if amount == Uint128(0) {
-        return Err(StdError::generic_err("Bond amount must be greater than 0"));
-    }
-
     let config = config_state_read(&deps.storage).load()?;
     if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
         return Err(StdError::unauthorized());
+    }
+
+    if amount == Uint128(0) {
+        return Err(StdError::generic_err("Bond amount must be greater than 0"));
     }
 
     Ok(HandleResponse {
@@ -128,11 +129,53 @@ pub fn handle_bond<S: Storage, A: Api, Q: Querier>(
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: staker.clone(),
                 amount: amount,
-            })
-            .unwrap(),
+            })?,
         })],
         log: vec![
             log("action", "bond"),
+            log("user", staker),
+            log("bond_amount", amount),
+        ],
+        data: None,
+    })
+}
+
+/// Burn xMars tokens and send corresponding Mars
+pub fn handle_unbond<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    staker: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+    if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
+        return Err(StdError::unauthorized());
+    }
+
+    if amount == Uint128(0) {
+        return Err(StdError::generic_err(
+            "Unbond amount must be greater than 0",
+        ));
+    }
+
+    Ok(HandleResponse {
+        messages: vec![
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: deps.api.human_address(&config.xmars_token_address)?,
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Burn { amount: amount })?,
+            }),
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: deps.api.human_address(&config.mars_token_address)?,
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: staker.clone(),
+                    amount: amount,
+                })?,
+            }),
+        ],
+        log: vec![
+            log("action", "unbond"),
             log("user", staker),
             log("bond_amount", amount),
         ],
@@ -411,7 +454,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bond() {
+    fn test_staking() {
         let mut deps = th_setup(&[]);
 
         // bond Mars -> should receive xMars
@@ -448,6 +491,57 @@ mod tests {
         // bond other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Bond).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: Uint128(2_000_000),
+        });
+
+        let env = mock_env("other_token", &[]);
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // unbond Mars -> should burn xMars and receive Mars back
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Unbond).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: Uint128(1_000_000),
+        });
+
+        let env = mock_env("xmars_token", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("xmars_token"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Burn {
+                        amount: Uint128(1_000_000),
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("mars_token"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Transfer {
+                        recipient: HumanAddr::from("staker"),
+                        amount: Uint128(1_000_000),
+                    })
+                    .unwrap(),
+                }),
+            ],
+            res.messages
+        );
+        assert_eq!(
+            vec![
+                log("action", "unbond"),
+                log("user", HumanAddr::from("staker")),
+                log("bond_amount", 1_000_000),
+            ],
+            res.log
+        );
+
+        // unbond other token -> Unauthorized
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Unbond).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });

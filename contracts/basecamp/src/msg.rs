@@ -25,8 +25,10 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    /// Stake Mars and get xMars in return
+    /// Stake Mars and get minted xMars in return
     Bond,
+    /// Unstake Mars and burn xMars
+    Unbond,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
