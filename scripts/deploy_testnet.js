@@ -9,6 +9,9 @@ const terra = new LCDClient({
 const wallet = await recover(terra, process.env.TEST_MAIN);
 let lpContractAddress = await deploy(terra, wallet);
 
-const initialAssets = ["uluna", "uusd"];
+const initialAssets = [
+    { denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5" },
+    { denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8" }
+];
 
 await setup(terra, wallet, lpContractAddress, { initialAssets });

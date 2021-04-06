@@ -622,8 +622,15 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
     denom: String,
 ) -> StdResult<ReserveResponse> {
     let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
-    let ma_token_address = deps.api.human_address(&reserve.ma_token_address)?;
-    Ok(ReserveResponse { ma_token_address })
+
+    Ok(ReserveResponse {
+        ma_token_address: deps.api.human_address(&reserve.ma_token_address)?,
+        borrow_index: reserve.borrow_index,
+        liquidity_index: reserve.liquidity_index,
+        borrow_rate: reserve.borrow_rate,
+        liquidity_rate: reserve.liquidity_rate,
+        loan_to_value: reserve.loan_to_value,
+    })
 }
 
 fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
