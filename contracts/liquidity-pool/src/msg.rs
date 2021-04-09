@@ -83,7 +83,10 @@ pub struct ReserveResponse {
     pub liquidity_index: Decimal256,
     pub borrow_rate: Decimal256,
     pub liquidity_rate: Decimal256,
+    pub borrow_slope: Decimal256,
     pub loan_to_value: Decimal256,
+    pub interests_last_updated: u64,
+    pub debt_total_scaled: Uint256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

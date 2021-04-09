@@ -16,6 +16,9 @@ export async function performTransaction(terra, wallet, msg) {
     fee: new StdFee(30000000, [
       new Coin('uluna', 4500000),
       new Coin('uusd', 4500000),
+      new Coin('umnt', 4000000),
+      new Coin('ukrw', 4000000),
+      new Coin('usdr', 4000000)
     ]),
   });
   const result = await terra.tx.broadcast(tx);

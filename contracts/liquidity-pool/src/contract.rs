@@ -629,7 +629,10 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
         liquidity_index: reserve.liquidity_index,
         borrow_rate: reserve.borrow_rate,
         liquidity_rate: reserve.liquidity_rate,
+        borrow_slope: reserve.borrow_slope,
         loan_to_value: reserve.loan_to_value,
+        interests_last_updated: reserve.interests_last_updated,
+        debt_total_scaled: reserve.debt_total_scaled,
     })
 }
 

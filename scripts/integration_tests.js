@@ -6,6 +6,84 @@ function toEncodedBinary(object) {
   return Buffer.from(JSON.stringify(object)).toString('base64');
 }
 
+function assert_in_delta(value, target, deviation) {
+  return Math.abs(value - target) < deviation
+}
+
+function round(num, dec) {
+  let multiplicator = Math.pow(10, dec);
+  num = parseFloat((num * multiplicator).toFixed(11));
+  let test = (Math.round(num) / multiplicator);
+  return +(test.toFixed(dec));
+}
+
+async function getExpectedIndicesAndRates(
+  reserve,
+  blockTime,
+  initialLiquidity,
+  moreDebt,
+  lessDebt,
+  lessLiquidity
+) {
+  const SECONDS_PER_YEAR = 31556952;
+
+  let secondsElapsed = blockTime - (1000 * reserve.interests_last_updated); // time conversion
+  console.log(secondsElapsed);
+  // market indices
+  let expectedAccumulatedLiquidityInterest = 1 + (reserve.liquidity_rate * secondsElapsed / SECONDS_PER_YEAR);
+  let expectedLiquidityIndex = round(reserve.liquidity_index * expectedAccumulatedLiquidityInterest, 18);
+
+  let expectedAccumulatedBorrowInterest = 1 + (reserve.borrow_rate * secondsElapsed / SECONDS_PER_YEAR);
+  let expectedBorrowIndex = round(reserve.borrow_index * expectedAccumulatedBorrowInterest, 18);
+
+  // When borrowing, new computed index is used for scaled amount
+  let moreDebtScaled = moreDebt / expectedBorrowIndex;
+  // When repaying, new computed index is used for scaled amount
+  let lessDebtScaled = lessDebt / expectedBorrowIndex;
+  let newDebtTotal = 0;
+  // NOTE: Don't panic here so that the total repay of debt can be simulated
+  // when less debt is greater than outstanding debt
+  // TODO: Maybe split index and interest rate calculations and take the needed inputs for each
+  if ((Number(reserve.debt_total_scaled) + moreDebtScaled) > lessDebtScaled) {
+    newDebtTotal = Number(reserve.debt_total_scaled) + moreDebtScaled - lessDebtScaled;
+  }
+  let decDebtTotal = newDebtTotal * expectedBorrowIndex;
+  let decLiquidityTotal = initialLiquidity - lessLiquidity;
+  let totalLiquidity = decLiquidityTotal + decDebtTotal;
+  let expectedUtilizationRate = totalLiquidity !== 0 ? decDebtTotal / totalLiquidity: 0;
+  console.log(expectedUtilizationRate);
+
+  // interest rates
+  let expectedBorrowRate = round(expectedUtilizationRate * reserve.borrow_slope, 18);
+  let expectedLiquidityRate = round(expectedBorrowRate * expectedUtilizationRate, 18);
+
+  return {expectedLiquidityIndex, expectedBorrowIndex, expectedLiquidityRate, expectedBorrowRate}
+}
+
+function getRealRates(txResult) {
+  let {from_contract} = txResult.logs[0].eventsByType;
+  let liquidityRate = Number(from_contract.liquidity_rate[0]);
+  let borrowRate = Number(from_contract.borrow_rate[0]);
+  let liquidityIndex = Number(from_contract.liquidity_index[0]);
+  let borrowIndex = Number(from_contract.borrow_index[0]);
+  return {liquidityRate, borrowRate, liquidityIndex, borrowIndex}
+}
+
+function assertEqualInterestRates(realRates, expectedRates) {
+  if (expectedRates.expectedLiquidityIndex !== realRates.liquidityIndex) {
+    throw new Error(`Expected liquidity index to be ${expectedRates.expectedLiquidityIndex}, got ${realRates.liquidityIndex}`);
+  }
+  if (expectedRates.expectedBorrowIndex !== realRates.borrowIndex) {
+    throw new Error(`Expected borrow index to be ${expectedRates.expectedBorrowIndex}, got ${realRates.borrowIndex}`);
+  }
+  if (expectedRates.expectedLiquidityRate !== realRates.liquidityRate) {
+    throw new Error(`Expected liquidity rate to be ${expectedRates.expectedLiquidityRate}, got ${realRates.liquidityRate}`);
+  }
+  if (expectedRates.expectedBorrowRate !== realRates.borrowRate) {
+    throw new Error(`Expected borrow rate to be ${expectedRates.expectedBorrowRate}, got ${realRates.borrowRate}`);
+  }
+}
+
 async function testReserveQuery(terra, address, denom) {
   console.log("### Testing Reserve...")
   let reserveQueryMsg = {"reserve": {"denom": denom}};
@@ -16,6 +94,17 @@ async function testReserveQuery(terra, address, denom) {
   }
 }
 
+async function depositAssets(terra, wallet, lpContractAddress, deposits) {
+  for (let deposit of deposits) {
+    let depositMsg = {"deposit_native": {"denom": deposit.denom}};
+    let depositAmount = deposit.amount;
+    let coins = new Coin(deposit.denom, depositAmount);
+    let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
+
+    await performTransaction(terra, wallet, executeDepositMsg);
+  }
+}
+
 
 async function main() {
   const terra = new LocalTerra();
@@ -23,8 +112,11 @@ async function main() {
 
   const lpContractAddress = await deploy(terra, wallet);
   const initialAssets = [
-    {denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5"},
-    {denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8"}
+    {denom: "uluna", borrow_slope: "4", loan_to_value: "0.5"},
+    {denom: "uusd", borrow_slope: "5", loan_to_value: "0.8"},
+    {denom: "umnt", borrow_slope: "5", loan_to_value: "0.7"},
+    {denom: "ukrw", borrow_slope: "2", loan_to_value: "0.6"},
+    {denom: "usdr", borrow_slope: "6", loan_to_value: "0.5"},
   ];
   await setup(terra, wallet, lpContractAddress, {initialAssets});
 
@@ -44,12 +136,15 @@ async function main() {
 
 
   console.log("### Testing Deposit...");
+  let initialLiquidity = 0;
   let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
   let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  let { ma_token_address, loan_to_value } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+  // let { ma_token_address, loan_to_value } = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+  let lunaReserve = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+  console.log(lunaReserve);
   let balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
-  const { balance: depositContractStartingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
+  const { balance: depositContractStartingBalance } = await queryContract(terra, lunaReserve.ma_token_address, balanceQueryMsg);
 
   let depositMsg = {"deposit_native": {"denom": "uluna"}};
   let depositAmount = 10_000_000;
@@ -60,7 +155,19 @@ async function main() {
   console.log("Deposit Message Sent: ");
   console.log(executeDepositMsg);
 
-  const { balance: depositContractEndingBalance } = await queryContract(terra, ma_token_address, balanceQueryMsg);
+  let {timestamp} = await terra.tx.txInfo(depositTxResult.txhash);
+  let blockTime = new Date(timestamp).valueOf()
+
+  let realRates = getRealRates(depositTxResult);
+  let expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, 0, 0);
+
+  console.log(realRates);
+  console.log(expectedRates);
+  assertEqualInterestRates(realRates, expectedRates);
+
+  initialLiquidity += depositAmount;
+
+  const { balance: depositContractEndingBalance } = await queryContract(terra, lunaReserve.ma_token_address, balanceQueryMsg);
   const depositContractDiff = depositContractEndingBalance - depositContractStartingBalance;
 
   if (depositContractDiff !== depositAmount) {
@@ -84,7 +191,9 @@ async function main() {
   let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} = await terra.bank.balance(wallet.key.accAddress);
 
   const senderMaLunaBalanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
-  let { balance: redeemerStartingMaLunaBalance} = await queryContract(terra, ma_token_address, senderMaLunaBalanceQueryMsg);
+  let { balance: redeemerStartingMaLunaBalance} = await queryContract(terra, lunaReserve.ma_token_address, senderMaLunaBalanceQueryMsg);
+
+  lunaReserve = await queryContract(terra, lpContractAddress, reserveQueryMsg);
 
   const redeemAmount = 5_000_000;
   const executeMsg = {
@@ -95,7 +204,7 @@ async function main() {
     }
   };
 
-  const redeemSendMsg = new MsgExecuteContract(wallet.key.accAddress, ma_token_address, executeMsg);
+  const redeemSendMsg = new MsgExecuteContract(wallet.key.accAddress, lunaReserve.ma_token_address, executeMsg);
   let redeemTxResult = await performTransaction(terra, wallet, redeemSendMsg);
 
   console.log("Redeem Message Sent:");
@@ -104,7 +213,18 @@ async function main() {
   let redeemTxInfo = await terra.tx.txInfo(redeemTxResult.txhash);
   const redeemTxFee = Number(redeemTxInfo.tx.fee.amount._coins.uluna.amount);
 
-  let { balance: redeemerEndingMaLunaBalance} = await queryContract(terra, ma_token_address, senderMaLunaBalanceQueryMsg);
+  blockTime = new Date(redeemTxInfo.timestamp).valueOf()
+
+  realRates = getRealRates(depositTxResult);
+  expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, 0, redeemAmount);
+
+  console.log(realRates);
+  console.log(expectedRates);
+  assertEqualInterestRates(realRates, expectedRates);
+
+  initialLiquidity -= redeemAmount;
+
+  let { balance: redeemerEndingMaLunaBalance} = await queryContract(terra, lunaReserve.ma_token_address, senderMaLunaBalanceQueryMsg);
   const maLunaBalanceDiff = redeemerStartingMaLunaBalance - redeemerEndingMaLunaBalance;
 
   if (maLunaBalanceDiff !== redeemAmount) {
@@ -140,11 +260,14 @@ async function main() {
     throw new Error("Borrower has no collateral deposited. Should not be able to borrow.");
   }
 
-  depositAmount = 80_000_000;
+  depositAmount = 8_000_000;
   coins = new Coin("uusd", depositAmount);
   depositMsg = {"deposit_native": {"denom": "uusd"}}
   executeDepositMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, depositMsg, [coins]);
   await performTransaction(terra, borrower, executeDepositMsg);
+
+  initialLiquidity += depositAmount;
+  console.log(initialLiquidity + " initial liquidity");
 
   // borrow again, still with insufficient collateral deposited
   tx = await borrower.createAndSignTx({
@@ -164,10 +287,12 @@ async function main() {
   let {_coins: {uluna: {amount: borrowerStartingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
   const {_coins: {uluna: {amount: borrowContractStartingBalance}}}  = await terra.bank.balance(lpContractAddress);
 
+  lunaReserve = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+
   // send smaller borrow that should succeed
   let { amount: uusd_to_luna_rate } = await terra.oracle.exchangeRate("uusd");
   let borrowerCollateral = depositAmount / uusd_to_luna_rate;
-  borrowAmount = new Int(borrowerCollateral * loan_to_value) - 10_000;
+  borrowAmount = new Int(borrowerCollateral * Number(lunaReserve.loan_to_value) - 10_000);
   borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
   executeBorrowMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, borrowMsg);
   const borrowTxResult = await performTransaction(terra, borrower, executeBorrowMsg);
@@ -177,6 +302,16 @@ async function main() {
 
   let borrowTxInfo = await terra.tx.txInfo(borrowTxResult.txhash);
   const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins.uluna.amount);
+
+  console.log(lunaReserve);
+  blockTime = new Date(borrowTxInfo.timestamp).valueOf()
+
+  realRates = getRealRates(borrowTxResult);
+  expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, borrowAmount, 0, borrowAmount);
+
+  console.log(realRates);
+  console.log(expectedRates);
+  assertEqualInterestRates(realRates, expectedRates);
 
   let {_coins: {uluna: {amount: borrowerEndingLunaBalance}}} = await terra.bank.balance(borrower.key.accAddress);
 
@@ -189,7 +324,7 @@ async function main() {
   const {_coins: {uluna: {amount: borrowContractEndingBalance}}}  = await terra.bank.balance(lpContractAddress);
   const borrowContractDiff = borrowContractStartingBalance - borrowContractEndingBalance;
 
-  if (borrowContractDiff !== borrowAmount) {
+  if (borrowContractDiff !== Number(borrowAmount)) {
     throw new Error(`[Borrow]: expected luna balance to decrease by ${borrowAmount} for address \
     ${lpContractAddress}, got ${borrowContractDiff}`);
   }
@@ -201,7 +336,7 @@ async function main() {
 
   const {debts: debtBeforeRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
   for (let debt of debtBeforeRepay) {
-    if (debt.denom === "uluna" && Number(debt.amount) !== borrowAmount) {
+    if (debt.denom === "uluna" && Number(debt.amount) !== Number(borrowAmount)) {
       throw new Error(`[Debt]: expected repayer's uluna debt to be ${borrowAmount} before payment, got ${debt.amount}`);
     }
   }
@@ -217,6 +352,15 @@ async function main() {
 
   let repayTxInfo = await terra.tx.txInfo(repayTxResult.txhash);
   const repayTxFee = Number(repayTxInfo.tx.fee.amount._coins.uluna.amount);
+
+  blockTime = new Date(repayTxInfo.timestamp).valueOf()
+
+  realRates = getRealRates(repayTxResult);
+  expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, repayAmount, repayAmount);
+
+  console.log(realRates);
+  console.log(expectedRates);
+  assertEqualInterestRates(realRates, expectedRates);
 
   let {_coins: {uluna: {amount: repayerEndingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
   const partialRepayDiff = repayerStartingLunaBalance - repayerEndingLunaBalance;
@@ -256,7 +400,7 @@ async function main() {
     }
   }
 
-  
+
   console.log("### Testing Collateral Check...");
   wallet = terra.wallets.test3;
   let deposits = [
@@ -304,16 +448,6 @@ async function main() {
 
   console.log("Borrow Message Sent: ");
   console.log(executeBorrowMsg);
-}
-
-async function depositAssets(terra, wallet, lpContractAddress, deposits) {
-  for (let deposit of deposits) {
-    let depositMsg = {"deposit_native": {"denom": deposit.denom}};
-    let depositAmount = deposit.amount;
-    let coins = new Coin(deposit.denom, depositAmount);
-    let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
-    await performTransaction(terra, wallet, executeDepositMsg);
-  }
 }
 
 main().catch(err => console.log(err));
