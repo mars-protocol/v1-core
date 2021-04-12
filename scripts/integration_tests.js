@@ -266,9 +266,6 @@ async function main() {
   executeDepositMsg = new MsgExecuteContract(borrower.key.accAddress, lpContractAddress, depositMsg, [coins]);
   await performTransaction(terra, borrower, executeDepositMsg);
 
-  initialLiquidity += depositAmount;
-  console.log(initialLiquidity + " initial liquidity");
-
   // borrow again, still with insufficient collateral deposited
   tx = await borrower.createAndSignTx({
     msgs: [executeBorrowMsg],
@@ -291,6 +288,8 @@ async function main() {
 
   // send smaller borrow that should succeed
   let { amount: uusd_to_luna_rate } = await terra.oracle.exchangeRate("uusd");
+  initialLiquidity += depositAmount / uusd_to_luna_rate;
+  console.log(initialLiquidity + " initial liquidity");
   let borrowerCollateral = depositAmount / uusd_to_luna_rate;
   borrowAmount = new Int(borrowerCollateral * Number(lunaReserve.loan_to_value) - 10_000);
   borrowMsg = {"borrow_native": {"denom": "uluna", "amount": borrowAmount.toString()}};
