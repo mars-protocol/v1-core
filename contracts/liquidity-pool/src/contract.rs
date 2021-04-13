@@ -2,11 +2,12 @@ use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
     HandleResponse, HumanAddr, InitResponse, LogAttribute, MigrateResponse, MigrateResult, Order,
-    Querier, QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
+    Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 
-use cw20::{BalanceResponse, Cw20HandleMsg, Cw20QueryMsg, Cw20ReceiveMsg, MinterResponse};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
+use mars::helpers::cw20_get_balance;
 
 use crate::msg::{
     ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
@@ -373,16 +374,13 @@ pub fn borrow_native<S: Storage, A: Api, Q: Querier>(
 
             if user_is_using_as_collateral {
                 // query asset balance (ma_token contract gives back a scaled value)
-                let asset_balance: BalanceResponse =
-                    deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                        contract_addr: deps.api.human_address(&asset_reserve.ma_token_address)?,
-                        msg: to_binary(&Cw20QueryMsg::Balance {
-                            address: deps.api.human_address(&borrower_addr)?,
-                        })?,
-                    }))?;
+                let asset_balance = cw20_get_balance(
+                    deps,
+                    deps.api.human_address(&asset_reserve.ma_token_address)?,
+                    deps.api.human_address(&borrower_addr)?,
+                )?;
 
-                let collateral =
-                    Uint256::from(asset_balance.balance) * asset_reserve.liquidity_index;
+                let collateral = Uint256::from(asset_balance) * asset_reserve.liquidity_index;
                 max_borrow = Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value;
             }
 
@@ -827,12 +825,12 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mock_querier::{mock_dependencies, WasmMockQuerier};
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{
         coin, from_binary, BlockInfo, ContractInfo, Decimal, Env, Extern, MessageInfo,
     };
+    use mars::mock_querier::{mock_dependencies, WasmMockQuerier};
 
     #[test]
     fn test_proper_initialization() {

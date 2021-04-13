@@ -4,8 +4,9 @@ use cosmwasm_std::{
     StdResult, Storage, Uint128, WasmMsg,
 };
 
-use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, Cw20QueryMsg, MinterResponse};
 use mars::cw20_token;
+use mars::helpers::{cw20_get_total_supply, cw20_get_balance};
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{config_state, config_state_read, Config};
@@ -98,29 +99,51 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
-            ReceiveMsg::Bond => handle_bond(deps, env, cw20_msg.sender, cw20_msg.amount),
-            ReceiveMsg::Unbond => handle_unbond(deps, env, cw20_msg.sender, cw20_msg.amount),
+            ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
+            ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
     }
 }
 
-/// Mint xMars tokens to bonder
-pub fn handle_bond<S: Storage, A: Api, Q: Querier>(
+/// Mint xMars tokens to staker
+pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     staker: HumanAddr,
-    amount: Uint128,
+    stake_amount: Uint128,
 ) -> StdResult<HandleResponse> {
+    // check bond is valid
     let config = config_state_read(&deps.storage).load()?;
+    // Has to send Mars tokens
     if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
         return Err(StdError::unauthorized());
     }
-
-    if amount == Uint128(0) {
+    if stake_amount == Uint128(0) {
         return Err(StdError::generic_err("Bond amount must be greater than 0"));
     }
+
+    // get total mars in contract before the stake transaction
+    let total_mars_in_basecamp =
+        cw20_get_balance(
+            deps,
+            deps.api.human_address(&config.mars_token_address)?,
+            deps.api.human_address(&env.contract.address)?
+        )? - stake_amount;
+
+    let total_xmars_supply =
+        cw20_get_total_supply(
+           deps,
+           deps.api.human_address(&config.xmars_token_address)?,
+        )?;
+
+    let mint_amount = 
+        if total_mars_in_basecamp == 0 || total_xmars_supply == 0 {
+            stake_amount;
+        } else {
+            stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp);
+        }
 
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -128,56 +151,74 @@ pub fn handle_bond<S: Storage, A: Api, Q: Querier>(
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: staker.clone(),
-                amount: amount,
+                amount: mint_amount,
             })?,
         })],
         log: vec![
-            log("action", "bond"),
+            log("action", "stake"),
             log("user", staker),
-            log("bond_amount", amount),
+            log("mars_staked", stake_amount),
+            log("xmars_minted", mint_amount),
         ],
         data: None,
     })
 }
 
 /// Burn xMars tokens and send corresponding Mars
-pub fn handle_unbond<S: Storage, A: Api, Q: Querier>(
+pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     staker: HumanAddr,
-    amount: Uint128,
+    burn_amount: Uint128,
 ) -> StdResult<HandleResponse> {
+    // check unbond is valid
     let config = config_state_read(&deps.storage).load()?;
     if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
         return Err(StdError::unauthorized());
     }
-
-    if amount == Uint128(0) {
+    if burn_amount == Uint128(0) {
         return Err(StdError::generic_err(
             "Unbond amount must be greater than 0",
         ));
     }
+    // TODO: countdown
+    
+    let total_mars_in_basecamp =
+        cw20_get_balance(
+            deps,
+            deps.api.human_address(&config.mars_token_address)?,
+            deps.api.human_address(&env.contract.address)?
+        )?;
+
+    let total_xmars_supply =
+        cw20_get_total_supply(
+           deps,
+           deps.api.human_address(&config.xmars_token_address)?,
+        )?;
+
+    let unstake_amount = burn_amount.multiply_ratio(total_mars_in_basecamp, total_xmars_supply); 
 
     Ok(HandleResponse {
         messages: vec![
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: deps.api.human_address(&config.xmars_token_address)?,
                 send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Burn { amount: amount })?,
+                msg: to_binary(&Cw20HandleMsg::Burn { amount: burn_amount })?,
             }),
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: deps.api.human_address(&config.mars_token_address)?,
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Transfer {
                     recipient: staker.clone(),
-                    amount: amount,
+                    amount: unstake_amount,
                 })?,
             }),
         ],
         log: vec![
             log("action", "unbond"),
             log("user", staker),
-            log("bond_amount", amount),
+            log("mars_unstaked", unstake_amount),
+            log("xmars_burned", burn_amount),
         ],
         data: None,
     })
@@ -304,6 +345,7 @@ mod tests {
         mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR,
     };
     use cosmwasm_std::{from_binary, Coin};
+    use mars::mock_querier;
 
     #[test]
     fn test_proper_initialization() {
@@ -455,6 +497,7 @@ mod tests {
 
     #[test]
     fn test_staking() {
+        // TODO: redo with the new logic and the queries
         let mut deps = th_setup(&[]);
 
         // bond Mars -> should receive xMars
