@@ -1,8 +1,18 @@
 import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
 import {deploy, performTransaction, queryContract, setup} from "./helpers.mjs";
 import BigNumber from "bignumber.js";
-// BigNumber.config({ DECIMAL_PLACES: 18 })
+BigNumber.config({ DECIMAL_PLACES: 18 })
 
+// CONSTANTS AND GLOBALS
+const TEST_NATIVE_DENOMS = ["uluna", "uusd", "ukrw"];
+
+function debug(string) {
+  if (Number(process.env.DEBUG) === 1) {
+    console.log(string);
+  }
+}
+
+// ASSERTS
 function assert(expression, message) {
   if (!expression) {
     throw new Error(message);
@@ -10,9 +20,21 @@ function assert(expression, message) {
 }
 
 function assertEqual(left, right, message = "Expected values to be equal") {
-  assert(left === right, `${message} got \n\t-left: ${left}, \n\t-right: ${right}`);
+  assert(left === right, `${message} got \n\t-left:  ${left}, \n\t-right: ${right}`);
 }
 
+function assertEqualBN(left, right, message = "Expected values to be equal") {
+  assert(left.eq(right), `${message} got \n\t-left:  ${left}, \n\t-right: ${right}`);
+}
+
+function assertEqualIndicesAndRates(expectedStateReserve, actualRates) {
+  assertEqualBN(expectedStateReserve.liquidityIndex, actualRates.liquidityIndex);
+  assertEqualBN(expectedStateReserve.borrowIndex, actualRates.borrowIndex);
+  assertEqualBN(expectedStateReserve.liquidityRate, actualRates.liquidityRate);
+  assertEqualBN(expectedStateReserve.borrowRate, actualRates.borrowRate);
+}
+
+// HELPERS
 function toEncodedBinary(object) {
   return Buffer.from(JSON.stringify(object)).toString('base64');
 }
@@ -21,111 +43,78 @@ function isValueInDelta(value, target, deviation) {
   return Math.abs(value - target) < deviation
 }
 
-// Round value to given number of decimals
-function round(num, dec) {
-  let multiplicator = Math.pow(10, dec);
-  num = parseFloat((num * multiplicator).toFixed(11));
-  let test = (Math.round(num) / multiplicator);
-  return +(test.toFixed(dec));
+function getTimestampInSecondsFromDateField(dateField) {
+  return (new Date(dateField).valueOf()) / 1000;
 }
 
-async function getExpectedIndicesAndRates(
-  reserve,
-  blockTime,
-  initialLiquidity,
-  moreDebt,
-  lessDebt,
-  lessLiquidity
-) {
-  const SECONDS_PER_YEAR = new BigNumber(31536000, 10);
-  blockTime = new BigNumber(blockTime, 10);
-  initialLiquidity = new BigNumber(initialLiquidity, 10);
-  moreDebt = new BigNumber(moreDebt, 10);
-  lessDebt = new BigNumber(lessDebt, 10);
-  lessLiquidity = new BigNumber(lessLiquidity, 10);
+// Expected State
+function updateExpectedAssetIndices(expectedState, asset, blockTime) {
+  let expectedStateReserve = expectedState.reserves[asset];
+  const SECONDS_PER_YEAR = BigNumber(31536000);
 
-  let interestsLastUpdated = new BigNumber(reserve.interests_last_updated, 10);
-  let liquidityRate = new BigNumber(reserve.liquidity_rate, 10);
-  let liquidityIndex = new BigNumber(reserve.liquidity_index, 10);
-  let borrowRate = new BigNumber(reserve.borrow_rate, 10);
-  let borrowIndex = new BigNumber(reserve.borrow_index, 10);
-  let debtTotalScaled = new BigNumber(reserve.debt_total_scaled, 10);
-  let borrowSlope = new BigNumber(reserve.borrow_slope, 10);
+  let secondsElapsed =
+    blockTime - expectedStateReserve.interestsLastUpdated;
 
-  console.log(reserve);
+  let expectedAccumulatedLiquidityInterest = 
+    expectedStateReserve.liquidityRate
+      .times(secondsElapsed)
+      .dividedBy(SECONDS_PER_YEAR)
+      .plus(1);
+  expectedStateReserve.liquidityIndex = 
+    expectedStateReserve.liquidityIndex.times(expectedAccumulatedLiquidityInterest);
 
-  console.log("debtTotalScaled: " + debtTotalScaled);
+  let expectedAccumulatedBorrowInterest = 
+    expectedStateReserve.borrowRate
+      .times(secondsElapsed)
+      .dividedBy(SECONDS_PER_YEAR)
+      .plus(1);
+  expectedStateReserve.borrowIndex = 
+    expectedStateReserve.borrowIndex.times(expectedAccumulatedBorrowInterest);
 
-  console.log("block time: " + blockTime);
-  console.log("interests last updated: " + interestsLastUpdated);
-  let secondsElapsed = blockTime.dividedBy(1000, 10).minus(interestsLastUpdated, 10); // time conversion
-  console.log("seconds elapsed: " + secondsElapsed.toFixed());
-  // market indices
-  let expectedAccumulatedLiquidityInterest = liquidityRate.times(secondsElapsed, 10).dividedBy(SECONDS_PER_YEAR, 10).plus(1, 10);
-  let expectedLiquidityIndex = liquidityIndex.times(expectedAccumulatedLiquidityInterest, 10);
-
-  let expectedAccumulatedBorrowInterest = borrowRate.times(secondsElapsed, 10).dividedBy(SECONDS_PER_YEAR, 10).plus(1, 10);
-  let expectedBorrowIndex = borrowIndex.times(expectedAccumulatedBorrowInterest, 10);
-
-  // When borrowing, new computed index is used for scaled amount
-  let moreDebtScaled = moreDebt.dividedBy(expectedBorrowIndex, 10);
-  // When repaying, new computed index is used for scaled amount
-  let lessDebtScaled = lessDebt.dividedBy(expectedBorrowIndex, 10);
-  let newDebtTotal = new BigNumber(0, 10);
-  // NOTE: Don't panic here so that the total repay of debt can be simulated
-  // when less debt is greater than outstanding debt
-  // TODO: Maybe split index and interest rate calculations and take the needed inputs for each
-  if (debtTotalScaled.plus(moreDebtScaled, 10) > lessDebtScaled) {
-    newDebtTotal = debtTotalScaled.plus(moreDebtScaled, 10).minus(lessDebtScaled, 10);
-    console.log("new debt total: " + newDebtTotal);
-  }
-  let decDebtTotal = newDebtTotal.times(expectedBorrowIndex, 10);
-  console.log("dec debt total: " + decDebtTotal);
-  let decLiquidityTotal = initialLiquidity.minus(lessLiquidity, 10);
-  let totalLiquidity = decLiquidityTotal.plus(decDebtTotal, 10);
-  console.log("total liquidity: " + totalLiquidity);
-  let expectedUtilizationRate = !totalLiquidity.isZero() ? decDebtTotal.dividedBy(totalLiquidity, 10) : new BigNumber(0, 10);
-  console.log("expected utilization rate: " + expectedUtilizationRate.toFixed());
-
-  // interest rates
-  let expectedBorrowRate = expectedUtilizationRate.times(borrowSlope, 10);
-  let expectedLiquidityRate = expectedBorrowRate.times(expectedUtilizationRate, 10);
-
-  return {
-    expectedLiquidityIndex: expectedLiquidityIndex.toFixed(),
-    expectedBorrowIndex: expectedBorrowIndex.toFixed(),
-    expectedLiquidityRate: expectedLiquidityRate.toFixed(),
-    expectedBorrowRate: expectedBorrowRate.toFixed(),
-  }
+  expectedState.interestsLastUpdated = blockTime;
 }
 
-function getRealRates(txResult) {
-  let {from_contract} = txResult.logs[0].eventsByType;
-  let liquidityRate = from_contract.liquidity_rate[0];
-  let borrowRate = from_contract.borrow_rate[0];
-  let liquidityIndex = from_contract.liquidity_index[0];
-  let borrowIndex = from_contract.borrow_index[0];
+function updateExpectedAssetRates(expectedState, asset) {
+  let expectedStateReserve = expectedState.reserves[asset];
+
+  let assetDebtTotal = 
+    expectedStateReserve.debtTotalScaled.times(expectedStateReserve.borrowIndex);
+  let assetLiquidityTotal = BigNumber(expectedState.contractBalances[asset]);
+  let assetLockedTotal = assetLiquidityTotal.plus(assetDebtTotal);
+
+  let expectedUtilizationRate =
+    assetLockedTotal.isZero() ? BigNumber(0) : assetDebtTotal.dividedBy(assetLockedTotal);
+
+  expectedStateReserve.borrowRate = expectedUtilizationRate.times(expectedStateReserve.borrowSlope);
+  expectedStateReserve.liquidityRate = 
+    expectedStateReserve.borrowRate.times(expectedUtilizationRate);
+}
+
+// QUERIES
+async function getAddressNativeBalances(terra, address) {
+  let ret = {};
+  let balanceQuery = 
+    await terra.bank.balance(address);
+
+  TEST_NATIVE_DENOMS.forEach((denom) => {
+    ret[denom] = Number(balanceQuery._coins[denom].amount);
+  });
+
+  return ret;
+}
+
+
+function getIndicesAndRatesFromTxResult(txResult) {
+  let fromContractEvent = txResult.logs[0].eventsByType.from_contract;
+
+  let liquidityRate = BigNumber(fromContractEvent.liquidity_rate[0]);
+  let borrowRate = BigNumber(fromContractEvent.borrow_rate[0]);
+  let liquidityIndex = BigNumber(fromContractEvent.liquidity_index[0]);
+  let borrowIndex = BigNumber(fromContractEvent.borrow_index[0]);
   return {liquidityRate, borrowRate, liquidityIndex, borrowIndex}
 }
 
-function assertEqualInterestRates(realRates, expectedRates) {
-  assertEqual(expectedRates.expectedLiquidityIndex, realRates.liquidityIndex, `Expected liquidity index to be ${expectedRates.expectedLiquidityIndex}, got ${realRates.liquidityIndex}`)
-  assertEqual(expectedRates.expectedBorrowIndex, realRates.borrowIndex, `Expected borrow index to be ${expectedRates.expectedBorrowIndex}, got ${realRates.borrowIndex}`);
-  assertEqual(expectedRates.expectedLiquidityRate, realRates.liquidityRate, `Expected liquidity rate to be ${expectedRates.expectedLiquidityRate}, got ${realRates.liquidityRate}`);
-  assertEqual(expectedRates.expectedBorrowRate, realRates.borrowRate, `Expected borrow rate to be ${expectedRates.expectedBorrowRate}, got ${realRates.borrowRate}`);
-}
-
-async function testReserveQuery(terra, address, denom) {
-  console.log("### Testing Reserve...")
-  let reserveQueryMsg = {"reserve": {"denom": denom}};
-  let reserveResult = await queryContract(terra, address, reserveQueryMsg);
-
-  assert(
-    reserveResult.hasOwnProperty("ma_token_address"),
-    `[Reserve]: Reserve Query for symbol ${denom} failed. Result has no property ma_token_address.`
-  )
-}
-
+// ACTIONS
 async function depositAssets(terra, wallet, lpContractAddress, deposits) {
   for (let deposit of deposits) {
     let depositMsg = {"deposit_native": {"denom": deposit.denom}};
@@ -137,66 +126,62 @@ async function depositAssets(terra, wallet, lpContractAddress, deposits) {
   }
 }
 
-async function testInitialDeposit(inputs) {
-  let {terra, wallet, initialLiquidity, lpContractAddress} = inputs;
-  let {_coins: {uluna: {amount: depositorStartingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
+// TESTS
+async function testDeposit(env, expectedState, depositUser, depositAsset, depositAmount) {
+  console.log(`### Testing Deposit | ${depositUser} -> ${depositAmount} ${depositAsset}`);
 
-  let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  let lunaReserve = await queryContract(terra, lpContractAddress, reserveQueryMsg);
-  console.log(lunaReserve);
-  let balanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
-  const { balance: depositContractStartingBalance } = await queryContract(terra, lunaReserve.ma_token_address, balanceQueryMsg);
+  let depositAddress = env.terra.wallets[depositUser].key.accAddress;
 
+  // Execute Deposit
   let depositMsg = {"deposit_native": {"denom": "uluna"}};
-  let depositAmount = 10_000_000;
   let coins = new Coin("uluna", depositAmount);
-  let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
-  let depositTxResult = await performTransaction(terra, wallet, executeDepositMsg);
+  let executeDepositMsg =
+    new MsgExecuteContract(depositAddress, env.lpContractAddress, depositMsg, [coins]);
+  let depositTxResult = await performTransaction(env.terra, env.ownerWallet, executeDepositMsg);
+  debug(executeDepositMsg);
+  debug(depositTxResult);
 
-  console.log("Deposit Message Sent: ");
-  console.log(executeDepositMsg);
+  let txInfo = await env.terra.tx.txInfo(depositTxResult.txhash);
 
-  let {timestamp} = await terra.tx.txInfo(depositTxResult.txhash);
-  let blockTime = new Date(timestamp).valueOf()
+  // Contract balance should go up by deposit amount
+  expectedState.contractBalances[depositAsset] += depositAmount;
+  let balanceQueryMsg = {"balance": {"address": depositAddress}};
+  const balanceQueryResult =
+    await queryContract(
+      env.terra,
+      expectedState.reserves[depositAsset].maTokenAddress,
+      balanceQueryMsg);
+  debug(balanceQueryMsg);
+  debug(balanceQueryResult);
+  assertEqual(expectedState.contractBalances[depositAsset], Number(balanceQueryResult.balance));
 
-  let realRates = getRealRates(depositTxResult);
-  let expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, 0, 0);
+  // Update and check indices and rates
+  let blockTime = getTimestampInSecondsFromDateField(txInfo.timestamp); 
+  updateExpectedAssetIndices(expectedState, depositAsset, blockTime);
+  updateExpectedAssetRates(expectedState, depositAsset);
 
-  console.log(realRates);
-  console.log(expectedRates);
-  assertEqualInterestRates(realRates, expectedRates);
+  let actualIndicesAndRates = getIndicesAndRatesFromTxResult(depositTxResult);
+  assertEqualIndicesAndRates(expectedState.reserves[depositAsset], actualIndicesAndRates);
 
-  initialLiquidity += depositAmount;
-
-  const { balance: depositContractEndingBalance } = await queryContract(terra, lunaReserve.ma_token_address, balanceQueryMsg);
-  const depositContractDiff = depositContractEndingBalance - depositContractStartingBalance;
-
-  if (depositContractDiff !== depositAmount) {
-    throw new Error(`[Deposit]: expected luna balance to increase by ${depositAmount} for address \
-    ${lpContractAddress}, got ${depositContractDiff}`);
-  }
-
-  let txInfo = await terra.tx.txInfo(depositTxResult.txhash);
+  // Depositor balance should go down by deposit amount + txfee
   const depositTxFee = Number(txInfo.tx.fee.amount._coins.uluna.amount);
-
-  let {_coins: {uluna: {amount: depositorEndingBalance}}} = await terra.bank.balance(wallet.key.accAddress);
-  let depositorBalanceDiff = depositorStartingBalance - depositorEndingBalance;
-
-  if (depositorBalanceDiff !== (depositAmount + depositTxFee)) {
-    throw new Error(`[Deposit]: expected depositor's balance to decrease by ${depositAmount + depositTxFee}, \
-    got ${depositorBalanceDiff}`);
-  }
-
-  return { initialLiquidity, depositAmount }
-
+  expectedState.userBalances[depositUser][depositAsset] -= (depositAmount + depositTxFee);
+  let actualEndingBalances = await getAddressNativeBalances(env.terra, depositAddress);
+  assertEqual(
+    expectedState.userBalances[depositUser][depositAsset],
+    actualEndingBalances[depositAsset]
+  );
 }
 
+/*
 async function testRedeem(inputs) {
   let {terra, wallet, lpContractAddress, initialLiquidity} = inputs;
-  let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} = await terra.bank.balance(wallet.key.accAddress);
+  let {_coins: {uluna: {amount: redeemerStartingLunaBalance}}} =
+    await terra.bank.balance(wallet.key.accAddress);
 
   let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  let lunaReserve = await queryContract(terra, lpContractAddress, reserveQueryMsg);
+  let lunaReserve =
+    await queryContract(terra, lpContractAddress, reserveQueryMsg);
 
   const senderMaLunaBalanceQueryMsg = {"balance": {"address": wallet.key.accAddress}};
   let { balance: redeemerStartingMaLunaBalance} = await queryContract(terra, lunaReserve.ma_token_address, senderMaLunaBalanceQueryMsg);
@@ -213,7 +198,6 @@ async function testRedeem(inputs) {
   const redeemSendMsg = new MsgExecuteContract(wallet.key.accAddress, lunaReserve.ma_token_address, executeMsg);
   let redeemTxResult = await performTransaction(terra, wallet, redeemSendMsg);
 
-  console.log("Redeem Message Sent:");
   console.log(redeemSendMsg);
 
   let redeemTxInfo = await terra.tx.txInfo(redeemTxResult.txhash);
@@ -221,7 +205,7 @@ async function testRedeem(inputs) {
 
   let blockTime = new Date(redeemTxInfo.timestamp).valueOf()
 
-  let realRates = getRealRates(redeemTxResult);
+  let realRates = getRealIndicesAndRates(redeemTxResult);
   let expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, 0, redeemAmount);
 
   console.log(realRates);
@@ -314,7 +298,7 @@ async function testBorrow(inputs) {
   console.log(lunaReserve);
   let blockTime = new Date(borrowTxInfo.timestamp).valueOf()
 
-  let realRates = getRealRates(borrowTxResult);
+  let realRates = getRealIndicesAndRates(borrowTxResult);
   let expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, borrowAmount, 0, borrowAmount);
 
   console.log(realRates);
@@ -343,8 +327,12 @@ async function testBorrow(inputs) {
 
 async function testRepay(inputs) {
   let {terra, lpContractAddress, repayer, initialLiquidity, borrowAmount} = inputs;
-  let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} = await terra.bank.balance(repayer.key.accAddress);
-  const {debts: debtBeforeRepay} = await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
+  let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} = 
+    await terra.bank.balance(repayer.key.accAddress);
+
+  const {debts: debtBeforeRepay} = 
+    await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
+
   console.log(debtBeforeRepay);
   for (let debt of debtBeforeRepay) {
     if (debt.denom === "uluna" && Number(debt.amount) !== Number(borrowAmount)) {
@@ -369,8 +357,16 @@ async function testRepay(inputs) {
 
   let blockTime = new Date(repayTxInfo.timestamp).valueOf()
 
-  let realRates = getRealRates(repayTxResult);
-  let expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, repayAmount, 0);
+  let realRates = getRealIndicesAndRates(repayTxResult);
+  let expectedRates = 
+    await getExpectedIndicesAndRates(
+      lunaReserve,
+      blockTime,
+      initialLiquidity,
+      0,
+      repayAmount,
+      0
+    );
 
   console.log("actual utilization rate: " + ((borrowAmount - repayAmount) / 5_000_000));
   console.log(realRates);
@@ -422,7 +418,7 @@ async function testRepay(inputs) {
 
   blockTime = new Date(overpayTxInfo.timestamp).valueOf()
 
-  realRates = getRealRates(overpayTxResult);
+  realRates = getRealIndicesAndRates(overpayTxResult);
   expectedRates = await getExpectedIndicesAndRates(lunaReserve, blockTime, initialLiquidity, 0, debtAfterRepay, 0);
 
   console.log(realRates);
@@ -478,46 +474,62 @@ async function testCollateralCheck(inputs) {
   console.log("Borrow Message Sent: ");
   console.log(executeBorrowMsg);
 }
+*/
 
+// MAIN
 async function main() {
-  const terra = new LocalTerra();
-  let wallet = terra.wallets.test1;
+  let terra = new LocalTerra();
+  let ownerWallet = terra.wallets.test1;
+  const lpContractAddress = await deploy(terra, ownerWallet);
 
-  const lpContractAddress = await deploy(terra, wallet);
+  let env = {
+    terra,
+    ownerWallet,
+    lpContractAddress,
+  };
+
   const initialAssets = [
     {denom: "uluna", borrow_slope: "4", loan_to_value: "0.5"},
     {denom: "uusd", borrow_slope: "5", loan_to_value: "0.8"},
-    {denom: "umnt", borrow_slope: "5", loan_to_value: "0.7"},
     {denom: "ukrw", borrow_slope: "2", loan_to_value: "0.6"},
-    {denom: "usdr", borrow_slope: "6", loan_to_value: "0.5"},
   ];
-  await setup(terra, wallet, lpContractAddress, {initialAssets});
 
-  await testReserveQuery(terra, lpContractAddress, "uusd")
-  await testReserveQuery(terra, lpContractAddress, "uluna");
+  await setup(env.terra, env.ownerWallet, lpContractAddress, {initialAssets});
 
-  console.log("### Testing Config...")
-  let configQueryMsg = {"config": {}};
-  let configResult = await queryContract(terra, lpContractAddress, configQueryMsg);
+  let test1Balances = 
+    await getAddressNativeBalances(env.terra, env.terra.wallets.test1.key.accAddress);
+  
+  let expectedStateReserves = {};
+  TEST_NATIVE_DENOMS.forEach(async (denom) => {
+    let reserveQueryMsg = {"reserve": {"denom": denom}};
+    let assetReserve = await queryContract(env.terra, env.lpContractAddress, reserveQueryMsg);
 
-  console.log("Config Query Sent:");
-  console.log(configQueryMsg);
+    expectedStateReserves[denom] = {
+      liquidityRate: BigNumber(0),
+      borrowRate: BigNumber(0),
+      liquidityIndex: BigNumber(1),
+      borrowIndex: BigNumber(1),
+      debtTotalScaled: BigNumber(0),
+      borrowSlope: BigNumber(assetReserve.borrow_slope),
+      interestsLastUpdated: assetReserve.interests_last_updated,
+      maTokenAddress: assetReserve.ma_token_address,
+    };
+  });
 
-  assert(
-    configResult.hasOwnProperty("ma_token_code_id"),
-    "[Config]: Config query failed. Result has no property ma_token_code_id."
-  )
-
-  console.log("### Testing Deposit...");
-  let depositInputs = {
-    terra,
-    wallet,
-    lpContractAddress,
-    initialLiquidity: 0,
+  let expectedState = {
+    contractBalances: {
+      uluna: 0,
+      uusd: 0,
+      ukrw: 0,
+    },
+    userBalances: {
+      test1: test1Balances, 
+    },
+    reserves: expectedStateReserves,
   }
-  let depositOutput = await testInitialDeposit(depositInputs);
+  await testDeposit(env, expectedState, "test1", "uluna", 10_000_000);
 
-
+  /*
   console.log("### Testing Redeem...");
   let { initialLiquidity: initialLiquidityAfterDeposit } = depositOutput;
   let redeemInputs = {
@@ -556,6 +568,8 @@ async function main() {
     lpContractAddress,
   }
   await testCollateralCheck(collateralCheckInputs);
+  */
+  console.log("OK");
 }
 
 main().catch(err => console.log(err));
