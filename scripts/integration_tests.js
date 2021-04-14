@@ -4,7 +4,11 @@ import BigNumber from "bignumber.js";
 BigNumber.config({ DECIMAL_PLACES: 18 })
 
 // CONSTANTS AND GLOBALS
-const TEST_NATIVE_DENOMS = ["uluna", "uusd", "ukrw"];
+const INITIAL_ASSETS = [
+  {denom: "uluna", borrow_slope: "4", loan_to_value: "0.5"},
+  {denom: "uusd", borrow_slope: "5", loan_to_value: "0.8"},
+  {denom: "ukrw", borrow_slope: "2", loan_to_value: "0.6"},
+];
 
 function debug(string) {
   if (Number(process.env.DEBUG) === 1) {
@@ -55,20 +59,20 @@ function updateExpectedAssetIndices(expectedState, asset, blockTime) {
   let secondsElapsed =
     blockTime - expectedStateReserve.interestsLastUpdated;
 
-  let expectedAccumulatedLiquidityInterest = 
+  let expectedAccumulatedLiquidityInterest =
     expectedStateReserve.liquidityRate
       .times(secondsElapsed)
       .dividedBy(SECONDS_PER_YEAR)
       .plus(1);
-  expectedStateReserve.liquidityIndex = 
+  expectedStateReserve.liquidityIndex =
     expectedStateReserve.liquidityIndex.times(expectedAccumulatedLiquidityInterest);
 
-  let expectedAccumulatedBorrowInterest = 
+  let expectedAccumulatedBorrowInterest =
     expectedStateReserve.borrowRate
       .times(secondsElapsed)
       .dividedBy(SECONDS_PER_YEAR)
       .plus(1);
-  expectedStateReserve.borrowIndex = 
+  expectedStateReserve.borrowIndex =
     expectedStateReserve.borrowIndex.times(expectedAccumulatedBorrowInterest);
 
   expectedState.interestsLastUpdated = blockTime;
@@ -77,7 +81,7 @@ function updateExpectedAssetIndices(expectedState, asset, blockTime) {
 function updateExpectedAssetRates(expectedState, asset) {
   let expectedStateReserve = expectedState.reserves[asset];
 
-  let assetDebtTotal = 
+  let assetDebtTotal =
     expectedStateReserve.debtTotalScaled.times(expectedStateReserve.borrowIndex);
   let assetLiquidityTotal = BigNumber(expectedState.contractBalances[asset]);
   let assetLockedTotal = assetLiquidityTotal.plus(assetDebtTotal);
@@ -86,17 +90,17 @@ function updateExpectedAssetRates(expectedState, asset) {
     assetLockedTotal.isZero() ? BigNumber(0) : assetDebtTotal.dividedBy(assetLockedTotal);
 
   expectedStateReserve.borrowRate = expectedUtilizationRate.times(expectedStateReserve.borrowSlope);
-  expectedStateReserve.liquidityRate = 
+  expectedStateReserve.liquidityRate =
     expectedStateReserve.borrowRate.times(expectedUtilizationRate);
 }
 
 // QUERIES
 async function getAddressNativeBalances(terra, address) {
   let ret = {};
-  let balanceQuery = 
+  let balanceQuery =
     await terra.bank.balance(address);
 
-  TEST_NATIVE_DENOMS.forEach((denom) => {
+  INITIAL_ASSETS.map(asset => asset.denom).forEach((denom) => {
     ret[denom] = Number(balanceQuery._coins[denom].amount);
   });
 
@@ -156,7 +160,7 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
   assertEqual(expectedState.contractBalances[depositAsset], Number(balanceQueryResult.balance));
 
   // Update and check indices and rates
-  let blockTime = getTimestampInSecondsFromDateField(txInfo.timestamp); 
+  let blockTime = getTimestampInSecondsFromDateField(txInfo.timestamp);
   updateExpectedAssetIndices(expectedState, depositAsset, blockTime);
   updateExpectedAssetRates(expectedState, depositAsset);
 
@@ -327,10 +331,10 @@ async function testBorrow(inputs) {
 
 async function testRepay(inputs) {
   let {terra, lpContractAddress, repayer, initialLiquidity, borrowAmount} = inputs;
-  let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} = 
+  let {_coins: {uluna: {amount: repayerStartingLunaBalance}}} =
     await terra.bank.balance(repayer.key.accAddress);
 
-  const {debts: debtBeforeRepay} = 
+  const {debts: debtBeforeRepay} =
     await queryContract(terra, lpContractAddress, {"debt": {"address": repayer.key.accAddress}});
 
   console.log(debtBeforeRepay);
@@ -358,7 +362,7 @@ async function testRepay(inputs) {
   let blockTime = new Date(repayTxInfo.timestamp).valueOf()
 
   let realRates = getRealIndicesAndRates(repayTxResult);
-  let expectedRates = 
+  let expectedRates =
     await getExpectedIndicesAndRates(
       lunaReserve,
       blockTime,
@@ -488,19 +492,13 @@ async function main() {
     lpContractAddress,
   };
 
-  const initialAssets = [
-    {denom: "uluna", borrow_slope: "4", loan_to_value: "0.5"},
-    {denom: "uusd", borrow_slope: "5", loan_to_value: "0.8"},
-    {denom: "ukrw", borrow_slope: "2", loan_to_value: "0.6"},
-  ];
+  await setup(env.terra, env.ownerWallet, lpContractAddress, {INITIAL_ASSETS});
 
-  await setup(env.terra, env.ownerWallet, lpContractAddress, {initialAssets});
-
-  let test1Balances = 
+  let test1Balances =
     await getAddressNativeBalances(env.terra, env.terra.wallets.test1.key.accAddress);
-  
+
   let expectedStateReserves = {};
-  TEST_NATIVE_DENOMS.forEach(async (denom) => {
+  INITIAL_ASSETS.map(asset => asset.denom).forEach(async (denom) => {
     let reserveQueryMsg = {"reserve": {"denom": denom}};
     let assetReserve = await queryContract(env.terra, env.lpContractAddress, reserveQueryMsg);
 
@@ -523,7 +521,7 @@ async function main() {
       ukrw: 0,
     },
     userBalances: {
-      test1: test1Balances, 
+      test1: test1Balances,
     },
     reserves: expectedStateReserves,
   }
