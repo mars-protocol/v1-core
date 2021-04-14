@@ -8,5 +8,8 @@
     "@terra-money/terra.js": "^1.6.0",
     "bignumber.js": "^9.0.1",
     "dotenv": "^8.2.0"
+  },
+  "devDependencies": {
+    "eslint": "^7.24.0"
   }
 }
