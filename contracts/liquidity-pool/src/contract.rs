@@ -19,6 +19,7 @@ use crate::state::{
     users_state, users_state_read, Config, Debt, Reserve, ReserveDenoms, User,
 };
 use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
+use crate::asset::{Asset, AssetRaw, AssetInfo, AssetInfoRaw};
 
 // CONSTANTS
 
@@ -86,10 +87,10 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     cw20_msg.sender,
                     Uint256::from(cw20_msg.amount),
                 )
-            }
+            },
         }
     } else {
-        Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
+        Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
     }
 }
 
