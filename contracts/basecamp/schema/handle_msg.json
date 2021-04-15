@@ -15,6 +15,7 @@
       }
     },
     {
+      "description": "Callback to initialize Mars and xMars tokens",
       "type": "object",
       "required": [
         "init_token_callback"
@@ -30,6 +31,30 @@
               "type": "integer",
               "format": "uint8",
               "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Mint Mars tokens to receiver (Temp action for Testing)",
+      "type": "object",
+      "required": [
+        "mint_mars"
+      ],
+      "properties": {
+        "mint_mars": {
+          "type": "object",
+          "required": [
+            "amount",
+            "recipient"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "recipient": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
