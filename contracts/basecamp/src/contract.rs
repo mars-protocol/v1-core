@@ -4,7 +4,7 @@ use cosmwasm_std::{
     StdResult, Storage, Uint128, WasmMsg,
 };
 
-use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, Cw20QueryMsg, MinterResponse};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::{cw20_get_total_supply, cw20_get_balance};
 
@@ -121,16 +121,16 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
     if stake_amount == Uint128(0) {
-        return Err(StdError::generic_err("Bond amount must be greater than 0"));
+        return Err(StdError::generic_err("Stake amount must be greater than 0"));
     }
 
     // get total mars in contract before the stake transaction
     let total_mars_in_basecamp =
-        cw20_get_balance(
+        (cw20_get_balance(
             deps,
             deps.api.human_address(&config.mars_token_address)?,
-            deps.api.human_address(&env.contract.address)?
-        )? - stake_amount;
+            env.contract.address
+        )? - stake_amount)?;
 
     let total_xmars_supply =
         cw20_get_total_supply(
@@ -139,11 +139,11 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
         )?;
 
     let mint_amount = 
-        if total_mars_in_basecamp == 0 || total_xmars_supply == 0 {
-            stake_amount;
+        if total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
+            stake_amount
         } else {
-            stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp);
-        }
+            stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp)
+        };
 
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -178,7 +178,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     }
     if burn_amount == Uint128(0) {
         return Err(StdError::generic_err(
-            "Unbond amount must be greater than 0",
+            "Unstake amount must be greater than 0",
         ));
     }
     // TODO: countdown
@@ -187,7 +187,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
         cw20_get_balance(
             deps,
             deps.api.human_address(&config.mars_token_address)?,
-            deps.api.human_address(&env.contract.address)?
+            env.contract.address
         )?;
 
     let total_xmars_supply =
@@ -342,10 +342,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{
-        mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR,
+         mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR,
     };
     use cosmwasm_std::{from_binary, Coin};
-    use mars::mock_querier;
+    use mars::testing::{mock_dependencies, WasmMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -497,15 +497,25 @@ mod tests {
 
     #[test]
     fn test_staking() {
-        // TODO: redo with the new logic and the queries
         let mut deps = th_setup(&[]);
 
-        // bond Mars -> should receive xMars
+        // no Mars in pool
+        // bond X Mars -> should receive X xMars
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Bond).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("mars_token"), 
+            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_000_000))]
+        );
+
+        deps.querier.set_cw20_total_supply(
+            HumanAddr::from("xmars_token"), 
+            Uint128(0)
+        );
 
         let env = mock_env("mars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
@@ -533,7 +543,7 @@ mod tests {
 
         // bond other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Bond).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });
@@ -543,7 +553,7 @@ mod tests {
 
         // unbond Mars -> should burn xMars and receive Mars back
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unbond).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(1_000_000),
         });
@@ -584,7 +594,7 @@ mod tests {
 
         // unbond other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unbond).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });
@@ -630,7 +640,7 @@ mod tests {
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?

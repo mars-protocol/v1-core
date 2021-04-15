@@ -830,7 +830,7 @@ mod tests {
     use cosmwasm_std::{
         coin, from_binary, BlockInfo, ContractInfo, Decimal, Env, Extern, MessageInfo,
     };
-    use mars::mock_querier::{mock_dependencies, WasmMockQuerier};
+    use mars::testing::{mock_dependencies, WasmMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -1236,12 +1236,12 @@ mod tests {
         ]);
 
         let exchange_rates = [
-            (&String::from("borrowedcoin1"), &Decimal::one()),
-            (&String::from("borrowedcoin2"), &Decimal::one()),
-            (&String::from("depositedcoin"), &Decimal::one()),
+            (String::from("borrowedcoin1"), Decimal::one()),
+            (String::from("borrowedcoin2"), Decimal::one()),
+            (String::from("depositedcoin"), Decimal::one()),
         ];
         deps.querier
-            .with_exchange_rates(&[(&String::from("uusd"), &exchange_rates)]);
+            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
         let mock_reserve_1 = MockReserve {
             ma_token_address: "matoken1",
@@ -1313,10 +1313,10 @@ mod tests {
 
         // Set the querier to return a certain collateral balance
         let deposit_coin_address = HumanAddr::from("matoken3");
-        deps.querier.with_balances(&[(
-            &deposit_coin_address,
-            &[(&HumanAddr(String::from("borrower")), &Uint128(10000))],
-        )]);
+        deps.querier.set_cw20_balances(
+            deposit_coin_address,
+            &[(HumanAddr::from("borrower"), Uint128(10000))],
+        );
 
         // TODO: probably some variables (ie: borrow_amount, expected_params) that are repeated
         // in all calls could be enclosed in local scopes somehow)
@@ -1776,12 +1776,12 @@ mod tests {
         let exchange_rate_2 = Decimal::from_ratio(15u128, 4u128);
         let exchange_rate_3 = Decimal::one();
 
-        let exchange_rates = [
-            (&String::from("depositedcoin1"), &exchange_rate_1),
-            (&String::from("depositedcoin2"), &exchange_rate_2),
+        let exchange_rates = &[
+            (String::from("depositedcoin1"), exchange_rate_1),
+            (String::from("depositedcoin2"), exchange_rate_2),
         ];
         deps.querier
-            .with_exchange_rates(&[(&String::from("uusd"), &exchange_rates)]);
+            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
         let mock_reserve_1 = MockReserve {
             ma_token_address: "matoken1",
@@ -1856,11 +1856,15 @@ mod tests {
         let borrower_addr = HumanAddr(String::from("borrower"));
 
         // Set the querier to return a certain collateral balance
-        deps.querier.with_balances(&[
-            (&ma_token_address_1, &[(&borrower_addr, &balance_1)]),
-            (&ma_token_address_2, &[(&borrower_addr, &balance_2)]),
-            (&ma_token_address_3, &[(&borrower_addr, &balance_3)]),
-        ]);
+        deps.querier.set_cw20_balances(
+            ma_token_address_1.clone(), &[(borrower_addr.clone(), balance_1)]
+        );
+        deps.querier.set_cw20_balances(
+            ma_token_address_2.clone(), &[(borrower_addr.clone(), balance_2)]
+        );
+        deps.querier.set_cw20_balances(
+            ma_token_address_3.clone(), &[(borrower_addr.clone(), balance_3)]
+        );
 
         let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
             * Uint256::from(balance_1)
@@ -2041,7 +2045,7 @@ mod tests {
         // When repaying, new computed index is used for scaled amount
         let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_borrow_index;
         let mut new_debt_total = Uint256::zero();
-        // NOTE: Don't panick here so that the total repay of debt can be simulated
+        // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         // TODO: Maybe split index and interest rate calculations and take the needed inputs
         // for each
