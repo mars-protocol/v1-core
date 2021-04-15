@@ -1,16 +1,18 @@
+/// cosmwasm_std::testing overrides and custom test helpers
+
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Api, Coin, Decimal, Extern, HumanAddr, Querier,
     QuerierResult, QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
 };
-use cw20::{BalanceResponse, Cw20QueryMsg};
+use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
 use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
 
 /// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
-/// this uses our CustomQuerier.
+/// in order to add a custom querier 
 pub fn mock_dependencies(
     canonical_length: usize,
     contract_balance: &[Coin],
@@ -28,67 +30,41 @@ pub fn mock_dependencies(
     }
 }
 
-pub struct WasmMockQuerier {
-    base: MockQuerier<TerraQueryWrapper>,
-    exchange_rate_querier: ExchangeRateQuerier,
-    balance_querier: BalanceQuerier,
-}
-
-#[derive(Clone, Default)]
-pub struct ExchangeRateQuerier {
-    // maps denom to exchange rates
+#[derive(Clone, Default, Debug)]
+pub struct NativeQuerier {
+    /// maps denom to exchange rates
     exchange_rates: HashMap<String, HashMap<String, Decimal>>,
 }
 
-impl ExchangeRateQuerier {
-    pub fn new(exchange_rates: &[(&String, &[(&String, &Decimal)])]) -> Self {
-        ExchangeRateQuerier {
-            exchange_rates: exchange_rates_to_map(exchange_rates),
-        }
-    }
-}
-
-pub(crate) fn exchange_rates_to_map(
-    exchange_rates: &[(&String, &[(&String, &Decimal)])],
-) -> HashMap<String, HashMap<String, Decimal>> {
-    let mut exchange_rates_map: HashMap<String, HashMap<String, Decimal>> = HashMap::new();
-    for (denom, exchange_rates) in exchange_rates.iter() {
-        let mut denom_exchange_rates_map: HashMap<String, Decimal> = HashMap::new();
-        for (denom, rate) in exchange_rates.iter() {
-            denom_exchange_rates_map.insert((**denom.clone()).parse().unwrap(), **rate);
-        }
-
-        exchange_rates_map.insert((**denom.clone()).parse().unwrap(), denom_exchange_rates_map);
-    }
-    exchange_rates_map
-}
-
-#[derive(Clone, Default)]
-pub struct BalanceQuerier {
-    // maps contract address to user balances
+#[derive(Clone, Debug)]
+pub struct Cw20Querier {
+    /// maps cw20 contract address to user balances
     balances: HashMap<HumanAddr, HashMap<HumanAddr, Uint128>>,
+    token_info_responses: HashMap<HumanAddr, TokenInfoResponse>,
 }
 
-impl BalanceQuerier {
-    pub fn new(balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])]) -> Self {
-        BalanceQuerier {
-            balances: balances_to_map(balances),
+impl Cw20Querier {
+    fn new() -> Self {
+        Cw20Querier {
+            balances: HashMap::new(),
+            token_info_responses: HashMap::new(),
         }
     }
 }
 
-pub(crate) fn balances_to_map(
-    balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])],
-) -> HashMap<HumanAddr, HashMap<HumanAddr, Uint128>> {
-    let mut contract_balances_map: HashMap<HumanAddr, HashMap<HumanAddr, Uint128>> = HashMap::new();
-    for (contract, balances) in balances.iter() {
-        let mut account_balances_map: HashMap<HumanAddr, Uint128> = HashMap::new();
-        for (account, balance) in balances.iter() {
-            account_balances_map.insert((*account).clone(), **balance);
-        }
-        contract_balances_map.insert((*contract).clone(), account_balances_map);
+pub fn mock_token_info_response() -> TokenInfoResponse {
+    TokenInfoResponse {
+        name: "".to_string(),
+        symbol: "".to_string(),
+        decimals: 0,
+        total_supply: Uint128(0),
     }
-    contract_balances_map
+}
+
+pub struct WasmMockQuerier {
+    base: MockQuerier<TerraQueryWrapper>,
+    native_querier: NativeQuerier,
+    cw20_querier: Cw20Querier,
 }
 
 impl Querier for WasmMockQuerier {
@@ -108,6 +84,39 @@ impl Querier for WasmMockQuerier {
 }
 
 impl WasmMockQuerier {
+    // TODO: Why is the api needed here? Is it for the type to be set somehow
+    pub fn new<A: Api>(base: MockQuerier<TerraQueryWrapper>, _api: A) -> Self {
+        WasmMockQuerier {
+            base,
+            native_querier: NativeQuerier::default(),
+            cw20_querier: Cw20Querier::new(),
+        }
+    }
+
+    /// Set querirer balances for native exchange rates taken as a list of tuples
+    pub fn set_native_exchange_rates(
+        &mut self, 
+        base_denom: String,
+        exchange_rates: &[(String, Decimal)])
+    {
+        self.native_querier.exchange_rates.insert(base_denom, exchange_rates.iter().cloned().collect());
+    }
+
+    /// Set mock querirer balances for a cw20 token as a list of tuples in the form
+    pub fn set_cw20_balances(
+        &mut self,
+        cw20_address: HumanAddr,
+        balances: &[(HumanAddr, Uint128)]) 
+    {
+        self.cw20_querier.balances.insert(cw20_address, balances.iter().cloned().collect());
+    }
+
+    pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
+        let mut token_info = mock_token_info_response();
+        token_info.total_supply = total_supply;
+        self.cw20_querier.token_info_responses.insert(cw20_address, token_info);
+    }
+
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
@@ -118,7 +127,7 @@ impl WasmMockQuerier {
                             quote_denoms,
                         } => {
                             let base_exchange_rates =
-                                match self.exchange_rate_querier.exchange_rates.get(base_denom) {
+                                match self.native_querier.exchange_rates.get(base_denom) {
                                     Some(res) => res,
                                     None => return Err(SystemError::InvalidRequest {
                                         error:
@@ -155,17 +164,18 @@ impl WasmMockQuerier {
                             };
                             Ok(to_binary(&res))
                         }
-                        _ => panic!("DO NOT ENTER HERE"),
+                        _ => panic!("[mock]: Unsupported query data for QueryRequest::Custom : {:?}", query_data),
                     }
                 } else {
-                    panic!("DO NOT ENTER HERE")
+                    panic!("[mock]: Unsupported route for QueryRequest::Custom : {:?}", route)
                 }
             }
+
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => match from_binary(&msg)
                 .unwrap()
             {
                 Cw20QueryMsg::Balance { address } => {
-                    let contract_balances = match self.balance_querier.balances.get(&contract_addr)
+                    let contract_balances = match self.cw20_querier.balances.get(&contract_addr)
                     {
                         Some(balances) => balances,
                         None => {
@@ -192,29 +202,26 @@ impl WasmMockQuerier {
                         balance: *user_balance,
                     }))
                 }
-                _ => panic!("DO NOT ENTER HERE"),
-            },
+
+                Cw20QueryMsg::TokenInfo {} => {
+                    let token_info_response = 
+                        match self.cw20_querier.balances.get(&contract_addr) {
+                            Some(tir) => tir,
+                            None => {
+                                return Err(SystemError::InvalidRequest {
+                                    error: format!("no token_info mock for account address {}", contract_addr),
+                                    request: msg.as_slice().into(),
+                                })
+                            }
+                        };
+
+                    Ok(to_binary(token_info_response))
+                }
+
+                other_query => panic!("[mock]: Unsupported wasm query: {:?}", other_query)
+            }
+
             _ => self.base.handle_query(request),
         }
-    }
-}
-
-impl WasmMockQuerier {
-    pub fn new<A: Api>(base: MockQuerier<TerraQueryWrapper>, _api: A) -> Self {
-        WasmMockQuerier {
-            base,
-            exchange_rate_querier: ExchangeRateQuerier::default(),
-            balance_querier: BalanceQuerier::default(),
-        }
-    }
-
-    // configure the exchange rates mock querier
-    pub fn with_exchange_rates(&mut self, exchange_rates: &[(&String, &[(&String, &Decimal)])]) {
-        self.exchange_rate_querier = ExchangeRateQuerier::new(exchange_rates);
-    }
-
-    // configure the balances mock querier
-    pub fn with_balances(&mut self, balances: &[(&HumanAddr, &[(&HumanAddr, &Uint128)])]) {
-        self.balance_querier = BalanceQuerier::new(balances);
     }
 }
