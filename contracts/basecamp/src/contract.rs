@@ -6,7 +6,7 @@ use cosmwasm_std::{
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::{cw20_get_total_supply, cw20_get_balance};
+use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{config_state, config_state_read, Config};
@@ -125,25 +125,20 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     }
 
     // get total mars in contract before the stake transaction
-    let total_mars_in_basecamp =
-        (cw20_get_balance(
-            deps,
-            deps.api.human_address(&config.mars_token_address)?,
-            env.contract.address
-        )? - stake_amount)?;
+    let total_mars_in_basecamp = (cw20_get_balance(
+        deps,
+        deps.api.human_address(&config.mars_token_address)?,
+        env.contract.address,
+    )? - stake_amount)?;
 
     let total_xmars_supply =
-        cw20_get_total_supply(
-           deps,
-           deps.api.human_address(&config.xmars_token_address)?,
-        )?;
+        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
 
-    let mint_amount = 
-        if total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
-            stake_amount
-        } else {
-            stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp)
-        };
+    let mint_amount = if total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
+        stake_amount
+    } else {
+        stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp)
+    };
 
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -182,28 +177,26 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
         ));
     }
     // TODO: countdown
-    
-    let total_mars_in_basecamp =
-        cw20_get_balance(
-            deps,
-            deps.api.human_address(&config.mars_token_address)?,
-            env.contract.address
-        )?;
+
+    let total_mars_in_basecamp = cw20_get_balance(
+        deps,
+        deps.api.human_address(&config.mars_token_address)?,
+        env.contract.address,
+    )?;
 
     let total_xmars_supply =
-        cw20_get_total_supply(
-           deps,
-           deps.api.human_address(&config.xmars_token_address)?,
-        )?;
+        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
 
-    let unstake_amount = burn_amount.multiply_ratio(total_mars_in_basecamp, total_xmars_supply); 
+    let unstake_amount = burn_amount.multiply_ratio(total_mars_in_basecamp, total_xmars_supply);
 
     Ok(HandleResponse {
         messages: vec![
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: deps.api.human_address(&config.xmars_token_address)?,
                 send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Burn { amount: burn_amount })?,
+                msg: to_binary(&Cw20HandleMsg::Burn {
+                    amount: burn_amount,
+                })?,
             }),
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: deps.api.human_address(&config.mars_token_address)?,
@@ -215,7 +208,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
             }),
         ],
         log: vec![
-            log("action", "unbond"),
+            log("action", "unstake"),
             log("user", staker),
             log("mars_unstaked", unstake_amount),
             log("xmars_burned", burn_amount),
@@ -341,9 +334,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{
-         mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR,
-    };
+    use cosmwasm_std::testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
     use mars::testing::{mock_dependencies, WasmMockQuerier};
 
@@ -508,14 +499,12 @@ mod tests {
         });
 
         deps.querier.set_cw20_balances(
-            HumanAddr::from("mars_token"), 
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_000_000))]
+            HumanAddr::from("mars_token"),
+            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_000_000))],
         );
 
-        deps.querier.set_cw20_total_supply(
-            HumanAddr::from("xmars_token"), 
-            Uint128(0)
-        );
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(0));
 
         let env = mock_env("mars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
@@ -534,9 +523,58 @@ mod tests {
         );
         assert_eq!(
             vec![
-                log("action", "bond"),
+                log("action", "stake"),
                 log("user", HumanAddr::from("staker")),
-                log("bond_amount", 2_000_000),
+                log("mars_staked", 2_000_000),
+                log("xmars_minted", 2_000_000),
+            ],
+            res.log
+        );
+
+        // Some Mars in pool and some xMars supply
+        // stake Mars -> should receive less xMars
+        let stake_amount = Uint128(2_000_000);
+        let mars_in_basecamp = Uint128(4_000_000);
+        let xmars_supply = Uint128(1_000_000);
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: stake_amount,
+        });
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("mars_token"),
+            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
+        );
+
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
+
+        let env = mock_env("mars_token", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        let expected_minted_xmars =
+            stake_amount.multiply_ratio(xmars_supply, (mars_in_basecamp - stake_amount).unwrap());
+
+        assert_eq!(
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("xmars_token"),
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Mint {
+                    recipient: HumanAddr::from("staker"),
+                    amount: expected_minted_xmars,
+                })
+                .unwrap(),
+            })],
+            res.messages
+        );
+        assert_eq!(
+            vec![
+                log("action", "stake"),
+                log("user", HumanAddr::from("staker")),
+                log("mars_staked", stake_amount),
+                log("xmars_minted", expected_minted_xmars),
             ],
             res.log
         );
@@ -552,14 +590,28 @@ mod tests {
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
         // unbond Mars -> should burn xMars and receive Mars back
+        let unstake_amount = Uint128(1_000_000);
+        let mars_in_basecamp = Uint128(4_000_000);
+        let xmars_supply = Uint128(3_000_000);
+
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
-            amount: Uint128(1_000_000),
+            amount: unstake_amount,
         });
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("mars_token"),
+            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
+        );
+
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
 
         let env = mock_env("xmars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
+
+        let expected_returned_mars = unstake_amount.multiply_ratio(mars_in_basecamp, xmars_supply);
 
         assert_eq!(
             vec![
@@ -567,7 +619,7 @@ mod tests {
                     contract_addr: HumanAddr::from("xmars_token"),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Burn {
-                        amount: Uint128(1_000_000),
+                        amount: unstake_amount,
                     })
                     .unwrap(),
                 }),
@@ -576,7 +628,7 @@ mod tests {
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Transfer {
                         recipient: HumanAddr::from("staker"),
-                        amount: Uint128(1_000_000),
+                        amount: expected_returned_mars,
                     })
                     .unwrap(),
                 }),
@@ -585,9 +637,10 @@ mod tests {
         );
         assert_eq!(
             vec![
-                log("action", "unbond"),
+                log("action", "unstake"),
                 log("user", HumanAddr::from("staker")),
-                log("bond_amount", 1_000_000),
+                log("mars_unstaked", expected_returned_mars),
+                log("xmars_burned", unstake_amount),
             ],
             res.log
         );
