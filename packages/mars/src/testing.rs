@@ -1,5 +1,4 @@
 /// cosmwasm_std::testing overrides and custom test helpers
-
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Api, Coin, Decimal, Extern, HumanAddr, Querier,
@@ -12,7 +11,7 @@ use terra_cosmwasm::{
 };
 
 /// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
-/// in order to add a custom querier 
+/// in order to add a custom querier
 pub fn mock_dependencies(
     canonical_length: usize,
     contract_balance: &[Coin],
@@ -95,26 +94,32 @@ impl WasmMockQuerier {
 
     /// Set querirer balances for native exchange rates taken as a list of tuples
     pub fn set_native_exchange_rates(
-        &mut self, 
+        &mut self,
         base_denom: String,
-        exchange_rates: &[(String, Decimal)])
-    {
-        self.native_querier.exchange_rates.insert(base_denom, exchange_rates.iter().cloned().collect());
+        exchange_rates: &[(String, Decimal)],
+    ) {
+        self.native_querier
+            .exchange_rates
+            .insert(base_denom, exchange_rates.iter().cloned().collect());
     }
 
     /// Set mock querirer balances for a cw20 token as a list of tuples in the form
     pub fn set_cw20_balances(
         &mut self,
         cw20_address: HumanAddr,
-        balances: &[(HumanAddr, Uint128)]) 
-    {
-        self.cw20_querier.balances.insert(cw20_address, balances.iter().cloned().collect());
+        balances: &[(HumanAddr, Uint128)],
+    ) {
+        self.cw20_querier
+            .balances
+            .insert(cw20_address, balances.iter().cloned().collect());
     }
 
     pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
         let mut token_info = mock_token_info_response();
         token_info.total_supply = total_supply;
-        self.cw20_querier.token_info_responses.insert(cw20_address, token_info);
+        self.cw20_querier
+            .token_info_responses
+            .insert(cw20_address, token_info);
     }
 
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
@@ -164,10 +169,16 @@ impl WasmMockQuerier {
                             };
                             Ok(to_binary(&res))
                         }
-                        _ => panic!("[mock]: Unsupported query data for QueryRequest::Custom : {:?}", query_data),
+                        _ => panic!(
+                            "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
+                            query_data
+                        ),
                     }
                 } else {
-                    panic!("[mock]: Unsupported route for QueryRequest::Custom : {:?}", route)
+                    panic!(
+                        "[mock]: Unsupported route for QueryRequest::Custom : {:?}",
+                        route
+                    )
                 }
             }
 
@@ -175,13 +186,14 @@ impl WasmMockQuerier {
                 .unwrap()
             {
                 Cw20QueryMsg::Balance { address } => {
-                    let contract_balances = match self.cw20_querier.balances.get(&contract_addr)
-                    {
+                    let contract_balances = match self.cw20_querier.balances.get(&contract_addr) {
                         Some(balances) => balances,
                         None => {
                             return Err(SystemError::InvalidRequest {
-                                error: "no balances available for provided contract address"
-                                    .to_string(),
+                                error: format!(
+                                    "no balance available for account address {}",
+                                    contract_addr
+                                ),
                                 request: msg.as_slice().into(),
                             })
                         }
@@ -191,8 +203,10 @@ impl WasmMockQuerier {
                         Some(balance) => balance,
                         None => {
                             return Err(SystemError::InvalidRequest {
-                                error: "no balance available for provided account address"
-                                    .to_string(),
+                                error: format!(
+                                    "no balance available for account address {}",
+                                    contract_addr
+                                ),
                                 request: msg.as_slice().into(),
                             })
                         }
@@ -204,12 +218,15 @@ impl WasmMockQuerier {
                 }
 
                 Cw20QueryMsg::TokenInfo {} => {
-                    let token_info_response = 
-                        match self.cw20_querier.balances.get(&contract_addr) {
+                    let token_info_response =
+                        match self.cw20_querier.token_info_responses.get(&contract_addr) {
                             Some(tir) => tir,
                             None => {
                                 return Err(SystemError::InvalidRequest {
-                                    error: format!("no token_info mock for account address {}", contract_addr),
+                                    error: format!(
+                                        "no token_info mock for account address {}",
+                                        contract_addr
+                                    ),
                                     request: msg.as_slice().into(),
                                 })
                             }
@@ -218,8 +235,8 @@ impl WasmMockQuerier {
                     Ok(to_binary(token_info_response))
                 }
 
-                other_query => panic!("[mock]: Unsupported wasm query: {:?}", other_query)
-            }
+                other_query => panic!("[mock]: Unsupported wasm query: {:?}", other_query),
+            },
 
             _ => self.base.handle_query(request),
         }

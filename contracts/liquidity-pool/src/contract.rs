@@ -1860,13 +1860,16 @@ mod tests {
 
         // Set the querier to return a certain collateral balance
         deps.querier.set_cw20_balances(
-            ma_token_address_1.clone(), &[(borrower_addr.clone(), balance_1)]
+            ma_token_address_1.clone(),
+            &[(borrower_addr.clone(), balance_1)],
         );
         deps.querier.set_cw20_balances(
-            ma_token_address_2.clone(), &[(borrower_addr.clone(), balance_2)]
+            ma_token_address_2.clone(),
+            &[(borrower_addr.clone(), balance_2)],
         );
         deps.querier.set_cw20_balances(
-            ma_token_address_3.clone(), &[(borrower_addr.clone(), balance_3)]
+            ma_token_address_3.clone(),
+            &[(borrower_addr.clone(), balance_3)],
         );
 
         let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
