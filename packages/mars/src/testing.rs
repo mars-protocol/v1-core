@@ -1,7 +1,7 @@
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, Api, Coin, Decimal, Extern, HumanAddr, Querier,
+    from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier,
     QuerierResult, QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
@@ -19,7 +19,6 @@ pub fn mock_dependencies(
     let contract_addr = HumanAddr::from(MOCK_CONTRACT_ADDR);
     let custom_querier: WasmMockQuerier = WasmMockQuerier::new(
         MockQuerier::new(&[(&contract_addr, contract_balance)]),
-        MockApi::new(canonical_length),
     );
 
     Extern {
@@ -84,7 +83,7 @@ impl Querier for WasmMockQuerier {
 
 impl WasmMockQuerier {
     // TODO: Why is the api needed here? Is it for the type to be set somehow
-    pub fn new<A: Api>(base: MockQuerier<TerraQueryWrapper>, _api: A) -> Self {
+    pub fn new(base: MockQuerier<TerraQueryWrapper>) -> Self {
         WasmMockQuerier {
             base,
             native_querier: NativeQuerier::default(),
