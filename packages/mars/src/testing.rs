@@ -1,3 +1,4 @@
+use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier, QuerierResult,
@@ -8,7 +9,6 @@ use std::collections::HashMap;
 use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
-use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 
 /// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
 /// in order to add a custom querier
