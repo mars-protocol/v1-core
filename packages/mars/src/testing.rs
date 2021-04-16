@@ -1,7 +1,7 @@
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier,
-    QuerierResult, QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
+    from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier, QuerierResult,
+    QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -17,9 +17,8 @@ pub fn mock_dependencies(
     contract_balance: &[Coin],
 ) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
     let contract_addr = HumanAddr::from(MOCK_CONTRACT_ADDR);
-    let custom_querier: WasmMockQuerier = WasmMockQuerier::new(
-        MockQuerier::new(&[(&contract_addr, contract_balance)]),
-    );
+    let custom_querier: WasmMockQuerier =
+        WasmMockQuerier::new(MockQuerier::new(&[(&contract_addr, contract_balance)]));
 
     Extern {
         storage: MockStorage::default(),
