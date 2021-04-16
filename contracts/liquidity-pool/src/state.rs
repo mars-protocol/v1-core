@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::asset::AssetInfo;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
@@ -62,6 +63,9 @@ pub struct Reserve {
     pub interests_last_updated: u64,
     /// Total debt scaled for the reserve's currency
     pub debt_total_scaled: Uint256,
+
+    /// Indicated whether the asset is native or a cw20 token
+    pub asset_type: AssetInfo,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
