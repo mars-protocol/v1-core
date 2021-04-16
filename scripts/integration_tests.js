@@ -1,7 +1,8 @@
 import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
 import {deploy, performTransaction, queryContract, setup} from "./helpers.mjs";
 import BigNumber from "bignumber.js";
-BigNumber.config({ DECIMAL_PLACES: 18 })
+
+BigNumber.config({DECIMAL_PLACES: 18})
 
 // CONSTANTS AND GLOBALS
 const INITIAL_ASSETS = [
@@ -32,8 +33,8 @@ function assertEqualBN(left, right, message = "Expected values to be equal") {
 }
 
 function assertEqualIndicesAndRates(expectedStateReserve, actualRates) {
-  assertEqualBN(expectedStateReserve.liquidityIndex, actualRates.liquidityIndex);
   assertEqualBN(expectedStateReserve.borrowIndex, actualRates.borrowIndex);
+  assertEqualBN(expectedStateReserve.liquidityIndex, actualRates.liquidityIndex);
   assertEqualBN(expectedStateReserve.borrowRate, actualRates.borrowRate);
   assertEqualBN(expectedStateReserve.liquidityRate, actualRates.liquidityRate);
 }
@@ -79,21 +80,14 @@ function updateExpectedAssetRates(expectedState, asset) {
   let expectedStateReserve = expectedState.reserves[asset];
 
   let assetDebtTotal = expectedStateReserve.debtTotalScaled.times(expectedStateReserve.borrowIndex);
-  console.log("asset debt total: " + assetDebtTotal.toNumber());
   let assetLiquidityTotal = new BigNumber(expectedState.lpContractBalances[asset]);
-  console.log("asset liquidity total: " + assetLiquidityTotal.toNumber());
   let assetLockedTotal = assetLiquidityTotal.plus(assetDebtTotal);
-  console.log("asset locked total: " + assetLockedTotal);
 
   let expectedUtilizationRate =
     assetLockedTotal.isZero() ? new BigNumber(0) : assetDebtTotal.dividedBy(assetLockedTotal);
 
-  console.log("expected utilization rate: " + expectedUtilizationRate.toNumber());
-
   expectedStateReserve.borrowRate = expectedUtilizationRate.times(expectedStateReserve.borrowSlope);
-  console.log("borrow rate: " + expectedStateReserve.borrowRate.toNumber());
   expectedStateReserve.liquidityRate = expectedStateReserve.borrowRate.times(expectedUtilizationRate);
-  console.log("liquidity rate: " + expectedStateReserve.liquidityRate);
 }
 
 // QUERIES
@@ -122,10 +116,10 @@ function getIndicesAndRatesFromTxResult(txResult) {
 
 // ACTIONS
 async function depositAssets(terra, wallet, lpContractAddress, deposits) {
-  for (let deposit of deposits) {
-    let depositMsg = {"deposit_native": {"denom": deposit.denom}};
-    let depositAmount = deposit.amount;
-    let coins = new Coin(deposit.denom, depositAmount);
+  for (let denom of Object.keys(deposits)) {
+    let depositMsg = {"deposit_native": {"denom": denom}};
+    let depositAmount = deposits[denom];
+    let coins = new Coin(denom, depositAmount.toString());
     let executeDepositMsg = new MsgExecuteContract(wallet.key.accAddress, lpContractAddress, depositMsg, [coins]);
 
     await performTransaction(terra, wallet, executeDepositMsg);
@@ -155,18 +149,6 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
   debug(lpContractBalance);
   assertEqual(expectedState.lpContractBalances[depositAsset], Number(lpContractBalance._coins[depositAsset].amount));
 
-  // maContract balance should go up by deposit amount
-  expectedState.maContractBalances[depositAsset] += depositAmount;
-  let balanceQueryMsg = {"balance": {"address": depositAddress}};
-  const balanceQueryResult =
-    await queryContract(
-      env.terra,
-      expectedState.reserves[depositAsset].maTokenAddress,
-      balanceQueryMsg);
-  debug(balanceQueryMsg);
-  debug(balanceQueryResult);
-  assertEqual(expectedState.maContractBalances[depositAsset], Number(balanceQueryResult.balance));
-
   // Update and check indices and rates
   let blockTime = getTimestampInSecondsFromDateField(txInfo.timestamp);
   updateExpectedAssetIndices(expectedState, depositAsset, blockTime);
@@ -175,12 +157,24 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
   let actualIndicesAndRates = getIndicesAndRatesFromTxResult(depositTxResult);
   assertEqualIndicesAndRates(expectedState.reserves[depositAsset], actualIndicesAndRates);
 
+  // ma balance should go up by deposit amount
+  expectedState.userBalances[depositUser].maBalances[depositAsset] += depositAmount / expectedState.reserves[depositAsset].liquidityIndex.toNumber();
+  let balanceQueryMsg = {"balance": {"address": depositAddress}};
+  const balanceQueryResult =
+    await queryContract(
+      env.terra,
+      expectedState.reserves[depositAsset].maTokenAddress,
+      balanceQueryMsg);
+  debug(balanceQueryMsg);
+  debug(balanceQueryResult);
+  assertEqual(expectedState.userBalances[depositUser].maBalances[depositAsset], Number(balanceQueryResult.balance));
+
   // Depositor balance should go down by deposit amount + txfee
   const depositTxFee = Number(txInfo.tx.fee.amount._coins[depositAsset].amount);
-  expectedState.userBalances[depositUser][depositAsset] -= (depositAmount + depositTxFee);
+  expectedState.userBalances[depositUser].native_deposits[depositAsset] -= (depositAmount + depositTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, depositAddress);
   assertEqual(
-    expectedState.userBalances[depositUser][depositAsset],
+    expectedState.userBalances[depositUser].native_deposits[depositAsset],
     actualEndingBalances[depositAsset]
   );
 }
@@ -194,7 +188,7 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
     "send": {
       "contract": env.lpContractAddress,
       "amount": redeemAmount.toString(),
-      "msg": toEncodedBinary({ "redeem": {"id": redeemAsset} }),
+      "msg": toEncodedBinary({"redeem": {"id": redeemAsset}}),
     }
   };
 
@@ -211,18 +205,6 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
   debug(lpContractBalance);
   assertEqual(expectedState.lpContractBalances[redeemAsset], Number(lpContractBalance._coins[redeemAsset].amount));
 
-  // maContract balance should go down by redeem amount
-  expectedState.maContractBalances[redeemAsset] -= redeemAmount;
-  let balanceQueryMsg = {"balance": {"address": redeemAddress}};
-  const balanceQueryResult =
-    await queryContract(
-      env.terra,
-      expectedState.reserves[redeemAsset].maTokenAddress,
-      balanceQueryMsg);
-  debug(balanceQueryMsg);
-  debug(balanceQueryResult);
-  assertEqual(expectedState.maContractBalances[redeemAsset], Number(balanceQueryResult.balance));
-
   // Update and check indices and rates
   let blockTime = getTimestampInSecondsFromDateField(redeemTxInfo.timestamp);
   updateExpectedAssetIndices(expectedState, redeemAsset, blockTime);
@@ -231,12 +213,24 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
   let actualIndicesAndRates = getIndicesAndRatesFromTxResult(redeemTxResult);
   assertEqualIndicesAndRates(expectedState.reserves[redeemAsset], actualIndicesAndRates);
 
+  // ma balance should go down by redeem amount
+  expectedState.userBalances[redeemUser].maBalances[redeemAsset] -= redeemAmount * expectedState.reserves[redeemAsset].liquidityIndex.toNumber();
+  let balanceQueryMsg = {"balance": {"address": redeemAddress}};
+  const balanceQueryResult =
+    await queryContract(
+      env.terra,
+      expectedState.reserves[redeemAsset].maTokenAddress,
+      balanceQueryMsg);
+  debug(balanceQueryMsg);
+  debug(balanceQueryResult);
+  assertEqual(expectedState.userBalances[redeemUser].maBalances[redeemAsset], Number(balanceQueryResult.balance));
+
   // Redeemer balance should go up by redeem amount - txfee
   const redeemTxFee = Number(redeemTxInfo.tx.fee.amount._coins[redeemAsset].amount);
-  expectedState.userBalances[redeemUser][redeemAsset] += (redeemAmount - redeemTxFee);
+  expectedState.userBalances[redeemUser].native_deposits[redeemAsset] += (redeemAmount - redeemTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, redeemAddress);
   assertEqual(
-    expectedState.userBalances[redeemUser][redeemAsset],
+    expectedState.userBalances[redeemUser].native_deposits[redeemAsset],
     actualEndingBalances[redeemAsset]
   );
 }
@@ -260,17 +254,6 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   const contractBalance = await env.terra.bank.balance(env.lpContractAddress);
   assertEqual(expectedState.lpContractBalances[borrowAsset], Number(contractBalance._coins[borrowAsset].amount));
 
-  // maContract balance should remain unchanged
-  let balanceQueryMsg = {"balance": {"address": borrowAddress}};
-  const balanceQueryResult =
-    await queryContract(
-      env.terra,
-      expectedState.reserves[borrowAsset].maTokenAddress,
-      balanceQueryMsg);
-  debug(balanceQueryMsg);
-  debug(balanceQueryResult);
-  assertEqual(expectedState.maContractBalances[borrowAsset], Number(balanceQueryResult.balance));
-
   // Update debt total, indices, and rates and test
   let borrowAmountScaled = new BigNumber(borrowAmount).dividedBy(expectedState.reserves[borrowAsset].borrowIndex);
   expectedState.reserves[borrowAsset].debtTotalScaled = expectedState.reserves[borrowAsset].debtTotalScaled.plus(borrowAmountScaled);
@@ -283,20 +266,16 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
 
   // Borrower balance should go up by borrow amount - txfee
   const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins[borrowAsset].amount);
-  expectedState.userBalances[borrowUser][borrowAsset] += (borrowAmount - borrowTxFee);
+  expectedState.userBalances[borrowUser].native_deposits[borrowAsset] += (borrowAmount - borrowTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, borrowAddress);
   assertEqual(
-    expectedState.userBalances[borrowUser][borrowAsset],
+    expectedState.userBalances[borrowUser].native_deposits[borrowAsset],
     actualEndingBalances[borrowAsset]
   );
 }
 
 async function testRepay(env, expectedState, repayUser, repayAsset, repayAmount) {
   console.log(`### Testing Repay | ${repayUser} -> ${repayAmount} ${repayAsset}`);
-
-  let reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  let assetReserve = await queryContract(env.terra, env.lpContractAddress, reserveQueryMsg);
-  console.log(assetReserve);
 
   let repayAddress = env.terra.wallets[repayUser].key.accAddress;
 
@@ -315,41 +294,72 @@ async function testRepay(env, expectedState, repayUser, repayAsset, repayAmount)
   const contractBalance = await env.terra.bank.balance(env.lpContractAddress);
   assertEqual(expectedState.lpContractBalances[repayAsset], Number(contractBalance._coins[repayAsset].amount));
 
-  // check maContract balance remains unchanged
-  let balanceQueryMsg = {"balance": {"address": repayAddress}};
-  const balanceQueryResult =
-    await queryContract(
-      env.terra,
-      expectedState.reserves[repayAsset].maTokenAddress,
-      balanceQueryMsg);
-  debug(balanceQueryMsg);
-  debug(balanceQueryResult);
-  assertEqual(expectedState.maContractBalances[repayAsset], Number(balanceQueryResult.balance));
-
   // Update debt total and check indices and rates
   let blockTime = getTimestampInSecondsFromDateField(repayTxInfo.timestamp);
   updateExpectedAssetIndices(expectedState, repayAsset, blockTime);
   let repayAmountScaled = new BigNumber(repayAmount).dividedBy(expectedState.reserves[repayAsset].borrowIndex);
   expectedState.reserves[repayAsset].debtTotalScaled = expectedState.reserves[repayAsset].debtTotalScaled.minus(repayAmountScaled);
-  console.log("my debt total scaled: " + expectedState.reserves[repayAsset].debtTotalScaled.toNumber());
-  expectedState.reserves[repayAsset].debtTotalScaled = new BigNumber(1);
+  // expectedState.reserves[repayAsset].debtTotalScaled = new BigNumber(1);
   updateExpectedAssetRates(expectedState, repayAsset);
-
-  reserveQueryMsg = {"reserve": {"denom": "uluna"}};
-  assetReserve = await queryContract(env.terra, env.lpContractAddress, reserveQueryMsg);
-  console.log(assetReserve);
 
   let actualIndicesAndRates = getIndicesAndRatesFromTxResult(repayTxResult);
   // assertEqualIndicesAndRates(expectedState.reserves[repayAsset], actualIndicesAndRates);
 
   // Repayer balance should go down by repay amount + txfee
   const repayTxFee = Number(repayTxInfo.tx.fee.amount._coins.uluna.amount);
-  expectedState.userBalances[repayUser][repayAsset] -= (repayAmount + repayTxFee);
+  expectedState.userBalances[repayUser].native_deposits[repayAsset] -= (repayAmount + repayTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, repayAddress);
   assertEqual(
-    expectedState.userBalances[repayUser][repayAsset],
+    expectedState.userBalances[repayUser].native_deposits[repayAsset],
     actualEndingBalances[repayAsset]
   );
+}
+
+async function testCollateralCheck(env, expectedState, user, deposits) {
+  let ltvDict = {};
+  for (let asset of INITIAL_ASSETS) {
+    if (deposits.hasOwnProperty(asset.denom)) {
+      ltvDict[asset.denom] = asset.loan_to_value;
+    }
+  }
+
+  await depositAssets(env.terra, env.terra.wallets[user], env.lpContractAddress, deposits);
+
+  let {_coins: exchangeRates} = await env.terra.oracle.exchangeRates();
+  let max_borrow_allowed_in_uluna = deposits.hasOwnProperty(("uluna")) ? deposits["uluna"] * ltvDict["uluna"] : 0;
+
+  for (let denom of Object.keys(deposits)) {
+    if (exchangeRates.hasOwnProperty(denom)) {
+      max_borrow_allowed_in_uluna += ltvDict[denom] * deposits[denom] / exchangeRates[denom].amount;
+    }
+  }
+
+  let max_borrow_allowed_in_uusd = new Int(max_borrow_allowed_in_uluna / exchangeRates['uusd'].amount);
+
+  let excessiveBorrowAmount = max_borrow_allowed_in_uusd + 100;
+  let validBorrowAmount = max_borrow_allowed_in_uusd - 100;
+
+  let borrowMsg = {"borrow_native": {"denom": "uusd", "amount": excessiveBorrowAmount.toString()}};
+  let executeBorrowMsg = new MsgExecuteContract(env.terra.wallets[user].key.accAddress, env.lpContractAddress, borrowMsg);
+  let tx = await env.terra.wallets[user].createAndSignTx({
+    msgs: [executeBorrowMsg],
+    fee: new StdFee(30000000, [
+      new Coin('uluna', 4000000),
+      new Coin('uusd', 4000000),
+      new Coin('ukrw', 4000000),
+    ]),
+  });
+
+  const insufficientCollateralResult = await env.terra.tx.broadcast(tx);
+  if (!isTxError(insufficientCollateralResult) || !insufficientCollateralResult.raw_log.includes("borrow amount exceeds maximum allowed given current collateral value")) {
+    throw new Error("[Collateral]: Borrower has insufficient collateral and should not be able to borrow.");
+  }
+
+  borrowMsg = {"borrow_native": {"denom": "uusd", "amount": validBorrowAmount.toString()}};
+  executeBorrowMsg = new MsgExecuteContract(env.terra.wallets[user].key.accAddress, env.lpContractAddress, borrowMsg);
+  await performTransaction(env.terra, env.terra.wallets[user], executeBorrowMsg);
+
+  debug(executeBorrowMsg);
 }
 
 // async function testBorrow(env, expectedState, borrowUser, borrowAsset, depositAsset, depositAmount) {
@@ -743,8 +753,8 @@ async function main() {
 
   await setup(env.terra, env.ownerWallet, lpContractAddress, {initialAssets: INITIAL_ASSETS});
 
-  let test1Balances = await getAddressNativeBalances(env.terra, env.terra.wallets.test1.key.accAddress);
-  let test2Balances = await getAddressNativeBalances(env.terra, env.terra.wallets.test2.key.accAddress);
+  let test1NativeBalances = await getAddressNativeBalances(env.terra, env.terra.wallets.test1.key.accAddress);
+  let test2NativeBalances = await getAddressNativeBalances(env.terra, env.terra.wallets.test2.key.accAddress);
 
   let expectedStateReserves = {};
   for (const denom of INITIAL_ASSETS.map(asset => asset.denom)) {
@@ -764,66 +774,39 @@ async function main() {
   }
 
   let expectedState = {
-    maContractBalances: {
-      uluna: 0,
-      uusd: 0,
-      ukrw: 0,
-    },
     lpContractBalances: {
       uluna: 0,
       uusd: 0,
       ukrw: 0,
     },
     userBalances: {
-      test1: test1Balances,
-      test2: test2Balances,
+      test1: {
+        native_deposits: test1NativeBalances,
+        maBalances: {
+          uluna: 0,
+          uusd: 0,
+          ukrw: 0,
+        }
+      },
+      test2: {
+        native_deposits: test2NativeBalances,
+        maBalances: {
+          uluna: 0,
+          uusd: 0,
+          ukrw: 0,
+        }},
     },
     reserves: expectedStateReserves,
   }
+
+  let deposits = {uluna: 10_000_000, uusd: 5_000_000, ukrw: 50_000_000};
+
   await testDeposit(env, expectedState, "test1", "uluna", 10_000_000);
   await testRedeem(env, expectedState, "test1", "uluna", 5_000_000);
   await testBorrow(env, expectedState, "test1", "uluna", 2_000_000);
   await testRepay(env, expectedState, "test1", "uluna", 2_000_000);
-  /*
-  console.log("### Testing Redeem...");
-  let { initialLiquidity: initialLiquidityAfterDeposit } = depositOutput;
-  let redeemInputs = {
-    terra,
-    wallet,
-    lpContractAddress,
-    initialLiquidity: initialLiquidityAfterDeposit,
-  }
-  let redeemOutputs = await testRedeem(redeemInputs);
 
-  console.log("### Testing Borrow...");
-  let { initialLiquidity: initialLiquidityAfterRedeem } = redeemOutputs;
-  let borrowInputs = {
-    terra,
-    lpContractAddress,
-    borrower: terra.wallets.test2,
-    initialLiquidity: initialLiquidityAfterRedeem,
-  }
-  let borrowOutput = await testBorrow(borrowInputs);
-
-  console.log("### Testing Repay...");
-  let {borrowAmount, initialLiquidity: initialLiquidityAfterBorrow} = borrowOutput;
-  let repayInputs = {
-    terra,
-    lpContractAddress,
-    borrowAmount,
-    repayer: terra.wallets.test2,
-    initialLiquidity: initialLiquidityAfterBorrow,
-  }
-  await testRepay(repayInputs);
-
-  console.log("### Testing Collateral Check...");
-  let collateralCheckInputs = {
-    terra,
-    wallet: terra.wallets.test3,
-    lpContractAddress,
-  }
-  await testCollateralCheck(collateralCheckInputs);
-  */
+  await testCollateralCheck(env, expectedState, "test2", deposits);
   console.log("OK");
 }
 
