@@ -88,6 +88,9 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     Uint256::from(cw20_msg.amount),
                 )
             }
+            ReceiveMsg::Deposit {} => {
+                deposit_cw20(deps, env, cw20_msg.sender, Uint256::from(cw20_msg.amount))
+            }
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -173,11 +176,6 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         AssetInfo::NativeToken { denom } => denom,
     };
 
-    let id_string = match String::from_utf8(Vec::from(id.clone())) {
-        Ok(res) => res,
-        Err(..) => return Err(StdError::generic_err("failed to encode id into string")),
-    };
-
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
     match reserves.may_load(id.clone().as_bytes()) {
@@ -208,9 +206,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
             // save index to denom mapping
             reserve_denoms_state(&mut deps.storage).save(
                 &config.reserve_count.to_be_bytes(),
-                &ReserveDenoms {
-                    denom: id_string.clone(),
-                },
+                &ReserveDenoms { denom: id.clone() },
             )?;
 
             // increment reserve count
@@ -229,8 +225,8 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
             msg: to_binary(&cw20_token::msg::InitMsg {
-                name: format!("mars {} debt token", id_string),
-                symbol: format!("ma{}", id_string),
+                name: format!("mars {} debt token", id),
+                symbol: format!("ma{}", id),
                 decimals: 6,
                 initial_balances: vec![],
                 mint: Some(MinterResponse {
@@ -238,7 +234,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: id_string })?,
+                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id })?,
                     contract_addr: env.contract.address,
                 }),
             })?,
@@ -339,6 +335,79 @@ pub fn deposit_native<S: Storage, A: Api, Q: Querier>(
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: env.message.sender,
+                amount: mint_amount.into(),
+            })?,
+        })],
+    })
+}
+
+pub fn deposit_cw20<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    sender: HumanAddr,
+    amount: Uint256,
+) -> StdResult<HandleResponse> {
+    // Cannot deposit zero amount
+    if amount.is_zero() {
+        return Err(StdError::generic_err(
+            "Deposit amount must be greater than 0",
+        ));
+    }
+    // Get cw20 token address and load reserve
+    let contract_addr = env.message.sender.as_str();
+    let mut reserve =
+        reserves_state(&mut deps.storage).load(String::from(contract_addr).as_bytes())?;
+
+    // get depositer address
+    let depositer_addr = deps.api.canonical_address(&sender)?;
+    let mut user: User = match users_state_read(&deps.storage).may_load(depositer_addr.as_slice()) {
+        Ok(Some(user)) => user,
+        Ok(None) => User {
+            borrowed_assets: Uint128::zero(),
+            deposited_assets: Uint128::zero(),
+        },
+        Err(error) => return Err(error),
+    };
+
+    let has_deposited_asset = get_bit(user.deposited_assets, reserve.index)?;
+    if !has_deposited_asset {
+        set_bit(&mut user.deposited_assets, reserve.index)?;
+        users_state(&mut deps.storage).save(depositer_addr.as_slice(), &user)?;
+    }
+
+    reserve_update_market_indices(&env, &mut reserve);
+    reserve_update_interest_rates(
+        &deps.querier,
+        &env,
+        &contract_addr,
+        &mut reserve,
+        Uint256::zero(),
+    )?;
+    reserves_state(&mut deps.storage).save(contract_addr.as_bytes(), &reserve)?;
+
+    if reserve.liquidity_index.is_zero() {
+        return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
+    }
+    let mint_amount = amount / reserve.liquidity_index;
+
+    let mut log = vec![
+        log("action", "deposit"),
+        log("reserve", contract_addr),
+        log("user", sender.clone()),
+        log("amount", amount),
+    ];
+
+    append_indices_and_rates_to_logs(&mut log, &reserve);
+
+    // mint ma tokens
+    Ok(HandleResponse {
+        data: None,
+        log,
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: sender,
                 amount: mint_amount.into(),
             })?,
         })],
@@ -761,12 +830,11 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
 pub fn reserve_update_interest_rates<Q: Querier>(
     querier: &Q,
     env: &Env,
-    denom: &str,
+    id: &str,
     reserve: &mut Reserve,
     liquidity_taken: Uint256,
 ) -> StdResult<()> {
-    // TODO: handle cw20
-    let denom_coin = querier.query_balance(env.contract.address.clone(), denom)?;
+    let denom_coin = querier.query_balance(env.contract.address.clone(), id)?;
 
     // TODO: Verify on integration tests that this balance includes the
     // amount sent by the user on deposits and repays(both for cw20 and native).
@@ -1106,6 +1174,95 @@ mod tests {
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_deposit_cw20() {
+        let initial_liquidity = 10000000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "somecontract")]);
+
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: Decimal256::from_ratio(11, 10),
+            loan_to_value: Decimal256::one(),
+            borrow_index: Decimal256::from_ratio(1, 1),
+            borrow_slope: Decimal256::from_ratio(1, 10),
+            liquidity_rate: Decimal256::from_ratio(10, 100),
+            debt_total_scaled: Uint256::from(10000000u128),
+            interests_last_updated: 10000000,
+            asset_type: AssetInfo::Token {
+                contract_addr: HumanAddr::from("somecontract"),
+            },
+            ..Default::default()
+        };
+        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecontract", &mock_reserve);
+
+        let deposit_amount = 110000u128;
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Deposit {}).unwrap()),
+            sender: HumanAddr::from("depositer"),
+            amount: Uint128(deposit_amount),
+        });
+        let env = th_mock_env(MockEnvParams {
+            sender: "somecontract",
+            sent_funds: &[coin(deposit_amount, "somecontract")],
+            block_time: Some(10000100),
+        });
+
+        let res = handle(&mut deps, env.clone(), msg).unwrap();
+
+        // previous * (1 + rate * time / 31536000)
+        let expected_accumulated_interest = Decimal256::one()
+            + (Decimal256::from_ratio(10, 100) * Decimal256::from_uint256(100u64)
+                / Decimal256::from_uint256(SECONDS_PER_YEAR));
+
+        let expected_liquidity_index =
+            Decimal256::from_ratio(11, 10) * expected_accumulated_interest;
+        let expected_mint_amount: Uint256 =
+            (Uint256::from(deposit_amount) / expected_liquidity_index).into();
+
+        let expected_params = th_get_expected_indices_and_rates(
+            &reserve,
+            env.block.time,
+            initial_liquidity,
+            Default::default(),
+        );
+
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("matoken"),
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Mint {
+                    recipient: HumanAddr::from("depositer"),
+                    amount: expected_mint_amount.into(),
+                })
+                .unwrap(),
+            })]
+        );
+
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "deposit"),
+                log("reserve", "somecontract"),
+                log("user", "depositer"),
+                log("amount", deposit_amount),
+                log("borrow_index", expected_params.borrow_index),
+                log("liquidity_index", expected_params.liquidity_index),
+                log("borrow_rate", expected_params.borrow_rate),
+                log("liquidity_rate", expected_params.liquidity_rate),
+            ]
+        );
+
+        // empty deposit fails
+        let env = mock_env("depositer", &[]);
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Deposit {}).unwrap()),
+            sender: HumanAddr::from("depositer"),
+            amount: Uint128(deposit_amount),
+        });
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
