@@ -1,3 +1,4 @@
+use crate::asset::AssetInfo;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::HumanAddr;
 use cw20::Cw20ReceiveMsg;
@@ -17,8 +18,8 @@ pub enum HandleMsg {
 
     /// Initialize an asset on the money market
     InitAsset {
-        /// Symbol used in Terra (e.g: uluna, uusd)
-        denom: String,
+        /// Indicated whether the asset is native or a cw20, and its denom or contract address, respectively
+        asset: AssetInfo,
         /// Borrow slope to calculate borrow rate
         borrow_slope: Decimal256,
         /// Max percentage of collateral that can be borrowed
