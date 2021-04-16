@@ -114,7 +114,7 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     staker: HumanAddr,
     stake_amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // check bond is valid
+    // check stake is valid
     let config = config_state_read(&deps.storage).load()?;
     // Has to send Mars tokens
     if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
@@ -166,7 +166,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     staker: HumanAddr,
     burn_amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // check unbond is valid
+    // check unstake is valid
     let config = config_state_read(&deps.storage).load()?;
     if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
         return Err(StdError::unauthorized());
@@ -491,7 +491,7 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         // no Mars in pool
-        // bond X Mars -> should receive X xMars
+        // stake X Mars -> should receive X xMars
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
             sender: HumanAddr::from("staker"),
@@ -579,7 +579,7 @@ mod tests {
             res.log
         );
 
-        // bond other token -> Unauthorized
+        // stake other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
             sender: HumanAddr::from("staker"),
@@ -589,7 +589,7 @@ mod tests {
         let env = mock_env("other_token", &[]);
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
-        // unbond Mars -> should burn xMars and receive Mars back
+        // unstake Mars -> should burn xMars and receive Mars back
         let unstake_amount = Uint128(1_000_000);
         let mars_in_basecamp = Uint128(4_000_000);
         let xmars_supply = Uint128(3_000_000);
@@ -645,7 +645,7 @@ mod tests {
             res.log
         );
 
-        // unbond other token -> Unauthorized
+        // unstake other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
@@ -660,7 +660,7 @@ mod tests {
     fn test_mint_mars() {
         let mut deps = th_setup(&[]);
 
-        // bond Mars -> should receive xMars
+        // stake Mars -> should receive xMars
         let msg = HandleMsg::MintMars {
             recipient: HumanAddr::from("recipient"),
             amount: Uint128(3_500_000),

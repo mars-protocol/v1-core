@@ -1,5 +1,4 @@
 /// cosmwasm_std::testing overrides and custom test helpers
-use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier,
     QuerierResult, QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
@@ -9,6 +8,7 @@ use std::collections::HashMap;
 use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
+use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 
 /// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
 /// in order to add a custom querier
@@ -91,7 +91,7 @@ impl WasmMockQuerier {
         }
     }
 
-    /// Set querirer balances for native exchange rates taken as a list of tuples
+    /// Set mock querier exchange rates query results for a given denom
     pub fn set_native_exchange_rates(
         &mut self,
         base_denom: String,
@@ -102,7 +102,7 @@ impl WasmMockQuerier {
             .insert(base_denom, exchange_rates.iter().cloned().collect());
     }
 
-    /// Set mock querirer balances for a cw20 token as a list of tuples in the form
+    /// Set mock querier balances results for a given cw20 token
     pub fn set_cw20_balances(
         &mut self,
         cw20_address: HumanAddr,
@@ -113,6 +113,9 @@ impl WasmMockQuerier {
             .insert(cw20_address, balances.iter().cloned().collect());
     }
 
+    /// Set mock querier so that it returns a specific total supply on the token info query
+    /// for a given cw20 token (note this will override existing token info with default
+    /// values for the rest of the fields)
     pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
         let mut token_info = mock_token_info_response();
         token_info.total_supply = total_supply;
