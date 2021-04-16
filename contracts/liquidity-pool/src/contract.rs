@@ -9,6 +9,7 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::cw20_get_balance;
 
+use crate::asset::AssetInfo;
 use crate::msg::{
     ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
     ReserveInfo, ReserveResponse, ReservesListResponse,
@@ -19,7 +20,6 @@ use crate::state::{
     users_state, users_state_read, Config, Debt, Reserve, ReserveDenoms, User,
 };
 use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
-use crate::asset::{Asset, AssetRaw, AssetInfo, AssetInfoRaw};
 
 // CONSTANTS
 
@@ -53,10 +53,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     match msg {
         HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitAsset {
-            denom,
+            asset,
             borrow_slope,
             loan_to_value,
-        } => init_asset(deps, env, denom, borrow_slope, loan_to_value),
+        } => init_asset(deps, env, asset, borrow_slope, loan_to_value),
         HandleMsg::InitAssetTokenCallback { id } => init_asset_token_callback(deps, env, id),
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
@@ -87,7 +87,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     cw20_msg.sender,
                     Uint256::from(cw20_msg.amount),
                 )
-            },
+            }
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -155,7 +155,7 @@ pub fn redeem_native<S: Storage, A: Api, Q: Querier>(
 pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    denom: String,
+    asset: AssetInfo,
     borrow_slope: Decimal256,
     loan_to_value: Decimal256,
 ) -> StdResult<HandleResponse> {
@@ -167,13 +167,19 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
 
+    // set id to either the denom or contract address depending on the asset type
+    let id = match asset.clone() {
+        AssetInfo::Token { contract_addr } => String::from(contract_addr.as_str()),
+        AssetInfo::NativeToken { denom } => denom,
+    };
+
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
-    match reserves.may_load(denom.as_bytes()) {
+    match reserves.may_load(id.clone().as_bytes()) {
         Ok(None) => {
             // create asset reserve
             reserves.save(
-                denom.as_bytes(),
+                id.as_bytes(),
                 &Reserve {
                     index: config.reserve_count,
                     ma_token_address: CanonicalAddr::default(),
@@ -189,15 +195,15 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
+
+                    asset_type: asset.clone(),
                 },
             )?;
 
             // save index to denom mapping
             reserve_denoms_state(&mut deps.storage).save(
                 &config.reserve_count.to_be_bytes(),
-                &ReserveDenoms {
-                    denom: denom.clone(),
-                },
+                &ReserveDenoms { denom: id.clone() },
             )?;
 
             // increment reserve count
@@ -216,8 +222,8 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
             msg: to_binary(&cw20_token::msg::InitMsg {
-                name: format!("mars {} debt token", denom),
-                symbol: format!("ma{}", denom),
+                name: format!("mars {} debt token", id),
+                symbol: format!("ma{}", id),
                 decimals: 6,
                 initial_balances: vec![],
                 mint: Some(MinterResponse {
@@ -225,7 +231,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id: denom })?,
+                    msg: to_binary(&HandleMsg::InitAssetTokenCallback { id })?,
                     contract_addr: env.contract.address,
                 }),
             })?,
@@ -871,7 +877,9 @@ mod tests {
         // *
         let env = mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
-            denom: String::from("someasset"),
+            asset: AssetInfo::NativeToken {
+                denom: "someasset".to_string(),
+            },
             borrow_slope: Decimal256::from_ratio(4, 100),
             loan_to_value: Decimal256::from_ratio(8, 10),
         };
@@ -882,7 +890,9 @@ mod tests {
         // *
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            denom: String::from("someasset"),
+            asset: AssetInfo::NativeToken {
+                denom: "someasset".to_string(),
+            },
             borrow_slope: Decimal256::from_ratio(4, 100),
             loan_to_value: Decimal256::from_ratio(8, 10),
         };
@@ -972,7 +982,9 @@ mod tests {
         // *
         let env = mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            denom: String::from("otherasset"),
+            asset: AssetInfo::Token {
+                contract_addr: HumanAddr::from("otherasset"),
+            },
             borrow_slope: Decimal256::from_ratio(4, 100),
             loan_to_value: Decimal256::from_ratio(8, 10),
         };
@@ -1961,6 +1973,8 @@ mod tests {
 
         interests_last_updated: u64,
         debt_total_scaled: Uint256,
+
+        asset_type: AssetInfo,
     }
 
     fn th_init_reserve<S: Storage, A: Api>(
@@ -1993,6 +2007,7 @@ mod tests {
             loan_to_value: reserve.loan_to_value,
             interests_last_updated: reserve.interests_last_updated,
             debt_total_scaled: reserve.debt_total_scaled,
+            asset_type: reserve.asset_type.clone(),
         };
 
         reserve_bucket.save(key, &new_reserve).unwrap();

@@ -2,91 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use cosmwasm_std::{
-    to_binary, Api, BankMsg, CanonicalAddr, Coin, CosmosMsg, Env, Extern, HumanAddr,
-    Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
-};
-use cw20::Cw20HandleMsg;
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Asset {
-    pub info: AssetInfo,
-    pub amount: Uint128,
-}
-
-impl fmt::Display for Asset {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}", self.amount, self.info)
-    }
-}
-
-impl Asset {
-    pub fn is_native_token(&self) -> bool {
-        self.info.is_native_token()
-    }
-
-    pub fn into_msg<S: Storage, A: Api, Q: Querier>(
-        self,
-        _deps: &Extern<S, A, Q>,
-        sender: HumanAddr,
-        recipient: HumanAddr,
-    ) -> StdResult<CosmosMsg> {
-        let amount = self.amount;
-
-        match &self.info {
-            AssetInfo::Token { contract_addr } => Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract_addr.clone(),
-                msg: to_binary(&Cw20HandleMsg::Transfer { recipient, amount })?,
-                send: vec![],
-            })),
-            AssetInfo::NativeToken { denom } => Ok(CosmosMsg::Bank(BankMsg::Send {
-                from_address: sender,
-                to_address: recipient,
-                amount: vec![Coin { denom: denom.to_string(), amount }],
-            })),
-        }
-    }
-
-    pub fn assert_sent_native_token_balance(&self, env: &Env) -> StdResult<()> {
-        if let AssetInfo::NativeToken { denom } = &self.info {
-            match env.message.sent_funds.iter().find(|x| x.denom == *denom) {
-                Some(coin) => {
-                    if self.amount == coin.amount {
-                        Ok(())
-                    } else {
-                        Err(StdError::generic_err("Native token balance mismatch between the argument and the transferred"))
-                    }
-                }
-                None => {
-                    if self.amount.is_zero() {
-                        Ok(())
-                    } else {
-                        Err(StdError::generic_err("Native token balance mismatch between the argument and the transferred"))
-                    }
-                }
-            }
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn to_raw<S: Storage, A: Api, Q: Querier>(
-        &self,
-        deps: &Extern<S, A, Q>,
-    ) -> StdResult<AssetRaw> {
-        Ok(AssetRaw {
-            info: match &self.info {
-                AssetInfo::NativeToken { denom } => AssetInfoRaw::NativeToken {
-                    denom: denom.to_string(),
-                },
-                AssetInfo::Token { contract_addr } => AssetInfoRaw::Token {
-                    contract_addr: deps.api.canonical_address(&contract_addr)?,
-                },
-            },
-            amount: self.amount,
-        })
-    }
-}
+use cosmwasm_std::{Api, CanonicalAddr, Extern, HumanAddr, Querier, StdResult, Storage};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -100,6 +16,14 @@ impl fmt::Display for AssetInfo {
         match self {
             AssetInfo::NativeToken { denom } => write!(f, "{}", denom),
             AssetInfo::Token { contract_addr } => write!(f, "{}", contract_addr),
+        }
+    }
+}
+
+impl Default for AssetInfo {
+    fn default() -> Self {
+        AssetInfo::NativeToken {
+            denom: "".to_string(),
         }
     }
 }
@@ -143,31 +67,6 @@ impl AssetInfo {
                 }
             }
         }
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct AssetRaw {
-    pub info: AssetInfoRaw,
-    pub amount: Uint128,
-}
-
-impl AssetRaw {
-    pub fn to_normal<S: Storage, A: Api, Q: Querier>(
-        &self,
-        deps: &Extern<S, A, Q>,
-    ) -> StdResult<Asset> {
-        Ok(Asset {
-            info: match &self.info {
-                AssetInfoRaw::NativeToken { denom } => AssetInfo::NativeToken {
-                    denom: denom.to_string(),
-                },
-                AssetInfoRaw::Token { contract_addr } => AssetInfo::Token {
-                    contract_addr: deps.api.human_address(&contract_addr)?,
-                },
-            },
-            amount: self.amount,
-        })
     }
 }
 
@@ -220,6 +119,3 @@ impl AssetInfoRaw {
         }
     }
 }
-
-
-
