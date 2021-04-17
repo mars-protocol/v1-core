@@ -26,7 +26,6 @@ pub enum HandleMsg {
     InitAssetTokenCallback {
         /// Either the denom for a terra native asset or address for a cw20 token
         reference: Vec<u8>,
-        symbol: String,
     },
     /// Deposit Terra native coins
     DepositNative {
@@ -134,10 +133,4 @@ pub struct InitAssetParams {
 pub enum AssetType {
     Cw20,
     Native,
-}
-
-impl Default for AssetType {
-    fn default() -> Self {
-        AssetType::Native
-    }
 }
