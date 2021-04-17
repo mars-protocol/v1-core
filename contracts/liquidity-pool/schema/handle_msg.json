@@ -24,32 +24,23 @@
         "init_asset": {
           "type": "object",
           "required": [
-            "asset",
-            "borrow_slope",
-            "loan_to_value"
+            "asset_info",
+            "asset_params"
           ],
           "properties": {
-            "asset": {
-              "description": "Indicated whether the asset is native or a cw20, and its denom or contract address, respectively",
+            "asset_info": {
+              "description": "Asset related info",
               "allOf": [
                 {
-                  "$ref": "#/definitions/AssetInfo"
+                  "$ref": "#/definitions/InitAssetInfo"
                 }
               ]
             },
-            "borrow_slope": {
-              "description": "Borrow slope to calculate borrow rate",
+            "asset_params": {
+              "description": "Asset parameters",
               "allOf": [
                 {
-                  "$ref": "#/definitions/Decimal256"
-                }
-              ]
-            },
-            "loan_to_value": {
-              "description": "Max percentage of collateral that can be borrowed",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Decimal256"
+                  "$ref": "#/definitions/InitAssetParams"
                 }
               ]
             }
@@ -72,7 +63,12 @@
           "properties": {
             "id": {
               "description": "Either the denom for a terra native asset or address for a cw20 token",
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
             }
           }
         }
@@ -147,48 +143,6 @@
     }
   ],
   "definitions": {
-    "AssetInfo": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "token"
-          ],
-          "properties": {
-            "token": {
-              "type": "object",
-              "required": [
-                "contract_addr"
-              ],
-              "properties": {
-                "contract_addr": {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "native_token"
-          ],
-          "properties": {
-            "native_token": {
-              "type": "object",
-              "required": [
-                "denom"
-              ],
-              "properties": {
-                "denom": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
     "Binary": {
       "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
       "type": "string"
@@ -225,6 +179,74 @@
     },
     "HumanAddr": {
       "type": "string"
+    },
+    "InitAssetInfo": {
+      "description": "We currently take no arguments for migrations",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "Cw20"
+          ],
+          "properties": {
+            "Cw20": {
+              "type": "object",
+              "required": [
+                "contract_addr"
+              ],
+              "properties": {
+                "contract_addr": {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "Native"
+          ],
+          "properties": {
+            "Native": {
+              "type": "object",
+              "required": [
+                "denom"
+              ],
+              "properties": {
+                "denom": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "InitAssetParams": {
+      "type": "object",
+      "required": [
+        "borrow_slope",
+        "loan_to_value"
+      ],
+      "properties": {
+        "borrow_slope": {
+          "description": "Borrow slope to calculate borrow rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "loan_to_value": {
+          "description": "Max percentage of collateral that can be borrowed",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        }
+      }
     },
     "Uint128": {
       "type": "string"

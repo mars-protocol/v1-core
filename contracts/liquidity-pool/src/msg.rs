@@ -1,4 +1,3 @@
-use crate::asset::AssetInfo;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::HumanAddr;
 use cw20::Cw20ReceiveMsg;
@@ -18,17 +17,15 @@ pub enum HandleMsg {
 
     /// Initialize an asset on the money market
     InitAsset {
-        /// Indicated whether the asset is native or a cw20, and its denom or contract address, respectively
-        asset: AssetInfo,
-        /// Borrow slope to calculate borrow rate
-        borrow_slope: Decimal256,
-        /// Max percentage of collateral that can be borrowed
-        loan_to_value: Decimal256,
+        /// Asset related info
+        asset_info: InitAssetInfo,
+        /// Asset parameters
+        asset_params: InitAssetParams,
     },
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {
         /// Either the denom for a terra native asset or address for a cw20 token
-        id: String,
+        id: Vec<u8>,
     },
     /// Deposit Terra native coins
     DepositNative {
@@ -115,3 +112,31 @@ pub struct DebtInfo {
 /// We currently take no arguments for migrations
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
+/// We currently take no arguments for migrations
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub enum InitAssetInfo {
+    Cw20 { contract_addr: HumanAddr },
+    Native { denom: String },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct InitAssetParams {
+    /// Borrow slope to calculate borrow rate
+    pub borrow_slope: Decimal256,
+    /// Max percentage of collateral that can be borrowed
+    pub loan_to_value: Decimal256,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetType {
+    Cw20,
+    Native,
+}
+
+impl Default for AssetType {
+    fn default() -> Self {
+        AssetType::Native
+    }
+}

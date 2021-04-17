@@ -31,3 +31,15 @@ pub fn cw20_get_total_supply<S: Storage, A: Api, Q: Querier>(
 
     Ok(query.total_supply)
 }
+
+pub fn cw20_get_symbol<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    token_address: HumanAddr,
+) -> StdResult<String> {
+    let query: TokenInfoResponse = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: token_address,
+        msg: to_binary(&Cw20QueryMsg::TokenInfo {})?,
+    }))?;
+
+    Ok(query.symbol)
+}
