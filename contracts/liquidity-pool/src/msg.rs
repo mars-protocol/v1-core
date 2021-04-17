@@ -25,7 +25,7 @@ pub enum HandleMsg {
     /// Callback sent from maToken contract after instantiated
     InitAssetTokenCallback {
         /// Either the denom for a terra native asset or address for a cw20 token
-        id: Vec<u8>,
+        reference: Vec<u8>,
     },
     /// Deposit Terra native coins
     DepositNative {

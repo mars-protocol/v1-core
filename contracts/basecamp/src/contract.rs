@@ -503,13 +503,8 @@ mod tests {
             &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_000_000))],
         );
 
-        deps.querier.set_cw20_token_info(
-            HumanAddr::from("xmars_token"),
-            None,
-            None,
-            None,
-            Some(Uint128(0)),
-        );
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(0));
 
         let env = mock_env("mars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
@@ -553,13 +548,8 @@ mod tests {
             &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
         );
 
-        deps.querier.set_cw20_token_info(
-            HumanAddr::from("xmars_token"),
-            None,
-            None,
-            None,
-            Some(xmars_supply),
-        );
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
 
         let env = mock_env("mars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
@@ -615,13 +605,8 @@ mod tests {
             &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
         );
 
-        deps.querier.set_cw20_token_info(
-            HumanAddr::from("xmars_token"),
-            None,
-            None,
-            None,
-            Some(xmars_supply),
-        );
+        deps.querier
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
 
         let env = mock_env("xmars_token", &[]);
         let res = handle(&mut deps, env, msg).unwrap();

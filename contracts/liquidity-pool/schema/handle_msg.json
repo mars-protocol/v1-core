@@ -58,10 +58,10 @@
         "init_asset_token_callback": {
           "type": "object",
           "required": [
-            "id"
+            "reference"
           ],
           "properties": {
-            "id": {
+            "reference": {
               "description": "Either the denom for a terra native asset or address for a cw20 token",
               "type": "array",
               "items": {
