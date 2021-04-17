@@ -55,10 +55,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             asset_info,
             asset_params,
         } => handle_init_asset(deps, env, asset_info, asset_params),
-        HandleMsg::InitAssetTokenCallback {
-            reference: id,
-            symbol,
-        } => init_asset_token_callback(deps, env, id, symbol),
+        HandleMsg::InitAssetTokenCallback { reference: id } => {
+            init_asset_token_callback(deps, env, id)
+        }
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
         HandleMsg::RepayNative { denom } => repay_native(deps, env, denom),
@@ -244,7 +243,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     // Prepare response, should instantiate an maToken
     // and use the Register hook
     Ok(HandleResponse {
-        log: vec![],
+        log: vec![log("action", "init_asset"), log("asset", symbol.clone())],
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
@@ -260,7 +259,6 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 init_hook: Some(cw20_token::msg::InitHook {
                     msg: to_binary(&HandleMsg::InitAssetTokenCallback {
                         reference: reference.to_vec(),
-                        symbol,
                     })?,
                     contract_addr: env.contract.address,
                 }),
@@ -275,7 +273,6 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     id: Vec<u8>,
-    symbol: String,
 ) -> StdResult<HandleResponse> {
     let mut state = reserves_state(&mut deps.storage);
     let mut reserve = state.load(&id.as_slice())?;
@@ -283,15 +280,7 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     if reserve.ma_token_address == CanonicalAddr::default() {
         reserve.ma_token_address = deps.api.canonical_address(&env.message.sender)?;
         state.save(&id.as_slice(), &reserve)?;
-        Ok(HandleResponse {
-            messages: vec![],
-            log: vec![
-                log("action", "init_asset"),
-                log("asset", symbol),
-                log("ma_token_address", &env.message.sender),
-            ],
-            data: None,
-        })
+        Ok(HandleResponse::default())
     } else {
         // Can do this only once
         Err(StdError::unauthorized())
@@ -964,7 +953,6 @@ mod tests {
                     init_hook: Some(cw20_token::msg::InitHook {
                         msg: to_binary(&HandleMsg::InitAssetTokenCallback {
                             reference: "someasset".into(),
-                            symbol: String::from("someasset"),
                         })
                         .unwrap(),
                         contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
@@ -976,24 +964,19 @@ mod tests {
             }),]
         );
 
+        assert_eq!(
+            res.log,
+            vec![log("action", "init_asset"), log("asset", "someasset"),],
+        );
+
         // *
         // callback comes back with created token
         // *
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
-            symbol: "someasset".to_string(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        assert_eq!(
-            res.log,
-            vec![
-                log("action", "init_asset"),
-                log("asset", "someasset"),
-                log("ma_token_address", "mtokencontract"),
-            ]
-        );
+        let _res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage)
@@ -1013,7 +996,6 @@ mod tests {
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
-            symbol: "someasset".to_string(),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -1033,7 +1015,7 @@ mod tests {
                 loan_to_value: Decimal256::from_ratio(8, 10),
             },
         };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
         let cw20_addr_raw = deps.api.canonical_address(&cw20_addr).unwrap();
 
         let reserve = reserves_state_read(&deps.storage)
@@ -1048,24 +1030,18 @@ mod tests {
         let config = config_state_read(&deps.storage).load().unwrap();
         assert_eq!(2, config.reserve_count);
 
+        assert_eq!(
+            res.log,
+            vec![log("action", "init_asset"), log("asset", "otherasset"),],
+        );
         // *
         // cw20 callback comes back with created token
         // *
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_addr_raw.as_slice()),
-            symbol: "otherasset".to_string(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        assert_eq!(
-            res.log,
-            vec![
-                log("action", "init_asset"),
-                log("asset", "otherasset"),
-                log("ma_token_address", "mtokencontract"),
-            ]
-        );
+        let _res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage)
@@ -1085,7 +1061,6 @@ mod tests {
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_addr_raw.as_slice()),
-            symbol: "otherasset".to_string(),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
@@ -1097,7 +1072,6 @@ mod tests {
         let env = mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "uluna".into(),
-            symbol: "uluna".to_string(),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
@@ -2050,7 +2024,7 @@ mod tests {
         }
     }
 
-    #[derive(Default, Debug)]
+    #[derive(Debug)]
     struct MockReserve<'a> {
         ma_token_address: &'a str,
         liquidity_index: Decimal256,
@@ -2066,6 +2040,23 @@ mod tests {
         debt_total_scaled: Uint256,
 
         asset_type: AssetType,
+    }
+
+    impl Default for MockReserve<'_> {
+        fn default() -> Self {
+            MockReserve {
+                ma_token_address: "",
+                liquidity_index: Default::default(),
+                borrow_index: Default::default(),
+                borrow_rate: Default::default(),
+                liquidity_rate: Default::default(),
+                borrow_slope: Default::default(),
+                loan_to_value: Default::default(),
+                interests_last_updated: 0,
+                debt_total_scaled: Default::default(),
+                asset_type: AssetType::Native,
+            }
+        }
     }
 
     fn th_init_reserve<S: Storage, A: Api>(
