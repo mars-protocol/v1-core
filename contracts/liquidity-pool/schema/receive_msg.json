@@ -12,10 +12,10 @@
         "redeem": {
           "type": "object",
           "required": [
-            "id"
+            "reference"
           ],
           "properties": {
-            "id": {
+            "reference": {
               "description": "Either the symbol for a terra native asset or address for a cw20 token",
               "type": "string"
             }

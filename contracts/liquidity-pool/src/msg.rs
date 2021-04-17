@@ -54,7 +54,7 @@ pub enum ReceiveMsg {
         // TODO: Maybe it's not necessary to send this but it makes things more
         // straightforward for now. We can revisit when we figure how are we
         // going to index the state
-        id: String,
+        reference: String,
     },
 }
 
