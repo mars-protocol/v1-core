@@ -18,7 +18,7 @@ pub enum HandleMsg {
 
     /// Initialize an asset on the money market
     InitAsset {
-        /// Indicated whether the asset is native or a cw20, and its denom or contract address, respectively
+        /// Indicates whether the asset is native or a cw20, and its denom or contract address, respectively
         asset: AssetInfo,
         /// Borrow slope to calculate borrow rate
         borrow_slope: Decimal256,
@@ -61,6 +61,8 @@ pub enum ReceiveMsg {
     },
     /// Deposit cw20 tokens
     Deposit {},
+    /// Borrow cw20 tokens
+    Borrow { id: String, amount: Uint256 },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

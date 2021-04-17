@@ -22,6 +22,47 @@
           }
         }
       }
+    },
+    {
+      "description": "Deposit cw20 tokens",
+      "type": "object",
+      "required": [
+        "deposit"
+      ],
+      "properties": {
+        "deposit": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Borrow cw20 tokens",
+      "type": "object",
+      "required": [
+        "borrow"
+      ],
+      "properties": {
+        "borrow": {
+          "type": "object",
+          "required": [
+            "amount",
+            "id"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint256"
+            },
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "Uint256": {
+      "type": "string"
+    }
+  }
 }
