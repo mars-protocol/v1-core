@@ -22,6 +22,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
         xmars_token_address: CanonicalAddr::default(),
+        cooldown_duration: msg.cooldown_duration, 
+        unstake_window: msg.unstake_window,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -87,6 +89,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitTokenCallback { token_id } => {
             handle_init_token_callback(deps, env, token_id)
         }
+        HandleMsg::Cooldown {} => handle_cooldown(deps, env),
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
 }
@@ -217,6 +220,36 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
+/// If a cooldown exists and amount has changed it computes the weighted average
+/// for the cooldown
+pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    // get total mars in contract before the stake transaction
+    let xmars_balance = cw20_get_balance(
+        deps,
+        deps.api.human_address(&config.xmars_token_address)?,
+        env.message.sender.clone(),
+    )?;
+
+    if xmars_balance.is_zero() {
+        return Err(StdError::unauthorized());
+    }
+
+    Ok(HandleResponse {
+        log: vec![],
+        data: None,
+        messages: vec![],
+    })
+
+    //let current_cooldown = 
+        //cooldown_state(&mut deps.storage).may_load(env.msg.sender)
+}
+
 /// Handles token post initialization storing the addresses
 /// in config
 /// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
@@ -338,11 +371,18 @@ mod tests {
     use cosmwasm_std::{from_binary, Coin};
     use mars::testing::{mock_dependencies, WasmMockQuerier};
 
+    const TEST_COOLDOWN_DURATION: u64 = 1000; 
+    const TEST_UNSTAKE_WINDOW: u64 = 100; 
+
     #[test]
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg { cw20_code_id: 11 };
+        let msg = InitMsg { 
+            cw20_code_id: 11,
+            cooldown_duration: 20,
+            unstake_window: 10,
+        };
         let env = mock_env("owner", &[]);
 
         let res = init(&mut deps, env, msg).unwrap();
@@ -697,7 +737,11 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
-        let msg = InitMsg { cw20_code_id: 1 };
+        let msg = InitMsg {
+            cw20_code_id: 1,
+            cooldown_duration: TEST_COOLDOWN_DURATION,
+            unstake_window: TEST_UNSTAKE_WINDOW,
+        };
         let env = mock_env("owner", &[]);
         let _res = init(&mut deps, env, msg).unwrap();
 
