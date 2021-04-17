@@ -55,8 +55,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             asset_info,
             asset_params,
         } => handle_init_asset(deps, env, asset_info, asset_params),
-        HandleMsg::InitAssetTokenCallback { reference: id } => {
-            init_asset_token_callback(deps, env, id)
+        HandleMsg::InitAssetTokenCallback { reference } => {
+            init_asset_token_callback(deps, env, reference)
         }
         HandleMsg::DepositNative { denom } => deposit_native(deps, env, denom),
         HandleMsg::BorrowNative { denom, amount } => borrow_native(deps, env, denom, amount),
@@ -72,8 +72,8 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
-            ReceiveMsg::Redeem { id } => {
-                let reserve = reserves_state_read(&deps.storage).load(id.as_bytes())?;
+            ReceiveMsg::Redeem { reference } => {
+                let reserve = reserves_state_read(&deps.storage).load(reference.as_bytes())?;
                 if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
                     return Err(StdError::unauthorized());
                 }
@@ -82,7 +82,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 redeem_native(
                     deps,
                     env,
-                    id,
+                    reference,
                     reserve,
                     cw20_msg.sender,
                     Uint256::from(cw20_msg.amount),
@@ -224,7 +224,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 },
             )?;
 
-            // save index to id mapping
+            // save index to reference mapping
             reserve_references_state(&mut deps.storage).save(
                 &config.reserve_count.to_be_bytes(),
                 &ReserveReferences {
@@ -272,14 +272,14 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    id: Vec<u8>,
+    reference: Vec<u8>,
 ) -> StdResult<HandleResponse> {
     let mut state = reserves_state(&mut deps.storage);
-    let mut reserve = state.load(&id.as_slice())?;
+    let mut reserve = state.load(&reference.as_slice())?;
 
     if reserve.ma_token_address == CanonicalAddr::default() {
         reserve.ma_token_address = deps.api.canonical_address(&env.message.sender)?;
-        state.save(&id.as_slice(), &reserve)?;
+        state.save(&reference.as_slice(), &reserve)?;
         Ok(HandleResponse::default())
     } else {
         // Can do this only once
@@ -1203,7 +1203,7 @@ mod tests {
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
                 to_binary(&ReceiveMsg::Redeem {
-                    id: String::from("somecoin"),
+                    reference: String::from("somecoin"),
                 })
                 .unwrap(),
             ),
@@ -1293,7 +1293,7 @@ mod tests {
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
                 to_binary(&ReceiveMsg::Redeem {
-                    id: String::from("somecoin"),
+                    reference: String::from("somecoin"),
                 })
                 .unwrap(),
             ),
