@@ -16,6 +16,11 @@ pub struct Config {
     pub mars_token_address: CanonicalAddr,
     /// xMars token address
     pub xmars_token_address: CanonicalAddr,
+    /// Cooldown duration in seconds
+    pub cooldown_duration: u64,
+    /// Time in seconds after the cooldown ends during which the unstaking of
+    /// the associated amount is allowed 
+    pub unstake_window: u64,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {

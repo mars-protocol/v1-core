@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
+    pub cooldown_duration: u64,
+    pub unstake_window: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -20,6 +22,8 @@ pub enum HandleMsg {
         recipient: HumanAddr,
         amount: Uint128,
     },
+    /// Initialize or refresh cooldown
+    Cooldown {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
