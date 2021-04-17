@@ -58,7 +58,8 @@
         "init_asset_token_callback": {
           "type": "object",
           "required": [
-            "reference"
+            "reference",
+            "symbol"
           ],
           "properties": {
             "reference": {
@@ -69,6 +70,9 @@
                 "format": "uint8",
                 "minimum": 0.0
               }
+            },
+            "symbol": {
+              "type": "string"
             }
           }
         }
