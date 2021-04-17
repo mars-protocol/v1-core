@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::asset::AssetInfo;
+use crate::msg::AssetType;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
@@ -65,7 +65,7 @@ pub struct Reserve {
     pub debt_total_scaled: Uint256,
 
     /// Indicated whether the asset is native or a cw20 token
-    pub asset_type: AssetInfo,
+    pub asset_type: AssetType,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
@@ -113,15 +113,15 @@ pub fn debts_asset_state_read<'a, S: Storage>(
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ReserveDenoms {
-    /// Denom of reserve
-    pub denom: String,
+pub struct ReserveReferences {
+    /// ID of reserve
+    pub id: String,
 }
 
-pub fn reserve_denoms_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveDenoms> {
+pub fn reserve_denoms_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveReferences> {
     bucket(RESERVE_DENOMS_NAMESPACE, storage)
 }
 
-pub fn reserve_denoms_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, ReserveDenoms> {
+pub fn reserve_denoms_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, ReserveReferences> {
     bucket_read(RESERVE_DENOMS_NAMESPACE, storage)
 }

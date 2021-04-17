@@ -115,9 +115,32 @@ impl WasmMockQuerier {
     /// Set mock querier so that it returns a specific total supply on the token info query
     /// for a given cw20 token (note this will override existing token info with default
     /// values for the rest of the fields)
-    pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
+    pub fn set_cw20_token_info(
+        &mut self,
+        cw20_address: HumanAddr,
+        name: Option<String>,
+        symbol: Option<String>,
+        decimals: Option<u8>,
+        total_supply: Option<Uint128>,
+    ) {
         let mut token_info = mock_token_info_response();
-        token_info.total_supply = total_supply;
+
+        if let Some(total_supply) = total_supply {
+            token_info.total_supply = total_supply;
+        }
+
+        if let Some(name) = name {
+            token_info.name = name;
+        }
+
+        if let Some(symbol) = symbol {
+            token_info.symbol = symbol;
+        }
+
+        if let Some(decimals) = decimals {
+            token_info.decimals = decimals;
+        }
+
         self.cw20_querier
             .token_info_responses
             .insert(cw20_address, token_info);
