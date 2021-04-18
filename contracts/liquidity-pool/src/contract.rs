@@ -63,10 +63,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             let deposit_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             handle_deposit(
                 deps,
-                env.clone(),
-                env.message.sender,
+                &env,
+                env.message.sender.clone(),
                 denom.as_bytes(),
-                denom.clone(),
+                denom.as_str(),
                 deposit_amount,
             )
         }
@@ -101,10 +101,10 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
             }
             ReceiveMsg::Deposit {} => handle_deposit(
                 deps,
-                env.clone(),
+                &env,
                 cw20_msg.sender,
                 deps.api.canonical_address(&env.message.sender)?.as_slice(),
-                String::from(env.message.sender.as_str()),
+                env.message.sender.as_str(),
                 Uint256::from(cw20_msg.amount),
             ),
         }
@@ -179,9 +179,9 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
         InitAssetInfo::Native { denom } => init_asset(
             deps,
             env,
-            denom.as_bytes().clone(),
-            denom.clone(),
-            denom.clone(),
+            denom.as_bytes(),
+            denom.as_str(),
+            denom.as_str(),
             AssetType::Native,
             asset_params,
         ),
@@ -192,8 +192,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
                 deps,
                 env,
                 canonical_addr.as_slice(),
-                symbol,
-                String::from(contract_addr.as_str()),
+                symbol.as_str(),
+                contract_addr.as_str(),
                 AssetType::Cw20,
                 asset_params,
             )
@@ -206,8 +206,8 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     reference: &[u8],
-    symbol: String,
-    asset: String,
+    symbol: &str,
+    asset: &str,
     asset_type: AssetType,
     asset_params: InitAssetParams,
 ) -> StdResult<HandleResponse> {
@@ -250,7 +250,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
             reserve_references_state(&mut deps.storage).save(
                 &config.reserve_count.to_be_bytes(),
                 &ReserveReferences {
-                    reference: symbol.clone(),
+                    reference: String::from(symbol),
                 },
             )?;
 
@@ -265,7 +265,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     // Prepare response, should instantiate an maToken
     // and use the Register hook
     Ok(HandleResponse {
-        log: vec![log("action", "init_asset"), log("asset", asset.clone())],
+        log: vec![log("action", "init_asset"), log("asset", asset)],
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
@@ -312,10 +312,10 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
 /// Handle deposits and mint corresponding debt tokens
 pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    env: &Env,
     sender: HumanAddr,
     reference: &[u8],
-    asset: String,
+    asset: &str,
     deposit_amount: Uint256,
 ) -> StdResult<HandleResponse> {
     let mut reserve = reserves_state_read(&deps.storage).load(reference)?;
@@ -809,10 +809,7 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
                 .amount
         }
         AssetType::Cw20 => {
-            let cw20_human_addr = deps
-                .api
-                .human_address(&CanonicalAddr::from(reference))
-                .unwrap();
+            let cw20_human_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
             cw20_get_balance(deps, cw20_human_addr, env.contract.address.clone())?
         }
     };
