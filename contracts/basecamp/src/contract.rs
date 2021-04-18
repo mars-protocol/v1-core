@@ -9,7 +9,10 @@ use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
-use crate::state::{config_state, config_state_read, Config};
+use crate::state::{
+    config_state, config_state_read, Config,
+    cooldowns_state, Cooldown,
+};
 
 // INIT
 
@@ -240,14 +243,54 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
 
+    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
+    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+
+    // compute new cooldown timestamp
+    let new_cooldown_timestamp = 
+        match cooldowns_bucket.may_load(sender_canonical_address.as_slice())? {
+            Some(cooldown) => {
+                let minimal_valid_cooldown_timestamp =
+                    env.block.time - config.cooldown_duration - config.unstake_window;
+                if cooldown.timestamp < minimal_valid_cooldown_timestamp {
+                    env.block.time
+                } else {
+                    let mut extra_amount: u128 = 0;
+                    if xmars_balance > cooldown.amount {
+                        extra_amount = xmars_balance.u128() - cooldown.amount.u128();
+                    };
+
+                    (
+                        (
+                            (cooldown.timestamp as u128) * cooldown.amount.u128() + 
+                            (env.block.time as u128) * extra_amount
+                        ) / (cooldown.amount.u128() + extra_amount)
+                    ) as u64
+                }
+            }
+
+            None => env.block.time
+        };
+
+    cooldowns_bucket.save(
+        &sender_canonical_address.as_slice(),
+        &Cooldown {
+            amount: xmars_balance,
+            timestamp: new_cooldown_timestamp,
+        }
+    )?;
+
     Ok(HandleResponse {
-        log: vec![],
+        log: vec![
+            log("action", "cooldown"),
+            log("user", env.message.sender),
+            log("cooldown_amount", xmars_balance),
+            log("cooldwon_timestamp", new_cooldown_timestamp)
+        ],
         data: None,
         messages: vec![],
     })
 
-    //let current_cooldown = 
-        //cooldown_state(&mut deps.storage).may_load(env.msg.sender)
 }
 
 /// Handles token post initialization storing the addresses
@@ -367,9 +410,13 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
-    use mars::testing::{mock_dependencies, WasmMockQuerier};
+    use mars::testing::{mock_dependencies, WasmMockQuerier, mock_env, MockEnvParams};
+
+    use crate::state::{
+        cooldowns_state_read
+    };
 
     const TEST_COOLDOWN_DURATION: u64 = 1000; 
     const TEST_UNSTAKE_WINDOW: u64 = 100; 
@@ -383,7 +430,7 @@ mod tests {
             cooldown_duration: 20,
             unstake_window: 10,
         };
-        let env = mock_env("owner", &[]);
+        let env = mock_env("owner", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
         assert_eq!(
@@ -444,7 +491,7 @@ mod tests {
 
         // mars token init callback
         let msg = HandleMsg::InitTokenCallback { token_id: 0 };
-        let env = mock_env("mars_token", &[]);
+        let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
             vec![
@@ -464,7 +511,7 @@ mod tests {
 
         // trying again fails
         let msg = HandleMsg::InitTokenCallback { token_id: 0 };
-        let env = mock_env("mars_token_again", &[]);
+        let env = mock_env("mars_token_again", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
         let config = config_state_read(&deps.storage).load().unwrap();
         assert_eq!(
@@ -477,7 +524,7 @@ mod tests {
 
         // xmars token init callback
         let msg = HandleMsg::InitTokenCallback { token_id: 1 };
-        let env = mock_env("xmars_token", &[]);
+        let env = mock_env("xmars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
             vec![
@@ -502,7 +549,7 @@ mod tests {
 
         // trying again fails
         let msg = HandleMsg::InitTokenCallback { token_id: 1 };
-        let env = mock_env("xmars_token_again", &[]);
+        let env = mock_env("xmars_token_again", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
         let config = config_state_read(&deps.storage).load().unwrap();
 
@@ -546,7 +593,7 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(0));
 
-        let env = mock_env("mars_token", &[]);
+        let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
 
         assert_eq!(
@@ -591,7 +638,7 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
 
-        let env = mock_env("mars_token", &[]);
+        let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_minted_xmars =
@@ -626,7 +673,7 @@ mod tests {
             amount: Uint128(2_000_000),
         });
 
-        let env = mock_env("other_token", &[]);
+        let env = mock_env("other_token", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
         // unstake Mars -> should burn xMars and receive Mars back
@@ -648,7 +695,7 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
 
-        let env = mock_env("xmars_token", &[]);
+        let env = mock_env("xmars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_returned_mars = unstake_amount.multiply_ratio(mars_in_basecamp, xmars_supply);
@@ -692,8 +739,45 @@ mod tests {
             amount: Uint128(2_000_000),
         });
 
-        let env = mock_env("other_token", &[]);
+        let env = mock_env("other_token", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_cooldown() {
+        let mut deps = th_setup(&[]);
+        // staker with no xmars is unauthorized
+        let msg = HandleMsg::Cooldown {};
+
+        let env = mock_env("staker", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // staker with xmars gets a cooldown equal to the xmars balance
+        let initial_xmars_balance = Uint128(1_000_000);
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(HumanAddr::from("staker"), initial_xmars_balance)],
+        );
+
+        let msg = HandleMsg::Cooldown {};
+
+        let initial_block_time = 1_600_000_000;
+        let env = mock_env("staker", MockEnvParams{
+            block_time: initial_block_time,
+            ..Default::default()
+        });
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        let cooldown = 
+            cooldowns_state_read(&deps.storage)
+            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+            .unwrap();
+
+        assert_eq!(cooldown.timestamp, 1_600_000_000);
+        assert_eq!(cooldown.amount, initial_xmars_balance);
+        // same amount does not alterate cooldown
+        // more amount gets a weighted average
+        // expired cooldown gets a new amount (test lower and higher)
     }
 
     #[test]
@@ -706,7 +790,7 @@ mod tests {
             amount: Uint128(3_500_000),
         };
 
-        let env = mock_env("owner", &[]);
+        let env = mock_env("owner", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
 
         assert_eq!(
@@ -728,7 +812,7 @@ mod tests {
             amount: Uint128(3_500_000),
         };
 
-        let env = mock_env("someoneelse", &[]);
+        let env = mock_env("someoneelse", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
@@ -742,7 +826,7 @@ mod tests {
             cooldown_duration: TEST_COOLDOWN_DURATION,
             unstake_window: TEST_UNSTAKE_WINDOW,
         };
-        let env = mock_env("owner", &[]);
+        let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
 
         let mut config_singleton = config_state(&mut deps.storage);
