@@ -56,6 +56,8 @@ pub enum ReceiveMsg {
         // going to index the state
         reference: String,
     },
+    /// Deposit the sent cw20 tokens
+    Deposit {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
