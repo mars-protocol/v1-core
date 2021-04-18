@@ -1,13 +1,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Storage};
-use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
+use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
+use cosmwasm_storage::{singleton, singleton_read, bucket, bucket_read, ReadonlySingleton, Singleton, Bucket, ReadonlyBucket};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
 
-/// Lending pool global configuration
+// namespaces (for buckets)
+pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
+
+/// Basecamp global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
@@ -29,4 +32,21 @@ pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
 
 pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
     singleton_read(storage, CONFIG_KEY)
+}
+
+/// Unstaking cooldown data
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Cooldown {
+    /// Timestamp where the cooldown was activated
+    pub timestamp: u64,
+    /// Amount that the user is allowed to unstake during the unstake window
+    pub amount: Uint128,
+}
+
+pub fn cooldowns_state<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
+    bucket(COOLDOWNS_NAMESPACE, storage)
+}
+
+pub fn cooldowns_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
+    bucket_read(COOLDOWNS_NAMESPACE, storage)
 }

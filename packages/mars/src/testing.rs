@@ -3,6 +3,7 @@ use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADD
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier, QuerierResult,
     QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
+    MessageInfo, BlockInfo, ContractInfo, Env,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -10,8 +11,39 @@ use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
 
-/// mock_dependencies is a drop-in replacement for cosmwasm_std::testing::mock_dependencies
-/// in order to add a custom querier
+pub struct MockEnvParams<'a> {
+    pub sent_funds: &'a [Coin],
+    pub block_time: u64,
+}
+
+impl<'a> Default for MockEnvParams<'a> {
+    fn default() -> Self {
+        MockEnvParams {
+            sent_funds: &[],
+            block_time: 1_571_797_419,
+        }
+    }
+}
+
+/// mock_env replacement for cosmwasm_std::testing::mock_env
+pub fn mock_env(sender: &str, mock_env_params: MockEnvParams) -> Env {
+    Env {
+        block: BlockInfo {
+            height: 12_345,
+            time: mock_env_params.block_time,
+            chain_id: "cosmos-testnet-14002".to_string(),
+        },
+        message: MessageInfo {
+            sender: HumanAddr::from(sender),
+            sent_funds: mock_env_params.sent_funds.to_vec(),
+        },
+        contract: ContractInfo {
+            address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+        },
+    }
+}
+
+/// mock_dependencies replacement for cosmwasm_std::testing::mock_dependencies
 pub fn mock_dependencies(
     canonical_length: usize,
     contract_balance: &[Coin],
@@ -81,7 +113,6 @@ impl Querier for WasmMockQuerier {
 }
 
 impl WasmMockQuerier {
-    // TODO: Why is the api needed here? Is it for the type to be set somehow
     pub fn new(base: MockQuerier<TerraQueryWrapper>) -> Self {
         WasmMockQuerier {
             base,
