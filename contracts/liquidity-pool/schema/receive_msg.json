@@ -22,6 +22,18 @@
           }
         }
       }
+    },
+    {
+      "description": "Deposit the sent cw20 tokens",
+      "type": "object",
+      "required": [
+        "deposit"
+      ],
+      "properties": {
+        "deposit": {
+          "type": "object"
+        }
+      }
     }
   ]
 }
