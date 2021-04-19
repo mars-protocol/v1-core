@@ -70,15 +70,18 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 deposit_amount,
             )
         }
-        HandleMsg::BorrowNative { denom, amount } => handle_borrow(
-            deps,
-            env.clone(),
-            env.message.sender,
-            denom.as_bytes(),
-            denom.as_str(),
-            amount,
-            AssetType::Native,
-        ),
+        HandleMsg::BorrowNative { denom, amount } => {
+            let borrower = env.message.sender.clone();
+            handle_borrow(
+                deps,
+                env,
+                borrower,
+                denom.as_bytes(),
+                denom.as_str(),
+                amount,
+                AssetType::Native,
+            )
+        }
         HandleMsg::RepayNative { denom } => repay_native(deps, env, denom),
     }
 }
@@ -115,14 +118,17 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 env.message.sender.as_str(),
                 Uint256::from(cw20_msg.amount),
             ),
-            ReceiveMsg::Borrow { reference, amount } => {
-                let reference_raw = deps.api.canonical_address(&reference)?;
+            ReceiveMsg::Borrow {
+                token_address,
+                amount,
+            } => {
+                let asset_reference_canonical_addr = deps.api.canonical_address(&token_address)?;
                 handle_borrow(
                     deps,
                     env,
                     cw20_msg.sender,
-                    reference_raw.as_slice(),
-                    reference.as_str(),
+                    asset_reference_canonical_addr.as_slice(),
+                    token_address.as_str(),
                     amount,
                     AssetType::Cw20,
                 )
@@ -225,9 +231,9 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    reference: &[u8],
+    asset_reference: &[u8],
     symbol: &str,
-    asset: &str,
+    asset_label: &str,
     asset_type: AssetType,
     asset_params: InitAssetParams,
 ) -> StdResult<HandleResponse> {
@@ -241,11 +247,11 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
-    match reserves.may_load(reference) {
+    match reserves.may_load(asset_reference) {
         Ok(None) => {
             // create asset reserve
             reserves.save(
-                reference,
+                asset_reference,
                 &Reserve {
                     index: config.reserve_count,
                     ma_token_address: CanonicalAddr::default(),
@@ -271,7 +277,6 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 &config.reserve_count.to_be_bytes(),
                 &ReserveReferences {
                     reference: symbol.as_bytes().to_vec(),
-                    asset_type,
                 },
             )?;
 
@@ -286,7 +291,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     // Prepare response, should instantiate an maToken
     // and use the Register hook
     Ok(HandleResponse {
-        log: vec![log("action", "init_asset"), log("asset", asset)],
+        log: vec![log("action", "init_asset"), log("asset", asset_label)],
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: config.ma_token_code_id,
@@ -301,7 +306,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
                     msg: to_binary(&HandleMsg::InitAssetTokenCallback {
-                        reference: reference.to_vec(),
+                        reference: asset_reference.to_vec(),
                     })?,
                     contract_addr: env.contract.address,
                 }),
@@ -334,24 +339,24 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
 pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    sender: HumanAddr,
-    reference: &[u8],
-    asset: &str,
+    depositor: HumanAddr,
+    asset_reference: &[u8],
+    asset_label: &str,
     deposit_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    let mut reserve = reserves_state_read(&deps.storage).load(reference)?;
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
         return Err(StdError::generic_err(format!(
             "Deposit amount must be greater than 0 {}",
-            asset,
+            asset_label,
         )));
     }
 
-    let depositer_addr_raw = deps.api.canonical_address(&sender)?;
+    let depositor_canonical_addr = deps.api.canonical_address(&depositor)?;
     let mut user: User =
-        match users_state_read(&deps.storage).may_load(depositer_addr_raw.as_slice()) {
+        match users_state_read(&deps.storage).may_load(depositor_canonical_addr.as_slice()) {
             Ok(Some(user)) => user,
             Ok(None) => User {
                 borrowed_assets: Uint128::zero(),
@@ -363,12 +368,12 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     let has_deposited_asset = get_bit(user.deposited_assets, reserve.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.deposited_assets, reserve.index)?;
-        users_state(&mut deps.storage).save(depositer_addr_raw.as_slice(), &user)?;
+        users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, reference, &mut reserve, Uint256::zero())?;
-    reserves_state(&mut deps.storage).save(reference, &reserve)?;
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
+    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     if reserve.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
@@ -377,8 +382,8 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
 
     let mut log = vec![
         log("action", "deposit"),
-        log("reserve", asset),
-        log("user", sender.clone()),
+        log("reserve", asset_label),
+        log("user", depositor.clone()),
         log("amount", deposit_amount),
     ];
 
@@ -391,7 +396,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: sender,
+                recipient: depositor,
                 amount: mint_amount.into(),
             })?,
         })],
@@ -402,9 +407,9 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
 pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    sender: HumanAddr,
-    reference: &[u8],
-    asset: &str,
+    borrower: HumanAddr,
+    asset_reference: &[u8],
+    asset_label: &str,
     borrow_amount: Uint256,
     asset_type: AssetType,
 ) -> StdResult<HandleResponse> {
@@ -412,15 +417,15 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     if borrow_amount.is_zero() {
         return Err(StdError::generic_err(format!(
             "Borrow amount must be greater than 0 {}",
-            asset,
+            asset_label,
         )));
     }
 
     let config = config_state_read(&deps.storage).load()?;
-    let mut borrow_reserve = reserves_state_read(&deps.storage).load(reference)?;
-    let borrower_addr_raw = deps.api.canonical_address(&sender)?;
+    let mut borrow_reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let borrower_canonical_addr = deps.api.canonical_address(&borrower)?;
     let mut user: User =
-        match users_state_read(&deps.storage).may_load(borrower_addr_raw.as_slice()) {
+        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
             Ok(Some(user)) => user,
             Ok(None) => return Err(StdError::generic_err("address has no collateral deposited")),
             Err(error) => return Err(error),
@@ -429,8 +434,11 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     // TODO: Check the contract has enough funds to safely lend them
 
     // Validate user has enough collateral
-    let mut denoms_to_query: Vec<String> = vec![asset.to_string()];
-    let mut user_balances: Vec<(String, Uint256, Decimal256)> = vec![]; // (reference, debt_amount, max_borrow)
+    let mut denoms_to_query: Vec<String> = match asset_type {
+        AssetType::Native => vec![asset_label.to_string()],
+        AssetType::Cw20 => vec![],
+    };
+    let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
     for i in 0..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
@@ -448,7 +456,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 let asset_balance = cw20_get_balance(
                     deps,
                     deps.api.human_address(&asset_reserve.ma_token_address)?,
-                    deps.api.human_address(&borrower_addr_raw)?,
+                    deps.api.human_address(&borrower_canonical_addr)?,
                 )?;
                 let collateral = Uint256::from(asset_balance) * asset_reserve.liquidity_index;
                 max_borrow = Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value;
@@ -457,11 +465,12 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             if user_is_borrowing {
                 // query debt
                 let debts_asset_bucket = debts_asset_state(&mut deps.storage, denom.as_slice());
-                let borrower_debt: Debt = debts_asset_bucket.load(borrower_addr_raw.as_slice())?;
+                let borrower_debt: Debt =
+                    debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
                 debt = borrower_debt.amount_scaled * asset_reserve.borrow_index;
             }
 
-            let reference = match asset_reserve.asset_type {
+            let asset_reference = match asset_reserve.asset_type {
                 AssetType::Native => match String::from_utf8(denom.to_vec()) {
                     Ok(res) => res,
                     Err(_) => {
@@ -475,13 +484,20 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 ),
             };
 
-            user_balances.push((String::from(reference.clone()), debt, max_borrow));
-            if denom != "uusd".as_bytes().to_vec() {
-                denoms_to_query.push(reference);
+            user_balances.push((
+                String::from(asset_reference.clone()),
+                debt,
+                max_borrow,
+                asset_reserve.asset_type.clone(),
+            ));
+            if asset_reserve.asset_type == AssetType::Native && denom != "uusd".as_bytes().to_vec()
+            {
+                denoms_to_query.push(asset_reference);
             }
         }
     }
 
+    // TODO: Implement oracle for cw20s to get exchange rates
     let querier = TerraQuerier::new(&deps.querier);
     let denoms_to_query: Vec<&str> = denoms_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
     let exchange_rates: ExchangeRatesResponse =
@@ -489,9 +505,9 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
-    for (denom, debt, max_borrow) in user_balances {
+    for (denom, debt, max_borrow, asset_type) in user_balances {
         let mut maybe_exchange_rate: Option<Decimal256> = None;
-        if denom == "uusd" {
+        if denom == "uusd" || asset_type == AssetType::Cw20 {
             maybe_exchange_rate = Some(Decimal256::one());
         } else {
             for rate in &exchange_rates.exchange_rates {
@@ -519,9 +535,11 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     let borrow_amount_rate = exchange_rates
         .exchange_rates
         .iter()
-        .find(|e| e.quote_denom == asset.to_string())
+        .find(|e| e.quote_denom == asset_label)
         .unwrap();
+
     let borrow_amount_in_uusd = borrow_amount * Decimal256::from(borrow_amount_rate.exchange_rate);
+
     if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd {
         return Err(StdError::generic_err(
             "borrow amount exceeds maximum allowed given current collateral value",
@@ -535,12 +553,12 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_reserve.index)?;
         let mut users_bucket = users_state(&mut deps.storage);
-        users_bucket.save(borrower_addr_raw.as_slice(), &user)?;
+        users_bucket.save(borrower_canonical_addr.as_slice(), &user)?;
     }
 
     // Set new debt
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, reference);
-    let mut debt: Debt = match debts_asset_bucket.may_load(borrower_addr_raw.as_slice()) {
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
+    let mut debt: Debt = match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
         Ok(Some(debt)) => debt,
         Ok(None) => Debt {
             amount_scaled: Uint256::zero(),
@@ -549,17 +567,23 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     };
     let borrow_amount_scaled = borrow_amount / borrow_reserve.borrow_index;
     debt.amount_scaled += borrow_amount_scaled;
-    debts_asset_bucket.save(borrower_addr_raw.as_slice(), &debt)?;
+    debts_asset_bucket.save(borrower_canonical_addr.as_slice(), &debt)?;
 
     borrow_reserve.debt_total_scaled += borrow_amount_scaled;
 
-    reserve_update_interest_rates(&deps, &env, reference, &mut borrow_reserve, borrow_amount)?;
-    reserves_state(&mut deps.storage).save(&reference, &borrow_reserve)?;
+    reserve_update_interest_rates(
+        &deps,
+        &env,
+        asset_reference,
+        &mut borrow_reserve,
+        borrow_amount,
+    )?;
+    reserves_state(&mut deps.storage).save(&asset_reference, &borrow_reserve)?;
 
     let mut log = vec![
         log("action", "borrow"),
-        log("reserve", asset),
-        log("user", sender),
+        log("reserve", asset_label),
+        log("user", borrower),
         log("amount", borrow_amount),
     ];
 
@@ -571,9 +595,9 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         AssetType::Native => {
             messages.push(CosmosMsg::Bank(BankMsg::Send {
                 from_address: env.contract.address,
-                to_address: deps.api.human_address(&borrower_addr_raw)?,
+                to_address: deps.api.human_address(&borrower_canonical_addr)?,
                 amount: vec![Coin {
-                    denom: asset.to_string(),
+                    denom: asset_label.to_string(),
                     amount: borrow_amount.into(),
                 }],
             }));
@@ -581,7 +605,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         AssetType::Cw20 => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: env.message.sender,
             msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: deps.api.human_address(&borrower_addr_raw)?,
+                recipient: deps.api.human_address(&borrower_canonical_addr)?,
                 amount: borrow_amount.into(),
             })?,
             send: vec![],
@@ -2030,142 +2054,6 @@ mod tests {
     }
 
     #[test]
-    fn test_borrow_cw20() {
-        // set initial liquidity
-        let available_liquidity = 1000000000u128;
-        let mut deps = th_setup(&[]);
-
-        let contract_addr = HumanAddr::from("somecontract");
-        let contract_addr_raw = deps.api.canonical_address(&contract_addr).unwrap();
-        deps.querier.set_cw20_balances(
-            contract_addr.clone(),
-            &[(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                Uint128(available_liquidity),
-            )],
-        );
-
-        //set exchange rates
-        let exchange_rate = Decimal::from_ratio(13u128, 2u128);
-        let exchange_rates = &[("somecontract".to_string(), exchange_rate)];
-        deps.querier
-            .set_native_exchange_rates("uusd".to_string(), exchange_rates);
-
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
-            loan_to_value: Decimal256::from_ratio(8, 10),
-            debt_total_scaled: Uint256::zero(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            asset_type: AssetType::Cw20,
-            interests_last_updated: 1000000,
-            ..Default::default()
-        };
-
-        let reserve_initial = th_init_reserve(
-            &deps.api,
-            &mut deps.storage,
-            contract_addr_raw.as_slice(),
-            &mock_reserve,
-        );
-
-        let borrower_addr = HumanAddr(String::from("borrower"));
-        let borrower_addr_raw = deps.api.canonical_address(&borrower_addr).unwrap();
-
-        // Set user as having all the reserves as collateral
-        let mut user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
-        set_bit(&mut user.deposited_assets, reserve_initial.index).unwrap();
-
-        let mut users_bucket = users_state(&mut deps.storage);
-        users_bucket
-            .save(borrower_addr_raw.as_slice(), &user)
-            .unwrap();
-
-        let ma_token_address = HumanAddr::from("matoken");
-        let balance = Uint128(4_000_000);
-        let borrow_amount = 1_000_000u64;
-
-        // Set the querier to return a certain collateral balance
-        deps.querier.set_cw20_balances(
-            ma_token_address.clone(),
-            &[(borrower_addr.clone(), balance)],
-        );
-
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::Borrow {
-                    reference: contract_addr,
-                    amount: Uint256::from(borrow_amount),
-                })
-                .unwrap(),
-            ),
-            sender: HumanAddr::from("borrower"),
-            amount: Uint128::zero(),
-        });
-
-        let block_time = 1000000;
-
-        let env = th_mock_env(MockEnvParams {
-            sender: "somecontract",
-            sent_funds: &[],
-            block_time: Some(block_time),
-        });
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        let expected_params = th_get_expected_indices_and_rates(
-            &reserve_initial,
-            block_time,
-            available_liquidity,
-            TestUtilizationDeltas {
-                less_liquidity: borrow_amount as u128,
-                more_debt: borrow_amount as u128,
-                ..Default::default()
-            },
-        );
-
-        assert_eq!(
-            res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("somecontract"),
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("borrower"),
-                    amount: borrow_amount.into(),
-                })
-                .unwrap(),
-                send: vec![],
-            })]
-        );
-
-        assert_eq!(
-            res.log,
-            vec![
-                log("action", "borrow"),
-                log("reserve", "somecontract"),
-                log("user", "borrower"),
-                log("amount", borrow_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
-            ]
-        );
-
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_addr_raw.as_slice())
-            .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-
-        let debt = debts_asset_state_read(&deps.storage, contract_addr_raw.as_slice())
-            .load(&borrower_addr_raw.as_slice())
-            .unwrap();
-        let debt_scaled = Uint256::from(borrow_amount) / expected_params.borrow_index;
-        assert_eq!(debt_scaled, debt.amount_scaled);
-    }
-
-    #[test]
     fn test_collateral_check() {
         // NOTE: available liquidity stays fixed as the test environment does not get changes in
         // contract balances on subsequent calls. They would change from call to call in practice
@@ -2173,19 +2061,25 @@ mod tests {
         let available_liquidity_2 = 2000000000u128;
         let available_liquidity_3 = 3000000000u128;
         let mut deps = th_setup(&[
-            coin(available_liquidity_1, "depositedcoin1"),
             coin(available_liquidity_2, "depositedcoin2"),
             coin(available_liquidity_3, "uusd"),
         ]);
 
-        let exchange_rate_1 = Decimal::from_ratio(13u128, 2u128);
+        let cw20_contract_addr = HumanAddr::from("depositedcoin1");
+        let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
+        deps.querier.set_cw20_balances(
+            cw20_contract_addr,
+            &[(
+                HumanAddr::from(MOCK_CONTRACT_ADDR),
+                Uint128(available_liquidity_1),
+            )],
+        );
+
+        let exchange_rate_1 = Decimal::one();
         let exchange_rate_2 = Decimal::from_ratio(15u128, 4u128);
         let exchange_rate_3 = Decimal::one();
 
-        let exchange_rates = &[
-            (String::from("depositedcoin1"), exchange_rate_1),
-            (String::from("depositedcoin2"), exchange_rate_2),
-        ];
+        let exchange_rates = &[(String::from("depositedcoin2"), exchange_rate_2)];
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
@@ -2195,6 +2089,7 @@ mod tests {
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
+            asset_type: AssetType::Cw20,
             ..Default::default()
         };
         let mock_reserve_2 = MockReserve {
@@ -2203,6 +2098,7 @@ mod tests {
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
+            asset_type: AssetType::Native,
             ..Default::default()
         };
         let mock_reserve_3 = MockReserve {
@@ -2211,6 +2107,7 @@ mod tests {
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
+            asset_type: AssetType::Native,
             ..Default::default()
         };
 
@@ -2218,7 +2115,7 @@ mod tests {
         let reserve_1_initial = th_init_reserve(
             &deps.api,
             &mut deps.storage,
-            b"depositedcoin1",
+            cw20_contract_addr_canonical.as_slice(),
             &mock_reserve_1,
         );
         // should get index 1
@@ -2285,15 +2182,15 @@ mod tests {
                 * Uint256::from(balance_3)
                 * Decimal256::from(exchange_rate_3));
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
-            / Decimal256::from(exchange_rate_1))
+            / Decimal256::from(exchange_rate_2))
             + Uint256::from(100 as u64);
         let permissible_borrow_amount = (max_borrow_allowed_in_uusd
-            / Decimal256::from(exchange_rate_1))
+            / Decimal256::from(exchange_rate_2))
             - Uint256::from(100 as u64);
 
         // borrow above the allowed amount given current collateral, should fail
         let borrow_msg = HandleMsg::BorrowNative {
-            denom: "depositedcoin1".to_string(),
+            denom: "depositedcoin2".to_string(),
             amount: exceeding_borrow_amount,
         };
         let env = mock_env("borrower", &[]);
@@ -2301,7 +2198,7 @@ mod tests {
 
         // borrow permissible amount given current collateral, should succeed
         let borrow_msg = HandleMsg::BorrowNative {
-            denom: "depositedcoin1".to_string(),
+            denom: "depositedcoin2".to_string(),
             amount: permissible_borrow_amount,
         };
         let env = mock_env("borrower", &[]);
@@ -2424,7 +2321,6 @@ mod tests {
                 &index.to_be_bytes(),
                 &ReserveReferences {
                     reference: key.to_vec(),
-                    asset_type: reserve.asset_type.clone(),
                 },
             )
             .unwrap();
