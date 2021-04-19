@@ -57,14 +57,14 @@ pub enum ReceiveMsg {
         reference: String,
     },
     /// Deposit the sent cw20 tokens
-    Deposit {},
+    DepositCw20 {},
     /// Borrow cw20 tokens
-    Borrow {
+    BorrowCw20 {
         token_address: HumanAddr,
         amount: Uint256,
     },
     /// Repay the sent cw20 tokens
-    Repay {},
+    RepayCw20 {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

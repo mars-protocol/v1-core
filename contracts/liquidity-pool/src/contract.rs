@@ -19,7 +19,7 @@ use crate::state::{
     users_state, users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
 use std::str;
-use terra_cosmwasm::{ExchangeRateItem, ExchangeRatesResponse, TerraQuerier};
+use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
 
 // CONSTANTS
 
@@ -121,7 +121,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     Uint256::from(cw20_msg.amount),
                 )
             }
-            ReceiveMsg::Deposit {} => handle_deposit(
+            ReceiveMsg::DepositCw20 {} => handle_deposit(
                 deps,
                 &env,
                 cw20_msg.sender,
@@ -129,7 +129,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 env.message.sender.as_str(),
                 Uint256::from(cw20_msg.amount),
             ),
-            ReceiveMsg::Borrow {
+            ReceiveMsg::BorrowCw20 {
                 token_address,
                 amount,
             } => {
@@ -144,7 +144,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     AssetType::Cw20,
                 )
             }
-            ReceiveMsg::Repay {} => handle_repay(
+            ReceiveMsg::RepayCw20 {} => handle_repay(
                 deps,
                 &env,
                 cw20_msg.sender,
@@ -559,18 +559,23 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         max_borrow_in_uusd += max_borrow * exchange_rate;
     }
 
-    // temporary fix as cw20s are currently not added to exchange rates
-    let borrow_amount_rate: Option<&ExchangeRateItem> = match asset_type {
+    // TODO: temporary fix as cw20s are currently not added to exchange rates
+    let borrow_amount_rate: Option<Decimal256> = match asset_type {
         AssetType::Native => exchange_rates
             .exchange_rates
             .iter()
-            .find(|e| e.quote_denom == asset_label),
-        AssetType::Cw20 => None,
+            .find(|e| e.quote_denom == asset_label)
+            .map(|e| Decimal256::from(e.exchange_rate)),
+        AssetType::Cw20 => Some(Decimal256::one()),
     };
 
     let borrow_amount_in_uusd = match borrow_amount_rate {
-        Some(rate) => borrow_amount * Decimal256::from(rate.exchange_rate),
-        None => Uint256::one(),
+        Some(exchange_rate) => borrow_amount * exchange_rate,
+        None => {
+            return Err(StdError::generic_err(
+                "no uusd exchange rate found for borrow asset",
+            ))
+        }
     };
 
     if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd {
@@ -677,7 +682,6 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
-    // TODO: Interest rate update and computing goes somewhere around here
     let borrower_canonical_addr = deps.api.canonical_address(&sender)?;
 
     // Check new debt
@@ -1364,7 +1368,7 @@ mod tests {
 
         let deposit_amount = 110000u128;
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Deposit {}).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
             sender: HumanAddr::from("depositer"),
             amount: Uint128(deposit_amount),
         });
@@ -1423,7 +1427,7 @@ mod tests {
         // empty deposit fails
         let env = mock_env("depositer", &[]);
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Deposit {}).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
             sender: HumanAddr::from("depositer"),
             amount: Uint128(deposit_amount),
         });
@@ -1679,7 +1683,7 @@ mod tests {
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::Borrow {
+                to_binary(&ReceiveMsg::BorrowCw20 {
                     token_address: cw20_contract_addr.clone(),
                     amount: Uint256::from(borrow_amount),
                 })
@@ -1772,7 +1776,7 @@ mod tests {
         let block_time = reserve_1_after_borrow.interests_last_updated + 20000u64;
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::Borrow {
+                to_binary(&ReceiveMsg::BorrowCw20 {
                     token_address: cw20_contract_addr.clone(),
                     amount: Uint256::from(borrow_amount),
                 })
@@ -2074,7 +2078,7 @@ mod tests {
             block_time: Some(block_time),
         });
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Repay {}).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::RepayCw20 {}).unwrap()),
             sender: borrower_addr.clone(),
             amount: Uint128(repay_amount),
         });
