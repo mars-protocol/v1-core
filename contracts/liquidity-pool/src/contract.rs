@@ -383,7 +383,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     let mut log = vec![
         log("action", "deposit"),
         log("reserve", asset_label),
-        log("user", depositor.clone()),
+        log("user", depositor.as_str()),
         log("amount", deposit_amount),
     ];
 
@@ -435,18 +435,19 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // Validate user has enough collateral
     let mut denoms_to_query: Vec<String> = match asset_type {
-        AssetType::Native => vec![asset_label.to_string()],
-        AssetType::Cw20 => vec![],
+        AssetType::Native if asset_label != "uusd" => vec![asset_label.to_string()],
+        _ => vec![],
     };
     let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
     for i in 0..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if user_is_using_as_collateral || user_is_borrowing {
-            let denom = reserve_references_state_read(&deps.storage)
+            let asset_reference_vec = reserve_references_state_read(&deps.storage)
                 .load(&i.to_be_bytes())?
                 .reference;
-            let asset_reserve = reserves_state_read(&deps.storage).load(&denom.as_slice())?;
+            let asset_reserve =
+                reserves_state_read(&deps.storage).load(&asset_reference_vec.as_slice())?;
 
             let mut debt = Uint256::zero();
             let mut max_borrow = Decimal256::zero();
@@ -464,14 +465,15 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
             if user_is_borrowing {
                 // query debt
-                let debts_asset_bucket = debts_asset_state(&mut deps.storage, denom.as_slice());
+                let debts_asset_bucket =
+                    debts_asset_state(&mut deps.storage, asset_reference_vec.as_slice());
                 let borrower_debt: Debt =
                     debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
                 debt = borrower_debt.amount_scaled * asset_reserve.borrow_index;
             }
 
-            let asset_reference = match asset_reserve.asset_type {
-                AssetType::Native => match String::from_utf8(denom.to_vec()) {
+            let asset_label = match asset_reserve.asset_type {
+                AssetType::Native => match String::from_utf8(asset_reference_vec.to_vec()) {
                     Ok(res) => res,
                     Err(_) => {
                         return Err(StdError::generic_err("failed to encode denom into string"))
@@ -479,20 +481,22 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 },
                 AssetType::Cw20 => String::from(
                     deps.api
-                        .human_address(&CanonicalAddr::from(denom.clone()))?
+                        .human_address(&CanonicalAddr::from(asset_reference_vec.clone()))?
                         .as_str(),
                 ),
             };
 
             user_balances.push((
-                String::from(asset_reference.clone()),
+                String::from(asset_label.clone()),
                 debt,
                 max_borrow,
                 asset_reserve.asset_type.clone(),
             ));
-            if asset_reserve.asset_type == AssetType::Native && denom != "uusd".as_bytes().to_vec()
+            // TODO: Deal with querying the cw20 exchange rate once the oracle is implemented
+            if asset_reserve.asset_type == AssetType::Native
+                && asset_reference_vec.as_slice() != "uusd".as_bytes()
             {
-                denoms_to_query.push(asset_reference);
+                denoms_to_query.push(asset_label);
             }
         }
     }
@@ -505,13 +509,14 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
-    for (denom, debt, max_borrow, asset_type) in user_balances {
+    for (asset_label, debt, max_borrow, asset_type) in user_balances {
         let mut maybe_exchange_rate: Option<Decimal256> = None;
-        if denom == "uusd" || asset_type == AssetType::Cw20 {
+        // TODO: Making the exchange rate equal to 1 as a placeholder. Implementation of an oracle to get the real exchange rates is pending
+        if asset_label == "uusd" || asset_type == AssetType::Cw20 {
             maybe_exchange_rate = Some(Decimal256::one());
         } else {
             for rate in &exchange_rates.exchange_rates {
-                if rate.quote_denom == denom {
+                if rate.quote_denom == asset_label {
                     maybe_exchange_rate = Some(Decimal256::from(rate.exchange_rate));
                     break;
                 }
@@ -523,7 +528,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             None => {
                 return Err(StdError::generic_err(format!(
                     "Exchange rate not found for denom {}",
-                    denom
+                    asset_label
                 )))
             }
         };
