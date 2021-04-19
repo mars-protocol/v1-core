@@ -27,10 +27,10 @@
       "description": "Deposit the sent cw20 tokens",
       "type": "object",
       "required": [
-        "deposit"
+        "deposit_cw20"
       ],
       "properties": {
-        "deposit": {
+        "deposit_cw20": {
           "type": "object"
         }
       }
@@ -39,10 +39,10 @@
       "description": "Borrow cw20 tokens",
       "type": "object",
       "required": [
-        "borrow"
+        "borrow_cw20"
       ],
       "properties": {
-        "borrow": {
+        "borrow_cw20": {
           "type": "object",
           "required": [
             "amount",
@@ -63,10 +63,10 @@
       "description": "Repay the sent cw20 tokens",
       "type": "object",
       "required": [
-        "repay"
+        "repay_cw20"
       ],
       "properties": {
-        "repay": {
+        "repay_cw20": {
           "type": "object"
         }
       }
