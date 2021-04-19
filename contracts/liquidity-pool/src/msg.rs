@@ -63,6 +63,8 @@ pub enum ReceiveMsg {
         token_address: HumanAddr,
         amount: Uint256,
     },
+    /// Repay the sent cw20 tokens
+    Repay {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
