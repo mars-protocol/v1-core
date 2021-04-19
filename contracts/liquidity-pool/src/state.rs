@@ -116,8 +116,6 @@ pub fn debts_asset_state_read<'a, S: Storage>(
 pub struct ReserveReferences {
     /// Reference of reserve
     pub reference: Vec<u8>,
-    /// Asset type
-    pub asset_type: AssetType,
 }
 
 pub fn reserve_references_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveReferences> {

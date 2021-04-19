@@ -60,7 +60,7 @@ pub enum ReceiveMsg {
     Deposit {},
     /// Borrow cw20 tokens
     Borrow {
-        reference: HumanAddr,
+        token_address: HumanAddr,
         amount: Uint256,
     },
 }
