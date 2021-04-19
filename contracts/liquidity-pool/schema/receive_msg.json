@@ -58,6 +58,18 @@
           }
         }
       }
+    },
+    {
+      "description": "Repay the sent cw20 tokens",
+      "type": "object",
+      "required": [
+        "repay"
+      ],
+      "properties": {
+        "repay": {
+          "type": "object"
+        }
+      }
     }
   ],
   "definitions": {
