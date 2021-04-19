@@ -14,6 +14,7 @@ use crate::state::{
     cooldowns_state, Cooldown,
 };
 
+
 // INIT
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -252,6 +253,9 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
             Some(cooldown) => {
                 let minimal_valid_cooldown_timestamp =
                     env.block.time - config.cooldown_duration - config.unstake_window;
+                println!("{}", cooldown.timestamp);
+                println!("{}", minimal_valid_cooldown_timestamp);
+
                 if cooldown.timestamp < minimal_valid_cooldown_timestamp {
                     env.block.time
                 } else {
@@ -746,6 +750,10 @@ mod tests {
     #[test]
     fn test_cooldown() {
         let mut deps = th_setup(&[]);
+
+        let initial_block_time = 1_600_000_000;
+        let ongoing_cooldown_block_time = initial_block_time + TEST_COOLDOWN_DURATION / 2;
+
         // staker with no xmars is unauthorized
         let msg = HandleMsg::Cooldown {};
 
@@ -759,25 +767,94 @@ mod tests {
             &[(HumanAddr::from("staker"), initial_xmars_balance)],
         );
 
-        let msg = HandleMsg::Cooldown {};
-
-        let initial_block_time = 1_600_000_000;
         let env = mock_env("staker", MockEnvParams{
             block_time: initial_block_time,
             ..Default::default()
         });
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
         let cooldown = 
             cooldowns_state_read(&deps.storage)
             .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
             .unwrap();
 
-        assert_eq!(cooldown.timestamp, 1_600_000_000);
+        assert_eq!(cooldown.timestamp, initial_block_time);
         assert_eq!(cooldown.amount, initial_xmars_balance);
+        assert_eq!(
+           vec![
+               log("action", "cooldown"),
+               log("user", "staker"),
+               log("cooldown_amount", initial_xmars_balance),
+               log("cooldwon_timestamp", initial_block_time)
+           ],
+           res.log
+        ) ;
+
         // same amount does not alterate cooldown
-        // more amount gets a weighted average
-        // expired cooldown gets a new amount (test lower and higher)
+        let env = mock_env("staker", MockEnvParams{
+            block_time: ongoing_cooldown_block_time,
+            ..Default::default()
+        });
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+
+        let cooldown = 
+            cooldowns_state_read(&deps.storage)
+            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+            .unwrap();
+
+        assert_eq!(cooldown.timestamp, initial_block_time);
+        assert_eq!(cooldown.amount, initial_xmars_balance);
+
+        // more amount gets a weighted average timestamp with the new amount
+        let additional_xmars_balance = Uint128(500_000);
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(HumanAddr::from("staker"), initial_xmars_balance + additional_xmars_balance)],
+        );
+        let env = mock_env("staker", MockEnvParams{
+            block_time: ongoing_cooldown_block_time,
+            ..Default::default()
+        });
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+
+        let cooldown = 
+            cooldowns_state_read(&deps.storage)
+            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+            .unwrap();
+
+        let expected_cooldown_timestamp = 
+            (
+                (
+                    (initial_block_time as u128) * initial_xmars_balance.u128() + 
+                    (ongoing_cooldown_block_time as u128) * additional_xmars_balance.u128()
+                ) / (initial_xmars_balance + additional_xmars_balance).u128()
+            ) as u64;
+        assert_eq!(cooldown.timestamp, expected_cooldown_timestamp);
+        assert_eq!(cooldown.amount, initial_xmars_balance + additional_xmars_balance);
+
+        // expired cooldown with moere amount gets a new timestamp (test lower and higher)
+        let expired_cooldown_block_time =
+            expected_cooldown_timestamp + TEST_COOLDOWN_DURATION + TEST_UNSTAKE_WINDOW + 1;
+        let expired_balance = initial_xmars_balance + additional_xmars_balance + Uint128(800_000);
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(HumanAddr::from("staker"), expired_balance)],
+        );
+
+        let env = mock_env("staker", MockEnvParams{
+            block_time: expired_cooldown_block_time,
+            ..Default::default()
+        });
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+
+        let cooldown = 
+            cooldowns_state_read(&deps.storage)
+            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+            .unwrap();
+
+        assert_eq!(cooldown.timestamp, expired_cooldown_block_time);
+        assert_eq!(cooldown.amount, expired_balance);
     }
 
     #[test]
