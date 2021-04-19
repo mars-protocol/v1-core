@@ -58,6 +58,11 @@ pub enum ReceiveMsg {
     },
     /// Deposit the sent cw20 tokens
     Deposit {},
+    /// Borrow cw20 tokens
+    Borrow {
+        reference: HumanAddr,
+        amount: Uint256,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
