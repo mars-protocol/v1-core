@@ -34,6 +34,38 @@
           "type": "object"
         }
       }
+    },
+    {
+      "description": "Borrow cw20 tokens",
+      "type": "object",
+      "required": [
+        "borrow"
+      ],
+      "properties": {
+        "borrow": {
+          "type": "object",
+          "required": [
+            "amount",
+            "reference"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint256"
+            },
+            "reference": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "HumanAddr": {
+      "type": "string"
+    },
+    "Uint256": {
+      "type": "string"
+    }
+  }
 }
