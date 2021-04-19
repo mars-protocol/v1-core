@@ -492,6 +492,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 max_borrow,
                 asset_reserve.asset_type.clone(),
             ));
+
             // TODO: Deal with querying the cw20 exchange rate once the oracle is implemented
             if asset_reserve.asset_type == AssetType::Native
                 && asset_reference_vec.as_slice() != "uusd".as_bytes()
@@ -509,6 +510,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
+
     for (asset_label, debt, max_borrow, asset_type) in user_balances {
         let mut maybe_exchange_rate: Option<Decimal256> = None;
         // TODO: Making the exchange rate equal to 1 as a placeholder. Implementation of an oracle to get the real exchange rates is pending
