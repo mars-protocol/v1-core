@@ -314,7 +314,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
             log("action", "cooldown"),
             log("user", env.message.sender),
             log("cooldown_amount", xmars_balance),
-            log("cooldwon_timestamp", new_cooldown_timestamp),
+            log("cooldown_timestamp", new_cooldown_timestamp),
         ],
         data: None,
         messages: vec![],
@@ -988,7 +988,7 @@ mod tests {
                 log("action", "cooldown"),
                 log("user", "staker"),
                 log("cooldown_amount", initial_xmars_balance),
-                log("cooldwon_timestamp", initial_block_time)
+                log("cooldown_timestamp", initial_block_time)
             ],
             res.log
         );
