@@ -32,7 +32,7 @@
               "description": "Asset related info",
               "allOf": [
                 {
-                  "$ref": "#/definitions/InitAssetInfo"
+                  "$ref": "#/definitions/AssetInfo"
                 }
               ]
             },
@@ -99,22 +99,26 @@
       "description": "Borrow Terra native coins",
       "type": "object",
       "required": [
-        "borrow_native"
+        "borrow"
       ],
       "properties": {
-        "borrow_native": {
+        "borrow": {
           "type": "object",
           "required": [
             "amount",
-            "denom"
+            "asset_info"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint256"
             },
-            "denom": {
+            "asset_info": {
               "description": "Denom used in Terra (e.g: uluna, uusd)",
-              "type": "string"
+              "allOf": [
+                {
+                  "$ref": "#/definitions/AssetInfo"
+                }
+              ]
             }
           }
         }
@@ -143,44 +147,7 @@
     }
   ],
   "definitions": {
-    "Binary": {
-      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
-      "type": "string"
-    },
-    "Cw20ReceiveMsg": {
-      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a HandleMsg",
-      "type": "object",
-      "required": [
-        "amount",
-        "sender"
-      ],
-      "properties": {
-        "amount": {
-          "$ref": "#/definitions/Uint128"
-        },
-        "msg": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Binary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sender": {
-          "$ref": "#/definitions/HumanAddr"
-        }
-      }
-    },
-    "Decimal256": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
-    },
-    "HumanAddr": {
-      "type": "string"
-    },
-    "InitAssetInfo": {
+    "AssetInfo": {
       "description": "We currently take no arguments for migrations",
       "anyOf": [
         {
@@ -222,6 +189,43 @@
           }
         }
       ]
+    },
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "Cw20ReceiveMsg": {
+      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a HandleMsg",
+      "type": "object",
+      "required": [
+        "amount",
+        "sender"
+      ],
+      "properties": {
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        },
+        "msg": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Binary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sender": {
+          "$ref": "#/definitions/HumanAddr"
+        }
+      }
+    },
+    "Decimal256": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
+      "type": "string"
+    },
+    "HumanAddr": {
+      "type": "string"
     },
     "InitAssetParams": {
       "type": "object",

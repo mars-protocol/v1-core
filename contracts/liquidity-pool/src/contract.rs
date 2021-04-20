@@ -10,7 +10,7 @@ use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol};
 
 use crate::msg::{
-    AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetInfo, InitAssetParams,
+    AssetInfo, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams,
     InitMsg, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
 };
 use crate::state::{
@@ -71,18 +71,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 deposit_amount,
             )
         }
-        HandleMsg::BorrowNative { denom, amount } => {
-            let borrower = env.message.sender.clone();
-            handle_borrow(
-                deps,
-                env,
-                borrower,
-                denom.as_bytes(),
-                denom.as_str(),
-                amount,
-                AssetType::Native,
-            )
-        }
+        HandleMsg::Borrow { asset_info, amount } => handle_borrow(deps, env, asset_info, amount),
         HandleMsg::RepayNative { denom } => {
             let repay_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             handle_repay(
@@ -131,21 +120,6 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 env.message.sender.as_str(),
                 Uint256::from(cw20_msg.amount),
             ),
-            ReceiveMsg::BorrowCw20 {
-                token_address,
-                amount,
-            } => {
-                let asset_reference_canonical_addr = deps.api.canonical_address(&token_address)?;
-                handle_borrow(
-                    deps,
-                    env,
-                    cw20_msg.sender,
-                    asset_reference_canonical_addr.as_slice(),
-                    token_address.as_str(),
-                    amount,
-                    AssetType::Cw20,
-                )
-            }
             ReceiveMsg::RepayCw20 {} => handle_repay(
                 deps,
                 &env,
@@ -260,11 +234,11 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
 pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    asset_info: InitAssetInfo,
+    asset_info: AssetInfo,
     asset_params: InitAssetParams,
 ) -> StdResult<HandleResponse> {
     return match asset_info {
-        InitAssetInfo::Native { denom } => init_asset(
+        AssetInfo::Native { denom } => init_asset(
             deps,
             env,
             denom.as_bytes(),
@@ -273,7 +247,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
             AssetType::Native,
             asset_params,
         ),
-        InitAssetInfo::Cw20 { contract_addr } => {
+        AssetInfo::Cw20 { contract_addr } => {
             let canonical_addr = deps.api.canonical_address(&contract_addr)?;
             let symbol = cw20_get_symbol(deps, contract_addr.clone())?;
             init_asset(
@@ -476,12 +450,27 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
 pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    borrower: HumanAddr,
-    asset_reference: &[u8],
-    asset_label: &str,
+    asset_info: AssetInfo,
     borrow_amount: Uint256,
-    asset_type: AssetType,
 ) -> StdResult<HandleResponse> {
+    let borrower = env.message.sender.clone();
+
+    let (asset_label, asset_reference, asset_type) = match asset_info {
+        AssetInfo::Cw20 { contract_addr } => {
+            let asset_label = String::from(contract_addr.as_str());
+            let asset_reference = deps
+                .api
+                .canonical_address(&contract_addr)?
+                .as_slice()
+                .to_vec();
+            (asset_label, asset_reference, AssetType::Cw20)
+        }
+        AssetInfo::Native { denom } => {
+            let asset_reference = denom.as_bytes().to_vec();
+            (denom, asset_reference, AssetType::Native)
+        }
+    };
+
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
         return Err(StdError::generic_err(format!(
@@ -491,7 +480,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = config_state_read(&deps.storage).load()?;
-    let mut borrow_reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let mut borrow_reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
     let borrower_canonical_addr = deps.api.canonical_address(&borrower)?;
     let mut user: User =
         match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
@@ -504,7 +493,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // Validate user has enough collateral
     let mut denoms_to_query: Vec<String> = match asset_type {
-        AssetType::Native if asset_label != "uusd" => vec![asset_label.to_string()],
+        AssetType::Native if asset_label != "uusd" => vec![asset_label.clone()],
         _ => vec![],
     };
     let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
@@ -556,7 +545,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             };
 
             user_balances.push((
-                String::from(asset_label.clone()),
+                asset_label.clone(),
                 debt,
                 max_borrow,
                 asset_reserve.asset_type.clone(),
@@ -644,7 +633,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     }
 
     // Set new debt
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
     let mut debt: Debt = match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
         Ok(Some(debt)) => debt,
         Ok(None) => Debt {
@@ -661,16 +650,16 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     reserve_update_interest_rates(
         &deps,
         &env,
-        asset_reference,
+        asset_reference.as_slice(),
         &mut borrow_reserve,
         borrow_amount,
     )?;
-    reserves_state(&mut deps.storage).save(&asset_reference, &borrow_reserve)?;
+    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &borrow_reserve)?;
 
     let mut log = vec![
         log("action", "borrow"),
-        log("reserve", asset_label),
-        log("user", borrower),
+        log("reserve", asset_label.as_str()),
+        log("user", borrower.as_str()),
         log("amount", borrow_amount),
     ];
 
@@ -684,13 +673,15 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 from_address: env.contract.address,
                 to_address: deps.api.human_address(&borrower_canonical_addr)?,
                 amount: vec![Coin {
-                    denom: asset_label.to_string(),
+                    denom: asset_label,
                     amount: borrow_amount.into(),
                 }],
             }));
         }
         AssetType::Cw20 => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: env.message.sender,
+            contract_addr: deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?,
             msg: to_binary(&Cw20HandleMsg::Transfer {
                 recipient: deps.api.human_address(&borrower_canonical_addr)?,
                 amount: borrow_amount.into(),
@@ -1104,7 +1095,7 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
         let msg = HandleMsg::InitAsset {
-            asset_info: InitAssetInfo::Native {
+            asset_info: AssetInfo::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: InitAssetParams {
@@ -1119,7 +1110,7 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
-            asset_info: InitAssetInfo::Native {
+            asset_info: AssetInfo::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: InitAssetParams {
@@ -1215,7 +1206,7 @@ mod tests {
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
 
         let msg = HandleMsg::InitAsset {
-            asset_info: InitAssetInfo::Cw20 {
+            asset_info: AssetInfo::Cw20 {
                 contract_addr: cw20_addr.clone(),
             },
             asset_params: InitAssetParams {
@@ -1870,23 +1861,18 @@ mod tests {
         let block_time = mock_reserve_1.interests_last_updated + 10000u64;
         let borrow_amount = 2400u128;
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::BorrowCw20 {
-                    token_address: cw20_contract_addr.clone(),
-                    amount: Uint256::from(borrow_amount),
-                })
-                .unwrap(),
-            ),
-            sender: borrower_addr.clone(),
-            amount: Uint128::zero(),
-        });
+        let msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Cw20 {
+                contract_addr: cw20_contract_addr.clone(),
+            },
+            amount: Uint256::from(borrow_amount),
+        };
 
         let env = mars::testing::mock_env(
-            "borrowedcoin1",
+            "borrower",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: block_time,
+                block_time,
             },
         );
 
@@ -1966,23 +1952,18 @@ mod tests {
         let borrow_amount = 1200u128;
         let block_time = reserve_1_after_borrow.interests_last_updated + 20000u64;
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::BorrowCw20 {
-                    token_address: cw20_contract_addr.clone(),
-                    amount: Uint256::from(borrow_amount),
-                })
-                .unwrap(),
-            ),
-            sender: borrower_addr.clone(),
-            amount: Uint128::zero(),
-        });
+        let msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Cw20 {
+                contract_addr: cw20_contract_addr.clone(),
+            },
+            amount: Uint256::from(borrow_amount),
+        };
 
         let env = mars::testing::mock_env(
-            "borrowedcoin1",
+            "borrower",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: block_time,
+                block_time,
             },
         );
 
@@ -2043,8 +2024,10 @@ mod tests {
                 block_time: block_time,
             },
         );
-        let msg = HandleMsg::BorrowNative {
-            denom: String::from("borrowedcoin2"),
+        let msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Native {
+                denom: String::from("borrowedcoin2"),
+            },
             amount: Uint256::from(borrow_amount),
         };
         let _res = handle(&mut deps, env, msg).unwrap();
@@ -2092,8 +2075,10 @@ mod tests {
         // Borrow coin 2 again (should fail due to insufficient collateral)
         // *
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
-        let msg = HandleMsg::BorrowNative {
-            denom: String::from("borrowedcoin2"),
+        let msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Native {
+                denom: String::from("borrowedcoin2"),
+            },
             amount: Uint256::from(10000 as u128),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
@@ -2479,16 +2464,20 @@ mod tests {
             - Uint256::from(100 as u64);
 
         // borrow above the allowed amount given current collateral, should fail
-        let borrow_msg = HandleMsg::BorrowNative {
-            denom: "depositedcoin2".to_string(),
+        let borrow_msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Native {
+                denom: "depositedcoin2".to_string(),
+            },
             amount: exceeding_borrow_amount,
         };
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
         let _res = handle(&mut deps, env, borrow_msg).unwrap_err();
 
         // borrow permissible amount given current collateral, should succeed
-        let borrow_msg = HandleMsg::BorrowNative {
-            denom: "depositedcoin2".to_string(),
+        let borrow_msg = HandleMsg::Borrow {
+            asset_info: AssetInfo::Native {
+                denom: "depositedcoin2".to_string(),
+            },
             amount: permissible_borrow_amount,
         };
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
