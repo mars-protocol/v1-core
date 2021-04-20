@@ -129,16 +129,10 @@ pub fn reserve_references_state_read<S: Storage>(
     bucket_read(RESERVE_REFERENCES_NAMESPACE, storage)
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ReserveMaTokens {
-    /// Reference of reserve
-    pub reference: Vec<u8>,
-}
-
-pub fn reserve_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveMaTokens> {
+pub fn reserve_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, Vec<u8>> {
     bucket(RESERVE_MA_TOKENS_NAMESPACE, storage)
 }
 
-pub fn reserve_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, ReserveMaTokens> {
+pub fn reserve_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Vec<u8>> {
     bucket_read(RESERVE_MA_TOKENS_NAMESPACE, storage)
 }

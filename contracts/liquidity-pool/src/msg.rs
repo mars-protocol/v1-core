@@ -48,7 +48,7 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    /// Redeem the sent tokens for
+    /// Redeem the sent tokens for the underlying asset
     Redeem {},
     /// Deposit the sent cw20 tokens
     DepositCw20 {},
