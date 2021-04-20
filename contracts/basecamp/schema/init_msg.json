@@ -3,10 +3,22 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "cw20_code_id"
+    "cooldown_duration",
+    "cw20_code_id",
+    "unstake_window"
   ],
   "properties": {
+    "cooldown_duration": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "cw20_code_id": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "unstake_window": {
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0

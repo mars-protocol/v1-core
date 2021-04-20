@@ -1017,9 +1017,7 @@ mod tests {
     use super::*;
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{
-        coin, from_binary, Decimal, Extern,
-    };
+    use cosmwasm_std::{coin, from_binary, Decimal, Extern};
     use mars::testing::{mock_dependencies, MockEnvParams, WasmMockQuerier};
 
     #[test]
@@ -1198,7 +1196,7 @@ mod tests {
         // *
         // cw20 callback comes back with created token
         // *
-        let env = mock_env("mtokencontract", &[]);
+        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_addr_raw.as_slice()),
         };
@@ -1219,7 +1217,7 @@ mod tests {
         // *
         // calling this again should not be allowed
         // *
-        let env = mock_env("mtokencontract", &[]);
+        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_addr_raw.as_slice()),
         };
@@ -1256,10 +1254,13 @@ mod tests {
         let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
 
         let deposit_amount = 110000;
-        let env = mars::testing::mock_env("depositer", MockEnvParams {
-            sent_funds: &[coin(deposit_amount, "somecoin")],
-            block_time: 10000100,
-        });
+        let env = mars::testing::mock_env(
+            "depositer",
+            MockEnvParams {
+                sent_funds: &[coin(deposit_amount, "somecoin")],
+                block_time: 10000100,
+            },
+        );
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
@@ -1372,11 +1373,13 @@ mod tests {
             sender: HumanAddr::from("depositer"),
             amount: Uint128(deposit_amount),
         });
-        let env = th_mock_env(MockEnvParams {
-            sender: "somecontract",
-            sent_funds: &[coin(deposit_amount, "somecoin")],
-            block_time: Some(10000100),
-        });
+        let env = mars::testing::mock_env(
+            "somecontract",
+            MockEnvParams {
+                sent_funds: &[coin(deposit_amount, "somecoin")],
+                block_time: 10000100,
+            },
+        );
 
         let res = handle(&mut deps, env.clone(), msg).unwrap();
 
@@ -1425,7 +1428,7 @@ mod tests {
         );
 
         // empty deposit fails
-        let env = mock_env("depositer", &[]);
+        let env = cosmwasm_std::testing::mock_env("depositer", &[]);
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
             sender: HumanAddr::from("depositer"),
@@ -1478,10 +1481,13 @@ mod tests {
             amount: Uint128(burn_amount),
         });
 
-        let env = mars::testing::mock_env("matoken", MockEnvParams {
-            sent_funds: &[],
-            block_time: mock_reserve.interests_last_updated + seconds_elapsed,
-        });
+        let env = mars::testing::mock_env(
+            "matoken",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+            },
+        );
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
@@ -1692,10 +1698,13 @@ mod tests {
             amount: Uint128::zero(),
         });
 
-        let env = mars::testing::mock_env("borrowedcoin1", MockEnvParams {
-            sent_funds: &[],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrowedcoin1",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: block_time,
+            },
+        );
 
         let res = handle(&mut deps, env, msg).unwrap();
 
@@ -1785,10 +1794,13 @@ mod tests {
             amount: Uint128::zero(),
         });
 
-        let env = mars::testing::mock_env("borrowedcoin1", MockEnvParams {
-            sent_funds: &[],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrowedcoin1",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: block_time,
+            },
+        );
 
         let _res = handle(&mut deps, env, msg).unwrap();
 
@@ -1840,10 +1852,13 @@ mod tests {
 
         let borrow_amount = 4000u128;
         let block_time = reserve_1_after_borrow_again.interests_last_updated + 3000u64;
-        let env = mars::testing::mock_env("borrower", MockEnvParams {
-            sent_funds: &[],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrower",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: block_time,
+            },
+        );
         let msg = HandleMsg::BorrowNative {
             denom: String::from("borrowedcoin2"),
             amount: Uint256::from(borrow_amount),
@@ -1902,10 +1917,13 @@ mod tests {
         // *
         // Repay zero debt 2 (should fail)
         // *
-        let env = mars::testing::mock_env("borrower", MockEnvParams {
-            sent_funds: &[],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrower",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: block_time,
+            },
+        );
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoin2"),
         };
@@ -1916,10 +1934,13 @@ mod tests {
         // *
         let repay_amount = 2000u128;
         let block_time = reserve_2_after_borrow_2.interests_last_updated + 8000u64;
-        let env = mars::testing::mock_env("borrower", MockEnvParams {
-            sent_funds: &[coin(repay_amount, "borrowedcoin2")],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrower",
+            MockEnvParams {
+                sent_funds: &[coin(repay_amount, "borrowedcoin2")],
+                block_time: block_time,
+            },
+        );
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoin2"),
         };
@@ -2001,10 +2022,13 @@ mod tests {
         let repay_amount: u128 =
             (expected_debt_scaled_2_after_repay_some_2 * expected_params_2.borrow_index).into();
 
-        let env = mars::testing::mock_env("borrower", MockEnvParams {
-            sent_funds: &[coin(repay_amount, "borrowedcoin2")],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrower",
+            MockEnvParams {
+                sent_funds: &[coin(repay_amount, "borrowedcoin2")],
+                block_time: block_time,
+            },
+        );
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoin2"),
         };
@@ -2068,10 +2092,13 @@ mod tests {
             },
         );
 
-        let env = mars::testing::mock_env("borrowedcoin1", MockEnvParams {
-            sent_funds: &[],
-            block_time: block_time,
-        });
+        let env = mars::testing::mock_env(
+            "borrowedcoin1",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: block_time,
+            },
+        );
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::RepayCw20 {}).unwrap()),
