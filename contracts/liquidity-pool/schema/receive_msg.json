@@ -27,30 +27,6 @@
       }
     },
     {
-      "description": "Borrow cw20 tokens",
-      "type": "object",
-      "required": [
-        "borrow_cw20"
-      ],
-      "properties": {
-        "borrow_cw20": {
-          "type": "object",
-          "required": [
-            "amount",
-            "token_address"
-          ],
-          "properties": {
-            "amount": {
-              "$ref": "#/definitions/Uint256"
-            },
-            "token_address": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
-    },
-    {
       "description": "Repay the sent cw20 tokens",
       "type": "object",
       "required": [
@@ -62,13 +38,5 @@
         }
       }
     }
-  ],
-  "definitions": {
-    "HumanAddr": {
-      "type": "string"
-    },
-    "Uint256": {
-      "type": "string"
-    }
-  }
+  ]
 }
