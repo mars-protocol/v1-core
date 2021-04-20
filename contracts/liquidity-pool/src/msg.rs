@@ -18,7 +18,7 @@ pub enum HandleMsg {
     /// Initialize an asset on the money market
     InitAsset {
         /// Asset related info
-        asset_info: AssetInfo,
+        asset: Asset,
         /// Asset parameters
         asset_params: InitAssetParams,
     },
@@ -35,7 +35,7 @@ pub enum HandleMsg {
     /// Borrow Terra native coins
     Borrow {
         /// Denom used in Terra (e.g: uluna, uusd)
-        asset_info: AssetInfo,
+        asset: Asset,
         amount: Uint256,
     },
     /// Repay Terra native coins loan
@@ -113,7 +113,7 @@ pub struct MigrateMsg {}
 /// We currently take no arguments for migrations
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub enum AssetInfo {
+pub enum Asset {
     Cw20 { contract_addr: HumanAddr },
     Native { denom: String },
 }

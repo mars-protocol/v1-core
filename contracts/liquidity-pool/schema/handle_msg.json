@@ -24,15 +24,15 @@
         "init_asset": {
           "type": "object",
           "required": [
-            "asset_info",
+            "asset",
             "asset_params"
           ],
           "properties": {
-            "asset_info": {
+            "asset": {
               "description": "Asset related info",
               "allOf": [
                 {
-                  "$ref": "#/definitions/AssetInfo"
+                  "$ref": "#/definitions/Asset"
                 }
               ]
             },
@@ -106,17 +106,17 @@
           "type": "object",
           "required": [
             "amount",
-            "asset_info"
+            "asset"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint256"
             },
-            "asset_info": {
+            "asset": {
               "description": "Denom used in Terra (e.g: uluna, uusd)",
               "allOf": [
                 {
-                  "$ref": "#/definitions/AssetInfo"
+                  "$ref": "#/definitions/Asset"
                 }
               ]
             }
@@ -147,7 +147,7 @@
     }
   ],
   "definitions": {
-    "AssetInfo": {
+    "Asset": {
       "description": "We currently take no arguments for migrations",
       "anyOf": [
         {
