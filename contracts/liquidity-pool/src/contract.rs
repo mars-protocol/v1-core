@@ -17,7 +17,7 @@ use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read,
     reserve_ma_tokens_state, reserve_ma_tokens_state_read, reserve_references_state,
     reserve_references_state_read, reserves_state, reserves_state_read, users_state,
-    users_state_read, Config, Debt, Reserve, ReserveMaTokens, ReserveReferences, User,
+    users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
 use std::str;
 use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
@@ -111,7 +111,7 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 let reference = match reserve_ma_tokens_state_read(&deps.storage)
                     .load(ma_contract_canonical_addr.as_slice())
                 {
-                    Ok(res) => res.reference,
+                    Ok(res) => res,
                     Err(_) => return Err(StdError::unauthorized()),
                 };
 
@@ -385,18 +385,17 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     reference: Vec<u8>,
 ) -> StdResult<HandleResponse> {
     let mut state = reserves_state(&mut deps.storage);
-    let mut reserve = state.load(&reference.as_slice())?;
+    let mut reserve = state.load(reference.as_slice())?;
 
     if reserve.ma_token_address == CanonicalAddr::default() {
         let ma_contract_canonical_addr = deps.api.canonical_address(&env.message.sender)?;
+
         reserve.ma_token_address = ma_contract_canonical_addr.clone();
-        state.save(&reference.as_slice(), &reserve)?;
+        state.save(reference.as_slice(), &reserve)?;
 
         // save ma token contract to reference mapping
-        reserve_ma_tokens_state(&mut deps.storage).save(
-            &ma_contract_canonical_addr.as_slice(),
-            &ReserveMaTokens { reference },
-        )?;
+        reserve_ma_tokens_state(&mut deps.storage)
+            .save(ma_contract_canonical_addr.as_slice(), &reference)?;
 
         Ok(HandleResponse::default())
     } else {
@@ -1527,9 +1526,7 @@ mod tests {
                     .canonical_address(&HumanAddr::from("matoken"))
                     .unwrap()
                     .as_slice(),
-                &ReserveMaTokens {
-                    reference: "somecoin".as_bytes().to_vec(),
-                },
+                &"somecoin".as_bytes().to_vec(),
             )
             .unwrap();
 
@@ -1661,9 +1658,7 @@ mod tests {
                     .canonical_address(&ma_token_addr)
                     .unwrap()
                     .as_slice(),
-                &ReserveMaTokens {
-                    reference: cw20_contract_canonical_addr.as_slice().to_vec(),
-                },
+                &cw20_contract_canonical_addr.as_slice().to_vec(),
             )
             .unwrap();
 

@@ -3,7 +3,7 @@
   "title": "ReceiveMsg",
   "anyOf": [
     {
-      "description": "Redeem the sent tokens for",
+      "description": "Redeem the sent tokens for the underlying asset",
       "type": "object",
       "required": [
         "redeem"
