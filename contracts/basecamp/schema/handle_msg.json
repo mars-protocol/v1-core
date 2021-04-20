@@ -59,6 +59,18 @@
           }
         }
       }
+    },
+    {
+      "description": "Initialize or refresh cooldown",
+      "type": "object",
+      "required": [
+        "cooldown"
+      ],
+      "properties": {
+        "cooldown": {
+          "type": "object"
+        }
+      }
     }
   ],
   "definitions": {

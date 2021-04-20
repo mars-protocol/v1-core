@@ -1,9 +1,9 @@
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, Coin, Decimal, Extern, HumanAddr, Querier, QuerierResult,
-    QueryRequest, StdError, StdResult, SystemError, Uint128, WasmQuery,
-    MessageInfo, BlockInfo, ContractInfo, Env,
+    from_binary, from_slice, to_binary, BlockInfo, Coin, ContractInfo, Decimal, Env, Extern,
+    HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
+    Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -147,21 +147,23 @@ impl WasmMockQuerier {
     /// for a given cw20 token (note this will override existing token info with default
     /// values for the rest of the fields)
     pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
-        let mut token_info = mock_token_info_response();
-        token_info.total_supply = total_supply;
-
-        self.cw20_querier
+        let token_info = self
+            .cw20_querier
             .token_info_responses
-            .insert(cw20_address, token_info);
+            .entry(cw20_address)
+            .or_insert(mock_token_info_response());
+
+        token_info.total_supply = total_supply;
     }
 
     pub fn set_cw20_symbol(&mut self, cw20_address: HumanAddr, symbol: String) {
-        let mut token_info = mock_token_info_response();
-        token_info.symbol = symbol;
-
-        self.cw20_querier
+        let token_info = self
+            .cw20_querier
             .token_info_responses
-            .insert(cw20_address, token_info);
+            .entry(cw20_address)
+            .or_insert(mock_token_info_response());
+
+        token_info.symbol = symbol;
     }
 
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
