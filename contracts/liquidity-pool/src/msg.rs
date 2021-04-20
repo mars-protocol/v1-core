@@ -49,13 +49,7 @@ pub enum HandleMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
     /// Redeem the sent tokens for
-    Redeem {
-        /// Either the symbol for a terra native asset or address for a cw20 token
-        // TODO: Maybe it's not necessary to send this but it makes things more
-        // straightforward for now. We can revisit when we figure how are we
-        // going to index the state
-        reference: String,
-    },
+    Redeem {},
     /// Deposit the sent cw20 tokens
     DepositCw20 {},
     /// Borrow cw20 tokens

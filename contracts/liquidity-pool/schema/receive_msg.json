@@ -10,16 +10,7 @@
       ],
       "properties": {
         "redeem": {
-          "type": "object",
-          "required": [
-            "reference"
-          ],
-          "properties": {
-            "reference": {
-              "description": "Either the symbol for a terra native asset or address for a cw20 token",
-              "type": "string"
-            }
-          }
+          "type": "object"
         }
       }
     },
