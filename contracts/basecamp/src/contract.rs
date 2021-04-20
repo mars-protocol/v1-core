@@ -9,11 +9,7 @@ use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
-use crate::state::{
-    config_state, config_state_read, Config,
-    cooldowns_state, Cooldown,
-};
-
+use crate::state::{config_state, config_state_read, cooldowns_state, Config, Cooldown};
 
 // INIT
 
@@ -26,7 +22,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
         xmars_token_address: CanonicalAddr::default(),
-        cooldown_duration: msg.cooldown_duration, 
+        cooldown_duration: msg.cooldown_duration,
         unstake_window: msg.unstake_window,
     };
 
@@ -183,7 +179,41 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
             "Unstake amount must be greater than 0",
         ));
     }
-    // TODO: countdown
+
+    // check valid cooldown
+    //
+    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
+    let staker_canonical_addr = deps.api.canonical_address(&staker)?;
+    match cooldowns_bucket.may_load(staker_canonical_addr.as_slice())? {
+        Some(mut cooldown) => {
+            if burn_amount > cooldown.amount {
+                return Err(StdError::generic_err(
+                    "Unstake amount must not be greater than cooldown amount",
+                ));
+            }
+            if env.block.time < cooldown.timestamp + config.cooldown_duration {
+                return Err(StdError::generic_err("Cooldown has not finished"));
+            }
+            if env.block.time
+                > cooldown.timestamp + config.cooldown_duration + config.unstake_window
+            {
+                return Err(StdError::generic_err("Cooldown has expired"));
+            }
+
+            if burn_amount == cooldown.amount {
+                cooldowns_bucket.remove(staker_canonical_addr.as_slice());
+            } else {
+                cooldown.amount = (cooldown.amount - burn_amount)?;
+                cooldowns_bucket.save(staker_canonical_addr.as_slice(), &cooldown)?;
+            }
+        }
+
+        None => {
+            return Err(StdError::generic_err(
+                "Address must have a valid cooldown to unstake",
+            ))
+        }
+    };
 
     let total_mars_in_basecamp = cw20_get_balance(
         deps,
@@ -248,7 +278,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
     let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
 
     // compute new cooldown timestamp
-    let new_cooldown_timestamp = 
+    let new_cooldown_timestamp =
         match cooldowns_bucket.may_load(sender_canonical_address.as_slice())? {
             Some(cooldown) => {
                 let minimal_valid_cooldown_timestamp =
@@ -264,16 +294,13 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
                         extra_amount = xmars_balance.u128() - cooldown.amount.u128();
                     };
 
-                    (
-                        (
-                            (cooldown.timestamp as u128) * cooldown.amount.u128() + 
-                            (env.block.time as u128) * extra_amount
-                        ) / (cooldown.amount.u128() + extra_amount)
-                    ) as u64
+                    (((cooldown.timestamp as u128) * cooldown.amount.u128()
+                        + (env.block.time as u128) * extra_amount)
+                        / (cooldown.amount.u128() + extra_amount)) as u64
                 }
             }
 
-            None => env.block.time
+            None => env.block.time,
         };
 
     cooldowns_bucket.save(
@@ -281,7 +308,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
         &Cooldown {
             amount: xmars_balance,
             timestamp: new_cooldown_timestamp,
-        }
+        },
     )?;
 
     Ok(HandleResponse {
@@ -289,12 +316,11 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
             log("action", "cooldown"),
             log("user", env.message.sender),
             log("cooldown_amount", xmars_balance),
-            log("cooldwon_timestamp", new_cooldown_timestamp)
+            log("cooldwon_timestamp", new_cooldown_timestamp),
         ],
         data: None,
         messages: vec![],
     })
-
 }
 
 /// Handles token post initialization storing the addresses
@@ -416,20 +442,18 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
-    use mars::testing::{mock_dependencies, WasmMockQuerier, mock_env, MockEnvParams};
+    use mars::testing::{mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier};
 
-    use crate::state::{
-        cooldowns_state_read
-    };
+    use crate::state::cooldowns_state_read;
 
-    const TEST_COOLDOWN_DURATION: u64 = 1000; 
-    const TEST_UNSTAKE_WINDOW: u64 = 100; 
+    const TEST_COOLDOWN_DURATION: u64 = 1000;
+    const TEST_UNSTAKE_WINDOW: u64 = 100;
 
     #[test]
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg { 
+        let msg = InitMsg {
             cw20_code_id: 11,
             cooldown_duration: 20,
             unstake_window: 10,
@@ -580,6 +604,10 @@ mod tests {
     #[test]
     fn test_staking() {
         let mut deps = th_setup(&[]);
+        let staker_canonical_addr = deps
+            .api
+            .canonical_address(&HumanAddr::from("staker"))
+            .unwrap();
 
         // no Mars in pool
         // stake X Mars -> should receive X xMars
@@ -680,11 +708,11 @@ mod tests {
         let env = mock_env("other_token", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
-        // unstake Mars -> should burn xMars and receive Mars back
+        // setup variables for unstake
         let unstake_amount = Uint128(1_000_000);
-        let mars_in_basecamp = Uint128(4_000_000);
-        let xmars_supply = Uint128(3_000_000);
-
+        let unstake_mars_in_basecamp = Uint128(4_000_000);
+        let unstake_xmars_supply = Uint128(3_000_000);
+        let unstake_block_timestamp = 1_000_000_000;
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
@@ -693,16 +721,114 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("mars_token"),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
+            &[(
+                HumanAddr::from(MOCK_CONTRACT_ADDR),
+                unstake_mars_in_basecamp,
+            )],
         );
 
         deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
+            .set_cw20_total_supply(HumanAddr::from("xmars_token"), unstake_xmars_supply);
 
-        let env = mock_env("xmars_token", MockEnvParams::default());
+        // unstake Mars no cooldown -> unauthorized
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
+
+        // unstake Mars expired cooldown -> unauthorized
+        cooldowns_state(&mut deps.storage)
+            .save(
+                staker_canonical_addr.as_slice(),
+                &Cooldown {
+                    amount: unstake_amount,
+                    timestamp: unstake_block_timestamp
+                        - TEST_COOLDOWN_DURATION
+                        - TEST_UNSTAKE_WINDOW
+                        - 1,
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
+
+        // unstake Mars unfinished cooldown -> unauthorized
+        cooldowns_state(&mut deps.storage)
+            .save(
+                staker_canonical_addr.as_slice(),
+                &Cooldown {
+                    amount: unstake_amount,
+                    timestamp: unstake_block_timestamp - TEST_COOLDOWN_DURATION + 1,
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
+
+        // unstake Mars cooldown with low amount -> unauthorized
+        cooldowns_state(&mut deps.storage)
+            .save(
+                staker_canonical_addr.as_slice(),
+                &Cooldown {
+                    amount: (unstake_amount - Uint128(1000)).unwrap(),
+                    timestamp: unstake_block_timestamp - TEST_COOLDOWN_DURATION,
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
+
+        // partial unstake Mars valid cooldown -> burn xMars, receive Mars back,
+        // deduct cooldown amount
+        let pending_cooldown_amount = Uint128(300_000);
+        let pending_cooldown_timestamp = unstake_block_timestamp - TEST_COOLDOWN_DURATION;
+
+        cooldowns_state(&mut deps.storage)
+            .save(
+                staker_canonical_addr.as_slice(),
+                &Cooldown {
+                    amount: unstake_amount + pending_cooldown_amount,
+                    timestamp: pending_cooldown_timestamp,
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let expected_returned_mars = unstake_amount.multiply_ratio(mars_in_basecamp, xmars_supply);
+        let expected_returned_mars =
+            unstake_amount.multiply_ratio(unstake_mars_in_basecamp, unstake_xmars_supply);
 
         assert_eq!(
             vec![
@@ -736,15 +862,87 @@ mod tests {
             res.log
         );
 
+        let actual_cooldown = cooldowns_state_read(&deps.storage)
+            .load(staker_canonical_addr.as_slice())
+            .unwrap();
+
+        assert_eq!(actual_cooldown.amount, pending_cooldown_amount);
+        assert_eq!(actual_cooldown.timestamp, pending_cooldown_timestamp);
+
         // unstake other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
             sender: HumanAddr::from("staker"),
-            amount: Uint128(2_000_000),
+            amount: pending_cooldown_amount,
         });
 
-        let env = mock_env("other_token", MockEnvParams::default());
+        let env = mock_env(
+            "other_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+
         let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // unstake pending amount Mars -> cooldown is deleted
+        let env = mock_env(
+            "xmars_token",
+            MockEnvParams {
+                block_time: unstake_block_timestamp,
+                ..Default::default()
+            },
+        );
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
+            sender: HumanAddr::from("staker"),
+            amount: pending_cooldown_amount,
+        });
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        // NOTE: In reality the mars/xmars amounts would change but since they are being
+        // mocked it does not really matter here.
+        let expected_returned_mars =
+            pending_cooldown_amount.multiply_ratio(unstake_mars_in_basecamp, unstake_xmars_supply);
+
+        assert_eq!(
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("xmars_token"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Burn {
+                        amount: pending_cooldown_amount,
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("mars_token"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Transfer {
+                        recipient: HumanAddr::from("staker"),
+                        amount: expected_returned_mars,
+                    })
+                    .unwrap(),
+                }),
+            ],
+            res.messages
+        );
+        assert_eq!(
+            vec![
+                log("action", "unstake"),
+                log("user", HumanAddr::from("staker")),
+                log("mars_unstaked", expected_returned_mars),
+                log("xmars_burned", pending_cooldown_amount),
+            ],
+            res.log
+        );
+
+        let actual_cooldown = cooldowns_state_read(&deps.storage)
+            .may_load(staker_canonical_addr.as_slice())
+            .unwrap();
+
+        assert_eq!(actual_cooldown, None);
     }
 
     #[test]
@@ -767,39 +965,53 @@ mod tests {
             &[(HumanAddr::from("staker"), initial_xmars_balance)],
         );
 
-        let env = mock_env("staker", MockEnvParams{
-            block_time: initial_block_time,
-            ..Default::default()
-        });
+        let env = mock_env(
+            "staker",
+            MockEnvParams {
+                block_time: initial_block_time,
+                ..Default::default()
+            },
+        );
         let res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = 
-            cooldowns_state_read(&deps.storage)
-            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+        let cooldown = cooldowns_state_read(&deps.storage)
+            .load(
+                deps.api
+                    .canonical_address(&HumanAddr::from("staker"))
+                    .unwrap()
+                    .as_slice(),
+            )
             .unwrap();
 
         assert_eq!(cooldown.timestamp, initial_block_time);
         assert_eq!(cooldown.amount, initial_xmars_balance);
         assert_eq!(
-           vec![
-               log("action", "cooldown"),
-               log("user", "staker"),
-               log("cooldown_amount", initial_xmars_balance),
-               log("cooldwon_timestamp", initial_block_time)
-           ],
-           res.log
-        ) ;
+            vec![
+                log("action", "cooldown"),
+                log("user", "staker"),
+                log("cooldown_amount", initial_xmars_balance),
+                log("cooldwon_timestamp", initial_block_time)
+            ],
+            res.log
+        );
 
         // same amount does not alterate cooldown
-        let env = mock_env("staker", MockEnvParams{
-            block_time: ongoing_cooldown_block_time,
-            ..Default::default()
-        });
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+        let env = mock_env(
+            "staker",
+            MockEnvParams {
+                block_time: ongoing_cooldown_block_time,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = 
-            cooldowns_state_read(&deps.storage)
-            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+        let cooldown = cooldowns_state_read(&deps.storage)
+            .load(
+                deps.api
+                    .canonical_address(&HumanAddr::from("staker"))
+                    .unwrap()
+                    .as_slice(),
+            )
             .unwrap();
 
         assert_eq!(cooldown.timestamp, initial_block_time);
@@ -810,28 +1022,38 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
-            &[(HumanAddr::from("staker"), initial_xmars_balance + additional_xmars_balance)],
+            &[(
+                HumanAddr::from("staker"),
+                initial_xmars_balance + additional_xmars_balance,
+            )],
         );
-        let env = mock_env("staker", MockEnvParams{
-            block_time: ongoing_cooldown_block_time,
-            ..Default::default()
-        });
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+        let env = mock_env(
+            "staker",
+            MockEnvParams {
+                block_time: ongoing_cooldown_block_time,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = 
-            cooldowns_state_read(&deps.storage)
-            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+        let cooldown = cooldowns_state_read(&deps.storage)
+            .load(
+                deps.api
+                    .canonical_address(&HumanAddr::from("staker"))
+                    .unwrap()
+                    .as_slice(),
+            )
             .unwrap();
 
-        let expected_cooldown_timestamp = 
-            (
-                (
-                    (initial_block_time as u128) * initial_xmars_balance.u128() + 
-                    (ongoing_cooldown_block_time as u128) * additional_xmars_balance.u128()
-                ) / (initial_xmars_balance + additional_xmars_balance).u128()
-            ) as u64;
+        let expected_cooldown_timestamp =
+            (((initial_block_time as u128) * initial_xmars_balance.u128()
+                + (ongoing_cooldown_block_time as u128) * additional_xmars_balance.u128())
+                / (initial_xmars_balance + additional_xmars_balance).u128()) as u64;
         assert_eq!(cooldown.timestamp, expected_cooldown_timestamp);
-        assert_eq!(cooldown.amount, initial_xmars_balance + additional_xmars_balance);
+        assert_eq!(
+            cooldown.amount,
+            initial_xmars_balance + additional_xmars_balance
+        );
 
         // expired cooldown with moere amount gets a new timestamp (test lower and higher)
         let expired_cooldown_block_time =
@@ -842,15 +1064,22 @@ mod tests {
             &[(HumanAddr::from("staker"), expired_balance)],
         );
 
-        let env = mock_env("staker", MockEnvParams{
-            block_time: expired_cooldown_block_time,
-            ..Default::default()
-        });
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown{}).unwrap();
+        let env = mock_env(
+            "staker",
+            MockEnvParams {
+                block_time: expired_cooldown_block_time,
+                ..Default::default()
+            },
+        );
+        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = 
-            cooldowns_state_read(&deps.storage)
-            .load(deps.api.canonical_address(&HumanAddr::from("staker")).unwrap().as_slice())
+        let cooldown = cooldowns_state_read(&deps.storage)
+            .load(
+                deps.api
+                    .canonical_address(&HumanAddr::from("staker"))
+                    .unwrap()
+                    .as_slice(),
+            )
             .unwrap();
 
         assert_eq!(cooldown.timestamp, expired_cooldown_block_time);
