@@ -2,7 +2,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
-use cosmwasm_storage::{singleton, singleton_read, bucket, bucket_read, ReadonlySingleton, Singleton, Bucket, ReadonlyBucket};
+use cosmwasm_storage::{
+    bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
+    Singleton,
+};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -22,7 +25,7 @@ pub struct Config {
     /// Cooldown duration in seconds
     pub cooldown_duration: u64,
     /// Time in seconds after the cooldown ends during which the unstaking of
-    /// the associated amount is allowed 
+    /// the associated amount is allowed
     pub unstake_window: u64,
 }
 
