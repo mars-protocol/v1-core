@@ -1,5 +1,6 @@
 import {LocalTerra} from "@terra-money/terra.js";
-import {deployContract, uploadContract, queryContract} from "./helpers.mjs";
+import {queryContract} from "./helpers.mjs";
+import {deployBasecampContract} from "./helpers.mjs";
 
 let terra = new LocalTerra();
 let wallet = terra.wallets.test1;
@@ -7,14 +8,37 @@ let wallet = terra.wallets.test1;
 let cooldownDuration = 1;
 let unstakeWindow = 30;
 
-console.log("Uploading Cw20 Token Contract...");
-let cw20TokenId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+let basecampContractAddress = await deployBasecampContract(terra, wallet, cooldownDuration, unstakeWindow);
 
-console.log("Deploying Basecamp...")
-let initMsg = {"cw20_code_id": cw20TokenId, "cooldown_duration": cooldownDuration.toString(), "unstake_window": unstakeWindow.toString()};
-let basecampContractAddress = await deployContract(terra, wallet, './artifacts/basecamp.wasm', initMsg);
-console.log(basecampContractAddress);
+// query config for mars and xmars contracts
+let queryConfigMsg = {"config": {}};
+let {mars_token_address, xmars_token_address} = await terra.wasm.contractQuery(basecampContractAddress, queryConfigMsg);
 
-let queryConfigMsg = {"token_info": {}};
-let queryConfigResult = await terra.wasm.contractQuery(basecampContractAddress, queryConfigMsg);
-console.log(queryConfigResult);
+// check token symbols
+console.log("### Testing Token Info...");
+let queryTokenInfoMsg = {"token_info": {}};
+let {symbol: marsSymbol} = await queryContract(terra, mars_token_address, queryTokenInfoMsg);
+if (marsSymbol !== "Mars") {
+  throw new Error(`Incorrect symbol ${marsSymbol}, expected Mars`);
+}
+
+let {symbol: xMarsSymbol} = await queryContract(terra, xmars_token_address, queryTokenInfoMsg);
+if (xMarsSymbol !== "xMars") {
+  throw new Error(`Incorrect symbol ${xMarsSymbol}, expected xMars`);
+}
+
+// check minter for both contracts is the basecamp contract
+console.log("### Testing Minter...");
+let queryMinterMsg = {"minter": {}};
+let {minter: marsMinter} = await queryContract(terra, mars_token_address, queryMinterMsg);
+if (marsMinter !== basecampContractAddress) {
+  throw new Error(`mars minter is ${marsMinter}, expected ${basecampContractAddress}`);
+}
+
+let {minter: xMarsMinter} = await queryContract(terra, xmars_token_address, queryMinterMsg);
+if (xMarsMinter !== basecampContractAddress) {
+  throw new Error(`xMars minter is ${xMarsMinter}, expected ${basecampContractAddress}`);
+}
+
+console.log("Testing Complete");
+

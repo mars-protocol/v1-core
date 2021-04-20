@@ -126,3 +126,21 @@ export function initialize(terra) {
 
   return terra.wallet(mk);
 }
+
+export async function deployBasecampContract(terra, wallet, cooldownDuration, unstakeWindow, codeId=undefined) {
+  if (!codeId) {
+    console.log("Uploading Cw20 Contract...");
+    codeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+  }
+
+  console.log("Deploying Basecamp...");
+  let initMsg = {"cw20_code_id": codeId, "cooldown_duration": cooldownDuration.toString(), "unstake_window": unstakeWindow.toString()};
+  let basecampCodeId = await uploadContract(terra, wallet, './artifacts/basecamp.wasm');
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, basecampCodeId, initMsg, undefined, true);
+  let result = await performTransaction(terra, wallet, instantiateMsg)
+
+  let basecampContractAddress = result.logs[0].eventsByType.from_contract.contract_address[0];
+
+  console.log("Basecamp Contract Address: " + basecampContractAddress);
+  return basecampContractAddress
+}
