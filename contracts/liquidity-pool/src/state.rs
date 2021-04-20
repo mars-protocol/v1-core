@@ -17,6 +17,7 @@ pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
 pub static DEBTS_NAMESPACE: &[u8] = b"debts";
 pub static USERS_NAMESPACE: &[u8] = b"users";
 pub static RESERVE_REFERENCES_NAMESPACE: &[u8] = b"reserve_references";
+pub static RESERVE_MA_TOKENS_NAMESPACE: &[u8] = b"reserve_ma_tokens";
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -126,4 +127,18 @@ pub fn reserve_references_state_read<S: Storage>(
     storage: &S,
 ) -> ReadonlyBucket<S, ReserveReferences> {
     bucket_read(RESERVE_REFERENCES_NAMESPACE, storage)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ReserveMaTokens {
+    /// Reference of reserve
+    pub reference: Vec<u8>,
+}
+
+pub fn reserve_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveMaTokens> {
+    bucket(RESERVE_MA_TOKENS_NAMESPACE, storage)
+}
+
+pub fn reserve_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, ReserveMaTokens> {
+    bucket_read(RESERVE_MA_TOKENS_NAMESPACE, storage)
 }
