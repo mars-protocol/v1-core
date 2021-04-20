@@ -1669,10 +1669,9 @@ mod tests {
             amount: Uint128(burn_amount),
         });
 
-        let env = th_mock_env(MockEnvParams {
-            sender: "matoken",
+        let env = mars::testing::mock_env("matoken", MockEnvParams {
             sent_funds: &[],
-            block_time: Some(mock_reserve.interests_last_updated + seconds_elapsed),
+            block_time: mock_reserve.interests_last_updated + seconds_elapsed,
         });
         let res = handle(&mut deps, env, msg).unwrap();
 
