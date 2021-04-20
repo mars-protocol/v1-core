@@ -283,8 +283,6 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
             Some(cooldown) => {
                 let minimal_valid_cooldown_timestamp =
                     env.block.time - config.cooldown_duration - config.unstake_window;
-                println!("{}", cooldown.timestamp);
-                println!("{}", minimal_valid_cooldown_timestamp);
 
                 if cooldown.timestamp < minimal_valid_cooldown_timestamp {
                     env.block.time
@@ -1055,7 +1053,7 @@ mod tests {
             initial_xmars_balance + additional_xmars_balance
         );
 
-        // expired cooldown with moere amount gets a new timestamp (test lower and higher)
+        // expired cooldown with more amount gets a new timestamp (test lower and higher)
         let expired_cooldown_block_time =
             expected_cooldown_timestamp + TEST_COOLDOWN_DURATION + TEST_UNSTAKE_WINDOW + 1;
         let expired_balance = initial_xmars_balance + additional_xmars_balance + Uint128(800_000);
