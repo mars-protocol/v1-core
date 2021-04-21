@@ -22,7 +22,11 @@
 
 ### Testing
 
-1. Run `node scripts/integration_tests.js`
+Run `node scripts/liquidity_pool_integration_tests.js`
+
+Env variables:
+- `DEBUG`: when set to 1, more verbose logs are printed.
+- `CACHE`: use a cache source to store and reuse references to local terra. (Only `redis` is supported)
 
 ### Generating a whitelist.json
 
