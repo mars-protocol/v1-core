@@ -1,6 +1,7 @@
 import {LocalTerra} from "@terra-money/terra.js";
 import {queryContract} from "./helpers.mjs";
 import {deployBasecampContract} from "./helpers.mjs";
+import { strict as assert } from 'assert';
 
 let terra = new LocalTerra();
 let wallet = terra.wallets.test1;
@@ -18,27 +19,19 @@ let {mars_token_address, xmars_token_address} = await terra.wasm.contractQuery(b
 console.log("### Testing Token Info...");
 let queryTokenInfoMsg = {"token_info": {}};
 let {symbol: marsSymbol} = await queryContract(terra, mars_token_address, queryTokenInfoMsg);
-if (marsSymbol !== "Mars") {
-  throw new Error(`Incorrect symbol ${marsSymbol}, expected Mars`);
-}
+assert.deepEqual(marsSymbol, "Mars");
 
 let {symbol: xMarsSymbol} = await queryContract(terra, xmars_token_address, queryTokenInfoMsg);
-if (xMarsSymbol !== "xMars") {
-  throw new Error(`Incorrect symbol ${xMarsSymbol}, expected xMars`);
-}
+assert.deepEqual(xMarsSymbol, "xMars");
 
 // check minter for both contracts is the basecamp contract
 console.log("### Testing Minter...");
 let queryMinterMsg = {"minter": {}};
 let {minter: marsMinter} = await queryContract(terra, mars_token_address, queryMinterMsg);
-if (marsMinter !== basecampContractAddress) {
-  throw new Error(`mars minter is ${marsMinter}, expected ${basecampContractAddress}`);
-}
+assert.deepEqual(marsMinter, basecampContractAddress);
 
 let {minter: xMarsMinter} = await queryContract(terra, xmars_token_address, queryMinterMsg);
-if (xMarsMinter !== basecampContractAddress) {
-  throw new Error(`xMars minter is ${xMarsMinter}, expected ${basecampContractAddress}`);
-}
+assert.deepEqual(xMarsMinter, basecampContractAddress);
 
 console.log("Testing Complete");
 
