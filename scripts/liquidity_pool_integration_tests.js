@@ -1,5 +1,5 @@
 import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
-import {deployLiquidityPool, performTransaction, queryContract, setup} from "./helpers.mjs";
+import {deployLiquidityPool, performTransaction, queryContract, setupLiquidityPool} from "./helpers.mjs";
 import BigNumber from "bignumber.js";
 import redis from "redis";
 import {promisify} from "util";
@@ -422,7 +422,7 @@ async function main() {
     lpAddress: lpDeployResults.lpAddress,
   };
 
-  await setup(env.terra, env.ownerWallet, env.lpAddress, {initialAssets: INITIAL_ASSETS});
+  await setupLiquidityPool(env.terra, env.ownerWallet, env.lpAddress, {initialAssets: INITIAL_ASSETS});
 
   let test1NativeBalances = await getAddressNativeBalances(env.terra, env.terra.wallets.test1.key.accAddress);
   let test2NativeBalances = await getAddressNativeBalances(env.terra, env.terra.wallets.test2.key.accAddress);

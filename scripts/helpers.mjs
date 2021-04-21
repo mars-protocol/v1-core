@@ -88,13 +88,25 @@ export async function deployLiquidityPool(terra, wallet, cache = {}) {
   };
 }
 
-export async function setup(terra, wallet, contractAddress, options) {
+export async function setupLiquidityPool(terra, wallet, contractAddress, options) {
   const initialAssets = options.initialAssets ?? [];
   const initialDeposits = options.initialDeposits ?? [];
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
-    let initAssetMsg = {"init_asset": {"denom": asset.denom, "borrow_slope": asset.borrow_slope, "loan_to_value": asset.loan_to_value}};
+    let initAssetMsg = {
+      "init_asset": {
+        "asset": {
+          "Native": {
+            "denom": asset.denom,
+          }
+        },
+        "asset_params": {
+          "borrow_slope": asset.borrow_slope,
+          "loan_to_value": asset.loan_to_value
+        },
+      },
+    };
     await executeContract(terra, wallet, contractAddress, initAssetMsg);
     console.log("Initialized " + asset.denom);
   }
