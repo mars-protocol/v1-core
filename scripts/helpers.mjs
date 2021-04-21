@@ -60,17 +60,32 @@ export async function deployContract(terra, wallet, filepath, initMsg) {
   return await instantiateContract(terra, wallet, codeId, initMsg);
 }
 
-export async function deploy(terra, wallet) {
-  let cw20CodeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
-  console.log(`Uploaded cw20_token contract code: ${cw20CodeId}`);
+export async function deployLiquidityPool(terra, wallet, cache = {}) {
+  let cw20CodeId = cache.cw20CodeId;
+  if (cw20CodeId) {
+    console.log(`Using existing cw20_token, code_id: ${cw20CodeId}`)
+  } else {
+    cw20CodeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+    console.log(`Uploaded cw20_token contract code: ${cw20CodeId}`);
+  }
+
+  let lpCodeId = cache.lpCodeId;
+  if (lpCodeId) {
+    console.log(`Using existing lpCodeId, code_id: ${lpCodeId}`)
+  } else {
+    lpCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
+    console.log(`Instantiated liquidity_pool contract, code_id: ${lpCodeId}`);
+  }
 
   const lpInitMsg = {"ma_token_code_id": cw20CodeId};
-  const lpContractAddress = await deployContract(terra, wallet,'./artifacts/liquidity_pool.wasm', lpInitMsg);
+  const lpAddress = await instantiateContract(terra, wallet, lpCodeId, lpInitMsg);
+  console.log(`Instantiated liquidity_pool contract: address: ${lpAddress}`);
 
-  console.log("Uploaded and instantiated liquidity_pool contract");
-
-  console.log("LP Contract Address: " + lpContractAddress);
-  return lpContractAddress;
+  return { 
+    lpAddress,
+    lpCodeId,
+    cw20CodeId,
+  };
 }
 
 export async function setup(terra, wallet, contractAddress, options) {
