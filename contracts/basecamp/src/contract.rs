@@ -106,7 +106,7 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
             ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
         }
     } else {
-        Err(StdError::generic_err("Invalid Cw20RecieveMsg"))
+        Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
     }
 }
 
@@ -391,11 +391,7 @@ pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&config.mars_token_address)?,
             send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: recipient,
-                amount: amount,
-            })
-            .unwrap(),
+            msg: to_binary(&Cw20HandleMsg::Mint { recipient, amount }).unwrap(),
         })],
         log: vec![],
         data: None,
