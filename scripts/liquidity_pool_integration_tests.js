@@ -246,7 +246,9 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
 
   let borrowAddress = env.terra.wallets[borrowUser].key.accAddress;
 
-  let borrowMsg = {"borrow_native": {"denom": borrowAsset, "amount": borrowAmount.toString()}};
+  let borrowMsg = {"borrow":
+    {"asset": {"Native": {"denom": borrowAsset}}, "amount": borrowAmount.toString()}
+  };
   let executeBorrowMsg = new MsgExecuteContract(borrowAddress, env.lpAddress, borrowMsg);
   const borrowTxResult = await performTransaction(env.terra, env.terra.wallets[borrowUser], executeBorrowMsg);
 
@@ -472,10 +474,10 @@ async function main() {
 
   let deposits = {uluna: 10_000_000, uusd: 5_000_000};//, ukrw: 50_000_000};
 
-  await testDeposit(env, expectedState, "test1", "uusd", 10_000_000);
-  await testBorrow(env, expectedState, "test1", "uluna", 4_000_000);
-  await testRedeem(env, expectedState, "test1", "uusd", 3_000_000);
-  await testRepay(env, expectedState, "test1", "uluna", 2_000_000);
+  await testDeposit(env, expectedState, "test1", "uluna", 10_000_000);
+  await testBorrow(env, expectedState, "test1", "uusd", 2_000_000);
+  await testRedeem(env, expectedState, "test1", "uluna", 3_000_000);
+  await testRepay(env, expectedState, "test1", "uusd", 1_000_000);
   await testCollateralCheck(env, expectedState, "test2", deposits);
   console.log("OK");
 }
