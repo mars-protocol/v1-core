@@ -20,7 +20,7 @@ use crate::state::{
     users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
 use std::str;
-use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
+use terra_cosmwasm::{ExchangeRateItem, TerraQuerier};
 
 // CONSTANTS
 
@@ -563,12 +563,13 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     // TODO: Implement oracle for cw20s to get exchange rates
     let querier = TerraQuerier::new(&deps.querier);
     let denoms_to_query: Vec<&str> = denoms_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-    let exchange_rates: ExchangeRatesResponse = match denoms_to_query.len() {
-        0 => ExchangeRatesResponse {
-            base_denom: "uusd".to_string(),
-            exchange_rates: vec![],
-        },
-        _ => querier.query_exchange_rates("uusd", denoms_to_query)?,
+    let native_exchange_rates: Vec<ExchangeRateItem> = match denoms_to_query.len() {
+        0 => vec![],
+        _ => {
+            querier
+                .query_exchange_rates("uusd", denoms_to_query)?
+                .exchange_rates
+        }
     };
 
     let mut total_debt_in_uusd = Uint256::zero();
@@ -576,7 +577,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     for (asset_label, debt, max_borrow, asset_type) in user_balances {
         let maybe_exchange_rate: Option<Decimal256> =
-            get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &exchange_rates);
+            get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
 
         let exchange_rate = match maybe_exchange_rate {
             Some(rate) => rate,
@@ -593,7 +594,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     }
 
     let borrow_amount_rate: Option<Decimal256> =
-        get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &exchange_rates);
+        get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
 
     let borrow_amount_in_uusd = match borrow_amount_rate {
         Some(exchange_rate) => borrow_amount * exchange_rate,
@@ -1041,15 +1042,15 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
 fn get_exchange_rate_for_asset(
     asset_label: &str,
     asset_type: &AssetType,
-    exchange_rates: &ExchangeRatesResponse,
+    native_exchange_rates: &[ExchangeRateItem],
 ) -> Option<Decimal256> {
     return match asset_type {
-        AssetType::Native if asset_label != "uusd" => exchange_rates
-            .exchange_rates
+        AssetType::Native if asset_label != "uusd" => native_exchange_rates
             .iter()
             .find(|e| e.quote_denom == asset_label)
             .map(|rate| Decimal256::from(rate.exchange_rate)),
-        // TODO: Making the exchange rate equal to 1 as a placeholder. Implementation of an oracle to get the real exchange rates is pending
+        // TODO: Making the exchange rate for cw20s equal to 1 as a placeholder.
+        // Implementation of an oracle to get the real exchange rates is pending
         _ => Some(Decimal256::one()),
     };
 }
