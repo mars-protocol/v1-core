@@ -247,6 +247,8 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   debug(borrowTxResult);
 
   let borrowTxInfo = await env.terra.tx.txInfo(borrowTxResult.txhash);
+  debug(borrowTxInfo);
+  const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins[borrowAsset].amount);
 
   // LP Contract balance should go down by borrow amount
   expectedState.lpContractBalances[borrowAsset] -= borrowAmount;
@@ -264,7 +266,6 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   assertEqualIndicesAndRates(expectedState.reserves[borrowAsset], actualIndicesAndRates);
 
   // Borrower balance should go up by borrow amount - txfee
-  const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins[borrowAsset].amount);
   expectedState.userBalances[borrowUser].native_deposits[borrowAsset] += (borrowAmount - borrowTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, borrowAddress);
   assert.strictEqual(
