@@ -139,7 +139,7 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
   let coins = new Coin(depositAsset, depositAmount);
   let executeDepositMsg =
     new MsgExecuteContract(depositAddress, env.lpAddress, depositMsg, [coins]);
-  let depositTxResult = await performTransaction(env.terra, env.ownerWallet, executeDepositMsg);
+  let depositTxResult = await performTransaction(env.terra, env.terra.wallets[depositUser], executeDepositMsg);
   debug(executeDepositMsg);
   debug(depositTxResult);
 
@@ -475,6 +475,7 @@ async function main() {
   let deposits = {uluna: 10_000_000, uusd: 5_000_000};//, ukrw: 50_000_000};
 
   await testDeposit(env, expectedState, "test1", "uluna", 10_000_000);
+  await testDeposit(env, expectedState, "test2", "uusd", 10_000_000);
   await testBorrow(env, expectedState, "test1", "uusd", 2_000_000);
   await testRedeem(env, expectedState, "test1", "uluna", 3_000_000);
   await testRepay(env, expectedState, "test1", "uusd", 1_000_000);
