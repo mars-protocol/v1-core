@@ -34,7 +34,7 @@ export async function uploadContract(terra, wallet, filepath) {
   const contract = readFileSync(filepath, 'base64');
   const uploadMsg = new MsgStoreCode(wallet.key.accAddress, contract);
   let result = await performTransaction(terra, wallet, uploadMsg);
-  return Number(result.logs[0].events[1].attributes[1].value) //code_id
+  return Number(result.logs[0].eventsByType.store_code.code_id[0]) //code_id
 }
 
 export async function instantiateContract(terra, wallet, codeId, msg) {
@@ -161,10 +161,10 @@ export async function deployBasecampContract(terra, wallet, cooldownDuration, un
   }
 
   console.log("Deploying Basecamp...");
-  let initMsg = {"cw20_code_id": codeId, "cooldown_duration": cooldownDuration.toString(), "unstake_window": unstakeWindow.toString()};
+  let initMsg = {"cw20_code_id": codeId, "cooldown_duration": cooldownDuration, "unstake_window": unstakeWindow};
   let basecampCodeId = await uploadContract(terra, wallet, './artifacts/basecamp.wasm');
   const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, basecampCodeId, initMsg, undefined, true);
-  let result = await performTransaction(terra, wallet, instantiateMsg)
+  let result = await performTransaction(terra, wallet, instantiateMsg);
 
   let basecampContractAddress = result.logs[0].eventsByType.from_contract.contract_address[0];
 

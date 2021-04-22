@@ -20,7 +20,7 @@ use crate::state::{
     users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
 use std::str;
-use terra_cosmwasm::{ExchangeRatesResponse, TerraQuerier};
+use terra_cosmwasm::{ExchangeRateItem, TerraQuerier};
 
 // CONSTANTS
 
@@ -563,25 +563,21 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     // TODO: Implement oracle for cw20s to get exchange rates
     let querier = TerraQuerier::new(&deps.querier);
     let denoms_to_query: Vec<&str> = denoms_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-    let exchange_rates: ExchangeRatesResponse =
-        querier.query_exchange_rates("uusd", denoms_to_query)?;
+    let native_exchange_rates: Vec<ExchangeRateItem> = match denoms_to_query.len() {
+        0 => vec![],
+        _ => {
+            querier
+                .query_exchange_rates("uusd", denoms_to_query)?
+                .exchange_rates
+        }
+    };
 
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
 
     for (asset_label, debt, max_borrow, asset_type) in user_balances {
-        let mut maybe_exchange_rate: Option<Decimal256> = None;
-        // TODO: Making the exchange rate equal to 1 as a placeholder. Implementation of an oracle to get the real exchange rates is pending
-        if asset_label == "uusd" || asset_type == AssetType::Cw20 {
-            maybe_exchange_rate = Some(Decimal256::one());
-        } else {
-            for rate in &exchange_rates.exchange_rates {
-                if rate.quote_denom == asset_label {
-                    maybe_exchange_rate = Some(Decimal256::from(rate.exchange_rate));
-                    break;
-                }
-            }
-        }
+        let maybe_exchange_rate: Option<Decimal256> =
+            get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
 
         let exchange_rate = match maybe_exchange_rate {
             Some(rate) => rate,
@@ -597,15 +593,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         max_borrow_in_uusd += max_borrow * exchange_rate;
     }
 
-    // TODO: temporary fix as cw20s are currently not added to exchange rates
-    let borrow_amount_rate: Option<Decimal256> = match asset_type {
-        AssetType::Native => exchange_rates
-            .exchange_rates
-            .iter()
-            .find(|e| e.quote_denom == asset_label)
-            .map(|e| Decimal256::from(e.exchange_rate)),
-        AssetType::Cw20 => Some(Decimal256::one()),
-    };
+    let borrow_amount_rate: Option<Decimal256> =
+        get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
 
     let borrow_amount_in_uusd = match borrow_amount_rate {
         Some(exchange_rate) => borrow_amount * exchange_rate,
@@ -1014,6 +1003,23 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
 }
 
 // HELPERS
+
+fn get_exchange_rate_for_asset(
+    asset_label: &str,
+    asset_type: &AssetType,
+    native_exchange_rates: &[ExchangeRateItem],
+) -> Option<Decimal256> {
+    return match asset_type {
+        AssetType::Native if asset_label != "uusd" => native_exchange_rates
+            .iter()
+            .find(|e| e.quote_denom == asset_label)
+            .map(|rate| Decimal256::from(rate.exchange_rate)),
+        // TODO: Making the exchange rate for cw20s equal to 1 as a placeholder.
+        // Implementation of an oracle to get the real exchange rates is pending
+        _ => Some(Decimal256::one()),
+    };
+}
+
 // native coins
 fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
     coins
@@ -2021,7 +2027,7 @@ mod tests {
             "borrower",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: block_time,
+                block_time,
             },
         );
         let msg = HandleMsg::Borrow {
@@ -2090,7 +2096,7 @@ mod tests {
             "borrower",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: block_time,
+                block_time,
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2107,7 +2113,7 @@ mod tests {
             "borrower",
             MockEnvParams {
                 sent_funds: &[coin(repay_amount, "borrowedcoin2")],
-                block_time: block_time,
+                block_time,
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2195,7 +2201,7 @@ mod tests {
             "borrower",
             MockEnvParams {
                 sent_funds: &[coin(repay_amount, "borrowedcoin2")],
-                block_time: block_time,
+                block_time,
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2265,7 +2271,7 @@ mod tests {
             "borrowedcoin1",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: block_time,
+                block_time,
             },
         );
 
@@ -2326,6 +2332,88 @@ mod tests {
             Uint256::from(0 as u128),
             reserve_1_after_repay_1.debt_total_scaled
         );
+    }
+
+    #[test]
+    fn test_borrow_uusd() {
+        let initial_liquidity = 10000000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
+        let block_time = 1;
+
+        let borrower_addr = HumanAddr::from("borrower");
+        let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
+        let ltv = Decimal256::from_ratio(7, 10);
+
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: Decimal256::one(),
+            loan_to_value: ltv,
+            borrow_index: Decimal256::one(),
+            borrow_slope: Decimal256::one(),
+            borrow_rate: Decimal256::one(),
+            liquidity_rate: Decimal256::one(),
+            debt_total_scaled: Uint256::zero(),
+            interests_last_updated: block_time,
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"uusd", &mock_reserve);
+
+        // Set user as having the reserve_collateral deposited
+        let deposit_amount = 110000u64;
+        let mut user = User {
+            borrowed_assets: Uint128::zero(),
+            deposited_assets: Uint128::zero(),
+        };
+        set_bit(&mut user.deposited_assets, reserve.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(borrower_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Set the querier to return collateral balance
+        let deposit_coin_address = HumanAddr::from("matoken");
+        deps.querier.set_cw20_balances(
+            deposit_coin_address,
+            &[(borrower_addr.clone(), Uint128::from(deposit_amount))],
+        );
+
+        // borrow with insufficient collateral, should fail
+        let msg = HandleMsg::Borrow {
+            asset: Asset::Native {
+                denom: "uusd".to_string(),
+            },
+            amount: Uint256::from(deposit_amount) * ltv + Uint256::from(1000u128),
+        };
+        let env = mars::testing::mock_env("borrower", MockEnvParams::default());
+        handle(&mut deps, env.clone(), msg).unwrap_err();
+
+        let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
+        let msg = HandleMsg::Borrow {
+            asset: Asset::Native {
+                denom: "uusd".to_string(),
+            },
+            amount: valid_amount,
+        };
+        let env = mars::testing::mock_env(
+            "borrower",
+            MockEnvParams {
+                block_time: block_time,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg).unwrap();
+
+        let user = users_state_read(&deps.storage)
+            .load(borrower_canonical_addr.as_slice())
+            .unwrap();
+        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+
+        let debt = debts_asset_state_read(&deps.storage, b"uusd")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+
+        assert_eq!(valid_amount, debt.amount_scaled);
     }
 
     #[test]
