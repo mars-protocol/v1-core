@@ -1003,6 +1003,23 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
 }
 
 // HELPERS
+
+fn get_exchange_rate_for_asset(
+    asset_label: &str,
+    asset_type: &AssetType,
+    native_exchange_rates: &[ExchangeRateItem],
+) -> Option<Decimal256> {
+    return match asset_type {
+        AssetType::Native if asset_label != "uusd" => native_exchange_rates
+            .iter()
+            .find(|e| e.quote_denom == asset_label)
+            .map(|rate| Decimal256::from(rate.exchange_rate)),
+        // TODO: Making the exchange rate for cw20s equal to 1 as a placeholder.
+        // Implementation of an oracle to get the real exchange rates is pending
+        _ => Some(Decimal256::one()),
+    };
+}
+
 // native coins
 fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
     coins
@@ -1037,22 +1054,6 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     }
     *bitmap = Uint128(bitmap.u128() & !(1 << index));
     Ok(())
-}
-
-fn get_exchange_rate_for_asset(
-    asset_label: &str,
-    asset_type: &AssetType,
-    native_exchange_rates: &[ExchangeRateItem],
-) -> Option<Decimal256> {
-    return match asset_type {
-        AssetType::Native if asset_label != "uusd" => native_exchange_rates
-            .iter()
-            .find(|e| e.quote_denom == asset_label)
-            .map(|rate| Decimal256::from(rate.exchange_rate)),
-        // TODO: Making the exchange rate for cw20s equal to 1 as a placeholder.
-        // Implementation of an oracle to get the real exchange rates is pending
-        _ => Some(Decimal256::one()),
-    };
 }
 
 // TESTS
@@ -2337,20 +2338,22 @@ mod tests {
     fn test_borrow_uusd() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
+        let block_time = 1;
 
         let borrower_addr = HumanAddr::from("borrower");
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
+        let ltv = Decimal256::from_ratio(7, 10);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
             liquidity_index: Decimal256::one(),
-            loan_to_value: Decimal256::one(),
+            loan_to_value: ltv,
             borrow_index: Decimal256::one(),
             borrow_slope: Decimal256::one(),
             borrow_rate: Decimal256::one(),
             liquidity_rate: Decimal256::one(),
             debt_total_scaled: Uint256::zero(),
-            interests_last_updated: 10000000,
+            interests_last_updated: block_time,
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -2380,28 +2383,23 @@ mod tests {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
             },
-            amount: Uint256::from(deposit_amount + 100),
+            amount: Uint256::from(deposit_amount) * ltv + Uint256::from(1000u128),
         };
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time: 10000200,
-            },
-        );
+        let env = mars::testing::mock_env("borrower", MockEnvParams::default());
         handle(&mut deps, env.clone(), msg).unwrap_err();
 
+        let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
         let msg = HandleMsg::Borrow {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
             },
-            amount: Uint256::from(deposit_amount),
+            amount: valid_amount,
         };
         let env = mars::testing::mock_env(
             "borrower",
             MockEnvParams {
-                sent_funds: &[],
-                block_time: 10000300,
+                block_time: block_time,
+                ..Default::default()
             },
         );
         handle(&mut deps, env, msg).unwrap();
@@ -2410,6 +2408,12 @@ mod tests {
             .load(borrower_canonical_addr.as_slice())
             .unwrap();
         assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+
+        let debt = debts_asset_state_read(&deps.storage, b"uusd")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+
+        assert_eq!(valid_amount, debt.amount_scaled);
     }
 
     #[test]
