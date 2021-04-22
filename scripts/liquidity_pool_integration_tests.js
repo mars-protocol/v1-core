@@ -3,6 +3,7 @@ import {deployLiquidityPool, performTransaction, queryContract, setupLiquidityPo
 import BigNumber from "bignumber.js";
 import redis from "redis";
 import {promisify} from "util";
+import { strict as assert } from "assert";
 
 BigNumber.config({DECIMAL_PLACES: 18})
 
@@ -20,16 +21,6 @@ function debug(string) {
 }
 
 // ASSERTS
-function assert(expression, message) {
-  if (!expression) {
-    throw new Error(message);
-  }
-}
-
-function assertEqual(left, right, message = "Expected values to be equal") {
-  assert(left === right, `${message} got \n\t-left:  ${left}, \n\t-right: ${right}`);
-}
-
 function assertEqualBN(left, right, message = "Expected values to be equal") {
   assert(left.eq(right), `${message} got \n\t-left:  ${left}, \n\t-right: ${right}`);
 }
@@ -149,7 +140,7 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
   expectedState.lpContractBalances[depositAsset] += depositAmount;
   let lpContractBalance = await env.terra.bank.balance(env.lpAddress);
   debug(lpContractBalance);
-  assertEqual(expectedState.lpContractBalances[depositAsset], Number(lpContractBalance._coins[depositAsset].amount));
+  assert.strictEqual(expectedState.lpContractBalances[depositAsset], Number(lpContractBalance._coins[depositAsset].amount));
 
   // Update and check indices and rates
   let blockTime = getTimestampInSecondsFromDateField(txInfo.timestamp);
@@ -169,13 +160,13 @@ async function testDeposit(env, expectedState, depositUser, depositAsset, deposi
       balanceQueryMsg);
   debug(balanceQueryMsg);
   debug(balanceQueryResult);
-  assertEqual(expectedState.userBalances[depositUser].maBalances[depositAsset], Number(balanceQueryResult.balance));
+  assert.strictEqual(expectedState.userBalances[depositUser].maBalances[depositAsset], Number(balanceQueryResult.balance));
 
   // Depositor balance should go down by deposit amount + txfee
   const depositTxFee = Number(txInfo.tx.fee.amount._coins[depositAsset].amount);
   expectedState.userBalances[depositUser].native_deposits[depositAsset] -= (depositAmount + depositTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, depositAddress);
-  assertEqual(
+  assert.strictEqual(
     expectedState.userBalances[depositUser].native_deposits[depositAsset],
     actualEndingBalances[depositAsset]
   );
@@ -217,7 +208,7 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
   expectedState.lpContractBalances[redeemAsset] -= redeemAmount;
   let lpContractBalance = await env.terra.bank.balance(env.lpAddress);
   debug(lpContractBalance);
-  assertEqual(expectedState.lpContractBalances[redeemAsset], Number(lpContractBalance._coins[redeemAsset].amount));
+  assert.strictEqual(expectedState.lpContractBalances[redeemAsset], Number(lpContractBalance._coins[redeemAsset].amount));
 
   // user's ma balance should go down by redeem amount
   expectedState.userBalances[redeemUser].maBalances[redeemAsset] -= redeemAmount;
@@ -229,13 +220,13 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
       balanceQueryMsg);
   debug(balanceQueryMsg);
   debug(balanceQueryResult);
-  assertEqual(expectedState.userBalances[redeemUser].maBalances[redeemAsset], Number(balanceQueryResult.balance));
+  assert.strictEqual(expectedState.userBalances[redeemUser].maBalances[redeemAsset], Number(balanceQueryResult.balance));
 
   // Redeemer balance should go up by redeem amount - txfee
   const redeemTxFee = Number(redeemTxInfo.tx.fee.amount._coins[redeemAsset].amount);
   expectedState.userBalances[redeemUser].native_deposits[redeemAsset] += (redeemAmount - redeemTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, redeemAddress);
-  assertEqual(
+  assert.strictEqual(
     expectedState.userBalances[redeemUser].native_deposits[redeemAsset],
     actualEndingBalances[redeemAsset]
   );
@@ -260,7 +251,7 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   // LP Contract balance should go down by borrow amount
   expectedState.lpContractBalances[borrowAsset] -= borrowAmount;
   const contractBalance = await env.terra.bank.balance(env.lpAddress);
-  assertEqual(expectedState.lpContractBalances[borrowAsset], Number(contractBalance._coins[borrowAsset].amount));
+  assert.strictEqual(expectedState.lpContractBalances[borrowAsset], Number(contractBalance._coins[borrowAsset].amount));
 
   // Update debt total, indices, and rates and test
   let borrowAmountScaled = new BigNumber(borrowAmount).dividedBy(expectedState.reserves[borrowAsset].borrowIndex);
@@ -276,7 +267,7 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   const borrowTxFee = Number(borrowTxInfo.tx.fee.amount._coins[borrowAsset].amount);
   expectedState.userBalances[borrowUser].native_deposits[borrowAsset] += (borrowAmount - borrowTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, borrowAddress);
-  assertEqual(
+  assert.strictEqual(
     expectedState.userBalances[borrowUser].native_deposits[borrowAsset],
     actualEndingBalances[borrowAsset]
   );
@@ -300,7 +291,7 @@ async function testRepay(env, expectedState, repayUser, repayAsset, repayAmount)
   // check lpContract balance increases by repay amount
   expectedState.lpContractBalances[repayAsset] += repayAmount;
   const contractBalance = await env.terra.bank.balance(env.lpAddress);
-  assertEqual(expectedState.lpContractBalances[repayAsset], Number(contractBalance._coins[repayAsset].amount));
+  assert.strictEqual(expectedState.lpContractBalances[repayAsset], Number(contractBalance._coins[repayAsset].amount));
 
   // Update debt total and check indices and rates
   let blockTime = getTimestampInSecondsFromDateField(repayTxInfo.timestamp);
@@ -317,7 +308,7 @@ async function testRepay(env, expectedState, repayUser, repayAsset, repayAmount)
   const repayTxFee = Number(repayTxInfo.tx.fee.amount._coins.uluna.amount);
   expectedState.userBalances[repayUser].native_deposits[repayAsset] -= (repayAmount + repayTxFee);
   let actualEndingBalances = await getAddressNativeBalances(env.terra, repayAddress);
-  assertEqual(
+  assert.strictEqual(
     expectedState.userBalances[repayUser].native_deposits[repayAsset],
     actualEndingBalances[repayAsset]
   );
