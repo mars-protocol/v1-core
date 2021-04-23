@@ -37,6 +37,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         owner: deps.api.canonical_address(&env.message.sender)?,
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
+        // TODO: Do we want to send this in the init message?
+        close_factor: Decimal256::from_ratio(1, 2),
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -84,6 +86,27 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 AssetType::Native,
             )
         }
+        HandleMsg::LiquidateNative {
+            collateral_asset,
+            debt_asset,
+            user,
+            debt_to_cover,
+            receive_ma_token,
+        } => {
+            let funds_sent = get_denom_amount_from_coins(&env.message.sent_funds, &debt_asset);
+            let sender = env.message.sender.clone();
+            handle_liquidate(
+                deps,
+                env,
+                sender,
+                collateral_asset,
+                Asset::Native { denom: debt_asset },
+                user,
+                debt_to_cover,
+                receive_ma_token,
+                funds_sent,
+            )
+        }
     }
 }
 
@@ -129,6 +152,34 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 Uint256::from(cw20_msg.amount),
                 AssetType::Cw20,
             ),
+            ReceiveMsg::LiquidateCw20 {
+                collateral_asset,
+                debt_asset,
+                user,
+                debt_to_cover,
+                receive_ma_token,
+            } => {
+                if env.message.sender != debt_asset {
+                    return Err(StdError::generic_err(format!(
+                        "Incorrect asset, must send {} in order to liquidate",
+                        debt_asset
+                    )));
+                }
+                let sent_funds = cw20_msg.amount;
+                handle_liquidate(
+                    deps,
+                    env,
+                    cw20_msg.sender,
+                    collateral_asset,
+                    Asset::Cw20 {
+                        contract_addr: debt_asset,
+                    },
+                    user,
+                    debt_to_cover,
+                    receive_ma_token,
+                    Uint256::from(sent_funds),
+                )
+            }
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -305,6 +356,9 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                     debt_total_scaled: Uint256::zero(),
 
                     asset_type: asset_type.clone(),
+
+                    liquidation_threshold: asset_params.liquidation_threshold,
+                    liquidation_bonus: asset_params.liquidation_bonus,
                 },
             )?;
 
@@ -793,6 +847,64 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    sender: HumanAddr,
+    collateral: Asset,
+    debt: Asset,
+    user: HumanAddr,
+    debt_to_cover: Uint256,
+    receive_ma_token: bool,
+    sent_funds: Uint256,
+) -> StdResult<HandleResponse> {
+    let (debt_asset_label, debt_reference) = match debt {
+        Asset::Native { denom } => {
+            let debt_reference = denom.as_bytes().to_vec();
+            let debt_asset_label = denom;
+            (debt_asset_label, debt_reference)
+        }
+        Asset::Cw20 { contract_addr } => {
+            let debt_asset_label = String::from(contract_addr.as_str());
+            let debt_reference = deps
+                .api
+                .canonical_address(&contract_addr)?
+                .as_slice()
+                .to_vec();
+            (debt_asset_label, debt_reference)
+        }
+    };
+
+    // liquidator must send positive amount of funds in debt asset
+    if sent_funds.is_zero() {
+        return Err(StdError::generic_err(format!(
+            "Must send more than 0 {} in order to liquidate",
+            debt_asset_label,
+        )));
+    }
+
+    let collateral_reference = match collateral {
+        Asset::Native { denom } => denom.as_bytes().to_vec(),
+        Asset::Cw20 { contract_addr } => deps
+            .api
+            .canonical_address(&contract_addr)?
+            .as_slice()
+            .to_vec(),
+    };
+
+    // load collateral and debt reserves
+    let collateral_reserve =
+        reserves_state(&mut deps.storage).load(collateral_reference.as_slice())?;
+    let debt_reserve = reserves_state(&mut deps.storage).load(debt_reference.as_slice())?;
+
+    // load user
+    let user = users_state_read(&deps.storage).load(deps.api.canonical_address(&user)?.as_slice());
+
+    // calculate user's health factor
+
+    Ok(HandleResponse::default())
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -814,6 +926,7 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     Ok(ConfigResponse {
         ma_token_code_id: config.ma_token_code_id,
         reserve_count: config.reserve_count,
+        close_factor: config.close_factor,
     })
 }
 
@@ -857,6 +970,9 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
         loan_to_value: reserve.loan_to_value,
         interests_last_updated: reserve.interests_last_updated,
         debt_total_scaled: reserve.debt_total_scaled,
+        asset_type: reserve.asset_type,
+        liquidation_threshold: reserve.liquidation_threshold,
+        liquidation_bonus: reserve.liquidation_bonus,
     })
 }
 
@@ -1154,6 +1270,8 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                liquidation_threshold: Decimal256::one(),
+                liquidation_bonus: Decimal256::zero(),
             },
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
@@ -1169,6 +1287,8 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                liquidation_threshold: Decimal256::one(),
+                liquidation_bonus: Decimal256::zero(),
             },
         };
         let res = handle(&mut deps, env, msg).unwrap();
@@ -1265,6 +1385,8 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                liquidation_threshold: Decimal256::one(),
+                liquidation_bonus: Decimal256::zero(),
             },
         };
         let res = handle(&mut deps, env, msg).unwrap();
@@ -2484,7 +2606,7 @@ mod tests {
         let env = mars::testing::mock_env(
             "borrower",
             MockEnvParams {
-                block_time: block_time,
+                block_time,
                 ..Default::default()
             },
         );
@@ -2688,6 +2810,9 @@ mod tests {
         debt_total_scaled: Uint256,
 
         asset_type: AssetType,
+
+        liquidation_threshold: Decimal256,
+        liquidation_bonus: Decimal256,
     }
 
     impl Default for MockReserve<'_> {
@@ -2703,6 +2828,8 @@ mod tests {
                 interests_last_updated: 0,
                 debt_total_scaled: Default::default(),
                 asset_type: AssetType::Native,
+                liquidation_threshold: Decimal256::one(),
+                liquidation_bonus: Decimal256::zero(),
             }
         }
     }
@@ -2738,6 +2865,8 @@ mod tests {
             interests_last_updated: reserve.interests_last_updated,
             debt_total_scaled: reserve.debt_total_scaled,
             asset_type: reserve.asset_type.clone(),
+            liquidation_threshold: reserve.liquidation_threshold,
+            liquidation_bonus: reserve.liquidation_bonus,
         };
 
         reserve_bucket.save(key, &new_reserve).unwrap();
