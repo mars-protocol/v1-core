@@ -12,6 +12,7 @@ use mars::helpers::{cw20_get_balance, cw20_get_symbol};
 use crate::msg::{
     Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
     MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
+    UserAccountInfo,
 };
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read,
@@ -858,6 +859,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     receive_ma_token: bool,
     sent_funds: Uint256,
 ) -> StdResult<HandleResponse> {
+    let user_canonical_address = deps.api.canonical_address(&user)?;
+
     let (debt_asset_label, debt_reference) = match debt {
         Asset::Native { denom } => {
             let debt_reference = denom.as_bytes().to_vec();
@@ -875,7 +878,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         }
     };
 
-    // liquidator must send positive amount of funds in debt asset
+    // liquidator must send positive amount of funds in the debt asset
     if sent_funds.is_zero() {
         return Err(StdError::generic_err(format!(
             "Must send more than 0 {} in order to liquidate",
@@ -897,12 +900,110 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         reserves_state(&mut deps.storage).load(collateral_reference.as_slice())?;
     let debt_reserve = reserves_state(&mut deps.storage).load(debt_reference.as_slice())?;
 
-    // load user
-    let user = users_state_read(&deps.storage).load(deps.api.canonical_address(&user)?.as_slice());
+    // get user account info
+    let user_account_info = calculate_user_account_info(deps, user)?;
 
-    // calculate user's health factor
+    // if health factor is not less than one the user cannot be liquidated
+    if user_account_info.health_factor >= Decimal256::one() {
+        return Err(StdError::generic_err(
+            "User has a health factor greater than 1 and thus cannot be liquidated",
+        ));
+    }
+
+    // if user has no debt in the deposited asset then the user cannot be liquidated
+    let debts_asset_bucket = debts_asset_state(&mut deps.storage, debt_reference.as_slice());
+    let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+    if user_debt.amount_scaled.is_zero() {
+        return Err(StdError::generic_err("User has no outstanding debt in the specified debt asset and thus cannot be liquidated"));
+    }
 
     Ok(HandleResponse::default())
+}
+
+pub fn calculate_user_account_info<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    user_address: HumanAddr,
+) -> StdResult<UserAccountInfo> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
+
+    let mut total_collateral_in_uusd = Decimal256::zero();
+    let mut total_debt_in_uusd = Decimal256::zero();
+    let mut avg_loan_to_value = Decimal256::zero();
+    let mut avg_liquidation_threshold = Decimal256::zero();
+
+    for i in 0..config.reserve_count {
+        let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
+        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
+        if !(user_is_using_as_collateral || user_is_borrowing) {
+            continue;
+        }
+
+        let asset_reference_vec = reserve_references_state_read(&deps.storage)
+            .load(&i.to_be_bytes())?
+            .reference;
+        let asset_reserve =
+            reserves_state_read(&deps.storage).load(&asset_reference_vec.as_slice())?;
+
+        // TODO: Add oracle for cw20 prices here
+        let asset_unit_price = Decimal256::one();
+
+        if user_is_using_as_collateral {
+            // query asset balance (ma_token contract gives back a scaled value)
+            let asset_balance = cw20_get_balance(
+                deps,
+                deps.api.human_address(&asset_reserve.ma_token_address)?,
+                user_address.clone(),
+            )?;
+            let liquidity_balance_in_uusd = asset_unit_price
+                * Decimal256::from_uint256(Uint256::from(asset_balance))
+                * asset_reserve.liquidity_index;
+
+            total_collateral_in_uusd += liquidity_balance_in_uusd;
+            avg_loan_to_value += liquidity_balance_in_uusd * asset_reserve.loan_to_value;
+            avg_liquidation_threshold +=
+                liquidity_balance_in_uusd * asset_reserve.liquidation_threshold;
+        }
+
+        if user_is_borrowing {
+            // query debt
+            let debts_asset_bucket =
+                debts_asset_state(&mut deps.storage, asset_reference_vec.as_slice());
+            let borrower_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+
+            let debt_balance_in_uusd =
+                asset_unit_price * borrower_debt.amount_scaled * asset_reserve.borrow_index;
+            total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
+        }
+    }
+
+    avg_loan_to_value = if total_collateral_in_uusd > Decimal256::zero() {
+        avg_loan_to_value / total_collateral_in_uusd
+    } else {
+        Decimal256::zero()
+    };
+
+    avg_liquidation_threshold = if total_collateral_in_uusd > Decimal256::zero() {
+        avg_liquidation_threshold / total_collateral_in_uusd
+    } else {
+        Decimal256::zero()
+    };
+
+    let health_factor = if total_debt_in_uusd.is_zero() {
+        Decimal256::one() // TODO: figure out how to make this -1
+    } else {
+        total_collateral_in_uusd * avg_liquidation_threshold / total_debt_in_uusd
+    };
+
+    Ok(UserAccountInfo {
+        total_collateral_in_uusd,
+        total_debt_in_uusd,
+        avg_loan_to_value,
+        avg_liquidation_threshold,
+        health_factor,
+    })
 }
 
 // QUERIES
