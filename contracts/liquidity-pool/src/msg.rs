@@ -137,6 +137,15 @@ pub struct DebtInfo {
     pub amount: Uint256,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct UserAccountInfo {
+    pub total_collateral_in_uusd: Decimal256,
+    pub total_debt_in_uusd: Decimal256,
+    pub avg_loan_to_value: Decimal256,
+    pub avg_liquidation_threshold: Decimal256,
+    pub health_factor: Decimal256,
+}
+
 /// We currently take no arguments for migrations
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
