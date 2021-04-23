@@ -43,6 +43,19 @@ pub enum HandleMsg {
         /// Denom used in Terra (e.g: uluna, uusd)
         denom: String,
     },
+    /// Liquidate under-collateralized native loans
+    LiquidateNative {
+        // Denom of collateral asset if native or token address if cw20
+        collateral_asset: Asset,
+        // Denom used in Terra (e.g: uluna, uusd) of the debt asset
+        debt_asset: String,
+        // The address of the borrower getting liquidated
+        user: HumanAddr,
+        // The debt amount of the borrowed asset the liquidator wants to cover
+        debt_to_cover: Uint256,
+        // Sends maAsset to liquidator if true and underlying collateral asset if false
+        receive_ma_token: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -54,6 +67,19 @@ pub enum ReceiveMsg {
     DepositCw20 {},
     /// Repay the sent cw20 tokens
     RepayCw20 {},
+    /// Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan
+    LiquidateCw20 {
+        // Denom of collateral asset if native or token address if cw20
+        collateral_asset: Asset,
+        // Token address of the debt asset
+        debt_asset: HumanAddr,
+        // The address of the borrower getting liquidated
+        user: HumanAddr,
+        // The debt amount of the borrowed asset the liquidator wants to cover
+        debt_to_cover: Uint256,
+        // Sends maAsset to liquidator if true and underlying collateral asset if false
+        receive_ma_token: bool,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -70,6 +96,7 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub ma_token_code_id: u64,
     pub reserve_count: u32,
+    pub close_factor: Decimal256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -83,6 +110,9 @@ pub struct ReserveResponse {
     pub loan_to_value: Decimal256,
     pub interests_last_updated: u64,
     pub debt_total_scaled: Uint256,
+    pub asset_type: AssetType,
+    pub liquidation_threshold: Decimal256,
+    pub liquidation_bonus: Decimal256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -124,6 +154,10 @@ pub struct InitAssetParams {
     pub borrow_slope: Decimal256,
     /// Max percentage of collateral that can be borrowed
     pub loan_to_value: Decimal256,
+    // Percentage at which the loan is defined as under-collateralized
+    pub liquidation_threshold: Decimal256,
+    // Bonus on the price of assets of the collateral when liquidators purchase it
+    pub liquidation_bonus: Decimal256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

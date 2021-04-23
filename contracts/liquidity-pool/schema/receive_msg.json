@@ -37,6 +37,93 @@
           "type": "object"
         }
       }
+    },
+    {
+      "description": "Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan",
+      "type": "object",
+      "required": [
+        "liquidate_cw20"
+      ],
+      "properties": {
+        "liquidate_cw20": {
+          "type": "object",
+          "required": [
+            "collateral_asset",
+            "debt_asset",
+            "debt_to_cover",
+            "receive_ma_token",
+            "user"
+          ],
+          "properties": {
+            "collateral_asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "debt_asset": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "debt_to_cover": {
+              "$ref": "#/definitions/Uint256"
+            },
+            "receive_ma_token": {
+              "type": "boolean"
+            },
+            "user": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "Asset": {
+      "description": "We currently take no arguments for migrations",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "Cw20"
+          ],
+          "properties": {
+            "Cw20": {
+              "type": "object",
+              "required": [
+                "contract_addr"
+              ],
+              "properties": {
+                "contract_addr": {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "Native"
+          ],
+          "properties": {
+            "Native": {
+              "type": "object",
+              "required": [
+                "denom"
+              ],
+              "properties": {
+                "denom": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "Uint256": {
+      "type": "string"
+    }
+  }
 }

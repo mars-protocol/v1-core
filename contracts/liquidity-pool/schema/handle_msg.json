@@ -144,6 +144,42 @@
           }
         }
       }
+    },
+    {
+      "description": "Liquidate under-collateralized native loans",
+      "type": "object",
+      "required": [
+        "liquidate_native"
+      ],
+      "properties": {
+        "liquidate_native": {
+          "type": "object",
+          "required": [
+            "collateral_asset",
+            "debt_asset",
+            "debt_to_cover",
+            "receive_ma_token",
+            "user"
+          ],
+          "properties": {
+            "collateral_asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "debt_asset": {
+              "type": "string"
+            },
+            "debt_to_cover": {
+              "$ref": "#/definitions/Uint256"
+            },
+            "receive_ma_token": {
+              "type": "boolean"
+            },
+            "user": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {
@@ -231,6 +267,8 @@
       "type": "object",
       "required": [
         "borrow_slope",
+        "liquidation_bonus",
+        "liquidation_threshold",
         "loan_to_value"
       ],
       "properties": {
@@ -241,6 +279,12 @@
               "$ref": "#/definitions/Decimal256"
             }
           ]
+        },
+        "liquidation_bonus": {
+          "$ref": "#/definitions/Decimal256"
+        },
+        "liquidation_threshold": {
+          "$ref": "#/definitions/Decimal256"
         },
         "loan_to_value": {
           "description": "Max percentage of collateral that can be borrowed",
