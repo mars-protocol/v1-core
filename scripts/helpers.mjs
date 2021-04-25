@@ -81,7 +81,7 @@ export async function deployLiquidityPool(terra, wallet, cache = {}) {
   const lpAddress = await instantiateContract(terra, wallet, lpCodeId, lpInitMsg);
   console.log(`Instantiated liquidity_pool contract: address: ${lpAddress}`);
 
-  return { 
+  return {
     lpAddress,
     lpCodeId,
     cw20CodeId,
@@ -127,7 +127,15 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
     const { account, assets } = borrow;
     console.log(`### Borrows for account ${account.key.accAddress}: `);
     for (const [asset, amount] of Object.entries(assets)) {
-      const borrowMsg = {"borrow_native": {"denom": asset, "amount": amount.toString()}};
+      const borrowMsg = {"borrow": {
+        "asset": {
+          "Native": {
+            "denom": asset
+          }
+        },
+        "amount": amount.toString()
+        }
+      };
       const executeBorrowMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, borrowMsg);
       await performTransaction(terra, account, executeBorrowMsg);
       console.log(`Borrowed ${amount} ${asset}`);

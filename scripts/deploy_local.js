@@ -1,10 +1,10 @@
 import 'dotenv/config.js';
-import {deploy, setup} from "./helpers.mjs";
+import {deployLiquidityPool, setupLiquidityPool} from "./helpers.mjs";
 import {LocalTerra} from "@terra-money/terra.js";
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
-let lpContractAddress = await deploy(terra, wallet);
+let returned_vals = await deployLiquidityPool(terra, wallet);
 
 const initialAssets = [
   {denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5"},
@@ -33,4 +33,4 @@ const initialBorrows = [
   },
 ]
 
-await setup(terra, wallet, lpContractAddress, {initialAssets, initialDeposits, initialBorrows});
+await setupLiquidityPool(terra, wallet, returned_vals.lpAddress, {initialAssets, initialDeposits, initialBorrows});
