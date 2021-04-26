@@ -1130,7 +1130,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn calculate_user_account_info<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: &Extern<S, A, Q>,
     user_address: HumanAddr,
 ) -> StdResult<UserAccountInfo> {
     let config = config_state_read(&deps.storage).load()?;
@@ -1177,7 +1177,7 @@ pub fn calculate_user_account_info<S: Storage, A: Api, Q: Querier>(
         if user_is_borrowing {
             // query debt
             let debts_asset_bucket =
-                debts_asset_state(&mut deps.storage, asset_reference.as_slice());
+                debts_asset_state_read(&deps.storage, asset_reference.as_slice());
             let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
 
             let debt_balance_in_uusd =
@@ -1253,6 +1253,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Reserve { asset } => to_binary(&query_reserve(deps, asset)?),
         QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
+        QueryMsg::UserAccountInfo { user } => to_binary(&query_user_account_info(deps, user)),
     }
 }
 
@@ -1408,6 +1409,13 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .collect();
 
     Ok(DebtResponse { debts: debts? })
+}
+
+fn query_user_account_info<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    user: HumanAddr,
+) -> StdResult<UserAccountInfo> {
+    calculate_user_account_info(deps, user)
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(

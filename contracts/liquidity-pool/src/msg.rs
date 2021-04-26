@@ -89,6 +89,7 @@ pub enum QueryMsg {
     Reserve { asset: Asset },
     ReservesList {},
     Debt { address: HumanAddr },
+    UserAccountInfo { user: HumanAddr },
 }
 
 // We define a custom struct for each query response
