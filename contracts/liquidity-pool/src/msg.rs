@@ -1,6 +1,9 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::HumanAddr;
-use cw20::Cw20ReceiveMsg;
+use cosmwasm_std::{
+    to_binary, Api, BankMsg, Coin, CosmosMsg, Extern, HumanAddr, Querier, StdResult, Storage,
+    WasmMsg,
+};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -156,6 +159,55 @@ pub struct MigrateMsg {}
 pub enum Asset {
     Cw20 { contract_addr: HumanAddr },
     Native { denom: String },
+}
+
+impl Asset {
+    pub fn into_msg(
+        self,
+        sender: HumanAddr,
+        recipient: HumanAddr,
+        amount: Uint256,
+    ) -> StdResult<CosmosMsg> {
+        match &self {
+            Asset::Native { denom } => Ok(CosmosMsg::Bank(BankMsg::Send {
+                from_address: sender,
+                to_address: recipient,
+                amount: vec![Coin {
+                    denom: denom.to_string(),
+                    amount: amount.into(),
+                }],
+            })),
+            Asset::Cw20 { contract_addr } => Ok(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: contract_addr.clone(),
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient,
+                    amount: amount.into(),
+                })?,
+                send: vec![],
+            })),
+        }
+    }
+
+    pub fn get_label_and_reference<S: Storage, A: Api, Q: Querier>(
+        self,
+        deps: &Extern<S, A, Q>,
+    ) -> StdResult<(String, Vec<u8>)> {
+        match &self {
+            Asset::Native { denom } => {
+                let asset_label = denom.as_bytes().to_vec();
+                Ok((denom.to_string(), asset_label))
+            }
+            Asset::Cw20 { contract_addr } => {
+                let asset_label = String::from(contract_addr.as_str());
+                let asset_reference = deps
+                    .api
+                    .canonical_address(&contract_addr)?
+                    .as_slice()
+                    .to_vec();
+                Ok((asset_label, asset_reference))
+            }
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

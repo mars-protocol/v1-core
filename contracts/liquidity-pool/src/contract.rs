@@ -852,8 +852,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     sender: HumanAddr,
-    collateral: Asset,
-    debt: Asset,
+    collateral_asset: Asset,
+    debt_asset: Asset,
     user: HumanAddr,
     debt_to_cover: Uint256,
     receive_ma_token: bool,
@@ -862,22 +862,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
     let user_canonical_address = deps.api.canonical_address(&user)?;
 
-    let (debt_asset_label, debt_asset_reference) = match debt.clone() {
-        Asset::Native { denom } => {
-            let debt_asset_reference = denom.as_bytes().to_vec();
-            let debt_asset_label = denom;
-            (debt_asset_label, debt_asset_reference)
-        }
-        Asset::Cw20 { contract_addr } => {
-            let debt_asset_label = String::from(contract_addr.as_str());
-            let debt_asset_reference = deps
-                .api
-                .canonical_address(&contract_addr)?
-                .as_slice()
-                .to_vec();
-            (debt_asset_label, debt_asset_reference)
-        }
-    };
+    let (debt_asset_label, debt_asset_reference) =
+        debt_asset.clone().get_label_and_reference(deps)?;
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_funds.is_zero() {
@@ -886,22 +872,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             debt_asset_label,
         )));
     }
-
-    let (collateral_asset_label, collateral_asset_reference) = match collateral.clone() {
-        Asset::Native { denom } => {
-            let collateral_asset_label = denom.as_bytes().to_vec();
-            (denom, collateral_asset_label)
-        }
-        Asset::Cw20 { contract_addr } => {
-            let collateral_asset_label = String::from(contract_addr.as_str());
-            let collateral_asset_reference = deps
-                .api
-                .canonical_address(&contract_addr)?
-                .as_slice()
-                .to_vec();
-            (collateral_asset_label, collateral_asset_reference)
-        }
-    };
+    let (collateral_asset_label, collateral_asset_reference) =
+        collateral_asset.clone().get_label_and_reference(deps)?;
 
     // get user account info
     let user_account_info = calculate_user_account_info(deps, user.clone())?;
@@ -957,7 +929,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     // if user wants to receive the underlying asset ensure contract has sufficient collateral liquidity
     if !receive_ma_token {
-        let contract_collateral_balance = match collateral.clone() {
+        let contract_collateral_balance = match collateral_asset.clone() {
             Asset::Native { denom } => {
                 deps.querier
                     .query_balance(env.contract.address.clone(), denom.as_str())?
@@ -1030,24 +1002,11 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             })?,
         });
 
-        let send_msg: CosmosMsg = match collateral.clone() {
-            Asset::Native { denom } => CosmosMsg::Bank(BankMsg::Send {
-                from_address: env.contract.address.clone(),
-                to_address: sender.clone(),
-                amount: vec![Coin {
-                    denom,
-                    amount: max_collateral_to_liquidate.into(),
-                }],
-            }),
-            Asset::Cw20 { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr,
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: sender.clone(),
-                    amount: max_collateral_to_liquidate.into(),
-                })?,
-            }),
-        };
+        let send_msg = collateral_asset.clone().into_msg(
+            env.contract.address.clone(),
+            sender.clone(),
+            max_collateral_to_liquidate,
+        )?;
         messages.append(&mut vec![burn_msg, send_msg]);
     }
 
@@ -1068,24 +1027,12 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // TODO: evaluate using TransferFrom instead of send + refund
     let refund_amount = actual_debt_to_liquidate - sent_funds;
     if refund_amount > Uint256::zero() {
-        match collateral {
-            Asset::Native { denom } => messages.push(CosmosMsg::Bank(BankMsg::Send {
-                from_address: env.contract.address.clone(),
-                to_address: sender.clone(),
-                amount: vec![Coin {
-                    denom,
-                    amount: refund_amount.into(),
-                }],
-            })),
-            Asset::Cw20 { contract_addr } => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr,
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: sender.clone(),
-                    amount: refund_amount.into(),
-                })?,
-            })),
-        }
+        let refund_msg = collateral_asset.into_msg(
+            env.contract.address.clone(),
+            sender.clone(),
+            refund_amount,
+        )?;
+        messages.push(refund_msg);
     }
 
     // Update user and reserve debt
@@ -1119,7 +1066,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         log("refund_amount", refund_amount),
     ];
 
-    // we should distinguish between these two in some way
+    // TODO: we should distinguish between these two in some way
     append_indices_and_rates_to_logs(&mut log, &collateral_reserve);
     append_indices_and_rates_to_logs(&mut log, &debt_reserve);
 
@@ -1231,10 +1178,12 @@ pub fn calculate_available_collateral_to_liquidate<S: Storage, A: Api, Q: Querie
     let liquidation_bonus = collateral_reserve.liquidation_bonus;
 
     let max_collateral_amount_to_liquidate =
-        debt_price * debt_to_cover * liquidation_bonus / collateral_price;
+        debt_price * debt_to_cover * (Decimal256::one() + liquidation_bonus) / collateral_price;
     if max_collateral_amount_to_liquidate > user_collateral_balance {
         collateral_amount = user_collateral_balance;
-        debt_amount_needed = collateral_price * collateral_amount / debt_price / liquidation_bonus;
+        debt_amount_needed = collateral_price * collateral_amount
+            / debt_price
+            / (Decimal256::one() + liquidation_bonus);
     } else {
         collateral_amount = max_collateral_amount_to_liquidate;
         debt_amount_needed = debt_to_cover;
@@ -3143,9 +3092,15 @@ mod tests {
             )],
         );
 
+        let collateral_ltv = Decimal256::from_ratio(5, 10);
+        let collateral_liquidation_threshold = Decimal256::from_ratio(7, 10);
+        let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
+
         let collateral_reserve = MockReserve {
             ma_token_address: "collateral",
-            loan_to_value: Decimal256::from_ratio(8, 10),
+            loan_to_value: collateral_ltv,
+            liquidation_threshold: collateral_liquidation_threshold,
+            liquidation_bonus: collateral_liquidation_bonus,
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -3155,8 +3110,6 @@ mod tests {
         let debt_reserve = MockReserve {
             ma_token_address: "debt",
             loan_to_value: Decimal256::from_ratio(6, 10),
-            liquidation_threshold: Decimal256::from_ratio(7, 10),
-            liquidation_bonus: Decimal256::from_ratio(1, 10),
             debt_total_scaled: Uint256::from(20_000_000u64),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -3203,10 +3156,7 @@ mod tests {
         let liquidator_address = HumanAddr::from("liquidator");
         deps.querier.set_cw20_balances(
             collateral_address.clone(),
-            &[
-                (user_address.clone(), collateral_balance),
-                (liquidator_address.clone(), Uint128::zero()),
-            ],
+            &[(user_address.clone(), collateral_balance)],
         );
 
         let debt_amount = Uint256::from(10_000_000u64);
@@ -3217,8 +3167,29 @@ mod tests {
             .save(user_canonical_addr.as_slice(), &debt)
             .unwrap();
 
-        // perform liquidation
+        // should throw an error if no / insufficient funds are sent to cover debt
         let debt_to_cover = Uint256::from(1_000_000u64);
+        let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::LiquidateCw20 {
+                    collateral_asset: Asset::Native {
+                        denom: "collateral".to_string(),
+                    },
+                    debt_asset: debt_contract_addr.clone(),
+                    user: user_address.clone(),
+                    debt_to_cover,
+                    receive_ma_token: true,
+                })
+                .unwrap(),
+            ),
+            sender: liquidator_address.clone(),
+            amount: Uint128::zero(),
+        });
+
+        let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
+        handle(&mut deps, env, liquidate_msg).unwrap_err();
+
+        // perform liquidation
         let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
                 to_binary(&ReceiveMsg::LiquidateCw20 {
@@ -3232,18 +3203,103 @@ mod tests {
                 })
                 .unwrap(),
             ),
+            sender: liquidator_address.clone(),
+            amount: debt_to_cover.into(),
+        });
+
+        let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
+        let res = handle(&mut deps, env, liquidate_msg).unwrap();
+        // TODO: prices should be pulled from oracle and mocked in tests
+        let debt_price = Decimal256::one();
+        let collateral_price = Decimal256::one();
+        let expected_collateral_amount =
+            debt_price * debt_to_cover * (Decimal256::one() + collateral_liquidation_bonus)
+                / collateral_price;
+
+        // this is incorrect: transfer should be from the under-collateralized user to the liquidator
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("collateral"),
+                send: vec![],
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: liquidator_address.clone(),
+                    amount: expected_collateral_amount.into(),
+                })
+                .unwrap(),
+            })]
+        );
+
+        // test health factor check
+        let healthy_user_address = HumanAddr::from("healthy_user");
+        let healthy_user_canonical_addr =
+            deps.api.canonical_address(&healthy_user_address).unwrap();
+
+        // Set user as having collateral and debt in respective reserves
+        let mut healthy_user = User {
+            borrowed_assets: Uint128::zero(),
+            deposited_assets: Uint128::zero(),
+        };
+        set_bit(
+            &mut healthy_user.deposited_assets,
+            collateral_reserve_initial.index,
+        )
+        .unwrap();
+        set_bit(
+            &mut healthy_user.borrowed_assets,
+            debt_reserve_initial.index,
+        )
+        .unwrap();
+
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(healthy_user_canonical_addr.as_slice(), &healthy_user)
+            .unwrap();
+
+        // set initial collateral and debt balances for user
+        let healthy_user_collateral_balance = Uint128(10_000_000);
+
+        // Set the querier to return a certain collateral balance
+        deps.querier.set_cw20_balances(
+            collateral_address.clone(),
+            &[(
+                healthy_user_address.clone(),
+                healthy_user_collateral_balance,
+            )],
+        );
+
+        let healthy_user_debt_amount =
+            Uint256::from(healthy_user_collateral_balance) * collateral_liquidation_threshold;
+        let healthy_user_debt = Debt {
+            amount_scaled: healthy_user_debt_amount,
+        };
+        debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
+            .save(healthy_user_canonical_addr.as_slice(), &healthy_user_debt)
+            .unwrap();
+
+        // perform liquidation
+        let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::LiquidateCw20 {
+                    collateral_asset: Asset::Native {
+                        denom: "collateral".to_string(),
+                    },
+                    debt_asset: debt_contract_addr.clone(),
+                    user: healthy_user_address,
+                    debt_to_cover,
+                    receive_ma_token: true,
+                })
+                .unwrap(),
+            ),
             sender: liquidator_address,
             amount: debt_to_cover.into(),
         });
 
-        let env = cosmwasm_std::testing::mock_env(debt_contract_addr, &[]);
-        let _res = handle(&mut deps, env, liquidate_msg).unwrap();
+        let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
+        handle(&mut deps, env, liquidate_msg).unwrap_err();
 
         // TODO:
-        // test if no / insufficient funds are sent to cover debt
-        // test correct amount sent back
         // test refund calculation when overpaying
-        // test health factor check
         // test available collateral to liquidate check
         // test interest indices and rates
     }
