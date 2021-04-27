@@ -862,8 +862,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
     let user_canonical_address = deps.api.canonical_address(&user)?;
 
-    let (debt_asset_label, debt_asset_reference) =
-        debt_asset.clone().get_label_and_reference(deps)?;
+    let (debt_asset_label, debt_asset_reference) = get_asset_label_and_reference(deps, debt_asset)?;
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_funds.is_zero() {
@@ -873,7 +872,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         )));
     }
     let (collateral_asset_label, collateral_asset_reference) =
-        collateral_asset.clone().get_label_and_reference(deps)?;
+        get_asset_label_and_reference(deps, collateral_asset.clone())?;
 
     // get user account info
     let user_account_info = calculate_user_account_info(deps, user.clone())?;
@@ -1002,7 +1001,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             })?,
         });
 
-        let send_msg = collateral_asset.clone().into_msg(
+        let send_msg = get_asset_msg(
+            collateral_asset.clone(),
             env.contract.address.clone(),
             sender.clone(),
             max_collateral_to_liquidate,
@@ -1027,7 +1027,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // TODO: evaluate using TransferFrom instead of send + refund
     let refund_amount = actual_debt_to_liquidate - sent_funds;
     if refund_amount > Uint256::zero() {
-        let refund_msg = collateral_asset.into_msg(
+        let refund_msg = get_asset_msg(
+            collateral_asset,
             env.contract.address.clone(),
             sender.clone(),
             refund_amount,
@@ -1512,6 +1513,53 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     }
     *bitmap = Uint128(bitmap.u128() & !(1 << index));
     Ok(())
+}
+
+fn get_asset_msg(
+    asset: Asset,
+    sender: HumanAddr,
+    recipient: HumanAddr,
+    amount: Uint256,
+) -> StdResult<CosmosMsg> {
+    match asset {
+        Asset::Native { denom } => Ok(CosmosMsg::Bank(BankMsg::Send {
+            from_address: sender,
+            to_address: recipient,
+            amount: vec![Coin {
+                denom: denom.to_string(),
+                amount: amount.into(),
+            }],
+        })),
+        Asset::Cw20 { contract_addr } => Ok(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: contract_addr.clone(),
+            msg: to_binary(&Cw20HandleMsg::Transfer {
+                recipient,
+                amount: amount.into(),
+            })?,
+            send: vec![],
+        })),
+    }
+}
+
+fn get_asset_label_and_reference<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    asset: Asset,
+) -> StdResult<(String, Vec<u8>)> {
+    match asset {
+        Asset::Native { denom } => {
+            let asset_label = denom.as_bytes().to_vec();
+            Ok((denom.to_string(), asset_label))
+        }
+        Asset::Cw20 { contract_addr } => {
+            let asset_label = String::from(contract_addr.as_str());
+            let asset_reference = deps
+                .api
+                .canonical_address(&contract_addr)?
+                .as_slice()
+                .to_vec();
+            Ok((asset_label, asset_reference))
+        }
+    }
 }
 
 // TESTS
