@@ -989,11 +989,9 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                 Err(error) => return Err(error),
             };
 
-        // is this balance call necessary? can i trust the user state and just check if the user
-        // has already deposited this asset
-        let liquidator_ma_balance =
-            cw20_get_balance(deps, collateral_ma_address.clone(), sender.clone())?;
-        if liquidator_ma_balance == Uint128::zero() {
+        let liquidator_is_using_as_collateral =
+            get_bit(liquidator.deposited_assets, collateral_reserve.index)?;
+        if !liquidator_is_using_as_collateral {
             set_bit(&mut liquidator.deposited_assets, collateral_reserve.index)?;
             users_state(&mut deps.storage)
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
@@ -1022,11 +1020,12 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             .save(&collateral_asset_reference.as_slice(), &collateral_reserve)?;
 
         // burn equivalent amount of ma_token and send back the underlying collateral
-        // TODO: confirm that this is being burnt on behalf of the borrower and not the contract
+        // TODO: evaluate how the approval flow should work
         let burn_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_ma_address.clone(),
             send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Burn {
+            msg: to_binary(&Cw20HandleMsg::BurnFrom {
+                owner: user.clone(),
                 amount: max_collateral_to_liquidate.into(),
             })?,
         });
@@ -1066,6 +1065,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         ));
     }
     // refund sent amount in excess of actual debt amount to liquidate
+    // TODO: evaluate using TransferFrom instead of send + refund
     let refund_amount = actual_debt_to_liquidate - sent_funds;
     if refund_amount > Uint256::zero() {
         match collateral {
@@ -1119,6 +1119,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         log("refund_amount", refund_amount),
     ];
 
+    // we should distinguish between these two in some way
     append_indices_and_rates_to_logs(&mut log, &collateral_reserve);
     append_indices_and_rates_to_logs(&mut log, &debt_reserve);
 
