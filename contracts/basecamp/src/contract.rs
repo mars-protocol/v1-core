@@ -24,6 +24,10 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         xmars_token_address: CanonicalAddr::default(),
         cooldown_duration: msg.cooldown_duration,
         unstake_window: msg.unstake_window,
+        voting_period: msg.voting_period,
+        effective_delay: msg.effective_delay,
+        expiration_period: msg.expiration_period,
+        proposal_deposit: msg.proposal_deposit,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -91,6 +95,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         }
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
+        HandleMsg::CastVote { .. } => Ok(HandleResponse::default()), //TODO
+        HandleMsg::EndPoll { .. } => Ok(HandleResponse::default()),  //TODO
+        HandleMsg::ExecutePoll { .. } => Ok(HandleResponse::default()), //TODO
+        HandleMsg::ExpirePoll { .. } => Ok(HandleResponse::default()), //TODO
     }
 }
 
@@ -104,6 +112,7 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
         match from_binary(&msg)? {
             ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
             ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
+            ReceiveMsg::SubmitPoll { .. } => Ok(HandleResponse::default()), // TODO
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -451,6 +460,10 @@ mod tests {
             cw20_code_id: 11,
             cooldown_duration: 20,
             unstake_window: 10,
+            voting_period: 1,
+            effective_delay: 1,
+            expiration_period: 1,
+            proposal_deposit: Uint128(1),
         };
         let env = mock_env("owner", MockEnvParams::default());
 
@@ -1125,6 +1138,10 @@ mod tests {
             cw20_code_id: 1,
             cooldown_duration: TEST_COOLDOWN_DURATION,
             unstake_window: TEST_UNSTAKE_WINDOW,
+            voting_period: 1,
+            effective_delay: 1,
+            expiration_period: 1,
+            proposal_deposit: Uint128(1),
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
