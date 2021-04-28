@@ -9,7 +9,9 @@ use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
-use crate::state::{config_state, config_state_read, cooldowns_state, Config, Cooldown};
+use crate::state::{
+    basecamp_state, config_state, config_state_read, cooldowns_state, Basecamp, Config, Cooldown,
+};
 
 // INIT
 
@@ -18,6 +20,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
+    // initialize Config
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
@@ -31,6 +34,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
 
     config_state(&mut deps.storage).save(&config)?;
+
+    // initialize State
+    basecamp_state(&mut deps.storage).save(&Basecamp { poll_count: 0 })?;
 
     // Prepare response, should instantiate Mars and xMars
     // and use the Register hook
@@ -447,7 +453,7 @@ mod tests {
     use cosmwasm_std::{from_binary, Coin};
     use mars::testing::{mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier};
 
-    use crate::state::cooldowns_state_read;
+    use crate::state::{basecamp_state_read, cooldowns_state_read};
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
@@ -523,6 +529,9 @@ mod tests {
         );
         assert_eq!(CanonicalAddr::default(), config.mars_token_address);
         assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
+
+        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
+        assert_eq!(basecamp.poll_count, 0);
 
         // mars token init callback
         let msg = HandleMsg::InitTokenCallback { token_id: 0 };

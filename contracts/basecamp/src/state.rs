@@ -55,7 +55,7 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Basecamp {
     /// Number of polls
-    total_polls: u64,
+    pub poll_count: u64,
 }
 
 pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
