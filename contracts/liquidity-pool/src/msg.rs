@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub ma_token_code_id: u64,
+    pub close_factor: Decimal256,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -45,15 +46,13 @@ pub enum HandleMsg {
     },
     /// Liquidate under-collateralized native loans
     LiquidateNative {
-        // Denom of collateral asset if native or token address if cw20
+        /// Details for collateral asset
         collateral_asset: Asset,
-        // Denom used in Terra (e.g: uluna, uusd) of the debt asset
+        /// Denom used in Terra (e.g: uluna, uusd) of the debt asset
         debt_asset: String,
-        // The address of the borrower getting liquidated
-        user: HumanAddr,
-        // The debt amount of the borrowed asset the liquidator wants to cover
-        debt_to_cover: Uint256,
-        // Sends maAsset to liquidator if true and underlying collateral asset if false
+        /// The address of the borrower getting liquidated
+        user_address: HumanAddr,
+        /// Sends maAsset to liquidator if true and underlying collateral asset if false
         receive_ma_token: bool,
     },
 }
@@ -69,15 +68,13 @@ pub enum ReceiveMsg {
     RepayCw20 {},
     /// Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan
     LiquidateCw20 {
-        // Denom of collateral asset if native or token address if cw20
+        /// Details for collateral asset
         collateral_asset: Asset,
-        // Token address of the debt asset
-        debt_asset: HumanAddr,
-        // The address of the borrower getting liquidated
-        user: HumanAddr,
-        // The debt amount of the borrowed asset the liquidator wants to cover
-        debt_to_cover: Uint256,
-        // Sends maAsset to liquidator if true and underlying collateral asset if false
+        /// Token address of the debt asset
+        debt_asset_address: HumanAddr,
+        /// The address of the borrower getting liquidated
+        user_address: HumanAddr,
+        /// Sends maAsset to liquidator if true and underlying collateral asset if false
         receive_ma_token: bool,
     },
 }
@@ -89,7 +86,6 @@ pub enum QueryMsg {
     Reserve { asset: Asset },
     ReservesList {},
     Debt { address: HumanAddr },
-    UserAccountInfo { user: HumanAddr },
 }
 
 // We define a custom struct for each query response
@@ -136,15 +132,6 @@ pub struct DebtResponse {
 pub struct DebtInfo {
     pub denom: String,
     pub amount: Uint256,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct UserAccountInfo {
-    pub total_collateral_in_uusd: Decimal256,
-    pub total_debt_in_uusd: Decimal256,
-    pub avg_loan_to_value: Decimal256,
-    pub avg_liquidation_threshold: Decimal256,
-    pub health_factor: Decimal256,
 }
 
 /// We currently take no arguments for migrations
