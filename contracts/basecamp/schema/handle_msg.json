@@ -71,6 +71,114 @@
           "type": "object"
         }
       }
+    },
+    {
+      "description": "Vote for a poll",
+      "type": "object",
+      "required": [
+        "cast_vote"
+      ],
+      "properties": {
+        "cast_vote": {
+          "type": "object",
+          "required": [
+            "amount",
+            "poll_id",
+            "vote"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "poll_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "vote": {
+              "$ref": "#/definitions/VoteOption"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "End poll after voting period has passed",
+      "type": "object",
+      "required": [
+        "end_poll"
+      ],
+      "properties": {
+        "end_poll": {
+          "type": "object",
+          "required": [
+            "poll_id"
+          ],
+          "properties": {
+            "poll_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Execute a successful poll",
+      "type": "object",
+      "required": [
+        "execute_poll"
+      ],
+      "properties": {
+        "execute_poll": {
+          "type": "object",
+          "required": [
+            "poll_id"
+          ],
+          "properties": {
+            "poll_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Make poll expire after expiration period has passed",
+      "type": "object",
+      "required": [
+        "expire_poll"
+      ],
+      "properties": {
+        "expire_poll": {
+          "type": "object",
+          "required": [
+            "poll_id"
+          ],
+          "properties": {
+            "poll_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Update basecamp config",
+      "type": "object",
+      "required": [
+        "update_config"
+      ],
+      "properties": {
+        "update_config": {
+          "type": "object"
+        }
+      }
     }
   ],
   "definitions": {
@@ -109,6 +217,13 @@
     },
     "Uint128": {
       "type": "string"
+    },
+    "VoteOption": {
+      "type": "string",
+      "enum": [
+        "for",
+        "against"
+      ]
     }
   }
 }
