@@ -12,8 +12,8 @@ use crate::msg::{
     ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
-    basecamp_state, config_state, config_state_read, cooldowns_state, polls_state,
-    polls_state_read, Basecamp, Config, Cooldown, Poll, PollExecuteCall, PollStatus,
+    basecamp_state, basecamp_state_read, config_state, config_state_read, cooldowns_state,
+    polls_state, polls_state_read, Basecamp, Config, Cooldown, Poll, PollExecuteCall, PollStatus,
 };
 
 // CONSTANTS
@@ -171,21 +171,27 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Stake amount must be greater than 0"));
     }
 
-    // get total mars in contract before the stake transaction
-    let total_mars_in_basecamp = (cw20_get_balance(
+    let total_mars_in_basecamp = cw20_get_balance(
         deps,
         deps.api.human_address(&config.mars_token_address)?,
         env.contract.address,
-    )? - stake_amount)?;
+    )?;
+    // Mars amount needs to be before the stake transaction (which is already in the basecamp's
+    // balance so it needs to be deducted)
+    // Mars deposited for polls is not taken into account
+    let basecamp = basecamp_state_read(&deps.storage).load()?;
+    let mars_to_deduct = basecamp.poll_total_deposits + stake_amount;
+    let net_total_mars_in_basecamp = (total_mars_in_basecamp - mars_to_deduct)?;
 
     let total_xmars_supply =
         cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
 
-    let mint_amount = if total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
-        stake_amount
-    } else {
-        stake_amount.multiply_ratio(total_xmars_supply, total_mars_in_basecamp)
-    };
+    let mint_amount =
+        if net_total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
+            stake_amount
+        } else {
+            stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_basecamp)
+        };
 
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -265,10 +271,14 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
         env.contract.address,
     )?;
 
+    // Mars from poll deposits is not taken into account
+    let basecamp = basecamp_state_read(&deps.storage).load()?;
+    let net_total_mars_in_basecamp = (total_mars_in_basecamp - basecamp.poll_total_deposits)?;
+
     let total_xmars_supply =
         cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
 
-    let unstake_amount = burn_amount.multiply_ratio(total_mars_in_basecamp, total_xmars_supply);
+    let unstake_amount = burn_amount.multiply_ratio(net_total_mars_in_basecamp, total_xmars_supply);
 
     Ok(HandleResponse {
         messages: vec![
@@ -758,7 +768,13 @@ mod tests {
             .canonical_address(&HumanAddr::from("staker"))
             .unwrap();
 
-        // no Mars in pool
+        let mut basecamp_singleton = basecamp_state(&mut deps.storage);
+        let mut basecamp = basecamp_singleton.load().unwrap();
+        let poll_total_deposits = Uint128(200_000);
+        basecamp.poll_total_deposits = poll_total_deposits;
+        basecamp_singleton.save(&basecamp).unwrap();
+
+        // no Mars in pool (Except for a poll deposit)
         // stake X Mars -> should receive X xMars
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
@@ -768,7 +784,7 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("mars_token"),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_000_000))],
+            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_200_000))],
         );
 
         deps.querier
@@ -822,8 +838,10 @@ mod tests {
         let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let expected_minted_xmars =
-            stake_amount.multiply_ratio(xmars_supply, (mars_in_basecamp - stake_amount).unwrap());
+        let expected_minted_xmars = stake_amount.multiply_ratio(
+            xmars_supply,
+            (mars_in_basecamp - (poll_total_deposits + stake_amount)).unwrap(),
+        );
 
         assert_eq!(
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -976,8 +994,10 @@ mod tests {
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let net_unstake_mars_in_basecamp =
+            (unstake_mars_in_basecamp - poll_total_deposits).unwrap();
         let expected_returned_mars =
-            unstake_amount.multiply_ratio(unstake_mars_in_basecamp, unstake_xmars_supply);
+            unstake_amount.multiply_ratio(net_unstake_mars_in_basecamp, unstake_xmars_supply);
 
         assert_eq!(
             vec![
@@ -1052,8 +1072,8 @@ mod tests {
 
         // NOTE: In reality the mars/xmars amounts would change but since they are being
         // mocked it does not really matter here.
-        let expected_returned_mars =
-            pending_cooldown_amount.multiply_ratio(unstake_mars_in_basecamp, unstake_xmars_supply);
+        let expected_returned_mars = pending_cooldown_amount
+            .multiply_ratio(net_unstake_mars_in_basecamp, unstake_xmars_supply);
 
         assert_eq!(
             vec![
