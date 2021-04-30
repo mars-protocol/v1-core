@@ -61,25 +61,6 @@
           }
         }
       }
-    },
-    {
-      "type": "object",
-      "required": [
-        "user_account_info"
-      ],
-      "properties": {
-        "user_account_info": {
-          "type": "object",
-          "required": [
-            "user"
-          ],
-          "properties": {
-            "user": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
     }
   ],
   "definitions": {

@@ -157,25 +157,33 @@
           "required": [
             "collateral_asset",
             "debt_asset",
-            "debt_to_cover",
             "receive_ma_token",
-            "user"
+            "user_address"
           ],
           "properties": {
             "collateral_asset": {
-              "$ref": "#/definitions/Asset"
+              "description": "Details for collateral asset",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             },
             "debt_asset": {
+              "description": "Denom used in Terra (e.g: uluna, uusd) of the debt asset",
               "type": "string"
             },
-            "debt_to_cover": {
-              "$ref": "#/definitions/Uint256"
-            },
             "receive_ma_token": {
+              "description": "Sends maAsset to liquidator if true and underlying collateral asset if false",
               "type": "boolean"
             },
-            "user": {
-              "$ref": "#/definitions/HumanAddr"
+            "user_address": {
+              "description": "The address of the borrower getting liquidated",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              ]
             }
           }
         }
