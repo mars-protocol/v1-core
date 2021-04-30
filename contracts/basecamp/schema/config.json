@@ -5,14 +5,30 @@
   "type": "object",
   "required": [
     "cooldown_duration",
+    "effective_delay",
+    "expiration_period",
     "mars_token_address",
     "owner",
+    "proposal_deposit",
     "unstake_window",
+    "voting_period",
     "xmars_token_address"
   ],
   "properties": {
     "cooldown_duration": {
       "description": "Cooldown duration in seconds",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "effective_delay": {
+      "description": "Blocks that need to pass since a proposal succeeds in order for it to be available to be executed",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "expiration_period": {
+      "description": "Blocks after the effective_delay during which a successful proposal can be activated before it expires",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
@@ -33,8 +49,22 @@
         }
       ]
     },
+    "proposal_deposit": {
+      "description": "Number of Mars needed to make a proposal. Will be returned if successful. Will be distributed between stakers if proposal is not executed.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
     "unstake_window": {
       "description": "Time in seconds after the cooldown ends during which the unstaking of the associated amount is allowed",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "voting_period": {
+      "description": "Blocks during which a proposal is active since being submitted",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
@@ -55,6 +85,9 @@
     },
     "CanonicalAddr": {
       "$ref": "#/definitions/Binary"
+    },
+    "Uint128": {
+      "type": "string"
     }
   }
 }

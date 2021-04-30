@@ -5,7 +5,11 @@
   "required": [
     "cooldown_duration",
     "cw20_code_id",
-    "unstake_window"
+    "effective_delay",
+    "expiration_period",
+    "proposal_deposit",
+    "unstake_window",
+    "voting_period"
   ],
   "properties": {
     "cooldown_duration": {
@@ -18,10 +22,33 @@
       "format": "uint64",
       "minimum": 0.0
     },
+    "effective_delay": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "expiration_period": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "proposal_deposit": {
+      "$ref": "#/definitions/Uint128"
+    },
     "unstake_window": {
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "voting_period": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "Uint128": {
+      "type": "string"
     }
   }
 }
