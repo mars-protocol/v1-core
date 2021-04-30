@@ -1305,6 +1305,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[coin(deposit_amount, "somecoin")],
                 block_time: 10000100,
+                ..Default::default()
             },
         );
         let msg = HandleMsg::DepositNative {
@@ -1424,6 +1425,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[coin(deposit_amount, "somecoin")],
                 block_time: 10000100,
+                ..Default::default()
             },
         );
 
@@ -1538,6 +1540,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                ..Default::default()
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
@@ -1671,6 +1674,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                ..Default::default()
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
@@ -1879,6 +1883,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
+                ..Default::default()
             },
         );
 
@@ -1970,6 +1975,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
+                ..Default::default()
             },
         );
 
@@ -2028,6 +2034,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
+                ..Default::default()
             },
         );
         let msg = HandleMsg::Borrow {
@@ -2124,6 +2131,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
+                ..Default::default()
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2141,6 +2149,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[coin(repay_amount, "borrowedcoinnative")],
                 block_time,
+                ..Default::default()
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2230,6 +2239,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[coin(repay_amount, "borrowedcoinnative")],
                 block_time,
+                ..Default::default()
             },
         );
         let msg = HandleMsg::RepayNative {
@@ -2300,6 +2310,7 @@ mod tests {
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
+                ..Default::default()
             },
         );
 
