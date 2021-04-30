@@ -1,6 +1,5 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
 
 use cosmwasm_std::{Binary, CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
@@ -56,6 +55,7 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 pub struct Basecamp {
     /// Number of polls
     pub poll_count: u64,
+    pub poll_total_deposits: Uint128,
 }
 
 pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
@@ -86,19 +86,17 @@ pub fn cooldowns_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldo
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Poll {
-    pub creator: CanonicalAddr,
+    pub submitter_canonical_address: CanonicalAddr,
     pub status: PollStatus,
     pub for_votes: Uint128,
     pub against_votes: Uint128,
+    pub start_height: u64,
     pub end_height: u64,
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_data: Option<Vec<ExecuteData>>,
+    pub execute_calls: Option<Vec<PollExecuteCall>>,
     pub deposit_amount: Uint128,
-
-    /// Amount used to compute voting quorum and threshold
-    pub total_voting_power: Option<Uint128>,
 }
 
 pub fn polls_state<S: Storage>(storage: &mut S) -> Bucket<S, Poll> {
@@ -119,31 +117,14 @@ pub enum PollStatus {
     Expired,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
-pub struct ExecuteData {
-    pub order: u64,
-    pub contract: CanonicalAddr,
+/// Execute call that will be done by the DAO if the poll succeeds. As this is persisted,
+/// the contract canonical address is stored (vs the human address when the poll submit message is
+/// sent)
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PollExecuteCall {
+    pub execution_order: u64,
+    pub target_contract_canonical_address: CanonicalAddr,
     pub msg: Binary,
-}
-
-impl Eq for ExecuteData {}
-
-impl Ord for ExecuteData {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.order.cmp(&other.order)
-    }
-}
-
-impl PartialOrd for ExecuteData {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl PartialEq for ExecuteData {
-    fn eq(&self, other: &Self) -> bool {
-        self.order == other.order
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

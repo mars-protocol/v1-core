@@ -14,6 +14,7 @@ use terra_cosmwasm::{
 pub struct MockEnvParams<'a> {
     pub sent_funds: &'a [Coin],
     pub block_time: u64,
+    pub block_height: u64,
 }
 
 impl<'a> Default for MockEnvParams<'a> {
@@ -21,6 +22,7 @@ impl<'a> Default for MockEnvParams<'a> {
         MockEnvParams {
             sent_funds: &[],
             block_time: 1_571_797_419,
+            block_height: 1,
         }
     }
 }
@@ -29,7 +31,7 @@ impl<'a> Default for MockEnvParams<'a> {
 pub fn mock_env(sender: &str, mock_env_params: MockEnvParams) -> Env {
     Env {
         block: BlockInfo {
-            height: 12_345,
+            height: mock_env_params.block_height,
             time: mock_env_params.block_time,
             chain_id: "cosmos-testnet-14002".to_string(),
         },
