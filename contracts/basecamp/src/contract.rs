@@ -8,10 +8,21 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
-use crate::state::{
-    basecamp_state, config_state, config_state_read, cooldowns_state, Basecamp, Config, Cooldown,
+use crate::msg::{
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, QueryMsg, ReceiveMsg,
 };
+use crate::state::{
+    basecamp_state, config_state, config_state_read, cooldowns_state, polls_state,
+    polls_state_read, Basecamp, Config, Cooldown, Poll, PollExecuteCall, PollStatus,
+};
+
+// CONSTANTS
+const MIN_TITLE_LENGTH: usize = 4;
+const MAX_TITLE_LENGTH: usize = 64;
+const MIN_DESC_LENGTH: usize = 4;
+const MAX_DESC_LENGTH: usize = 1024;
+const MIN_LINK_LENGTH: usize = 12;
+const MAX_LINK_LENGTH: usize = 128;
 
 // INIT
 
@@ -36,7 +47,10 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     config_state(&mut deps.storage).save(&config)?;
 
     // initialize State
-    basecamp_state(&mut deps.storage).save(&Basecamp { poll_count: 0 })?;
+    basecamp_state(&mut deps.storage).save(&Basecamp {
+        poll_count: 0,
+        poll_total_deposits: Uint128(0),
+    })?;
 
     // Prepare response, should instantiate Mars and xMars
     // and use the Register hook
@@ -105,6 +119,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::EndPoll { .. } => Ok(HandleResponse::default()),  //TODO
         HandleMsg::ExecutePoll { .. } => Ok(HandleResponse::default()), //TODO
         HandleMsg::ExpirePoll { .. } => Ok(HandleResponse::default()), //TODO
+        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()), //TODO
     }
 }
 
@@ -118,7 +133,21 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
         match from_binary(&msg)? {
             ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
             ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
-            ReceiveMsg::SubmitPoll { .. } => Ok(HandleResponse::default()), // TODO
+            ReceiveMsg::SubmitPoll {
+                title,
+                description,
+                link,
+                execute_calls,
+            } => handle_submit_poll(
+                deps,
+                env,
+                cw20_msg.sender,
+                cw20_msg.amount,
+                title,
+                description,
+                link,
+                execute_calls,
+            ),
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -413,6 +442,108 @@ pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Submit new poll
+pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    submitter_address: HumanAddr,
+    deposit_amount: Uint128,
+    title: String,
+    description: String,
+    option_link: Option<String>,
+    option_msg_execute_calls: Option<Vec<MsgExecuteCall>>,
+) -> StdResult<HandleResponse> {
+    // Validate title
+    if title.len() < MIN_TITLE_LENGTH {
+        return Err(StdError::generic_err("Title too short"));
+    }
+    if title.len() > MAX_TITLE_LENGTH {
+        return Err(StdError::generic_err("Title too long"));
+    }
+
+    // Validate description
+    if description.len() < MIN_DESC_LENGTH {
+        return Err(StdError::generic_err("Description too short"));
+    }
+    if description.len() > MAX_DESC_LENGTH {
+        return Err(StdError::generic_err("Description too long"));
+    }
+
+    // Validate Link
+    if let Some(link) = &option_link {
+        if link.len() < MIN_LINK_LENGTH {
+            return Err(StdError::generic_err("Link too short"));
+        }
+        if link.len() > MAX_LINK_LENGTH {
+            return Err(StdError::generic_err("Link too long"));
+        }
+    }
+
+    let config = config_state_read(&deps.storage).load()?;
+
+    if env.message.sender != deps.api.human_address(&config.mars_token_address)? {
+        return Err(StdError::unauthorized());
+    }
+
+    // Validate deposit amount
+    if deposit_amount < config.proposal_deposit {
+        return Err(StdError::generic_err(format!(
+            "Must deposit more than {} token",
+            config.proposal_deposit
+        )));
+    }
+
+    // Update poll totals
+    let mut basecamp_singleton = basecamp_state(&mut deps.storage);
+    let mut basecamp = basecamp_singleton.load()?;
+    basecamp.poll_count += 1;
+    basecamp.poll_total_deposits += deposit_amount;
+    basecamp_singleton.save(&basecamp)?;
+
+    // Transform MsgExecuteCalls into PollExecuteCalls by canonicalizing the contract address
+    let option_poll_execute_calls = if let Some(calls) = option_msg_execute_calls {
+        let mut poll_execute_calls: Vec<PollExecuteCall> = vec![];
+        for call in calls {
+            poll_execute_calls.push(PollExecuteCall {
+                execution_order: call.execution_order,
+                target_contract_canonical_address: deps
+                    .api
+                    .canonical_address(&call.target_contract_address)?,
+                msg: call.msg,
+            });
+        }
+        Some(poll_execute_calls)
+    } else {
+        None
+    };
+
+    let new_poll = Poll {
+        submitter_canonical_address: deps.api.canonical_address(&submitter_address)?,
+        status: PollStatus::Active,
+        for_votes: Uint128::zero(),
+        against_votes: Uint128::zero(),
+        start_height: env.block.height,
+        end_height: env.block.height + config.voting_period,
+        title: title,
+        description: description,
+        link: option_link,
+        execute_calls: option_poll_execute_calls,
+        deposit_amount: deposit_amount,
+    };
+    polls_state(&mut deps.storage).save(&basecamp.poll_count.to_be_bytes(), &new_poll)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "submit_poll"),
+            log("poll_submitter", &submitter_address),
+            log("poll_id", &basecamp.poll_count),
+            log("poll_end_height", &new_poll.end_height),
+        ],
+        data: None,
+    })
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -457,6 +588,8 @@ mod tests {
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
+    const TEST_POLL_DEPOSIT_AMOUNT: Uint128 = Uint128(10000);
+    const TEST_POLL_VOTING_PERIOD: u64 = 2000;
 
     #[test]
     fn test_proper_initialization() {
@@ -1138,6 +1271,266 @@ mod tests {
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
+    #[test]
+    fn test_submit_poll_invalid_params() {
+        let mut deps = th_setup(&[]);
+
+        // Invalid title
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "a".to_string(),
+                    description: "A valid description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: (0..100).map(|_| "a").collect::<String>(),
+                    description: "A valid description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // Invalid description
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: "a".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: (0..1030).map(|_| "a").collect::<String>(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // Invalid link
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: Some("a".to_string()),
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: Some((0..150).map(|_| "a").collect::<String>()),
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: Uint128(2_000_000),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // Invalid deposit amount
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: (TEST_POLL_DEPOSIT_AMOUNT - Uint128(100)).unwrap(),
+        });
+        let env = mock_env("mars_token", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+
+        // Invalid deposit currency
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid Title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: HumanAddr::from("submitter"),
+            amount: TEST_POLL_DEPOSIT_AMOUNT,
+        });
+        let env = mock_env("someothertoken", MockEnvParams::default());
+        let _res = handle(&mut deps, env, msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_submit_poll() {
+        let mut deps = th_setup(&[]);
+        let submitter_address = HumanAddr::from("submitter");
+        let submitter_canonical_address = deps.api.canonical_address(&submitter_address).unwrap();
+
+        // Submit Poll without link or call data
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                })
+                .unwrap(),
+            ),
+            sender: submitter_address.clone(),
+            amount: TEST_POLL_DEPOSIT_AMOUNT,
+        });
+        let env = mock_env(
+            "mars_token",
+            MockEnvParams {
+                block_height: 100_000,
+                ..Default::default()
+            },
+        );
+        let res = handle(&mut deps, env, msg).unwrap();
+        let expected_end_height = 100_000 + TEST_POLL_VOTING_PERIOD;
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "submit_poll"),
+                log("poll_submitter", "submitter"),
+                log("poll_id", 1),
+                log("poll_end_height", expected_end_height),
+            ]
+        );
+
+        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
+        assert_eq!(basecamp.poll_count, 1);
+        assert_eq!(basecamp.poll_total_deposits, TEST_POLL_DEPOSIT_AMOUNT);
+
+        let poll = polls_state_read(&deps.storage)
+            .load(&1_u64.to_be_bytes())
+            .unwrap();
+        assert_eq!(
+            poll.submitter_canonical_address,
+            submitter_canonical_address
+        );
+        assert_eq!(poll.status, PollStatus::Active);
+        assert_eq!(poll.for_votes, Uint128(0));
+        assert_eq!(poll.against_votes, Uint128(0));
+        assert_eq!(poll.start_height, 100_000);
+        assert_eq!(poll.end_height, expected_end_height);
+        assert_eq!(poll.title, "A valid title");
+        assert_eq!(poll.description, "A valid description");
+        assert_eq!(poll.link, None);
+        assert_eq!(poll.execute_calls, None);
+        assert_eq!(poll.deposit_amount, TEST_POLL_DEPOSIT_AMOUNT);
+
+        // Submit Poll with link and call data
+        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
+            msg: Some(
+                to_binary(&ReceiveMsg::SubmitPoll {
+                    title: "A valid title".to_string(),
+                    description: "A valid description".to_string(),
+                    link: Some("https://www.avalidlink.com".to_string()),
+                    execute_calls: Some(vec![MsgExecuteCall {
+                        execution_order: 0,
+                        target_contract_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                    }]),
+                })
+                .unwrap(),
+            ),
+            sender: submitter_address,
+            amount: TEST_POLL_DEPOSIT_AMOUNT,
+        });
+        let env = mock_env(
+            "mars_token",
+            MockEnvParams {
+                block_height: 100_000,
+                ..Default::default()
+            },
+        );
+        let res = handle(&mut deps, env, msg).unwrap();
+        let expected_end_height = 100_000 + TEST_POLL_VOTING_PERIOD;
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "submit_poll"),
+                log("poll_submitter", "submitter"),
+                log("poll_id", 2),
+                log("poll_end_height", expected_end_height),
+            ]
+        );
+
+        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
+        assert_eq!(basecamp.poll_count, 2);
+        assert_eq!(
+            basecamp.poll_total_deposits,
+            TEST_POLL_DEPOSIT_AMOUNT + TEST_POLL_DEPOSIT_AMOUNT
+        );
+
+        let poll = polls_state_read(&deps.storage)
+            .load(&2_u64.to_be_bytes())
+            .unwrap();
+        assert_eq!(poll.link, Some("https://www.avalidlink.com".to_string()));
+        assert_eq!(
+            poll.execute_calls,
+            Some(vec![PollExecuteCall {
+                execution_order: 0,
+                target_contract_canonical_address: deps
+                    .api
+                    .canonical_address(&HumanAddr::from(MOCK_CONTRACT_ADDR))
+                    .unwrap(),
+                msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+            }])
+        );
+    }
+
     // TEST HELPERS
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
@@ -1147,10 +1540,10 @@ mod tests {
             cw20_code_id: 1,
             cooldown_duration: TEST_COOLDOWN_DURATION,
             unstake_window: TEST_UNSTAKE_WINDOW,
-            voting_period: 1,
+            voting_period: TEST_POLL_VOTING_PERIOD,
             effective_delay: 1,
             expiration_period: 1,
-            proposal_deposit: Uint128(1),
+            proposal_deposit: TEST_POLL_DEPOSIT_AMOUNT,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();

@@ -1,5 +1,5 @@
-use crate::state::{ExecuteData, VoteOption};
-use cosmwasm_std::{HumanAddr, Uint128};
+use crate::state::VoteOption;
+use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,10 +45,8 @@ pub enum HandleMsg {
     ExecutePoll { poll_id: u64 },
     /// Make poll expire after expiration period has passed
     ExpirePoll { poll_id: u64 },
-    // TODO: SnapshotPoll?
-    // TODO: LockTokens?
-    // TODO: UnlockTokens?
-    // TODO: Update Config
+    /// Update basecamp config
+    UpdateConfig {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -63,8 +61,17 @@ pub enum ReceiveMsg {
         title: String,
         description: String,
         link: Option<String>,
-        execute_msgs: Option<Vec<ExecuteData>>,
+        execute_calls: Option<Vec<MsgExecuteCall>>,
     },
+}
+
+/// Execute call that will be done by the DAO if the poll succeeds. As this is part of
+/// the poll creation call, the contract human address is sent (vs the canonical address when persisted)
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MsgExecuteCall {
+    pub execution_order: u64,
+    pub target_contract_address: HumanAddr,
+    pub msg: Binary,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
