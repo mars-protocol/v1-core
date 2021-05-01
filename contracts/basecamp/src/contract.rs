@@ -363,10 +363,10 @@ pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
     }
 
     // Validate deposit amount
-    if deposit_amount < config.poll_required_deposit {
+    if deposit_amount < config.proposal_deposit {
         return Err(StdError::generic_err(format!(
             "Must deposit at least {} tokens",
-            config.poll_required_deposit
+            config.proposal_deposit
         )));
     }
 
@@ -1720,6 +1720,9 @@ mod tests {
         let mut deps = th_setup(&[]);
         let voter_address = HumanAddr::from("voter");
 
+        let (_submitter_address, submitter_canonical_address) =
+            get_test_addresses(&deps.api, "submitter");
+
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
             &[(voter_address.clone(), Uint128(100))],
@@ -1804,6 +1807,8 @@ mod tests {
         // setup
         let mut deps = th_setup(&[]);
         let (voter_address, voter_canonical_address) = get_test_addresses(&deps.api, "voter");
+        let (_submitter_address, submitter_canonical_address) =
+            get_test_addresses(&deps.api, "submitter");
 
         let active_poll_id = 1_u64;
 
