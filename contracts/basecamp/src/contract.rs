@@ -13,7 +13,8 @@ use crate::msg::{
 };
 use crate::state::{
     basecamp_state, basecamp_state_read, config_state, config_state_read, cooldowns_state,
-    polls_state, polls_state_read, Basecamp, Config, Cooldown, Poll, PollExecuteCall, PollStatus,
+    poll_votes_state, poll_votes_state_read, polls_state, polls_state_read, Basecamp, Config,
+    Cooldown, Poll, PollExecuteCall, PollStatus, PollVote, PollVoteOption,
 };
 
 // CONSTANTS
@@ -113,13 +114,20 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitTokenCallback { token_id } => {
             handle_init_token_callback(deps, env, token_id)
         }
+
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
-        HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
-        HandleMsg::CastVote { .. } => Ok(HandleResponse::default()), //TODO
-        HandleMsg::EndPoll { .. } => Ok(HandleResponse::default()),  //TODO
+
+        HandleMsg::CastVote {
+            poll_id,
+            vote,
+            voting_power,
+        } => handle_cast_vote(deps, env, poll_id, vote, voting_power),
+        HandleMsg::EndPoll { .. } => Ok(HandleResponse::default()), //TODO
         HandleMsg::ExecutePoll { .. } => Ok(HandleResponse::default()), //TODO
         HandleMsg::ExpirePoll { .. } => Ok(HandleResponse::default()), //TODO
         HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()), //TODO
+
+        HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
 }
 
@@ -308,150 +316,6 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
-/// If a cooldown exists and amount has changed it computes the weighted average
-/// for the cooldown
-pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
-
-    // get total mars in contract before the stake transaction
-    let xmars_balance = cw20_get_balance(
-        deps,
-        deps.api.human_address(&config.xmars_token_address)?,
-        env.message.sender.clone(),
-    )?;
-
-    if xmars_balance.is_zero() {
-        return Err(StdError::unauthorized());
-    }
-
-    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
-    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-
-    // compute new cooldown timestamp
-    let new_cooldown_timestamp =
-        match cooldowns_bucket.may_load(sender_canonical_address.as_slice())? {
-            Some(cooldown) => {
-                let minimal_valid_cooldown_timestamp =
-                    env.block.time - config.cooldown_duration - config.unstake_window;
-
-                if cooldown.timestamp < minimal_valid_cooldown_timestamp {
-                    env.block.time
-                } else {
-                    let mut extra_amount: u128 = 0;
-                    if xmars_balance > cooldown.amount {
-                        extra_amount = xmars_balance.u128() - cooldown.amount.u128();
-                    };
-
-                    (((cooldown.timestamp as u128) * cooldown.amount.u128()
-                        + (env.block.time as u128) * extra_amount)
-                        / (cooldown.amount.u128() + extra_amount)) as u64
-                }
-            }
-
-            None => env.block.time,
-        };
-
-    cooldowns_bucket.save(
-        &sender_canonical_address.as_slice(),
-        &Cooldown {
-            amount: xmars_balance,
-            timestamp: new_cooldown_timestamp,
-        },
-    )?;
-
-    Ok(HandleResponse {
-        log: vec![
-            log("action", "cooldown"),
-            log("user", env.message.sender),
-            log("cooldown_amount", xmars_balance),
-            log("cooldown_timestamp", new_cooldown_timestamp),
-        ],
-        data: None,
-        messages: vec![],
-    })
-}
-
-/// Handles token post initialization storing the addresses
-/// in config
-/// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
-pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    token_id: u8,
-) -> StdResult<HandleResponse> {
-    let mut config_singleton = config_state(&mut deps.storage);
-    let mut config = config_singleton.load()?;
-
-    return match token_id {
-        // Mars
-        0 => {
-            if config.mars_token_address == CanonicalAddr::default() {
-                config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_mars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        // xMars
-        1 => {
-            if config.xmars_token_address == CanonicalAddr::default() {
-                config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_xmars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        _ => Err(StdError::unauthorized()),
-    };
-}
-
-/// Mints Mars token to receiver (Temp action for testing)
-pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    recipient: HumanAddr,
-    amount: Uint128,
-) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
-
-    // Only owner can trigger a mint
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
-    }
-
-    Ok(HandleResponse {
-        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&config.mars_token_address)?,
-            send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Mint { recipient, amount }).unwrap(),
-        })],
-        log: vec![],
-        data: None,
-    })
-}
-
 /// Submit new poll
 pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -554,6 +418,218 @@ pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Handles token post initialization storing the addresses
+/// in config
+/// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
+pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    token_id: u8,
+) -> StdResult<HandleResponse> {
+    let mut config_singleton = config_state(&mut deps.storage);
+    let mut config = config_singleton.load()?;
+
+    return match token_id {
+        // Mars
+        0 => {
+            if config.mars_token_address == CanonicalAddr::default() {
+                config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
+                config_singleton.save(&config)?;
+                Ok(HandleResponse {
+                    messages: vec![],
+                    log: vec![
+                        log("action", "init_mars_token"),
+                        log("token_address", &env.message.sender),
+                    ],
+                    data: None,
+                })
+            } else {
+                // Can do this only once
+                Err(StdError::unauthorized())
+            }
+        }
+        // xMars
+        1 => {
+            if config.xmars_token_address == CanonicalAddr::default() {
+                config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
+                config_singleton.save(&config)?;
+                Ok(HandleResponse {
+                    messages: vec![],
+                    log: vec![
+                        log("action", "init_xmars_token"),
+                        log("token_address", &env.message.sender),
+                    ],
+                    data: None,
+                })
+            } else {
+                // Can do this only once
+                Err(StdError::unauthorized())
+            }
+        }
+        _ => Err(StdError::unauthorized()),
+    };
+}
+
+/// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
+/// If a cooldown exists and amount has changed it computes the weighted average
+/// for the cooldown
+pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    // get total mars in contract before the stake transaction
+    let xmars_balance = cw20_get_balance(
+        deps,
+        deps.api.human_address(&config.xmars_token_address)?,
+        env.message.sender.clone(),
+    )?;
+
+    if xmars_balance.is_zero() {
+        return Err(StdError::unauthorized());
+    }
+
+    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
+    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+
+    // compute new cooldown timestamp
+    let new_cooldown_timestamp =
+        match cooldowns_bucket.may_load(sender_canonical_address.as_slice())? {
+            Some(cooldown) => {
+                let minimal_valid_cooldown_timestamp =
+                    env.block.time - config.cooldown_duration - config.unstake_window;
+
+                if cooldown.timestamp < minimal_valid_cooldown_timestamp {
+                    env.block.time
+                } else {
+                    let mut extra_amount: u128 = 0;
+                    if xmars_balance > cooldown.amount {
+                        extra_amount = xmars_balance.u128() - cooldown.amount.u128();
+                    };
+
+                    (((cooldown.timestamp as u128) * cooldown.amount.u128()
+                        + (env.block.time as u128) * extra_amount)
+                        / (cooldown.amount.u128() + extra_amount)) as u64
+                }
+            }
+
+            None => env.block.time,
+        };
+
+    cooldowns_bucket.save(
+        &sender_canonical_address.as_slice(),
+        &Cooldown {
+            amount: xmars_balance,
+            timestamp: new_cooldown_timestamp,
+        },
+    )?;
+
+    Ok(HandleResponse {
+        log: vec![
+            log("action", "cooldown"),
+            log("user", env.message.sender),
+            log("cooldown_amount", xmars_balance),
+            log("cooldown_timestamp", new_cooldown_timestamp),
+        ],
+        data: None,
+        messages: vec![],
+    })
+}
+
+pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    poll_id: u64,
+    vote_option: PollVoteOption,
+    voting_power: Uint128,
+) -> StdResult<HandleResponse> {
+    let mut poll = polls_state_read(&deps.storage).load(&poll_id.to_be_bytes())?;
+    if poll.status != PollStatus::Active {
+        return Err(StdError::generic_err("Poll is not active"));
+    }
+
+    if env.block.height > poll.end_height {
+        return Err(StdError::generic_err("Poll has expired"));
+    }
+
+    let voter_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    if poll_votes_state_read(&deps.storage, poll_id)
+        .may_load(voter_canonical_address.as_slice())?
+        .is_some()
+    {
+        return Err(StdError::generic_err("User has already voted in this poll"));
+    }
+
+    let config = config_state_read(&deps.storage).load()?;
+
+    // TODO: this should get the balance at the poll start block once the custom xMars
+    // with snapshot balances is implemented
+    let max_voting_power = cw20_get_balance(
+        deps,
+        deps.api.human_address(&config.xmars_token_address)?,
+        env.message.sender.clone(),
+    )?;
+
+    if voting_power > max_voting_power {
+        return Err(StdError::generic_err(
+            "User does not have enough voting power",
+        ));
+    }
+
+    match vote_option {
+        PollVoteOption::For => poll.for_votes += voting_power,
+        PollVoteOption::Against => poll.against_votes += voting_power,
+    };
+
+    poll_votes_state(&mut deps.storage, poll_id).save(
+        voter_canonical_address.as_slice(),
+        &PollVote {
+            option: vote_option.clone(),
+            power: voting_power,
+        },
+    )?;
+
+    polls_state(&mut deps.storage).save(&poll_id.to_be_bytes(), &poll)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "cast_vote"),
+            log("poll_id", poll_id),
+            log("voter", &env.message.sender),
+            log("vote", vote_option),
+            log("voting_power", voting_power),
+        ],
+        data: None,
+    })
+}
+
+/// Mints Mars token to receiver (Temp action for testing)
+pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    recipient: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    // Only owner can trigger a mint
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    Ok(HandleResponse {
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint { recipient, amount }).unwrap(),
+        })],
+        log: vec![],
+        data: None,
+    })
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -592,7 +668,9 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
-    use mars::testing::{mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier};
+    use mars::testing::{
+        get_test_addresses, mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier,
+    };
 
     use crate::state::{basecamp_state_read, cooldowns_state_read};
 
@@ -1549,6 +1627,286 @@ mod tests {
                 msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
             }])
         );
+    }
+
+    #[test]
+    fn test_invalid_cast_votes() {
+        let mut deps = th_setup(&[]);
+        let voter_address = HumanAddr::from("voter");
+        let (_submitter_address, submitter_canonical_address) =
+            get_test_addresses(&deps.api, "submitter");
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(voter_address.clone(), Uint128(100))],
+        );
+
+        // acive poll
+        let active_poll_id = 1_u64;
+        let executed_poll_id = 2_u64;
+        polls_state(&mut deps.storage)
+            .save(
+                &active_poll_id.to_be_bytes(),
+                &Poll {
+                    submitter_canonical_address: submitter_canonical_address.clone(),
+                    status: PollStatus::Active,
+                    for_votes: Uint128::zero(),
+                    against_votes: Uint128::zero(),
+                    start_height: 100_000,
+                    end_height: 100_100,
+                    title: "A valid title".to_string(),
+                    description: "A description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                    deposit_amount: TEST_POLL_DEPOSIT_AMOUNT,
+                },
+            )
+            .unwrap();
+
+        // expired poll
+        polls_state(&mut deps.storage)
+            .save(
+                &executed_poll_id.to_be_bytes(),
+                &Poll {
+                    submitter_canonical_address: submitter_canonical_address,
+                    status: PollStatus::Executed,
+                    for_votes: Uint128::zero(),
+                    against_votes: Uint128::zero(),
+                    start_height: 100_000,
+                    end_height: 100_100,
+                    title: "A valid title".to_string(),
+                    description: "A description".to_string(),
+                    link: None,
+                    execute_calls: None,
+                    deposit_amount: TEST_POLL_DEPOSIT_AMOUNT,
+                },
+            )
+            .unwrap();
+
+        let msgs = vec![
+            // voting a non existing poll shold fail
+            (
+                HandleMsg::CastVote {
+                    poll_id: 3,
+                    vote: PollVoteOption::For,
+                    voting_power: Uint128(100),
+                },
+                100_001,
+            ),
+            // voting a non active poll should fail
+            (
+                HandleMsg::CastVote {
+                    poll_id: executed_poll_id,
+                    vote: PollVoteOption::For,
+                    voting_power: Uint128(100),
+                },
+                100_001,
+            ),
+            // voting after poll end should fail
+            (
+                HandleMsg::CastVote {
+                    poll_id: active_poll_id,
+                    vote: PollVoteOption::For,
+                    voting_power: Uint128(100),
+                },
+                100_200,
+            ),
+            // voting with more power than available should fail
+            (
+                HandleMsg::CastVote {
+                    poll_id: active_poll_id,
+                    vote: PollVoteOption::For,
+                    voting_power: Uint128(101),
+                },
+                100_001,
+            ),
+        ];
+
+        for (msg, block_height) in msgs {
+            let env = mock_env(
+                "voter",
+                MockEnvParams {
+                    block_height: block_height,
+                    ..Default::default()
+                },
+            );
+            handle(&mut deps, env, msg).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_cast_vote() {
+        // setup
+        let mut deps = th_setup(&[]);
+        let (voter_address, voter_canonical_address) = get_test_addresses(&deps.api, "voter");
+        let (_submitter_address, submitter_canonical_address) =
+            get_test_addresses(&deps.api, "submitter");
+
+        let active_poll_id = 1_u64;
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(voter_address.clone(), Uint128(100))],
+        );
+
+        let active_poll = Poll {
+            submitter_canonical_address: submitter_canonical_address,
+            status: PollStatus::Active,
+            for_votes: Uint128::zero(),
+            against_votes: Uint128::zero(),
+            start_height: 100_000,
+            end_height: 100_100,
+            title: "A valid title".to_string(),
+            description: "A description".to_string(),
+            link: None,
+            execute_calls: None,
+            deposit_amount: TEST_POLL_DEPOSIT_AMOUNT,
+        };
+        polls_state(&mut deps.storage)
+            .save(&active_poll_id.to_be_bytes(), &active_poll)
+            .unwrap();
+
+        // Add another vote on an extra poll to voter to validate voting on multiple polls
+        // is valid
+        poll_votes_state(&mut deps.storage, 4_u64)
+            .save(
+                voter_canonical_address.as_slice(),
+                &PollVote {
+                    option: PollVoteOption::Against,
+                    power: Uint128(2),
+                },
+            )
+            .unwrap();
+
+        // Valid vote for
+        let msg = HandleMsg::CastVote {
+            poll_id: active_poll_id,
+            vote: PollVoteOption::For,
+            voting_power: Uint128(100),
+        };
+
+        let env = mock_env(
+            "voter",
+            MockEnvParams {
+                block_height: active_poll.start_height + 1,
+                ..Default::default()
+            },
+        );
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            vec![
+                log("action", "cast_vote"),
+                log("poll_id", active_poll_id),
+                log("voter", "voter"),
+                log("vote", "for"),
+                log("voting_power", 100),
+            ],
+            res.log
+        );
+
+        let poll = polls_state_read(&deps.storage)
+            .load(&active_poll_id.to_be_bytes())
+            .unwrap();
+        assert_eq!(poll.for_votes, Uint128(100));
+        assert_eq!(poll.against_votes, Uint128(0));
+
+        let poll_vote = poll_votes_state_read(&deps.storage, active_poll_id)
+            .load(voter_canonical_address.as_slice())
+            .unwrap();
+
+        assert_eq!(poll_vote.option, PollVoteOption::For);
+        assert_eq!(poll_vote.power, Uint128(100));
+
+        // Voting again with same address should fail
+        let msg = HandleMsg::CastVote {
+            poll_id: active_poll_id,
+            vote: PollVoteOption::For,
+            voting_power: Uint128(100),
+        };
+
+        let env = mock_env(
+            "voter",
+            MockEnvParams {
+                block_height: active_poll.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg).unwrap_err();
+
+        // Valid against vote
+        let msg = HandleMsg::CastVote {
+            poll_id: active_poll_id,
+            vote: PollVoteOption::Against,
+            voting_power: Uint128(200),
+        };
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(HumanAddr::from("voter2"), Uint128(300))], // more balance just to check less can be used
+        );
+
+        let env = mock_env(
+            "voter2",
+            MockEnvParams {
+                block_height: active_poll.start_height + 1,
+                ..Default::default()
+            },
+        );
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(
+            vec![
+                log("action", "cast_vote"),
+                log("poll_id", active_poll_id),
+                log("voter", "voter2"),
+                log("vote", "against"),
+                log("voting_power", 200),
+            ],
+            res.log
+        );
+
+        // Extra for and against votes to check aggregates are computed correctly
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[
+                (HumanAddr::from("voter3"), Uint128(300)),
+                (HumanAddr::from("voter4"), Uint128(400)),
+            ],
+        );
+
+        let msg = HandleMsg::CastVote {
+            poll_id: active_poll_id,
+            vote: PollVoteOption::For,
+            voting_power: Uint128(300),
+        };
+        let env = mock_env(
+            "voter3",
+            MockEnvParams {
+                block_height: active_poll.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg).unwrap();
+
+        let msg = HandleMsg::CastVote {
+            poll_id: active_poll_id,
+            vote: PollVoteOption::Against,
+            voting_power: Uint128(400),
+        };
+        let env = mock_env(
+            "voter4",
+            MockEnvParams {
+                block_height: active_poll.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg).unwrap();
+
+        let poll = polls_state_read(&deps.storage)
+            .load(&active_poll_id.to_be_bytes())
+            .unwrap();
+        assert_eq!(poll.for_votes, Uint128(100 + 300));
+        assert_eq!(poll.against_votes, Uint128(200 + 400));
     }
 
     // TEST HELPERS
