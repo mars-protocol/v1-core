@@ -4,6 +4,7 @@ import {LocalTerra} from "@terra-money/terra.js";
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
+
 let returned_vals = await deployLiquidityPool(terra, wallet);
 
 const initialAssets = [

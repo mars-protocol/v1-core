@@ -19,7 +19,6 @@ use crate::state::{
     reserve_references_state_read, reserves_state, reserves_state_read, users_state,
     users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
-use std::collections::HashMap;
 use std::str;
 use terra_cosmwasm::{ExchangeRateItem, TerraQuerier};
 
@@ -904,13 +903,12 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("User has no outstanding debt in the specified debt asset and thus cannot be liquidated"));
     }
 
-    let mut total_collateral_in_uusd = Decimal256::zero();
-    let mut total_debt_in_uusd = Decimal256::zero();
-    let mut avg_liquidation_threshold = Decimal256::zero();
+    let mut native_asset_prices_to_query: Vec<String> = vec![];
+    let mut cw20_asset_prices_to_query: Vec<HumanAddr> = vec![];
 
-    let mut native_assets_to_query: Vec<String> = vec![];
-    let mut cw20_assets_to_query: Vec<HumanAddr> = vec![];
+    let mut user_asset_info: Vec<(String, Uint256, Decimal256)> = vec![]; // (asset_label, debt_amount, weighted_liquidation_threshold)
 
+    // List all prices to query
     for i in 0..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
@@ -923,7 +921,31 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             .reference;
         let reserve = reserves_state_read(&deps.storage).load(&asset_reference.as_slice())?;
 
+        let mut weighted_liquidation_threshold = Decimal256::zero();
+        let mut debt_amount = Uint256::zero();
+
+        if user_is_using_as_collateral {
+            // query asset balance (ma_token contract gives back a scaled value)
+            let asset_balance = cw20_get_balance(
+                deps,
+                deps.api.human_address(&reserve.ma_token_address)?,
+                deps.api.human_address(&user_canonical_address)?,
+            )?;
+            let collateral =
+                Decimal256::from_uint256(Uint256::from(asset_balance)) * reserve.liquidity_index;
+            weighted_liquidation_threshold = collateral * reserve.liquidation_threshold;
+        }
+
+        if user_is_borrowing {
+            // query debt
+            let debts_asset_bucket =
+                debts_asset_state_read(&deps.storage, asset_reference.as_slice());
+            let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+            debt_amount = user_debt.amount_scaled * reserve.borrow_index;
+        }
+
         // get assets to query
+        let asset_label: String;
         match reserve.asset_type {
             AssetType::Native => {
                 let asset_denom = match String::from_utf8(asset_reference.to_vec()) {
@@ -932,97 +954,74 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                         return Err(StdError::generic_err("failed to encode denom into string"))
                     }
                 };
-                native_assets_to_query.push(asset_denom)
+                native_asset_prices_to_query.push(asset_denom.clone());
+                asset_label = asset_denom;
             }
             AssetType::Cw20 => {
                 let asset_address = deps
                     .api
                     .human_address(&CanonicalAddr::from(asset_reference))?;
-                cw20_assets_to_query.push(asset_address)
+                cw20_asset_prices_to_query.push(asset_address.clone());
+                asset_label = String::from(asset_address.as_str());
             }
         };
+
+        user_asset_info.push((asset_label, debt_amount, weighted_liquidation_threshold));
     }
 
-    let mut asset_prices: HashMap<Vec<u8>, Decimal256> = HashMap::new();
+    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
 
-    if native_assets_to_query.len() > 0 {
-        let native_assets_to_query: Vec<&str> =
-            native_assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
+    if native_asset_prices_to_query.len() > 0 {
+        let native_assets_to_query: Vec<&str> = native_asset_prices_to_query
+            .iter()
+            .map(AsRef::as_ref)
+            .collect(); // type conversion
         let querier = TerraQuerier::new(&deps.querier);
-        let native_prices_in_uusd = querier
+        let native_asset_prices_in_uusd = querier
             .query_exchange_rates("uusd", native_assets_to_query)?
             .exchange_rates;
-        for rate in native_prices_in_uusd {
-            asset_prices.insert(
-                rate.quote_denom.as_bytes().to_vec(),
-                Decimal256::from(rate.exchange_rate),
-            );
+        for rate in native_asset_prices_in_uusd {
+            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
         }
     }
 
     // TODO: Add oracle for cw20 prices here
-    if cw20_assets_to_query.len() > 0 {
-        for asset in cw20_assets_to_query {
-            asset_prices.insert(
-                deps.api.canonical_address(&asset)?.as_slice().to_vec(),
-                Decimal256::one(),
-            );
+    if cw20_asset_prices_to_query.len() > 0 {
+        for asset in cw20_asset_prices_to_query {
+            asset_prices.push((String::from(asset.as_str()), Decimal256::one()));
         }
     }
 
-    for i in 0..config.reserve_count {
-        let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
-        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
-        if !(user_is_using_as_collateral || user_is_borrowing) {
-            continue;
-        }
+    let mut total_debt_in_uusd = Decimal256::zero();
+    let mut weighted_liquidation_threshold_sum = Decimal256::zero();
 
-        let asset_reference = reserve_references_state_read(&deps.storage)
-            .load(&i.to_be_bytes())?
-            .reference;
-        let reserve = reserves_state_read(&deps.storage).load(&asset_reference.as_slice())?;
+    // calculate user's health factor
+    for (asset_label, debt_amount, weighted_liquidation_threshold) in user_asset_info {
+        let asset_price = match asset_prices
+            .iter()
+            .find(|asset| asset.0 == asset_label)
+            .map(|correct_asset| correct_asset.1)
+        {
+            Some(price) => price,
+            None => {
+                return Err(StdError::generic_err(format!(
+                    "asset price for {} not found",
+                    asset_label
+                )))
+            }
+        };
 
-        let asset_unit_price = asset_prices[&asset_reference];
+        let weighted_liquidation_threshold_in_uusd = asset_price * weighted_liquidation_threshold;
+        weighted_liquidation_threshold_sum += weighted_liquidation_threshold_in_uusd;
 
-        if user_is_using_as_collateral {
-            // query asset balance (ma_token contract gives back a scaled value)
-            let asset_balance = cw20_get_balance(
-                deps,
-                deps.api.human_address(&reserve.ma_token_address)?,
-                user_address.clone(),
-            )?;
-            // TODO: confirm if we have to update reserve indices prior to unscaling the value
-            let liquidity_balance_in_uusd = asset_unit_price
-                * Decimal256::from_uint256(Uint256::from(asset_balance))
-                * reserve.liquidity_index;
-
-            total_collateral_in_uusd += liquidity_balance_in_uusd;
-            avg_liquidation_threshold += liquidity_balance_in_uusd * reserve.liquidation_threshold;
-        }
-
-        if user_is_borrowing {
-            // query debt
-            let debts_asset_bucket =
-                debts_asset_state_read(&deps.storage, asset_reference.as_slice());
-            let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
-
-            // TODO: confirm if we have to update reserve indices prior to unscaling the value
-            let debt_balance_in_uusd =
-                asset_unit_price * user_debt.amount_scaled * reserve.borrow_index;
-            total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
-        }
+        let debt_balance_in_uusd = asset_price * debt_amount;
+        total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
     }
-
-    avg_liquidation_threshold = if total_collateral_in_uusd > Decimal256::zero() {
-        avg_liquidation_threshold / total_collateral_in_uusd
-    } else {
-        Decimal256::zero()
-    };
 
     let health_factor = if total_debt_in_uusd.is_zero() {
         Decimal256::one() // TODO: figure out how to make this -1
     } else {
-        total_collateral_in_uusd * avg_liquidation_threshold / total_debt_in_uusd
+        weighted_liquidation_threshold_sum / total_debt_in_uusd
     };
 
     // if health factor is not less than one the user cannot be liquidated
@@ -1035,7 +1034,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // load debt reserve and update indices
     let mut debt_reserve =
         reserves_state_read(&deps.storage).load(debt_asset_reference.as_slice())?;
-    reserve_update_market_indices(&env, &mut debt_reserve);
 
     // calculate max liquidatable debt given the user's debt amount and the close factor
     let max_liquidatable_debt =
@@ -1050,8 +1048,33 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let max_collateral_to_liquidate: Uint256;
     let debt_amount_needed: Uint256;
 
-    let collateral_price = asset_prices[&collateral_asset_reference];
-    let debt_price = asset_prices[&debt_asset_reference];
+    let collateral_price = match asset_prices
+        .iter()
+        .find(|asset| asset.0 == collateral_asset_label)
+        .map(|correct_asset| correct_asset.1)
+    {
+        Some(price) => price,
+        None => {
+            return Err(StdError::generic_err(format!(
+                "asset price for {} not found",
+                collateral_asset_label
+            )))
+        }
+    };
+
+    let debt_price = match asset_prices
+        .iter()
+        .find(|asset| asset.0 == debt_asset_label)
+        .map(|correct_asset| correct_asset.1)
+    {
+        Some(price) => price,
+        None => {
+            return Err(StdError::generic_err(format!(
+                "asset price for {} not found",
+                debt_asset_label
+            )))
+        }
+    };
 
     let liquidation_bonus = collateral_reserve.liquidation_bonus;
 
@@ -1102,9 +1125,32 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         }
     }
 
+    // update debt reserve indices
+    reserve_update_market_indices(&env, &mut debt_reserve);
+
     let mut messages: Vec<CosmosMsg> = vec![];
 
-    // Passing collateral from user to liquidator depending on whether it selects to receive ma_tokens or the underlying asset
+    let debt_burn_amount = actual_debt_amount_to_liquidate / debt_reserve.borrow_index;
+    //TODO: add message to burn debt tokens here
+
+    // Update user and reserve debt
+    let mut debts_asset_bucket =
+        debts_asset_state(&mut deps.storage, debt_asset_reference.as_slice());
+    let mut debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+    debt.amount_scaled = debt.amount_scaled - debt_burn_amount;
+    debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
+
+    debt_reserve.debt_total_scaled = debt_reserve.debt_total_scaled - debt_burn_amount;
+    reserve_update_interest_rates(
+        deps,
+        &env,
+        debt_asset_reference.as_slice(),
+        &mut debt_reserve,
+        debt_burn_amount,
+    )?;
+    reserves_state(&mut deps.storage).save(&debt_asset_reference.as_slice(), &debt_reserve)?;
+
+    // Passing collateral from user to liquidator depending on whether they elect to receive ma_tokens or the underlying asset
     if receive_ma_token {
         let liquidator_canonical_addr = deps.api.canonical_address(&sender_address)?;
         let mut liquidator: User =
@@ -1128,19 +1174,13 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
         // send ma tokens to the liquidator
         // TODO: need to add the message that sends the maTokens from the user to the liquidator here
-
-        // update collateral reserve interest rates
-        reserve_update_interest_rates(
-            &deps,
-            &env,
-            collateral_asset_reference.as_slice(),
-            &mut collateral_reserve,
-            Uint256::zero(),
-        )?;
     } else {
+        // update collateral reserve indices
+        reserve_update_market_indices(&env, &mut collateral_reserve);
+
         // burn equivalent amount of ma_token and send back the underlying collateral
         // TODO: add message to burn user's ma_token here
-        // update collateral reserve interest rates
+
         let send_msg = build_send_asset_msg(
             env.contract.address.clone(),
             sender_address.clone(),
@@ -1186,25 +1226,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             refund_amount,
         )?;
     }
-
-    // Update user and reserve debt
-    let mut debts_asset_bucket =
-        debts_asset_state(&mut deps.storage, debt_asset_reference.as_slice());
-    let mut debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
-    debt.amount_scaled =
-        debt.amount_scaled - actual_debt_amount_to_liquidate / debt_reserve.borrow_index;
-    debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
-
-    debt_reserve.debt_total_scaled = debt_reserve.debt_total_scaled
-        - actual_debt_amount_to_liquidate / debt_reserve.borrow_index;
-    reserve_update_interest_rates(
-        &deps,
-        &env,
-        debt_asset_reference.as_slice(),
-        &mut debt_reserve,
-        Uint256::zero(),
-    )?;
-    reserves_state(&mut deps.storage).save(&debt_asset_reference.as_slice(), &debt_reserve)?;
 
     // save collateral reserve
     reserves_state(&mut deps.storage)
