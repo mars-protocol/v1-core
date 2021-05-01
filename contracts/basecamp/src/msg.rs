@@ -1,4 +1,4 @@
-use crate::state::VoteOption;
+use crate::state::PollVoteOption;
 use cosmwasm_std::{Binary, HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -35,8 +35,8 @@ pub enum HandleMsg {
     /// Vote for a poll
     CastVote {
         poll_id: u64,
-        vote: VoteOption,
-        amount: Uint128,
+        vote: PollVoteOption,
+        voting_power: Uint128,
     },
 
     /// End poll after voting period has passed

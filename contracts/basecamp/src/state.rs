@@ -129,15 +129,25 @@ pub struct PollExecuteCall {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct PollVote {
-    option: VoteOption,
-    power: Uint128,
+    pub option: PollVoteOption,
+    pub power: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum VoteOption {
+pub enum PollVoteOption {
     For,
     Against,
+}
+
+impl std::fmt::Display for PollVoteOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let display_str = match self {
+            PollVoteOption::For => "for",
+            PollVoteOption::Against => "against",
+        };
+        write!(f, "{}", display_str)
+    }
 }
 
 pub fn poll_votes_state<S: Storage>(storage: &mut S, poll_id: u64) -> Bucket<S, PollVote> {
