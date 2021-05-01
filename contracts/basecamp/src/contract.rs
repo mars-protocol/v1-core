@@ -498,7 +498,7 @@ pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
     // Validate deposit amount
     if deposit_amount < config.proposal_deposit {
         return Err(StdError::generic_err(format!(
-            "Must deposit more than {} token",
+            "Must deposit at least {} tokens",
             config.proposal_deposit
         )));
     }
