@@ -834,8 +834,8 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
             }
         }
         Asset::Cw20 { contract_addr } => {
-            let canonical_addr = deps.api.canonical_address(&contract_addr)?;
-            match reserves_state_read(&deps.storage).load(canonical_addr.as_slice()) {
+            let cw20_canonical_address = deps.api.canonical_address(&contract_addr)?;
+            match reserves_state_read(&deps.storage).load(cw20_canonical_address.as_slice()) {
                 Ok(reserve) => reserve,
                 Err(_) => {
                     return Err(StdError::generic_err(format!(
@@ -871,16 +871,16 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
             let (k, v) = item?;
 
             let denom = match v.asset_type {
-                AssetType::Native => match String::from_utf8(k.clone()) {
+                AssetType::Native => match String::from_utf8(k) {
                     Ok(denom) => denom,
                     Err(_) => {
                         return Err(StdError::generic_err("failed to encode key into string"))
                     }
                 },
                 AssetType::Cw20 => {
-                    let cw20_contract_addr =
-                        match deps.api.human_address(&CanonicalAddr::from(k.clone())) {
-                            Ok(contract_addr) => contract_addr,
+                    let cw20_contract_address =
+                        match deps.api.human_address(&CanonicalAddr::from(k)) {
+                            Ok(cw20_contract_address) => cw20_contract_address,
                             Err(_) => {
                                 return Err(StdError::generic_err(
                                     "failed to encode key into canonical address",
@@ -888,12 +888,12 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
                             }
                         };
 
-                    match cw20_get_symbol(deps, cw20_contract_addr.clone()) {
+                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
                                 "failed to get symbol from canonical address: {}",
-                                cw20_contract_addr
+                                cw20_contract_address
                             )));
                         }
                     }
