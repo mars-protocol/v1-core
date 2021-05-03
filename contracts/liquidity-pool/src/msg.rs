@@ -60,7 +60,7 @@ pub enum ReceiveMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    Reserve { denom: String },
+    Reserve { asset: Asset },
     ReservesList {},
     Debt { address: HumanAddr },
 }
