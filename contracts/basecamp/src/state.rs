@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, CanonicalAddr, Storage, Uint128};
+use cosmwasm_std::{Binary, CanonicalAddr, Decimal, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -30,16 +30,21 @@ pub struct Config {
     /// Time in seconds after the cooldown ends during which the unstaking of
     /// the associated amount is allowed
     pub unstake_window: u64,
+
     /// Blocks during which a proposal is active since being submitted
-    pub voting_period: u64,
+    pub poll_voting_period: u64,
     /// Blocks that need to pass since a proposal succeeds in order for it to be available to be
     /// executed
-    pub effective_delay: u64,
+    pub poll_effective_delay: u64,
     /// Blocks after the effective_delay during which a successful proposal can be activated before it expires
-    pub expiration_period: u64,
+    pub poll_expiration_period: u64,
     /// Number of Mars needed to make a proposal. Will be returned if successful. Will be
     /// distributed between stakers if proposal is not executed.
-    pub proposal_deposit: Uint128,
+    pub poll_required_deposit: Uint128,
+    /// % of total voting power required to participate in the poll in order to consider it successfull
+    pub poll_required_quorum: Decimal,
+    /// % of for votes required in order to consider the poll successfull
+    pub poll_required_threshold: Decimal,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
@@ -55,6 +60,9 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 pub struct Basecamp {
     /// Number of polls
     pub poll_count: u64,
+    // TODO: This accounting should not be neccesary if staking/reserve are separated
+    // from basecamp
+    /// Total Mars deposited in order to submit polls
     pub poll_total_deposits: Uint128,
 }
 
