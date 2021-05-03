@@ -1,5 +1,5 @@
 use crate::state::PollVoteOption;
-use cosmwasm_std::{Binary, HumanAddr, Uint128};
+use cosmwasm_std::{Binary, Decimal, HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -9,10 +9,13 @@ pub struct InitMsg {
     pub cw20_code_id: u64,
     pub cooldown_duration: u64,
     pub unstake_window: u64,
-    pub voting_period: u64,
-    pub effective_delay: u64,
-    pub expiration_period: u64,
-    pub proposal_deposit: Uint128,
+
+    pub poll_voting_period: u64,
+    pub poll_effective_delay: u64,
+    pub poll_expiration_period: u64,
+    pub poll_required_deposit: Uint128,
+    pub poll_required_quorum: Decimal,
+    pub poll_required_threshold: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
