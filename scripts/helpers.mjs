@@ -15,10 +15,7 @@ export async function performTransaction(terra, wallet, msg) {
     msgs: [msg],
     fee: new StdFee(30000000, [
       new Coin('uluna', 4500000),
-      new Coin('uusd', 4500000),
-      new Coin('umnt', 4000000),
-      new Coin('ukrw', 4000000),
-      new Coin('usdr', 4000000)
+      new Coin('uusd', 4500000)
     ]),
   });
   const result = await terra.tx.broadcast(tx);
@@ -94,21 +91,39 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
-    let initAssetMsg = {
-      "init_asset": {
-        "asset": {
-          "Native": {
-            "denom": asset.denom,
-          }
+    if (asset.denom) {
+      let initAssetMsg = {
+        "init_asset": {
+          "asset": {
+            "Native": {
+              "denom": asset.denom,
+            }
+          },
+          "asset_params": {
+            "borrow_slope": asset.borrow_slope,
+            "loan_to_value": asset.loan_to_value
+          },
         },
-        "asset_params": {
-          "borrow_slope": asset.borrow_slope,
-          "loan_to_value": asset.loan_to_value
+      };
+      await executeContract(terra, wallet, contractAddress, initAssetMsg);
+      console.log("Initialized " + asset.denom);
+    } else if (asset.contract_addr) {
+      let initAssetMsg = {
+        "init_asset": {
+          "asset": {
+            "Cw20": {
+              "contract_addr": asset.contract_addr,
+            }
+          },
+          "asset_params": {
+            "borrow_slope": asset.borrow_slope,
+            "loan_to_value": asset.loan_to_value
+          },
         },
-      },
-    };
-    await executeContract(terra, wallet, contractAddress, initAssetMsg);
-    console.log("Initialized " + asset.denom);
+      };
+      await executeContract(terra, wallet, contractAddress, initAssetMsg);
+      console.log(`Initialized ${asset.symbol || asset.contract_addr}`);
+    }
   }
 
   for (let deposit of initialDeposits) {
