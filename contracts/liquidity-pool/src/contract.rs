@@ -801,7 +801,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Reserve { denom } => to_binary(&query_reserve(deps, denom)?),
+        QueryMsg::Reserve { asset } => to_binary(&query_reserve(deps, asset)?),
         QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
     }
@@ -819,9 +819,33 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 
 fn query_reserve<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    denom: String,
+    asset: Asset,
 ) -> StdResult<ReserveResponse> {
-    let reserve = reserves_state_read(&deps.storage).load(denom.as_bytes())?;
+    let reserve = match asset {
+        Asset::Native { denom } => {
+            match reserves_state_read(&deps.storage).load(denom.as_bytes()) {
+                Ok(reserve) => reserve,
+                Err(_) => {
+                    return Err(StdError::generic_err(format!(
+                        "failed to load reserve for: {}",
+                        denom
+                    )))
+                }
+            }
+        }
+        Asset::Cw20 { contract_addr } => {
+            let canonical_addr = deps.api.canonical_address(&contract_addr)?;
+            match reserves_state_read(&deps.storage).load(canonical_addr.as_slice()) {
+                Ok(reserve) => reserve,
+                Err(_) => {
+                    return Err(StdError::generic_err(format!(
+                        "failed to load reserve for: {}",
+                        contract_addr
+                    )))
+                }
+            }
+        }
+    };
 
     Ok(ReserveResponse {
         ma_token_address: deps.api.human_address(&reserve.ma_token_address)?,
@@ -845,17 +869,40 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-            let denom = String::from_utf8(k);
-            let denom = match denom {
-                Ok(denom) => denom,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+
+            let denom = match v.asset_type {
+                AssetType::Native => match String::from_utf8(k.clone()) {
+                    Ok(denom) => denom,
+                    Err(_) => {
+                        return Err(StdError::generic_err("failed to encode key into string"))
+                    }
+                },
+                AssetType::Cw20 => {
+                    let cw20_contract_addr =
+                        match deps.api.human_address(&CanonicalAddr::from(k.clone())) {
+                            Ok(contract_addr) => contract_addr,
+                            Err(_) => {
+                                return Err(StdError::generic_err(
+                                    "failed to encode key into canonical address",
+                                ))
+                            }
+                        };
+
+                    match cw20_get_symbol(deps, cw20_contract_addr.clone()) {
+                        Ok(symbol) => symbol,
+                        Err(_) => {
+                            return Err(StdError::generic_err(format!(
+                                "failed to get symbol from canonical address: {}",
+                                cw20_contract_addr
+                            )));
+                        }
+                    }
+                }
             };
-            let ma_token_address = deps
-                .api
-                .human_address(&CanonicalAddr::from(v.ma_token_address))?;
+
             Ok(ReserveInfo {
                 denom,
-                ma_token_address,
+                ma_token_address: deps.api.human_address(&v.ma_token_address)?,
             })
         })
         .collect();
