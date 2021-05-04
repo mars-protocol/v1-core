@@ -1041,8 +1041,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
         }
 
-        // send ma tokens to the liquidator
-        // TODO: need to add the message that sends the maTokens from the user to the liquidator here
+    // TODO: need to add the message that sends the maTokens from the user to the liquidator here
     } else {
         // update collateral reserve indices
         reserve_update_market_indices(&env, &mut collateral_reserve);
