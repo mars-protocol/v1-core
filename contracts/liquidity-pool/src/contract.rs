@@ -20,7 +20,7 @@ use crate::state::{
     users_state_read, Config, Debt, Reserve, ReserveReferences, User,
 };
 use std::str;
-use terra_cosmwasm::{ExchangeRateItem, TerraQuerier};
+use terra_cosmwasm::TerraQuerier;
 
 // CONSTANTS
 
@@ -505,20 +505,11 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let borrower = env.message.sender.clone();
 
-    let (asset_label, asset_reference, asset_type) = match asset {
-        Asset::Cw20 { contract_addr } => {
-            let asset_label = String::from(contract_addr.as_str());
-            let asset_reference = deps
-                .api
-                .canonical_address(&contract_addr)?
-                .as_slice()
-                .to_vec();
-            (asset_label, asset_reference, AssetType::Cw20)
-        }
-        Asset::Native { denom } => {
-            let asset_reference = denom.as_bytes().to_vec();
-            (denom, asset_reference, AssetType::Native)
-        }
+    let (asset_label, asset_reference) = get_asset_label_and_reference(deps, &asset)?;
+
+    let asset_type = match &asset {
+        Asset::Cw20 { .. } => AssetType::Cw20,
+        Asset::Native { .. } => AssetType::Native,
     };
 
     // Cannot borrow zero amount
@@ -542,8 +533,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     // TODO: Check the contract has enough funds to safely lend them
 
     // Validate user has enough collateral
-    let mut denoms_to_query: Vec<String> = match asset_type {
-        AssetType::Native if asset_label != "uusd" => vec![asset_label.clone()],
+    let mut native_asset_prices_to_query: Vec<String> = match asset {
+        Asset::Native { .. } if asset_label != "uusd" => vec![asset_label.clone()],
         _ => vec![],
     };
     let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
@@ -584,57 +575,28 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 deps,
                 &asset_reserve,
                 asset_reference_vec,
-                &mut denoms_to_query,
+                &mut native_asset_prices_to_query,
             )?;
 
             user_balances.push((asset_label, debt, max_borrow, asset_reserve.asset_type));
         }
     }
 
-    // TODO: Implement oracle for cw20s to get exchange rates
-    let querier = TerraQuerier::new(&deps.querier);
-    let denoms_to_query: Vec<&str> = denoms_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-    let native_exchange_rates: Vec<ExchangeRateItem> = match denoms_to_query.len() {
-        0 => vec![],
-        _ => {
-            querier
-                .query_exchange_rates("uusd", denoms_to_query)?
-                .exchange_rates
-        }
-    };
+    // TODO: fetch cw20 prices from oracle and append to asset_prices
+    let asset_prices = get_native_asset_prices(deps, &native_asset_prices_to_query)?;
 
     let mut total_debt_in_uusd = Uint256::zero();
     let mut max_borrow_in_uusd = Decimal256::zero();
 
     for (asset_label, debt, max_borrow, asset_type) in user_balances {
-        let maybe_exchange_rate: Option<Decimal256> =
-            get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
+        let asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
 
-        let exchange_rate = match maybe_exchange_rate {
-            Some(rate) => rate,
-            None => {
-                return Err(StdError::generic_err(format!(
-                    "Exchange rate not found for denom {}",
-                    asset_label
-                )))
-            }
-        };
-
-        total_debt_in_uusd += debt * exchange_rate;
-        max_borrow_in_uusd += max_borrow * exchange_rate;
+        total_debt_in_uusd += debt * asset_price;
+        max_borrow_in_uusd += max_borrow * asset_price;
     }
 
-    let borrow_amount_rate: Option<Decimal256> =
-        get_exchange_rate_for_asset(asset_label.as_str(), &asset_type, &native_exchange_rates);
-
-    let borrow_amount_in_uusd = match borrow_amount_rate {
-        Some(exchange_rate) => borrow_amount * exchange_rate,
-        None => {
-            return Err(StdError::generic_err(
-                "no uusd exchange rate found for borrow asset",
-            ))
-        }
-    };
+    let borrow_asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
+    let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
     if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd {
         return Err(StdError::generic_err(
@@ -685,35 +647,13 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     append_indices_and_rates_to_logs(&mut log, &borrow_reserve);
 
-    // push transfer message if cw20 and send message if native
-    let mut messages = vec![];
-    match asset_type {
-        AssetType::Native => {
-            messages.push(CosmosMsg::Bank(BankMsg::Send {
-                from_address: env.contract.address,
-                to_address: deps.api.human_address(&borrower_canonical_addr)?,
-                amount: vec![Coin {
-                    denom: asset_label,
-                    amount: borrow_amount.into(),
-                }],
-            }));
-        }
-        AssetType::Cw20 => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps
-                .api
-                .human_address(&CanonicalAddr::from(asset_reference))?,
-            msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: deps.api.human_address(&borrower_canonical_addr)?,
-                amount: borrow_amount.into(),
-            })?,
-            send: vec![],
-        })),
-    }
+    // Send borrow amount to borrower
+    let send_msg = build_send_asset_msg(env.contract.address, borrower, &asset, borrow_amount)?;
 
     Ok(HandleResponse {
         data: None,
         log,
-        messages,
+        messages: vec![send_msg],
     })
 }
 
@@ -835,7 +775,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     receive_ma_token: bool,
 ) -> StdResult<HandleResponse> {
     let (debt_asset_label, debt_asset_reference) =
-        get_asset_label_and_reference(deps, debt_asset.clone())?;
+        get_asset_label_and_reference(deps, &debt_asset)?;
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_amount_to_liquidate.is_zero() {
@@ -846,7 +786,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     let (collateral_asset_label, collateral_asset_reference) =
-        get_asset_label_and_reference(deps, collateral_asset.clone())?;
+        get_asset_label_and_reference(deps, &collateral_asset)?;
 
     // load collateral reserve
     let mut collateral_reserve =
@@ -937,21 +877,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
-
-    if native_asset_prices_to_query.len() > 0 {
-        let native_assets_to_query: Vec<&str> = native_asset_prices_to_query
-            .iter()
-            .map(AsRef::as_ref)
-            .collect(); // type conversion
-        let querier = TerraQuerier::new(&deps.querier);
-        let native_asset_prices_in_uusd = querier
-            .query_exchange_rates("uusd", native_assets_to_query)?
-            .exchange_rates;
-        for rate in native_asset_prices_in_uusd {
-            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
-        }
-    }
+    let asset_prices = get_native_asset_prices(deps, &native_asset_prices_to_query)?;
 
     let mut total_debt_in_uusd = Decimal256::zero();
     let mut weighted_liquidation_threshold_sum = Decimal256::zero();
@@ -999,9 +925,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         } else {
             sent_debt_amount_to_liquidate
         };
-
-    // let max_collateral_to_liquidate: Uint256;
-    // let debt_amount_needed: Uint256;
 
     let collateral_price = asset_get_price(
         collateral_asset_label.as_str(),
@@ -1443,22 +1366,6 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
 
 // HELPERS
 
-fn get_exchange_rate_for_asset(
-    asset_label: &str,
-    asset_type: &AssetType,
-    native_exchange_rates: &[ExchangeRateItem],
-) -> Option<Decimal256> {
-    return match asset_type {
-        AssetType::Native if asset_label != "uusd" => native_exchange_rates
-            .iter()
-            .find(|e| e.quote_denom == asset_label)
-            .map(|rate| Decimal256::from(rate.exchange_rate)),
-        // TODO: Making the exchange rate for cw20s equal to 1 as a placeholder.
-        // Implementation of an oracle to get the real exchange rates is pending
-        _ => Some(Decimal256::one()),
-    };
-}
-
 // native coins
 fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
     coins
@@ -1523,7 +1430,7 @@ fn build_send_asset_msg(
 
 fn get_asset_label_and_reference<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    asset: Asset,
+    asset: &Asset,
 ) -> StdResult<(String, Vec<u8>)> {
     match asset {
         Asset::Native { denom } => {
@@ -1540,6 +1447,26 @@ fn get_asset_label_and_reference<S: Storage, A: Api, Q: Querier>(
             Ok((asset_label, asset_reference))
         }
     }
+}
+
+fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    assets_to_query: &Vec<String>,
+) -> StdResult<Vec<(String, Decimal256)>> {
+    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
+
+    if assets_to_query.len() > 0 {
+        let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
+        let querier = TerraQuerier::new(&deps.querier);
+        let asset_prices_in_uusd = querier
+            .query_exchange_rates("uusd", assets_to_query)?
+            .exchange_rates;
+        for rate in asset_prices_in_uusd {
+            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
+        }
+    }
+
+    Ok(asset_prices)
 }
 
 fn asset_get_price(
