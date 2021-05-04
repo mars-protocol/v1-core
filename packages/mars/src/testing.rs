@@ -1,9 +1,9 @@
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, Api, BlockInfo, Coin, ContractInfo, Decimal, Env, Extern,
-    CanonicalAddr, HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
-    Uint128, WasmQuery,
+    from_binary, from_slice, to_binary, Api, BlockInfo, CanonicalAddr, Coin, ContractInfo, Decimal,
+    Env, Extern, HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult,
+    SystemError, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -294,5 +294,5 @@ impl WasmMockQuerier {
 pub fn get_test_addresses(api: &MockApi, address: &str) -> (HumanAddr, CanonicalAddr) {
     let human_address = HumanAddr::from(address);
     let canonical_address = api.canonical_address(&human_address).unwrap();
-    (human_address, canonical_address) 
+    (human_address, canonical_address)
 }
