@@ -122,7 +122,6 @@ pub enum ProposalStatus {
     Passed,
     Rejected,
     Executed,
-    Expired,
 }
 
 /// Execute call that will be done by the DAO if the proposal succeeds. As this is persisted,

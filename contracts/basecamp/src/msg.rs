@@ -46,8 +46,7 @@ pub enum HandleMsg {
     EndProposal { proposal_id: u64 },
     /// Execute a successful proposal
     ExecuteProposal { proposal_id: u64 },
-    /// Make proposal expire after expiration period has passed
-    ExpireProposal { proposal_id: u64 },
+
     /// Update basecamp config
     UpdateConfig {},
 }
