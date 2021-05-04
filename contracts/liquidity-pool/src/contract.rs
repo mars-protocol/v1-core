@@ -885,7 +885,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     let mut native_asset_prices_to_query: Vec<String> = vec![];
-    let mut user_asset_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (asset_label, debt_amount_asset, liquidation_threshold_asset)
+    let mut user_asset_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (asset_label, debt_amount_asset, liquidation_threshold_asset, asset_type)
 
     // List all prices to query and get asset debt/liquidation threshold
     for i in 0..config.reserve_count {
@@ -957,15 +957,16 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let mut weighted_liquidation_threshold_sum = Decimal256::zero();
 
     // calculate user's health factor
-    for (asset_label, debt_amount, weighted_liquidation_threshold, asset_type) in
+    for (asset_label, debt_amount_in_asset, weighted_liquidation_threshold_in_asset, asset_type) in
         user_asset_balances
     {
         let asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
 
-        let weighted_liquidation_threshold_in_uusd = asset_price * weighted_liquidation_threshold;
+        let weighted_liquidation_threshold_in_uusd =
+            asset_price * weighted_liquidation_threshold_in_asset;
         weighted_liquidation_threshold_sum += weighted_liquidation_threshold_in_uusd;
 
-        let debt_balance_in_uusd = asset_price * debt_amount;
+        let debt_balance_in_uusd = asset_price * debt_amount_in_asset;
         total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
     }
 
