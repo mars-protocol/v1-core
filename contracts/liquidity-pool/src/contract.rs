@@ -505,7 +505,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let borrower = env.message.sender.clone();
 
-    let (asset_label, asset_reference) = get_asset_label_and_reference(deps, &asset)?;
+    let (asset_label, asset_reference) = asset_get_label_and_reference(deps, &asset)?;
 
     let asset_type = match &asset {
         Asset::Cw20 { .. } => AssetType::Cw20,
@@ -571,7 +571,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 debt = borrower_debt.amount_scaled * asset_reserve.borrow_index;
             }
 
-            let asset_label = get_asset_label_and_add_price_to_query_list(
+            let asset_label = asset_get_label_and_add_price_to_query_list(
                 deps,
                 &asset_reserve,
                 asset_reference_vec,
@@ -775,7 +775,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     receive_ma_token: bool,
 ) -> StdResult<HandleResponse> {
     let (debt_asset_label, debt_asset_reference) =
-        get_asset_label_and_reference(deps, &debt_asset)?;
+        asset_get_label_and_reference(deps, &debt_asset)?;
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_amount_to_liquidate.is_zero() {
@@ -786,7 +786,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     let (collateral_asset_label, collateral_asset_reference) =
-        get_asset_label_and_reference(deps, &collateral_asset)?;
+        asset_get_label_and_reference(deps, &collateral_asset)?;
 
     // load collateral reserve
     let mut collateral_reserve =
@@ -863,7 +863,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             debt_amount = user_debt.amount_scaled * reserve.borrow_index;
         }
 
-        let asset_label = get_asset_label_and_add_price_to_query_list(
+        let asset_label = asset_get_label_and_add_price_to_query_list(
             deps,
             &reserve,
             asset_reference,
@@ -1428,27 +1428,6 @@ fn build_send_asset_msg(
     }
 }
 
-fn get_asset_label_and_reference<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    asset: &Asset,
-) -> StdResult<(String, Vec<u8>)> {
-    match asset {
-        Asset::Native { denom } => {
-            let asset_label = denom.as_bytes().to_vec();
-            Ok((denom.to_string(), asset_label))
-        }
-        Asset::Cw20 { contract_addr } => {
-            let asset_label = String::from(contract_addr.as_str());
-            let asset_reference = deps
-                .api
-                .canonical_address(&contract_addr)?
-                .as_slice()
-                .to_vec();
-            Ok((asset_label, asset_reference))
-        }
-    }
-}
-
 fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     assets_to_query: &Vec<String>,
@@ -1495,7 +1474,28 @@ fn asset_get_price(
     Ok(asset_price)
 }
 
-fn get_asset_label_and_add_price_to_query_list<S: Storage, A: Api, Q: Querier>(
+fn asset_get_label_and_reference<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    asset: &Asset,
+) -> StdResult<(String, Vec<u8>)> {
+    match asset {
+        Asset::Native { denom } => {
+            let asset_label = denom.as_bytes().to_vec();
+            Ok((denom.to_string(), asset_label))
+        }
+        Asset::Cw20 { contract_addr } => {
+            let asset_label = String::from(contract_addr.as_str());
+            let asset_reference = deps
+                .api
+                .canonical_address(&contract_addr)?
+                .as_slice()
+                .to_vec();
+            Ok((asset_label, asset_reference))
+        }
+    }
+}
+
+fn asset_get_label_and_add_price_to_query_list<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     asset_reserve: &Reserve,
     asset_reference: Vec<u8>,
