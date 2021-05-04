@@ -567,7 +567,7 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
 
     // TODO: this should get the balance at the poll start block once the custom xMars
-    // with snapshot balances is implemented
+    // when snapshot balances is implemented
     let max_voting_power = cw20_get_balance(
         deps,
         deps.api.human_address(&config.xmars_token_address)?,
