@@ -293,5 +293,6 @@ impl WasmMockQuerier {
 
 pub fn get_test_addresses(api: &MockApi, address: &str) -> (HumanAddr, CanonicalAddr) {
     let human_address = HumanAddr::from(address);
+    let canonical_address = api.canonical_address(&human_address).unwrap();
     (human_address, canonical_address) 
 }
