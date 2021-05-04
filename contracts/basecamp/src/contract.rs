@@ -713,7 +713,7 @@ pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
     if env.block.height < (proposal.end_height + config.proposal_effective_delay) {
         return Err(StdError::generic_err(
-            "Proposal has not ended it's delay period",
+            "Proposal has not ended its delay period",
         ));
     }
     if env.block.height
@@ -1827,7 +1827,7 @@ mod tests {
         );
 
         let msgs = vec![
-            // voting a non existing proposal shold fail
+            // voting a non-existent proposal shold fail
             (
                 HandleMsg::CastVote {
                     proposal_id: 3,
@@ -1836,7 +1836,7 @@ mod tests {
                 },
                 100_001,
             ),
-            // voting a non active proposal should fail
+            // voting a an inactive proposal should fail
             (
                 HandleMsg::CastVote {
                     proposal_id: executed_proposal_id,
@@ -2327,7 +2327,7 @@ mod tests {
                 },
                 executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
             ),
-            // cannot execute a proposal beffore the effective delay has passed
+            // cannot execute a proposal before the effective delay has passed
             (
                 HandleMsg::ExecuteProposal {
                     proposal_id: passed_proposal_id,

@@ -43,7 +43,7 @@ pub struct Config {
     pub proposal_required_deposit: Uint128,
     /// % of total voting power required to participate in the proposal in order to consider it successfull
     pub proposal_required_quorum: Decimal,
-    /// % of for votes required in order to consider the proposal successfull
+    /// % of for votes required in order to consider the proposal successful
     pub proposal_required_threshold: Decimal,
 }
 
