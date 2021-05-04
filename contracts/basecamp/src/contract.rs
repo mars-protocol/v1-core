@@ -13,8 +13,9 @@ use crate::msg::{
 };
 use crate::state::{
     basecamp_state, basecamp_state_read, config_state, config_state_read, cooldowns_state,
-    poll_votes_state, poll_votes_state_read, polls_state, polls_state_read, Basecamp, Config,
-    Cooldown, Poll, PollExecuteCall, PollStatus, PollVote, PollVoteOption,
+    proposal_votes_state, proposal_votes_state_read, proposals_state, proposals_state_read,
+    Basecamp, Config, Cooldown, Proposal, ProposalExecuteCall, ProposalStatus, ProposalVote,
+    ProposalVoteOption,
 };
 
 // CONSTANTS
@@ -40,20 +41,20 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         cooldown_duration: msg.cooldown_duration,
         unstake_window: msg.unstake_window,
 
-        poll_voting_period: msg.poll_voting_period,
-        poll_effective_delay: msg.poll_effective_delay,
-        poll_expiration_period: msg.poll_expiration_period,
-        poll_required_deposit: msg.poll_required_deposit,
-        poll_required_quorum: msg.poll_required_quorum,
-        poll_required_threshold: msg.poll_required_threshold,
+        proposal_voting_period: msg.proposal_voting_period,
+        proposal_effective_delay: msg.proposal_effective_delay,
+        proposal_expiration_period: msg.proposal_expiration_period,
+        proposal_required_deposit: msg.proposal_required_deposit,
+        proposal_required_quorum: msg.proposal_required_quorum,
+        proposal_required_threshold: msg.proposal_required_threshold,
     };
 
     config_state(&mut deps.storage).save(&config)?;
 
     // initialize State
     basecamp_state(&mut deps.storage).save(&Basecamp {
-        poll_count: 0,
-        poll_total_deposits: Uint128(0),
+        proposal_count: 0,
+        proposal_total_deposits: Uint128(0),
     })?;
 
     // Prepare response, should instantiate Mars and xMars
@@ -121,14 +122,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
 
         HandleMsg::CastVote {
-            poll_id,
+            proposal_id,
             vote,
             voting_power,
-        } => handle_cast_vote(deps, env, poll_id, vote, voting_power),
-        HandleMsg::EndPoll { poll_id } => handle_end_poll(deps, env, poll_id),
-        HandleMsg::ExecutePoll { .. } => Ok(HandleResponse::default()), //TODO
-        HandleMsg::ExpirePoll { .. } => Ok(HandleResponse::default()),  //TODO
-        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()),    //TODO
+        } => handle_cast_vote(deps, env, proposal_id, vote, voting_power),
+        HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
+        HandleMsg::ExecuteProposal { proposal_id } => {
+            handle_execute_proposal(deps, env, proposal_id)
+        }
+        HandleMsg::ExpireProposal { .. } => Ok(HandleResponse::default()), //TODO
+        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()),       //TODO
 
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
@@ -144,12 +147,12 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
         match from_binary(&msg)? {
             ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
             ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
-            ReceiveMsg::SubmitPoll {
+            ReceiveMsg::SubmitProposal {
                 title,
                 description,
                 link,
                 execute_calls,
-            } => handle_submit_poll(
+            } => handle_submit_proposal(
                 deps,
                 env,
                 cw20_msg.sender,
@@ -189,9 +192,9 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     )?;
     // Mars amount needs to be before the stake transaction (which is already in the basecamp's
     // balance so it needs to be deducted)
-    // Mars deposited for polls is not taken into account
+    // Mars deposited for proposals is not taken into account
     let basecamp = basecamp_state_read(&deps.storage).load()?;
-    let mars_to_deduct = basecamp.poll_total_deposits + stake_amount;
+    let mars_to_deduct = basecamp.proposal_total_deposits + stake_amount;
     let net_total_mars_in_basecamp = (total_mars_in_basecamp - mars_to_deduct)?;
 
     let total_xmars_supply =
@@ -282,9 +285,9 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
         env.contract.address,
     )?;
 
-    // Mars from poll deposits is not taken into account
+    // Mars from proposal deposits is not taken into account
     let basecamp = basecamp_state_read(&deps.storage).load()?;
-    let net_total_mars_in_basecamp = (total_mars_in_basecamp - basecamp.poll_total_deposits)?;
+    let net_total_mars_in_basecamp = (total_mars_in_basecamp - basecamp.proposal_total_deposits)?;
 
     let total_xmars_supply =
         cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
@@ -319,8 +322,8 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Submit new poll
-pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
+/// Submit new proposal
+pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     submitter_address: HumanAddr,
@@ -363,25 +366,25 @@ pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
     }
 
     // Validate deposit amount
-    if deposit_amount < config.poll_required_deposit {
+    if deposit_amount < config.proposal_required_deposit {
         return Err(StdError::generic_err(format!(
             "Must deposit at least {} tokens",
-            config.poll_required_deposit
+            config.proposal_required_deposit
         )));
     }
 
-    // Update poll totals
+    // Update proposal totals
     let mut basecamp_singleton = basecamp_state(&mut deps.storage);
     let mut basecamp = basecamp_singleton.load()?;
-    basecamp.poll_count += 1;
-    basecamp.poll_total_deposits += deposit_amount;
+    basecamp.proposal_count += 1;
+    basecamp.proposal_total_deposits += deposit_amount;
     basecamp_singleton.save(&basecamp)?;
 
-    // Transform MsgExecuteCalls into PollExecuteCalls by canonicalizing the contract address
-    let option_poll_execute_calls = if let Some(calls) = option_msg_execute_calls {
-        let mut poll_execute_calls: Vec<PollExecuteCall> = vec![];
+    // Transform MsgExecuteCalls into ProposalExecuteCalls by canonicalizing the contract address
+    let option_proposal_execute_calls = if let Some(calls) = option_msg_execute_calls {
+        let mut proposal_execute_calls: Vec<ProposalExecuteCall> = vec![];
         for call in calls {
-            poll_execute_calls.push(PollExecuteCall {
+            proposal_execute_calls.push(ProposalExecuteCall {
                 execution_order: call.execution_order,
                 target_contract_canonical_address: deps
                     .api
@@ -389,33 +392,34 @@ pub fn handle_submit_poll<S: Storage, A: Api, Q: Querier>(
                 msg: call.msg,
             });
         }
-        Some(poll_execute_calls)
+        Some(proposal_execute_calls)
     } else {
         None
     };
 
-    let new_poll = Poll {
+    let new_proposal = Proposal {
         submitter_canonical_address: deps.api.canonical_address(&submitter_address)?,
-        status: PollStatus::Active,
+        status: ProposalStatus::Active,
         for_votes: Uint128::zero(),
         against_votes: Uint128::zero(),
         start_height: env.block.height,
-        end_height: env.block.height + config.poll_voting_period,
+        end_height: env.block.height + config.proposal_voting_period,
         title: title,
         description: description,
         link: option_link,
-        execute_calls: option_poll_execute_calls,
+        execute_calls: option_proposal_execute_calls,
         deposit_amount: deposit_amount,
     };
-    polls_state(&mut deps.storage).save(&basecamp.poll_count.to_be_bytes(), &new_poll)?;
+    proposals_state(&mut deps.storage)
+        .save(&basecamp.proposal_count.to_be_bytes(), &new_proposal)?;
 
     Ok(HandleResponse {
         messages: vec![],
         log: vec![
-            log("action", "submit_poll"),
-            log("poll_submitter", &submitter_address),
-            log("poll_id", &basecamp.poll_count),
-            log("poll_end_height", &new_poll.end_height),
+            log("action", "submit_proposal"),
+            log("proposal_submitter", &submitter_address),
+            log("proposal_id", &basecamp.proposal_count),
+            log("proposal_end_height", &new_proposal.end_height),
         ],
         data: None,
     })
@@ -543,30 +547,32 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
 pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    poll_id: u64,
-    vote_option: PollVoteOption,
+    proposal_id: u64,
+    vote_option: ProposalVoteOption,
     voting_power: Uint128,
 ) -> StdResult<HandleResponse> {
-    let mut poll = polls_state_read(&deps.storage).load(&poll_id.to_be_bytes())?;
-    if poll.status != PollStatus::Active {
-        return Err(StdError::generic_err("Poll is not active"));
+    let mut proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+    if proposal.status != ProposalStatus::Active {
+        return Err(StdError::generic_err("Proposal is not active"));
     }
 
-    if env.block.height > poll.end_height {
-        return Err(StdError::generic_err("Poll has expired"));
+    if env.block.height > proposal.end_height {
+        return Err(StdError::generic_err("Proposal has expired"));
     }
 
     let voter_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    if poll_votes_state_read(&deps.storage, poll_id)
+    if proposal_votes_state_read(&deps.storage, proposal_id)
         .may_load(voter_canonical_address.as_slice())?
         .is_some()
     {
-        return Err(StdError::generic_err("User has already voted in this poll"));
+        return Err(StdError::generic_err(
+            "User has already voted in this proposal",
+        ));
     }
 
     let config = config_state_read(&deps.storage).load()?;
 
-    // TODO: this should get the balance at the poll start block once the custom xMars
+    // TODO: this should get the balance at the proposal start block once the custom xMars
     // when snapshot balances is implemented
     let max_voting_power = cw20_get_balance(
         deps,
@@ -581,25 +587,25 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     }
 
     match vote_option {
-        PollVoteOption::For => poll.for_votes += voting_power,
-        PollVoteOption::Against => poll.against_votes += voting_power,
+        ProposalVoteOption::For => proposal.for_votes += voting_power,
+        ProposalVoteOption::Against => proposal.against_votes += voting_power,
     };
 
-    poll_votes_state(&mut deps.storage, poll_id).save(
+    proposal_votes_state(&mut deps.storage, proposal_id).save(
         voter_canonical_address.as_slice(),
-        &PollVote {
+        &ProposalVote {
             option: vote_option.clone(),
             power: voting_power,
         },
     )?;
 
-    polls_state(&mut deps.storage).save(&poll_id.to_be_bytes(), &poll)?;
+    proposals_state(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
 
     Ok(HandleResponse {
         messages: vec![],
         log: vec![
             log("action", "cast_vote"),
-            log("poll_id", poll_id),
+            log("proposal_id", proposal_id),
             log("voter", &env.message.sender),
             log("vote", vote_option),
             log("voting_power", voting_power),
@@ -608,59 +614,61 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-pub fn handle_end_poll<S: Storage, A: Api, Q: Querier>(
+pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    poll_id: u64,
+    proposal_id: u64,
 ) -> StdResult<HandleResponse> {
     let config = config_state_read(&deps.storage).load()?;
 
-    let polls_bucket = polls_state(&mut deps.storage);
-    let mut poll = polls_bucket.load(&poll_id.to_be_bytes())?;
+    let proposals_bucket = proposals_state(&mut deps.storage);
+    let mut proposal = proposals_bucket.load(&proposal_id.to_be_bytes())?;
 
-    if poll.status != PollStatus::Active {
-        return Err(StdError::generic_err("Poll is not active"));
+    if proposal.status != ProposalStatus::Active {
+        return Err(StdError::generic_err("Proposal is not active"));
     }
 
-    if env.block.height <= poll.end_height {
+    if env.block.height <= proposal.end_height {
         return Err(StdError::generic_err("Voting period has not ended"));
     }
 
-    // Compute poll quorum and threshold
-    let for_votes = poll.for_votes;
-    let against_votes = poll.against_votes;
+    // Compute proposal quorum and threshold
+    let for_votes = proposal.for_votes;
+    let against_votes = proposal.against_votes;
     let total_votes = for_votes + against_votes;
     // TODO: When implementing balance snapshots, this should get the total xmars supply
-    // at the start of the poll
+    // at the start of the proposal
     let total_voting_power =
         cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
 
-    let mut poll_quorum: Decimal = Decimal::zero();
-    let mut poll_threshold: Decimal = Decimal::zero();
+    let mut proposal_quorum: Decimal = Decimal::zero();
+    let mut proposal_threshold: Decimal = Decimal::zero();
     if total_voting_power > Uint128::zero() {
-        poll_quorum = Decimal::from_ratio(total_votes, total_voting_power);
+        proposal_quorum = Decimal::from_ratio(total_votes, total_voting_power);
     }
     if total_votes > Uint128::zero() {
-        poll_threshold = Decimal::from_ratio(for_votes, total_votes);
+        proposal_threshold = Decimal::from_ratio(for_votes, total_votes);
     }
 
-    // Determine poll result
-    let mut new_poll_status = PollStatus::Rejected;
-    let mut log_poll_result = "rejected";
+    // Determine proposal result
+    let mut new_proposal_status = ProposalStatus::Rejected;
+    let mut log_proposal_result = "rejected";
     let mut handle_response_messages = vec![];
 
-    if poll_quorum >= config.poll_required_quorum
-        && poll_threshold >= config.poll_required_threshold
+    if proposal_quorum >= config.proposal_required_quorum
+        && proposal_threshold >= config.proposal_required_threshold
     {
-        new_poll_status = PollStatus::Passed;
-        log_poll_result = "passed";
+        new_proposal_status = ProposalStatus::Passed;
+        log_proposal_result = "passed";
         // refund deposit amount to sumbitter
         handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&config.mars_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: deps.api.human_address(&poll.submitter_canonical_address)?,
-                amount: poll.deposit_amount,
+                recipient: deps
+                    .api
+                    .human_address(&proposal.submitter_canonical_address)?,
+                amount: proposal.deposit_amount,
             })?,
         }));
     }
@@ -669,23 +677,32 @@ pub fn handle_end_poll<S: Storage, A: Api, Q: Querier>(
 
     // Update deposit totals
     basecamp_state(&mut deps.storage).update(|mut basecamp| {
-        basecamp.poll_total_deposits = (basecamp.poll_total_deposits - poll.deposit_amount)?;
+        basecamp.proposal_total_deposits =
+            (basecamp.proposal_total_deposits - proposal.deposit_amount)?;
         Ok(basecamp)
     })?;
 
-    // Update poll status
-    poll.status = new_poll_status;
-    polls_state(&mut deps.storage).save(&poll_id.to_be_bytes(), &poll)?;
+    // Update proposal status
+    proposal.status = new_proposal_status;
+    proposals_state(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
 
     Ok(HandleResponse {
         messages: handle_response_messages,
         log: vec![
-            log("action", "end_poll"),
-            log("poll_id", poll_id),
-            log("poll_result", log_poll_result),
+            log("action", "end_proposal"),
+            log("proposal_id", proposal_id),
+            log("proposal_result", log_proposal_result),
         ],
         data: None,
     })
+}
+
+pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    proposal_id: u64,
+) -> StdResult<HandleResponse> {
+    Ok(HandleResponse::default())
 }
 
 /// Mints Mars token to receiver (Temp action for testing)
@@ -759,8 +776,8 @@ mod tests {
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
-    const TEST_POLL_VOTING_PERIOD: u64 = 2000;
-    const TEST_POLL_REQUIRED_DEPOSIT: Uint128 = Uint128(10000);
+    const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
+    const TEST_PROPOSAL_REQUIRED_DEPOSIT: Uint128 = Uint128(10000);
 
     #[test]
     fn test_proper_initialization() {
@@ -771,12 +788,12 @@ mod tests {
             cooldown_duration: 20,
             unstake_window: 10,
 
-            poll_voting_period: 1,
-            poll_effective_delay: 1,
-            poll_expiration_period: 1,
-            poll_required_deposit: Uint128(1),
-            poll_required_threshold: Decimal::one(),
-            poll_required_quorum: Decimal::one(),
+            proposal_voting_period: 1,
+            proposal_effective_delay: 1,
+            proposal_expiration_period: 1,
+            proposal_required_deposit: Uint128(1),
+            proposal_required_threshold: Decimal::one(),
+            proposal_required_quorum: Decimal::one(),
         };
         let env = mock_env("owner", MockEnvParams::default());
 
@@ -838,7 +855,7 @@ mod tests {
         assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        assert_eq!(basecamp.poll_count, 0);
+        assert_eq!(basecamp.proposal_count, 0);
 
         // mars token init callback
         let msg = HandleMsg::InitTokenCallback { token_id: 0 };
@@ -934,11 +951,11 @@ mod tests {
 
         let mut basecamp_singleton = basecamp_state(&mut deps.storage);
         let mut basecamp = basecamp_singleton.load().unwrap();
-        let poll_total_deposits = Uint128(200_000);
-        basecamp.poll_total_deposits = poll_total_deposits;
+        let proposal_total_deposits = Uint128(200_000);
+        basecamp.proposal_total_deposits = proposal_total_deposits;
         basecamp_singleton.save(&basecamp).unwrap();
 
-        // no Mars in pool (Except for a poll deposit)
+        // no Mars in pool (Except for a proposal deposit)
         // stake X Mars -> should receive X xMars
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
@@ -1004,7 +1021,7 @@ mod tests {
 
         let expected_minted_xmars = stake_amount.multiply_ratio(
             xmars_supply,
-            (mars_in_basecamp - (poll_total_deposits + stake_amount)).unwrap(),
+            (mars_in_basecamp - (proposal_total_deposits + stake_amount)).unwrap(),
         );
 
         assert_eq!(
@@ -1159,7 +1176,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let net_unstake_mars_in_basecamp =
-            (unstake_mars_in_basecamp - poll_total_deposits).unwrap();
+            (unstake_mars_in_basecamp - proposal_total_deposits).unwrap();
         let expected_returned_mars =
             unstake_amount.multiply_ratio(net_unstake_mars_in_basecamp, unstake_xmars_supply);
 
@@ -1456,13 +1473,13 @@ mod tests {
     }
 
     #[test]
-    fn test_submit_poll_invalid_params() {
+    fn test_submit_proposal_invalid_params() {
         let mut deps = th_setup(&[]);
 
         // Invalid title
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "a".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
@@ -1478,7 +1495,7 @@ mod tests {
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: (0..100).map(|_| "a").collect::<String>(),
                     description: "A valid description".to_string(),
                     link: None,
@@ -1495,7 +1512,7 @@ mod tests {
         // Invalid description
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "a".to_string(),
                     link: None,
@@ -1511,7 +1528,7 @@ mod tests {
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: (0..1030).map(|_| "a").collect::<String>(),
                     link: None,
@@ -1528,7 +1545,7 @@ mod tests {
         // Invalid link
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some("a".to_string()),
@@ -1544,7 +1561,7 @@ mod tests {
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some((0..150).map(|_| "a").collect::<String>()),
@@ -1561,7 +1578,7 @@ mod tests {
         // Invalid deposit amount
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
@@ -1570,7 +1587,7 @@ mod tests {
                 .unwrap(),
             ),
             sender: HumanAddr::from("submitter"),
-            amount: (TEST_POLL_REQUIRED_DEPOSIT - Uint128(100)).unwrap(),
+            amount: (TEST_PROPOSAL_REQUIRED_DEPOSIT - Uint128(100)).unwrap(),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
@@ -1578,7 +1595,7 @@ mod tests {
         // Invalid deposit currency
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
@@ -1587,22 +1604,22 @@ mod tests {
                 .unwrap(),
             ),
             sender: HumanAddr::from("submitter"),
-            amount: TEST_POLL_REQUIRED_DEPOSIT,
+            amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
         let env = mock_env("someothertoken", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
-    fn test_submit_poll() {
+    fn test_submit_proposal() {
         let mut deps = th_setup(&[]);
         let submitter_address = HumanAddr::from("submitter");
         let submitter_canonical_address = deps.api.canonical_address(&submitter_address).unwrap();
 
-        // Submit Poll without link or call data
+        // Submit Proposal without link or call data
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
@@ -1611,7 +1628,7 @@ mod tests {
                 .unwrap(),
             ),
             sender: submitter_address.clone(),
-            amount: TEST_POLL_REQUIRED_DEPOSIT,
+            amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
         let env = mock_env(
             "mars_token",
@@ -1621,43 +1638,46 @@ mod tests {
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
-        let expected_end_height = 100_000 + TEST_POLL_VOTING_PERIOD;
+        let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
         assert_eq!(
             res.log,
             vec![
-                log("action", "submit_poll"),
-                log("poll_submitter", "submitter"),
-                log("poll_id", 1),
-                log("poll_end_height", expected_end_height),
+                log("action", "submit_proposal"),
+                log("proposal_submitter", "submitter"),
+                log("proposal_id", 1),
+                log("proposal_end_height", expected_end_height),
             ]
         );
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        assert_eq!(basecamp.poll_count, 1);
-        assert_eq!(basecamp.poll_total_deposits, TEST_POLL_REQUIRED_DEPOSIT);
+        assert_eq!(basecamp.proposal_count, 1);
+        assert_eq!(
+            basecamp.proposal_total_deposits,
+            TEST_PROPOSAL_REQUIRED_DEPOSIT
+        );
 
-        let poll = polls_state_read(&deps.storage)
+        let proposal = proposals_state_read(&deps.storage)
             .load(&1_u64.to_be_bytes())
             .unwrap();
         assert_eq!(
-            poll.submitter_canonical_address,
+            proposal.submitter_canonical_address,
             submitter_canonical_address
         );
-        assert_eq!(poll.status, PollStatus::Active);
-        assert_eq!(poll.for_votes, Uint128(0));
-        assert_eq!(poll.against_votes, Uint128(0));
-        assert_eq!(poll.start_height, 100_000);
-        assert_eq!(poll.end_height, expected_end_height);
-        assert_eq!(poll.title, "A valid title");
-        assert_eq!(poll.description, "A valid description");
-        assert_eq!(poll.link, None);
-        assert_eq!(poll.execute_calls, None);
-        assert_eq!(poll.deposit_amount, TEST_POLL_REQUIRED_DEPOSIT);
+        assert_eq!(proposal.status, ProposalStatus::Active);
+        assert_eq!(proposal.for_votes, Uint128(0));
+        assert_eq!(proposal.against_votes, Uint128(0));
+        assert_eq!(proposal.start_height, 100_000);
+        assert_eq!(proposal.end_height, expected_end_height);
+        assert_eq!(proposal.title, "A valid title");
+        assert_eq!(proposal.description, "A valid description");
+        assert_eq!(proposal.link, None);
+        assert_eq!(proposal.execute_calls, None);
+        assert_eq!(proposal.deposit_amount, TEST_PROPOSAL_REQUIRED_DEPOSIT);
 
-        // Submit Poll with link and call data
+        // Submit Proposal with link and call data
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
-                to_binary(&ReceiveMsg::SubmitPoll {
+                to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some("https://www.avalidlink.com".to_string()),
@@ -1670,7 +1690,7 @@ mod tests {
                 .unwrap(),
             ),
             sender: submitter_address,
-            amount: TEST_POLL_REQUIRED_DEPOSIT,
+            amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
         let env = mock_env(
             "mars_token",
@@ -1680,31 +1700,34 @@ mod tests {
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
-        let expected_end_height = 100_000 + TEST_POLL_VOTING_PERIOD;
+        let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
         assert_eq!(
             res.log,
             vec![
-                log("action", "submit_poll"),
-                log("poll_submitter", "submitter"),
-                log("poll_id", 2),
-                log("poll_end_height", expected_end_height),
+                log("action", "submit_proposal"),
+                log("proposal_submitter", "submitter"),
+                log("proposal_id", 2),
+                log("proposal_end_height", expected_end_height),
             ]
         );
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        assert_eq!(basecamp.poll_count, 2);
+        assert_eq!(basecamp.proposal_count, 2);
         assert_eq!(
-            basecamp.poll_total_deposits,
-            TEST_POLL_REQUIRED_DEPOSIT + TEST_POLL_REQUIRED_DEPOSIT
+            basecamp.proposal_total_deposits,
+            TEST_PROPOSAL_REQUIRED_DEPOSIT + TEST_PROPOSAL_REQUIRED_DEPOSIT
         );
 
-        let poll = polls_state_read(&deps.storage)
+        let proposal = proposals_state_read(&deps.storage)
             .load(&2_u64.to_be_bytes())
             .unwrap();
-        assert_eq!(poll.link, Some("https://www.avalidlink.com".to_string()));
         assert_eq!(
-            poll.execute_calls,
-            Some(vec![PollExecuteCall {
+            proposal.link,
+            Some("https://www.avalidlink.com".to_string())
+        );
+        assert_eq!(
+            proposal.execute_calls,
+            Some(vec![ProposalExecuteCall {
                 execution_order: 0,
                 target_contract_canonical_address: deps
                     .api
@@ -1725,23 +1748,23 @@ mod tests {
             &[(voter_address.clone(), Uint128(100))],
         );
 
-        let active_poll_id = 1_u64;
-        let executed_poll_id = 2_u64;
-        th_build_mock_poll(
+        let active_proposal_id = 1_u64;
+        let executed_proposal_id = 2_u64;
+        th_build_mock_proposal(
             &mut deps,
-            MockPoll {
-                id: active_poll_id,
-                status: PollStatus::Active,
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Active,
                 start_height: 100_000,
                 end_height: 100_100,
                 ..Default::default()
             },
         );
-        th_build_mock_poll(
+        th_build_mock_proposal(
             &mut deps,
-            MockPoll {
-                id: active_poll_id,
-                status: PollStatus::Executed,
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Executed,
                 start_height: 100_000,
                 end_height: 100_100,
                 ..Default::default()
@@ -1749,29 +1772,29 @@ mod tests {
         );
 
         let msgs = vec![
-            // voting a non existing poll shold fail
+            // voting a non existing proposal shold fail
             (
                 HandleMsg::CastVote {
-                    poll_id: 3,
-                    vote: PollVoteOption::For,
+                    proposal_id: 3,
+                    vote: ProposalVoteOption::For,
                     voting_power: Uint128(100),
                 },
                 100_001,
             ),
-            // voting a non active poll should fail
+            // voting a non active proposal should fail
             (
                 HandleMsg::CastVote {
-                    poll_id: executed_poll_id,
-                    vote: PollVoteOption::For,
+                    proposal_id: executed_proposal_id,
+                    vote: ProposalVoteOption::For,
                     voting_power: Uint128(100),
                 },
                 100_001,
             ),
-            // voting after poll end should fail
+            // voting after proposal end should fail
             (
                 HandleMsg::CastVote {
-                    poll_id: active_poll_id,
-                    vote: PollVoteOption::For,
+                    proposal_id: active_proposal_id,
+                    vote: ProposalVoteOption::For,
                     voting_power: Uint128(100),
                 },
                 100_200,
@@ -1779,8 +1802,8 @@ mod tests {
             // voting with more power than available should fail
             (
                 HandleMsg::CastVote {
-                    poll_id: active_poll_id,
-                    vote: PollVoteOption::For,
+                    proposal_id: active_proposal_id,
+                    vote: ProposalVoteOption::For,
                     voting_power: Uint128(101),
                 },
                 100_001,
@@ -1805,34 +1828,34 @@ mod tests {
         let mut deps = th_setup(&[]);
         let (voter_address, voter_canonical_address) = get_test_addresses(&deps.api, "voter");
 
-        let active_poll_id = 1_u64;
+        let active_proposal_id = 1_u64;
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
             &[(voter_address.clone(), Uint128(100))],
         );
 
-        let active_poll = th_build_mock_poll(
+        let active_proposal = th_build_mock_proposal(
             &mut deps,
-            MockPoll {
-                id: active_poll_id,
-                status: PollStatus::Active,
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Active,
                 start_height: 100_000,
                 end_height: 100_100,
                 ..Default::default()
             },
         );
-        polls_state(&mut deps.storage)
-            .save(&active_poll_id.to_be_bytes(), &active_poll)
+        proposals_state(&mut deps.storage)
+            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
             .unwrap();
 
-        // Add another vote on an extra poll to voter to validate voting on multiple polls
+        // Add another vote on an extra proposal to voter to validate voting on multiple proposals
         // is valid
-        poll_votes_state(&mut deps.storage, 4_u64)
+        proposal_votes_state(&mut deps.storage, 4_u64)
             .save(
                 voter_canonical_address.as_slice(),
-                &PollVote {
-                    option: PollVoteOption::Against,
+                &ProposalVote {
+                    option: ProposalVoteOption::Against,
                     power: Uint128(2),
                 },
             )
@@ -1840,15 +1863,15 @@ mod tests {
 
         // Valid vote for
         let msg = HandleMsg::CastVote {
-            poll_id: active_poll_id,
-            vote: PollVoteOption::For,
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
             voting_power: Uint128(100),
         };
 
         let env = mock_env(
             "voter",
             MockEnvParams {
-                block_height: active_poll.start_height + 1,
+                block_height: active_proposal.start_height + 1,
                 ..Default::default()
             },
         );
@@ -1857,7 +1880,7 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "cast_vote"),
-                log("poll_id", active_poll_id),
+                log("proposal_id", active_proposal_id),
                 log("voter", "voter"),
                 log("vote", "for"),
                 log("voting_power", 100),
@@ -1865,30 +1888,30 @@ mod tests {
             res.log
         );
 
-        let poll = polls_state_read(&deps.storage)
-            .load(&active_poll_id.to_be_bytes())
+        let proposal = proposals_state_read(&deps.storage)
+            .load(&active_proposal_id.to_be_bytes())
             .unwrap();
-        assert_eq!(poll.for_votes, Uint128(100));
-        assert_eq!(poll.against_votes, Uint128(0));
+        assert_eq!(proposal.for_votes, Uint128(100));
+        assert_eq!(proposal.against_votes, Uint128(0));
 
-        let poll_vote = poll_votes_state_read(&deps.storage, active_poll_id)
+        let proposal_vote = proposal_votes_state_read(&deps.storage, active_proposal_id)
             .load(voter_canonical_address.as_slice())
             .unwrap();
 
-        assert_eq!(poll_vote.option, PollVoteOption::For);
-        assert_eq!(poll_vote.power, Uint128(100));
+        assert_eq!(proposal_vote.option, ProposalVoteOption::For);
+        assert_eq!(proposal_vote.power, Uint128(100));
 
         // Voting again with same address should fail
         let msg = HandleMsg::CastVote {
-            poll_id: active_poll_id,
-            vote: PollVoteOption::For,
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
             voting_power: Uint128(100),
         };
 
         let env = mock_env(
             "voter",
             MockEnvParams {
-                block_height: active_poll.start_height + 1,
+                block_height: active_proposal.start_height + 1,
                 ..Default::default()
             },
         );
@@ -1896,8 +1919,8 @@ mod tests {
 
         // Valid against vote
         let msg = HandleMsg::CastVote {
-            poll_id: active_poll_id,
-            vote: PollVoteOption::Against,
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::Against,
             voting_power: Uint128(200),
         };
 
@@ -1909,7 +1932,7 @@ mod tests {
         let env = mock_env(
             "voter2",
             MockEnvParams {
-                block_height: active_poll.start_height + 1,
+                block_height: active_proposal.start_height + 1,
                 ..Default::default()
             },
         );
@@ -1917,7 +1940,7 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "cast_vote"),
-                log("poll_id", active_poll_id),
+                log("proposal_id", active_proposal_id),
                 log("voter", "voter2"),
                 log("vote", "against"),
                 log("voting_power", 200),
@@ -1935,87 +1958,87 @@ mod tests {
         );
 
         let msg = HandleMsg::CastVote {
-            poll_id: active_poll_id,
-            vote: PollVoteOption::For,
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
             voting_power: Uint128(300),
         };
         let env = mock_env(
             "voter3",
             MockEnvParams {
-                block_height: active_poll.start_height + 1,
+                block_height: active_proposal.start_height + 1,
                 ..Default::default()
             },
         );
         handle(&mut deps, env, msg).unwrap();
 
         let msg = HandleMsg::CastVote {
-            poll_id: active_poll_id,
-            vote: PollVoteOption::Against,
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::Against,
             voting_power: Uint128(400),
         };
         let env = mock_env(
             "voter4",
             MockEnvParams {
-                block_height: active_poll.start_height + 1,
+                block_height: active_proposal.start_height + 1,
                 ..Default::default()
             },
         );
         handle(&mut deps, env, msg).unwrap();
 
-        let poll = polls_state_read(&deps.storage)
-            .load(&active_poll_id.to_be_bytes())
+        let proposal = proposals_state_read(&deps.storage)
+            .load(&active_proposal_id.to_be_bytes())
             .unwrap();
-        assert_eq!(poll.for_votes, Uint128(100 + 300));
-        assert_eq!(poll.against_votes, Uint128(200 + 400));
+        assert_eq!(proposal.for_votes, Uint128(100 + 300));
+        assert_eq!(proposal.against_votes, Uint128(200 + 400));
     }
 
     #[test]
-    fn test_invalid_end_polls() {
+    fn test_invalid_end_proposals() {
         let mut deps = th_setup(&[]);
 
-        let active_poll_id = 1_u64;
-        let executed_poll_id = 2_u64;
+        let active_proposal_id = 1_u64;
+        let executed_proposal_id = 2_u64;
 
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
 
         basecamp_state(&mut deps.storage)
             .update(|mut basecamp| {
-                basecamp.poll_total_deposits = Uint128(100_000);
+                basecamp.proposal_total_deposits = Uint128(100_000);
                 Ok(basecamp)
             })
             .unwrap();
 
-        th_build_mock_poll(
+        th_build_mock_proposal(
             &mut deps,
-            MockPoll {
-                id: active_poll_id,
-                status: PollStatus::Active,
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Active,
                 end_height: 100_000,
                 ..Default::default()
             },
         );
-        th_build_mock_poll(
+        th_build_mock_proposal(
             &mut deps,
-            MockPoll {
-                id: executed_poll_id,
-                status: PollStatus::Executed,
+            MockProposal {
+                id: executed_proposal_id,
+                status: ProposalStatus::Executed,
                 ..Default::default()
             },
         );
 
         let msgs = vec![
-            // cannot end a poll that has not ended its voting period
+            // cannot end a proposal that has not ended its voting period
             (
-                HandleMsg::EndPoll {
-                    poll_id: active_poll_id,
+                HandleMsg::EndProposal {
+                    proposal_id: active_proposal_id,
                 },
                 100_000,
             ),
-            // cannot end a non active poll
+            // cannot end a non active proposal
             (
-                HandleMsg::EndPoll {
-                    poll_id: executed_poll_id,
+                HandleMsg::EndProposal {
+                    proposal_id: executed_proposal_id,
                 },
                 100_001,
             ),
@@ -2034,51 +2057,51 @@ mod tests {
     }
 
     #[test]
-    fn test_end_poll() {
+    fn test_end_proposal() {
         let mut deps = th_setup(&[]);
 
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
 
-        let initial_poll_deposits = Uint128(100_000);
+        let initial_proposal_deposits = Uint128(100_000);
         basecamp_state(&mut deps.storage)
             .update(|mut basecamp| {
-                basecamp.poll_total_deposits = initial_poll_deposits;
+                basecamp.proposal_total_deposits = initial_proposal_deposits;
                 Ok(basecamp)
             })
             .unwrap();
 
-        let poll_threshold = Decimal::from_ratio(51_u128, 100_u128);
-        let poll_quorum = Decimal::from_ratio(2_u128, 100_u128);
-        let poll_end_height = 100_000u64;
+        let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
+        let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
+        let proposal_end_height = 100_000u64;
 
         config_state(&mut deps.storage)
             .update(|mut config| {
-                config.poll_required_threshold = poll_threshold;
-                config.poll_required_quorum = poll_quorum;
+                config.proposal_required_threshold = proposal_threshold;
+                config.proposal_required_quorum = proposal_quorum;
                 Ok(config)
             })
             .unwrap();
 
-        // end passed poll
-        let initial_passed_poll = th_build_mock_poll(
+        // end passed proposal
+        let initial_passed_proposal = th_build_mock_proposal(
             &mut deps,
-            MockPoll {
+            MockProposal {
                 id: 1,
-                status: PollStatus::Active,
+                status: ProposalStatus::Active,
                 for_votes: Uint128(11_000),
                 against_votes: Uint128(10_000),
-                end_height: poll_end_height + 1,
+                end_height: proposal_end_height + 1,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndPoll { poll_id: 1 };
+        let msg = HandleMsg::EndProposal { proposal_id: 1 };
 
         let env = mock_env(
             "ender",
             MockEnvParams {
-                block_height: initial_passed_poll.end_height + 1,
+                block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
             },
         );
@@ -2088,9 +2111,9 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "end_poll"),
-                log("poll_id", 1),
-                log("poll_result", "passed"),
+                log("action", "end_proposal"),
+                log("proposal_id", 1),
+                log("proposal_result", "passed"),
             ]
         );
 
@@ -2101,40 +2124,43 @@ mod tests {
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Transfer {
                     recipient: HumanAddr::from("submitter"),
-                    amount: TEST_POLL_REQUIRED_DEPOSIT,
+                    amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
             }),]
         );
 
-        let final_passed_poll = polls_state_read(&deps.storage)
+        let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&1u64.to_be_bytes())
             .unwrap();
-        assert_eq!(final_passed_poll.status, PollStatus::Passed);
+        assert_eq!(final_passed_proposal.status, ProposalStatus::Passed);
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_poll_total_deposits =
-            (initial_poll_deposits - TEST_POLL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(basecamp.poll_total_deposits, expected_poll_total_deposits);
+        let expected_proposal_total_deposits =
+            (initial_proposal_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
+        assert_eq!(
+            basecamp.proposal_total_deposits,
+            expected_proposal_total_deposits
+        );
 
-        // end rejected poll (no quorum)
-        let initial_passed_poll = th_build_mock_poll(
+        // end rejected proposal (no quorum)
+        let initial_passed_proposal = th_build_mock_proposal(
             &mut deps,
-            MockPoll {
+            MockProposal {
                 id: 2,
-                status: PollStatus::Active,
+                status: ProposalStatus::Active,
                 for_votes: Uint128(11),
                 against_votes: Uint128(10),
-                end_height: poll_end_height + 1,
+                end_height: proposal_end_height + 1,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndPoll { poll_id: 2 };
+        let msg = HandleMsg::EndProposal { proposal_id: 2 };
 
         let env = mock_env(
             "ender",
             MockEnvParams {
-                block_height: initial_passed_poll.end_height + 1,
+                block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
             },
         );
@@ -2144,42 +2170,45 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "end_poll"),
-                log("poll_id", 2),
-                log("poll_result", "rejected"),
+                log("action", "end_proposal"),
+                log("proposal_id", 2),
+                log("proposal_result", "rejected"),
             ]
         );
 
         assert_eq!(res.messages, vec![]);
 
-        let final_passed_poll = polls_state_read(&deps.storage)
+        let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&2u64.to_be_bytes())
             .unwrap();
-        assert_eq!(final_passed_poll.status, PollStatus::Rejected);
+        assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_poll_total_deposits =
-            (expected_poll_total_deposits - TEST_POLL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(basecamp.poll_total_deposits, expected_poll_total_deposits);
+        let expected_proposal_total_deposits =
+            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
+        assert_eq!(
+            basecamp.proposal_total_deposits,
+            expected_proposal_total_deposits
+        );
 
-        // end rejected poll (no threshold)
-        let initial_passed_poll = th_build_mock_poll(
+        // end rejected proposal (no threshold)
+        let initial_passed_proposal = th_build_mock_proposal(
             &mut deps,
-            MockPoll {
+            MockProposal {
                 id: 3,
-                status: PollStatus::Active,
+                status: ProposalStatus::Active,
                 for_votes: Uint128(10_000),
                 against_votes: Uint128(11_000),
-                end_height: poll_end_height + 1,
+                end_height: proposal_end_height + 1,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndPoll { poll_id: 3 };
+        let msg = HandleMsg::EndProposal { proposal_id: 3 };
 
         let env = mock_env(
             "ender",
             MockEnvParams {
-                block_height: initial_passed_poll.end_height + 1,
+                block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
             },
         );
@@ -2189,22 +2218,25 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "end_poll"),
-                log("poll_id", 3),
-                log("poll_result", "rejected"),
+                log("action", "end_proposal"),
+                log("proposal_id", 3),
+                log("proposal_result", "rejected"),
             ]
         );
 
         assert_eq!(res.messages, vec![]);
 
-        let final_passed_poll = polls_state_read(&deps.storage)
+        let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&3u64.to_be_bytes())
             .unwrap();
-        assert_eq!(final_passed_poll.status, PollStatus::Rejected);
+        assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_poll_total_deposits =
-            (expected_poll_total_deposits - TEST_POLL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(basecamp.poll_total_deposits, expected_poll_total_deposits);
+        let expected_proposal_total_deposits =
+            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
+        assert_eq!(
+            basecamp.proposal_total_deposits,
+            expected_proposal_total_deposits
+        );
     }
 
     // TEST HELPERS
@@ -2217,12 +2249,12 @@ mod tests {
             cooldown_duration: TEST_COOLDOWN_DURATION,
             unstake_window: TEST_UNSTAKE_WINDOW,
 
-            poll_voting_period: TEST_POLL_VOTING_PERIOD,
-            poll_effective_delay: 1,
-            poll_expiration_period: 1,
-            poll_required_deposit: TEST_POLL_REQUIRED_DEPOSIT,
-            poll_required_quorum: Decimal::one(),
-            poll_required_threshold: Decimal::one(),
+            proposal_voting_period: TEST_PROPOSAL_VOTING_PERIOD,
+            proposal_effective_delay: 1,
+            proposal_expiration_period: 1,
+            proposal_required_deposit: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+            proposal_required_quorum: Decimal::one(),
+            proposal_required_threshold: Decimal::one(),
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
@@ -2243,20 +2275,20 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct MockPoll {
+    struct MockProposal {
         id: u64,
-        status: PollStatus,
+        status: ProposalStatus,
         for_votes: Uint128,
         against_votes: Uint128,
         start_height: u64,
         end_height: u64,
     }
 
-    impl Default for MockPoll {
+    impl Default for MockProposal {
         fn default() -> Self {
-            MockPoll {
+            MockProposal {
                 id: 1,
-                status: PollStatus::Active,
+                status: ProposalStatus::Active,
                 for_votes: Uint128::zero(),
                 against_votes: Uint128::zero(),
                 start_height: 100_000,
@@ -2265,30 +2297,30 @@ mod tests {
         }
     }
 
-    fn th_build_mock_poll(
+    fn th_build_mock_proposal(
         deps: &mut Extern<MockStorage, MockApi, WasmMockQuerier>,
-        mock_poll: MockPoll,
-    ) -> Poll {
+        mock_proposal: MockProposal,
+    ) -> Proposal {
         let (_, canonical_address) = get_test_addresses(&deps.api, "submitter");
 
-        let poll = Poll {
+        let proposal = Proposal {
             submitter_canonical_address: canonical_address,
-            status: mock_poll.status,
-            for_votes: mock_poll.for_votes,
-            against_votes: mock_poll.against_votes,
-            start_height: mock_poll.start_height,
-            end_height: mock_poll.end_height,
+            status: mock_proposal.status,
+            for_votes: mock_proposal.for_votes,
+            against_votes: mock_proposal.against_votes,
+            start_height: mock_proposal.start_height,
+            end_height: mock_proposal.end_height,
             title: "A valid title".to_string(),
             description: "A description".to_string(),
             link: None,
             execute_calls: None,
-            deposit_amount: TEST_POLL_REQUIRED_DEPOSIT,
+            deposit_amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         };
 
-        polls_state(&mut deps.storage)
-            .save(&mock_poll.id.to_be_bytes(), &poll)
+        proposals_state(&mut deps.storage)
+            .save(&mock_proposal.id.to_be_bytes(), &proposal)
             .unwrap();
 
-        poll
+        proposal
     }
 }
