@@ -825,7 +825,7 @@ mod tests {
         get_test_addresses, mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier,
     };
 
-    use crate::state::{basecamp_state_read, cooldowns_state_read, polls_state_read};
+    use crate::state::{basecamp_state_read, cooldowns_state_read, proposals_state_read};
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
