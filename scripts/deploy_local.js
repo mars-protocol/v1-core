@@ -5,7 +5,7 @@ import {LocalTerra} from "@terra-money/terra.js";
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
 
-let returned_vals = await deployLiquidityPool(terra, wallet);
+let returnedValues = await deployLiquidityPool(terra, wallet);
 
 const initialAssets = [
   {denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5"},
@@ -34,4 +34,4 @@ const initialBorrows = [
   },
 ]
 
-await setupLiquidityPool(terra, wallet, returned_vals.lpAddress, {initialAssets, initialDeposits, initialBorrows});
+await setupLiquidityPool(terra, wallet, returnedValues.lpAddress, {initialAssets, initialDeposits, initialBorrows});

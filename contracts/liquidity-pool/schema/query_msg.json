@@ -22,11 +22,11 @@
         "reserve": {
           "type": "object",
           "required": [
-            "denom"
+            "asset"
           ],
           "properties": {
-            "denom": {
-              "type": "string"
+            "asset": {
+              "$ref": "#/definitions/Asset"
             }
           }
         }
@@ -64,6 +64,48 @@
     }
   ],
   "definitions": {
+    "Asset": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "cw20"
+          ],
+          "properties": {
+            "cw20": {
+              "type": "object",
+              "required": [
+                "contract_addr"
+              ],
+              "properties": {
+                "contract_addr": {
+                  "$ref": "#/definitions/HumanAddr"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "native"
+          ],
+          "properties": {
+            "native": {
+              "type": "object",
+              "required": [
+                "denom"
+              ],
+              "properties": {
+                "denom": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "HumanAddr": {
       "type": "string"
     }

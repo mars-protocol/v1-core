@@ -3,7 +3,7 @@
   "title": "HandleMsg",
   "anyOf": [
     {
-      "description": "Implementation cw20 receive msg",
+      "description": "Implementation of cw20 receive msg",
       "type": "object",
       "required": [
         "receive"
@@ -192,15 +192,14 @@
   ],
   "definitions": {
     "Asset": {
-      "description": "We currently take no arguments for migrations",
       "anyOf": [
         {
           "type": "object",
           "required": [
-            "Cw20"
+            "cw20"
           ],
           "properties": {
-            "Cw20": {
+            "cw20": {
               "type": "object",
               "required": [
                 "contract_addr"
@@ -216,10 +215,10 @@
         {
           "type": "object",
           "required": [
-            "Native"
+            "native"
           ],
           "properties": {
-            "Native": {
+            "native": {
               "type": "object",
               "required": [
                 "denom"
