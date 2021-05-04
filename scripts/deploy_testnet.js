@@ -8,7 +8,7 @@ const terra = new LCDClient({
 })
 const wallet = await recover(terra, process.env.TEST_MAIN);
 
-let returned_vals = await deployLiquidityPool(terra, wallet);
+let returnedValues = await deployLiquidityPool(terra, wallet);
 
 // https://github.com/terra-project/assets/blob/master/cw20/tokens.json
 const initialAssets = [
@@ -18,4 +18,4 @@ const initialAssets = [
     { symbol: "MIR", contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u", borrow_slope: "0.1", loan_to_value: "0.5" },
 ];
 
-await setupLiquidityPool(terra, wallet, returned_vals.lpAddress, { initialAssets });
+await setupLiquidityPool(terra, wallet, returnedValues.lpAddress, { initialAssets });

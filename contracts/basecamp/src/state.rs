@@ -76,7 +76,6 @@ pub fn basecamp_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Base
 
 /// Unstaking cooldown data
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub struct Cooldown {
     /// Timestamp where the cooldown was activated
     pub timestamp: u64,

@@ -13,7 +13,7 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    /// Implementation cw20 receive msg
+    /// Implementation of cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
     /// Initialize an asset on the money market
@@ -137,13 +137,6 @@ pub struct DebtInfo {
 /// We currently take no arguments for migrations
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
-/// We currently take no arguments for migrations
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub enum Asset {
-    Cw20 { contract_addr: HumanAddr },
-    Native { denom: String },
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitAssetParams {
@@ -155,6 +148,13 @@ pub struct InitAssetParams {
     pub liquidation_threshold: Decimal256,
     // Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Decimal256,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Asset {
+    Cw20 { contract_addr: HumanAddr },
+    Native { denom: String },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

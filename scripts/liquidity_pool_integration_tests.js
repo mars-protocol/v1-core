@@ -201,7 +201,7 @@ async function testRedeem(env, expectedState, redeemUser, redeemAsset, redeemAmo
   let actualIndicesAndRates = getIndicesAndRatesFromTxResult(redeemTxResult);
   assertEqualIndicesAndRates(expectedState.reserves[redeemAsset], actualIndicesAndRates);
 
-  let expectedUnderlyingAssetAmount = 
+  let expectedUnderlyingAssetAmount =
     expectedState.reserves[redeemAsset].liquidityIndex.mul(redeemAsset)
 
   // lpContract balance should go down by redeem amount adjusted by the liquidity index
@@ -238,7 +238,7 @@ async function testBorrow(env, expectedState, borrowUser, borrowAsset, borrowAmo
   let borrowAddress = env.terra.wallets[borrowUser].key.accAddress;
 
   let borrowMsg = {"borrow":
-    {"asset": {"Native": {"denom": borrowAsset}}, "amount": borrowAmount.toString()}
+    {"asset": {"native": {"denom": borrowAsset}}, "amount": borrowAmount.toString()}
   };
   let executeBorrowMsg = new MsgExecuteContract(borrowAddress, env.lpAddress, borrowMsg);
   const borrowTxResult = await performTransaction(env.terra, env.terra.wallets[borrowUser], executeBorrowMsg);
@@ -369,7 +369,7 @@ function setRedisAsCacheSource(cache) {
   redisClient.on("error", function(error) {
     console.log(`Redis client error: ${error}`);
   });
-  
+
   const redisGet = promisify(redisClient.get).bind(redisClient);
 
   cache.active = true;
@@ -385,7 +385,7 @@ async function main() {
   if (process.env.CACHE === "redis") {
     setRedisAsCacheSource(cache);
   }
-  
+
   if(!cache.active) {
     console.log("Not using cache, will deploy all contracts");
   }

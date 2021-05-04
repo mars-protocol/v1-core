@@ -95,7 +95,7 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
       let initAssetMsg = {
         "init_asset": {
           "asset": {
-            "Native": {
+            "native": {
               "denom": asset.denom,
             }
           },
@@ -111,7 +111,7 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
       let initAssetMsg = {
         "init_asset": {
           "asset": {
-            "Cw20": {
+            "cw20": {
               "contract_addr": asset.contract_addr,
             }
           },
@@ -144,7 +144,7 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
     for (const [asset, amount] of Object.entries(assets)) {
       const borrowMsg = {"borrow": {
         "asset": {
-          "Native": {
+          "native": {
             "denom": asset
           }
         },
