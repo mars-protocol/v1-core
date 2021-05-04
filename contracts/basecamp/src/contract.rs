@@ -126,12 +126,12 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             vote,
             voting_power,
         } => handle_cast_vote(deps, env, proposal_id, vote, voting_power),
+
         HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
         HandleMsg::ExecuteProposal { proposal_id } => {
             handle_execute_proposal(deps, env, proposal_id)
         }
-        HandleMsg::ExpireProposal { .. } => Ok(HandleResponse::default()), //TODO
-        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()),       //TODO
+        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()), //TODO
 
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
@@ -702,7 +702,60 @@ pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
     env: Env,
     proposal_id: u64,
 ) -> StdResult<HandleResponse> {
-    Ok(HandleResponse::default())
+    let mut proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+
+    if proposal.status != ProposalStatus::Passed {
+        return Err(StdError::generic_err(
+            "Proposal has not passed or has already been executed",
+        ));
+    }
+
+    let config = config_state_read(&deps.storage).load()?;
+    if env.block.height < (proposal.end_height + config.proposal_effective_delay) {
+        return Err(StdError::generic_err(
+            "Proposal has not ended it's delay period",
+        ));
+    }
+    if env.block.height
+        > (proposal.end_height
+            + config.proposal_effective_delay
+            + config.proposal_expiration_period)
+    {
+        return Err(StdError::generic_err("Proposal has expired"));
+    }
+
+    proposal.status = ProposalStatus::Executed;
+    proposals_state(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
+
+    let messages: Vec<CosmosMsg> = if let Some(mut proposal_execute_calls) = proposal.execute_calls
+    {
+        let mut ret = Vec::<CosmosMsg>::with_capacity(proposal_execute_calls.len());
+
+        proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
+
+        for execute_call in proposal_execute_calls {
+            ret.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: deps
+                    .api
+                    .human_address(&execute_call.target_contract_canonical_address)?,
+                msg: execute_call.msg,
+                send: vec![],
+            }));
+        }
+
+        ret
+    } else {
+        vec![]
+    };
+
+    Ok(HandleResponse {
+        messages: messages,
+        log: vec![
+            log("action", "execute_proposal"),
+            log("proposal_id", proposal_id),
+        ],
+        data: None,
+    })
 }
 
 /// Mints Mars token to receiver (Temp action for testing)
@@ -777,6 +830,8 @@ mod tests {
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
+    const TEST_PROPOSAL_EFFECTIVE_DELAY: u64 = 200;
+    const TEST_PROPOSAL_EXPIRATION_PERIOD: u64 = 300;
     const TEST_PROPOSAL_REQUIRED_DEPOSIT: Uint128 = Uint128(10000);
 
     #[test]
@@ -2239,6 +2294,156 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_invalid_execute_proposals() {
+        let mut deps = th_setup(&[]);
+
+        let passed_proposal_id = 1_u64;
+        let executed_proposal_id = 2_u64;
+
+        let passed_proposal = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: passed_proposal_id,
+                status: ProposalStatus::Passed,
+                end_height: 100_000,
+                ..Default::default()
+            },
+        );
+        let executed_proposal = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: executed_proposal_id,
+                status: ProposalStatus::Executed,
+                ..Default::default()
+            },
+        );
+
+        let msgs = vec![
+            // cannot execute a non Passed proposal
+            (
+                HandleMsg::ExecuteProposal {
+                    proposal_id: executed_proposal_id,
+                },
+                executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
+            ),
+            // cannot execute a proposal beffore the effective delay has passed
+            (
+                HandleMsg::ExecuteProposal {
+                    proposal_id: passed_proposal_id,
+                },
+                passed_proposal.end_height + 1,
+            ),
+            // cannot execute an expired proposal
+            (
+                HandleMsg::ExecuteProposal {
+                    proposal_id: passed_proposal_id,
+                },
+                passed_proposal.end_height
+                    + TEST_PROPOSAL_EFFECTIVE_DELAY
+                    + TEST_PROPOSAL_EXPIRATION_PERIOD
+                    + 1,
+            ),
+        ];
+
+        for (msg, block_height) in msgs {
+            let env = mock_env(
+                "executer",
+                MockEnvParams {
+                    block_height: block_height,
+                    ..Default::default()
+                },
+            );
+            handle(&mut deps, env, msg).unwrap_err();
+        }
+    }
+
+    #[test]
+    fn test_execute_proposals() {
+        let mut deps = th_setup(&[]);
+        let (contract_address, contract_canonical_address) =
+            get_test_addresses(&deps.api, MOCK_CONTRACT_ADDR);
+
+        let initial_proposal = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: 1,
+                status: ProposalStatus::Passed,
+                end_height: 100_000,
+                execute_calls: Some(vec![
+                    ProposalExecuteCall {
+                        execution_order: 2,
+                        msg: to_binary(&HandleMsg::MintMars {
+                            recipient: HumanAddr::from("someone"),
+                            amount: Uint128(1000),
+                        })
+                        .unwrap(),
+                        target_contract_canonical_address: contract_canonical_address.clone(),
+                    },
+                    ProposalExecuteCall {
+                        execution_order: 3,
+                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                        target_contract_canonical_address: contract_canonical_address.clone(),
+                    },
+                    ProposalExecuteCall {
+                        execution_order: 1,
+                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                        target_contract_canonical_address: contract_canonical_address.clone(),
+                    },
+                ]),
+                ..Default::default()
+            },
+        );
+
+        let env = mock_env(
+            "executer",
+            MockEnvParams {
+                block_height: initial_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
+                ..Default::default()
+            },
+        );
+
+        let msg = HandleMsg::ExecuteProposal { proposal_id: 1 };
+
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            res.log,
+            vec![log("action", "execute_proposal"), log("proposal_id", 1),]
+        );
+
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_address.clone(),
+                    send: vec![],
+                    msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_address.clone(),
+                    send: vec![],
+                    msg: to_binary(&HandleMsg::MintMars {
+                        recipient: HumanAddr::from("someone"),
+                        amount: Uint128(1000)
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_address.clone(),
+                    send: vec![],
+                    msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                }),
+            ]
+        );
+
+        let final_proposal = proposals_state_read(&deps.storage)
+            .load(&1_u64.to_be_bytes())
+            .unwrap();
+
+        assert_eq!(ProposalStatus::Executed, final_proposal.status);
+    }
+
     // TEST HELPERS
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
@@ -2250,8 +2455,8 @@ mod tests {
             unstake_window: TEST_UNSTAKE_WINDOW,
 
             proposal_voting_period: TEST_PROPOSAL_VOTING_PERIOD,
-            proposal_effective_delay: 1,
-            proposal_expiration_period: 1,
+            proposal_effective_delay: TEST_PROPOSAL_EFFECTIVE_DELAY,
+            proposal_expiration_period: TEST_PROPOSAL_EXPIRATION_PERIOD,
             proposal_required_deposit: TEST_PROPOSAL_REQUIRED_DEPOSIT,
             proposal_required_quorum: Decimal::one(),
             proposal_required_threshold: Decimal::one(),
@@ -2282,6 +2487,7 @@ mod tests {
         against_votes: Uint128,
         start_height: u64,
         end_height: u64,
+        execute_calls: Option<Vec<ProposalExecuteCall>>,
     }
 
     impl Default for MockProposal {
@@ -2291,8 +2497,9 @@ mod tests {
                 status: ProposalStatus::Active,
                 for_votes: Uint128::zero(),
                 against_votes: Uint128::zero(),
-                start_height: 100_000,
-                end_height: 100_100,
+                start_height: 1,
+                end_height: 1,
+                execute_calls: None,
             }
         }
     }
@@ -2313,7 +2520,7 @@ mod tests {
             title: "A valid title".to_string(),
             description: "A description".to_string(),
             link: None,
-            execute_calls: None,
+            execute_calls: mock_proposal.execute_calls,
             deposit_amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         };
 

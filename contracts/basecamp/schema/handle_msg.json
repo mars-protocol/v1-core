@@ -147,28 +147,6 @@
       }
     },
     {
-      "description": "Make proposal expire after expiration period has passed",
-      "type": "object",
-      "required": [
-        "expire_proposal"
-      ],
-      "properties": {
-        "expire_proposal": {
-          "type": "object",
-          "required": [
-            "proposal_id"
-          ],
-          "properties": {
-            "proposal_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            }
-          }
-        }
-      }
-    },
-    {
       "description": "Update basecamp config",
       "type": "object",
       "required": [
