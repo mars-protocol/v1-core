@@ -562,7 +562,6 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                     }
                 }
                 .reference;
-            // TODO for CW20 the asset_reference_vec here is the contracts symbol rather than it's canonical address so it fails
             let asset_reserve =
                 match reserves_state_read(&deps.storage).load(&asset_reference_vec.as_slice()) {
                     Ok(asset_reserve) => asset_reserve,
