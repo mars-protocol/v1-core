@@ -1605,7 +1605,7 @@ mod tests {
         // should have asset_type Native
         assert_eq!(AssetType::Native, reserve.asset_type);
 
-        // should store reference in reserve index is stored
+        // should store reference in reserve index
         let reserve_reference = reserve_references_state_read(&deps.storage)
             .load(&0_u32.to_be_bytes())
             .unwrap();
@@ -1710,7 +1710,7 @@ mod tests {
         // should have asset_type Cw20
         assert_eq!(AssetType::Cw20, reserve.asset_type);
 
-        // should store reference in reserve index is stored
+        // should store reference in reserve index
         let reserve_reference = reserve_references_state_read(&deps.storage)
             .load(&1_u32.to_be_bytes())
             .unwrap();
