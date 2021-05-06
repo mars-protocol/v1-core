@@ -362,7 +362,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
             reserve_references_state(&mut deps.storage).save(
                 &config.reserve_count.to_be_bytes(),
                 &ReserveReferences {
-                    reference: symbol.as_bytes().to_vec(),
+                    reference: asset_reference.to_vec(),
                 },
             )?;
 
@@ -538,7 +538,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         _ => vec![],
     };
     let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
-    for i in 0..config.reserve_count {
+    for i in 0_u32..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if user_is_using_as_collateral || user_is_borrowing {
@@ -828,7 +828,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let mut user_asset_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (asset_label, debt_amount_asset, liquidation_threshold_asset, asset_type)
 
     // List all prices to query and get asset debt/liquidation threshold
-    for i in 0..config.reserve_count {
+    for i in 0_u32..config.reserve_count {
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if !(user_is_using_as_collateral || user_is_borrowing) {
@@ -1605,6 +1605,12 @@ mod tests {
         // should have asset_type Native
         assert_eq!(AssetType::Native, reserve.asset_type);
 
+        // should store reference in reserve index is stored
+        let reserve_reference = reserve_references_state_read(&deps.storage)
+            .load(&0_u32.to_be_bytes())
+            .unwrap();
+        assert_eq!(b"someasset", reserve_reference.reference.as_slice());
+
         // Should have reserve count of 1
         let config = config_state_read(&deps.storage).load().unwrap();
         assert_eq!(config.reserve_count, 1);
@@ -1673,7 +1679,7 @@ mod tests {
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
         // *
-        // calling with a cw20 asset, which increments count
+        // Initialize a cw20 asset
         // *
         let cw20_addr = HumanAddr::from("otherasset");
         deps.querier
@@ -1692,12 +1698,26 @@ mod tests {
             },
         };
         let res = handle(&mut deps, env, msg).unwrap();
-        let cw20_addr_raw = deps.api.canonical_address(&cw20_addr).unwrap();
+        let cw20_canonical_addr = deps.api.canonical_address(&cw20_addr).unwrap();
 
         let reserve = reserves_state_read(&deps.storage)
-            .load(&cw20_addr_raw.as_slice())
+            .load(&cw20_canonical_addr.as_slice())
             .unwrap();
+        // should have asset reserve with Canonical default address
+        assert_eq!(CanonicalAddr::default(), reserve.ma_token_address);
+        // should have index 1
         assert_eq!(1, reserve.index);
+        // should have asset_type Cw20
+        assert_eq!(AssetType::Cw20, reserve.asset_type);
+
+        // should store reference in reserve index is stored
+        let reserve_reference = reserve_references_state_read(&deps.storage)
+            .load(&1_u32.to_be_bytes())
+            .unwrap();
+        assert_eq!(
+            cw20_canonical_addr.as_slice(),
+            reserve_reference.reference.as_slice()
+        );
 
         // should have an asset_type of cw20
         assert_eq!(AssetType::Cw20, reserve.asset_type);
@@ -1715,13 +1735,13 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
-            reference: Vec::from(cw20_addr_raw.as_slice()),
+            reference: Vec::from(cw20_canonical_addr.as_slice()),
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage)
-            .load(cw20_addr_raw.as_slice())
+            .load(cw20_canonical_addr.as_slice())
             .unwrap();
         assert_eq!(
             deps.api
@@ -1736,7 +1756,7 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
         let msg = HandleMsg::InitAssetTokenCallback {
-            reference: Vec::from(cw20_addr_raw.as_slice()),
+            reference: Vec::from(cw20_canonical_addr.as_slice()),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
     }

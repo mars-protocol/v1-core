@@ -121,6 +121,8 @@ pub fn debts_asset_state_read<'a, S: Storage>(
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+// TODO: If we do not use the struct for anything else this struct should be deleted and
+// the bucket should jus store Vec<u8>
 pub struct ReserveReferences {
     /// Reference of reserve
     pub reference: Vec<u8>,
