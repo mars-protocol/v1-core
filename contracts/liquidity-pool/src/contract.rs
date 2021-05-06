@@ -67,23 +67,15 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 deps,
                 &env,
                 env.message.sender.clone(),
-                denom.as_bytes(),
-                denom.as_str(),
+                Asset::Native { denom },
                 deposit_amount,
             )
         }
         HandleMsg::Borrow { asset, amount } => handle_borrow(deps, env, asset, amount),
         HandleMsg::RepayNative { denom } => {
             let repay_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
-            handle_repay(
-                deps,
-                &env,
-                env.message.sender.clone(),
-                denom.as_bytes(),
-                denom.as_str(),
-                repay_amount,
-                AssetType::Native,
-            )
+            let sender = env.message.sender.clone();
+            handle_repay(deps, env, sender, Asset::Native { denom }, repay_amount)
         }
         HandleMsg::LiquidateNative {
             collateral_asset,
@@ -137,19 +129,21 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                 deps,
                 &env,
                 cw20_msg.sender,
-                deps.api.canonical_address(&env.message.sender)?.as_slice(),
-                env.message.sender.as_str(),
+                Asset::Cw20 {
+                    contract_addr: env.message.sender.clone(),
+                },
                 Uint256::from(cw20_msg.amount),
             ),
-            ReceiveMsg::RepayCw20 {} => handle_repay(
-                deps,
-                &env,
-                cw20_msg.sender,
-                deps.api.canonical_address(&env.message.sender)?.as_slice(),
-                env.message.sender.as_str(),
-                Uint256::from(cw20_msg.amount),
-                AssetType::Cw20,
-            ),
+            ReceiveMsg::RepayCw20 {} => {
+                let contract_addr = env.message.sender.clone();
+                handle_repay(
+                    deps,
+                    env,
+                    cw20_msg.sender,
+                    Asset::Cw20 { contract_addr },
+                    Uint256::from(cw20_msg.amount),
+                )
+            }
             ReceiveMsg::LiquidateCw20 {
                 collateral_asset,
                 debt_asset_address,
@@ -288,22 +282,19 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
         Asset::Native { denom } => init_asset(
             deps,
             env,
-            denom.as_bytes(),
+            Asset::Native {
+                denom: denom.clone(),
+            },
             denom.as_str(),
-            denom.as_str(),
-            AssetType::Native,
             asset_params,
         ),
         Asset::Cw20 { contract_addr } => {
-            let canonical_addr = deps.api.canonical_address(&contract_addr)?;
             let symbol = cw20_get_symbol(deps, contract_addr.clone())?;
             init_asset(
                 deps,
                 env,
-                canonical_addr.as_slice(),
+                Asset::Cw20 { contract_addr },
                 symbol.as_str(),
-                contract_addr.as_str(),
-                AssetType::Cw20,
                 asset_params,
             )
         }
@@ -314,12 +305,17 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 pub fn init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    asset_reference: &[u8],
+    asset: Asset,
     symbol: &str,
-    asset_label: &str,
-    asset_type: AssetType,
     asset_params: InitAssetParams,
 ) -> StdResult<HandleResponse> {
+    // Get asset info
+    let (asset_label, asset_reference) = asset_get_label_and_reference(deps, &asset)?;
+    let asset_type = match &asset {
+        Asset::Native { .. } => AssetType::Native,
+        Asset::Cw20 { .. } => AssetType::Cw20,
+    };
+
     // Get config
     let mut config = config_state_read(&deps.storage).load()?;
 
@@ -330,11 +326,11 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
 
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
-    match reserves.may_load(asset_reference) {
+    match reserves.may_load(asset_reference.as_slice()) {
         Ok(None) => {
             // create asset reserve
             reserves.save(
-                asset_reference,
+                asset_reference.as_slice(),
                 &Reserve {
                     index: config.reserve_count,
                     ma_token_address: CanonicalAddr::default(),
@@ -392,7 +388,7 @@ pub fn init_asset<S: Storage, A: Api, Q: Querier>(
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
                     msg: to_binary(&HandleMsg::InitAssetTokenCallback {
-                        reference: asset_reference.to_vec(),
+                        reference: asset_reference,
                     })?,
                     contract_addr: env.contract.address,
                 }),
@@ -433,11 +429,12 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
     depositor: HumanAddr,
-    asset_reference: &[u8],
-    asset_label: &str,
+    deposit_asset: Asset,
     deposit_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let (asset_label, asset_reference) = asset_get_label_and_reference(deps, &deposit_asset)?;
+
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
@@ -465,8 +462,14 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     }
 
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
+    reserve_update_interest_rates(
+        &deps,
+        &env,
+        asset_reference.as_slice(),
+        &mut reserve,
+        Uint256::zero(),
+    )?;
+    reserves_state(&mut deps.storage).save(asset_reference.as_slice(), &reserve)?;
 
     if reserve.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
@@ -685,16 +688,15 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 /// Handle the repay of native tokens. Refund extra funds if they exist
 pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: &Env,
+    env: Env,
     sender: HumanAddr,
-    asset_reference: &[u8],
-    asset_label: &str,
+    repay_asset: Asset,
     repay_amount: Uint256,
-    asset_type: AssetType,
 ) -> StdResult<HandleResponse> {
+    let (asset_label, asset_reference) = asset_get_label_and_reference(deps, &repay_asset)?;
     // TODO: assumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
     // but double check that's the case
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
     // Get repay amount
     // TODO: Evaluate refunding the rest of the coins sent (or failing if more
@@ -710,7 +712,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     let borrower_canonical_addr = deps.api.canonical_address(&sender)?;
 
     // Check new debt
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
     let mut debt = debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
 
     if debt.amount_scaled.is_zero() {
@@ -727,29 +729,13 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         // refund any excess amounts
         // TODO: Should we log this?
         refund_amount = (repay_amount_scaled - debt.amount_scaled) * reserve.borrow_index;
-        match asset_type {
-            AssetType::Native => {
-                messages.push(CosmosMsg::Bank(BankMsg::Send {
-                    from_address: env.contract.address.clone(),
-                    to_address: sender.clone(),
-                    amount: vec![Coin {
-                        denom: asset_label.to_string(),
-                        amount: refund_amount.into(),
-                    }],
-                }));
-            }
-            AssetType::Cw20 => {
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: env.message.sender.clone(),
-                    msg: to_binary(&Cw20HandleMsg::Transfer {
-                        recipient: sender.clone(),
-                        amount: refund_amount.into(),
-                    })?,
-                    send: vec![],
-                }));
-            }
-        }
-
+        let refund_msg = build_send_asset_msg(
+            env.contract.address.clone(),
+            sender.clone(),
+            &repay_asset,
+            refund_amount,
+        )?;
+        messages.push(refund_msg);
         repay_amount_scaled = debt.amount_scaled;
     }
 
@@ -762,8 +748,14 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         ));
     }
     reserve.debt_total_scaled = reserve.debt_total_scaled - repay_amount_scaled;
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
+    reserve_update_interest_rates(
+        &deps,
+        &env,
+        asset_reference.as_slice(),
+        &mut reserve,
+        Uint256::zero(),
+    )?;
+    reserves_state(&mut deps.storage).save(asset_reference.as_slice(), &reserve)?;
 
     if debt.amount_scaled == Uint256::zero() {
         // Remove asset from borrowed assets
