@@ -521,7 +521,16 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = config_state_read(&deps.storage).load()?;
-    let mut borrow_reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+    let mut borrow_reserve =
+        match reserves_state_read(&deps.storage).load(asset_reference.as_slice()) {
+            Ok(borrow_reserve) => borrow_reserve,
+            Err(_) => {
+                return Err(StdError::generic_err(format!(
+                    "no borrow reserve exists with asset reference: {}",
+                    String::from_utf8(asset_reference).expect("Found invalid UTF-8")
+                )));
+            }
+        };
     let borrower_canonical_addr = deps.api.canonical_address(&borrower)?;
     let mut user: User =
         match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
@@ -542,11 +551,28 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if user_is_using_as_collateral || user_is_borrowing {
-            let asset_reference_vec = reserve_references_state_read(&deps.storage)
-                .load(&i.to_be_bytes())?
+            let asset_reference_vec =
+                match reserve_references_state_read(&deps.storage).load(&i.to_be_bytes()) {
+                    Ok(asset_reference_vec) => asset_reference_vec,
+                    Err(_) => {
+                        return Err(StdError::generic_err(format!(
+                            "no reserve reference exists with index: {}",
+                            i
+                        )))
+                    }
+                }
                 .reference;
+            // TODO for CW20 the asset_reference_vec here is the contracts symbol rather than it's canonical address so it fails
             let asset_reserve =
-                reserves_state_read(&deps.storage).load(&asset_reference_vec.as_slice())?;
+                match reserves_state_read(&deps.storage).load(&asset_reference_vec.as_slice()) {
+                    Ok(asset_reserve) => asset_reserve,
+                    Err(_) => {
+                        return Err(StdError::generic_err(format!(
+                            "no asset reserve exists with asset reference: {}",
+                            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
+                        )));
+                    }
+                };
 
             let mut debt = Uint256::zero();
             let mut max_borrow = Decimal256::zero();
@@ -1206,7 +1232,7 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
-                                "failed to get symbol from canonical address: {}",
+                                "failed to get symbol from cw20 contract address: {}",
                                 cw20_contract_address
                             )));
                         }
@@ -1246,14 +1272,40 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-            let denom = String::from_utf8(k);
-            let denom = match denom {
-                Ok(denom) => denom,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+
+            let denom = match v.asset_type {
+                AssetType::Native => match String::from_utf8(k.clone()) {
+                    Ok(denom) => denom,
+                    Err(_) => {
+                        return Err(StdError::generic_err("failed to encode key into string"))
+                    }
+                },
+                AssetType::Cw20 => {
+                    let cw20_contract_address =
+                        match deps.api.human_address(&CanonicalAddr::from(k.clone())) {
+                            Ok(cw20_contract_address) => cw20_contract_address,
+                            Err(_) => {
+                                return Err(StdError::generic_err(
+                                    "failed to encode key into canonical address",
+                                ))
+                            }
+                        };
+
+                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
+                        Ok(symbol) => symbol,
+                        Err(_) => {
+                            return Err(StdError::generic_err(format!(
+                                "failed to get symbol from cw20 contract address: {}",
+                                cw20_contract_address
+                            )));
+                        }
+                    }
+                }
             };
+
             let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
             if is_borrowing_asset {
-                let debts_asset_bucket = debts_asset_state_read(&deps.storage, denom.as_bytes());
+                let debts_asset_bucket = debts_asset_state_read(&deps.storage, k.as_slice());
                 let debt = debts_asset_bucket.load(debtor_address.as_slice())?;
                 Ok(DebtInfo {
                     denom,
