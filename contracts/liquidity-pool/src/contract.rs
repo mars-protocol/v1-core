@@ -191,53 +191,51 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
 pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    reference: &[u8],
+    asset_reference: &[u8],
     redeemer: HumanAddr,
     burn_amount: Uint256,
 ) -> StdResult<HandleResponse> {
     // Sender must be the corresponding ma token contract
-    let mut reserve = reserves_state_read(&deps.storage).load(reference)?;
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, reference, &mut reserve, burn_amount)?;
-    reserves_state(&mut deps.storage).save(reference, &reserve)?;
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
+    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
 
     // Check contract has sufficient balance to send back
-    let (balance, asset_label) = match reserve.asset_type {
-        AssetType::Native => {
-            let asset_label = match str::from_utf8(reference) {
-                Ok(res) => res,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
-            };
-            (
-                deps.querier
-                    .query_balance(&env.contract.address, &asset_label)?
-                    .amount,
-                String::from(asset_label),
-            )
-        }
-        AssetType::Cw20 => {
-            let cw20_contract_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
-            (
-                cw20_get_balance(
-                    deps,
-                    cw20_contract_addr.clone(),
-                    env.contract.address.clone(),
-                )?,
-                String::from(cw20_contract_addr.as_str()),
-            )
-        }
-    };
-    if redeem_amount > Uint256::from(balance) {
+    let contract_balance = asset_get_balance_of(
+        deps,
+        &env.contract.address,
+        asset_reference,
+        &reserve.asset_type,
+    )?;
+
+    if redeem_amount > Uint256::from(contract_balance) {
         return Err(StdError::generic_err(
             "Redeem amount exceeds contract balance",
         ));
     }
+
+    let asset_label = match reserve.asset_type {
+        AssetType::Native => {
+            let asset_label = match str::from_utf8(asset_reference) {
+                Ok(res) => res,
+                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+            };
+            String::from(asset_label)
+        }
+        AssetType::Cw20 => {
+            let cw20_contract_address = deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?;
+            String::from(cw20_contract_address.as_str())
+        }
+    };
 
     let mut log = vec![
         log("action", "redeem"),
@@ -267,7 +265,9 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
             }],
         })),
         AssetType::Cw20 => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&CanonicalAddr::from(reference))?,
+            contract_addr: deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?,
             msg: to_binary(&Cw20HandleMsg::Transfer {
                 recipient: redeemer,
                 amount: redeem_amount.into(),
@@ -767,7 +767,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     sent_debt_amount_to_liquidate: Uint256,
     receive_ma_token: bool,
 ) -> StdResult<HandleResponse> {
-    let (debt_asset_label, debt_asset_reference, _) = asset_get_attributes(deps, &debt_asset)?;
+    let (debt_asset_label, debt_asset_reference, asset_type) = asset_get_attributes(deps, &debt_asset)?;
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_amount_to_liquidate.is_zero() {
@@ -947,24 +947,12 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     // ensure contract has sufficient collateral liquidity if user wants to receive the underlying asset
     if !receive_ma_token {
-        let contract_collateral_balance = match collateral_asset.clone() {
-            Asset::Native { denom } => {
-                Uint256::from(
-                    deps.querier
-                        .query_balance(env.contract.address.clone(), denom.as_str())?
-                        .amount,
-                ) * collateral_reserve.liquidity_index
-            }
-            Asset::Cw20 {
-                contract_addr: token_addr,
-            } => {
-                Uint256::from(cw20_get_balance(
-                    deps,
-                    token_addr,
-                    env.contract.address.clone(),
-                )?) * collateral_reserve.liquidity_index
-            }
-        };
+        let contract_collateral_balance = asset_get_balance_of(
+            deps,
+            &env.contract.address,
+            collateral_asset_reference.as_slice(),
+            &asset_type,
+        )?;
         if contract_collateral_balance < actual_collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1328,26 +1316,16 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
 pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     env: &Env,
-    reference: &[u8],
+    asset_reference: &[u8],
     reserve: &mut Reserve,
     liquidity_taken: Uint256,
 ) -> StdResult<()> {
-    let contract_balance_amount = match reserve.asset_type {
-        AssetType::Native => {
-            let denom = str::from_utf8(reference);
-            let denom = match denom {
-                Ok(denom) => denom,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
-            };
-            deps.querier
-                .query_balance(env.contract.address.clone(), denom)?
-                .amount
-        }
-        AssetType::Cw20 => {
-            let cw20_human_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
-            cw20_get_balance(deps, cw20_human_addr, env.contract.address.clone())?
-        }
-    };
+    let contract_balance_amount = asset_get_balance_of(
+        deps,
+        &env.contract.address,
+        asset_reference,
+        &reserve.asset_type,
+    )?;
 
     // TODO: Verify on integration tests that this balance includes the
     // amount sent by the user on deposits and repays(both for cw20 and native).
@@ -1559,6 +1537,36 @@ fn asset_get_label_and_add_price_to_query_list<S: Storage, A: Api, Q: Querier>(
     }
 
     Ok(asset_label)
+}
+
+fn asset_get_balance_of<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: &HumanAddr,
+    asset_reference: &[u8],
+    asset_type: &AssetType,
+) -> StdResult<Uint256> {
+    return match asset_type {
+        AssetType::Native => {
+            let denom = str::from_utf8(asset_reference);
+            let denom = match denom {
+                Ok(denom) => denom,
+                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+            };
+            Ok(Uint256::from(
+                deps.querier.query_balance(address, denom)?.amount,
+            ))
+        }
+        AssetType::Cw20 => {
+            let cw20_human_addr = deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference.to_vec()))?;
+            Ok(Uint256::from(cw20_get_balance(
+                deps,
+                cw20_human_addr,
+                HumanAddr::from(address),
+            )?))
+        }
+    };
 }
 
 // TESTS
