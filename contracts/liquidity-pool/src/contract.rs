@@ -191,18 +191,18 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
 pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    reference: &[u8],
-    redeemer: HumanAddr,
+    asset_reference: &[u8],
+    redeemer_address: HumanAddr,
     burn_amount: Uint256,
 ) -> StdResult<HandleResponse> {
     // Sender must be the corresponding ma token contract
-    let mut reserve = reserves_state_read(&deps.storage).load(reference)?;
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, reference, &mut reserve, burn_amount)?;
-    reserves_state(&mut deps.storage).save(reference, &reserve)?;
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
+    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
@@ -210,7 +210,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     // Check contract has sufficient balance to send back
     let (balance, asset_label) = match reserve.asset_type {
         AssetType::Native => {
-            let asset_label = match str::from_utf8(reference) {
+            let asset_label = match str::from_utf8(asset_reference) {
                 Ok(res) => res,
                 Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
             };
@@ -222,7 +222,9 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
             )
         }
         AssetType::Cw20 => {
-            let cw20_contract_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
+            let cw20_contract_addr = deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?;
             (
                 cw20_get_balance(
                     deps,
@@ -242,7 +244,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     let mut log = vec![
         log("action", "redeem"),
         log("reserve", asset_label.as_str()),
-        log("user", redeemer.as_str()),
+        log("user", redeemer_address.as_str()),
         log("burn_amount", burn_amount),
         log("redeem_amount", redeem_amount),
     ];
@@ -257,24 +259,22 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
         })?,
     })];
 
-    match reserve.asset_type {
-        AssetType::Native => messages.push(CosmosMsg::Bank(BankMsg::Send {
-            from_address: env.contract.address,
-            to_address: redeemer,
-            amount: vec![Coin {
-                denom: asset_label,
-                amount: redeem_amount.into(),
-            }],
-        })),
-        AssetType::Cw20 => messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&CanonicalAddr::from(reference))?,
-            msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: redeemer,
-                amount: redeem_amount.into(),
-            })?,
-            send: vec![],
-        })),
-    }
+    let redeem_msg = match reserve.asset_type {
+        AssetType::Native => build_send_native_asset_msg(
+            env.contract.address,
+            redeemer_address,
+            asset_label.as_str(),
+            redeem_amount,
+        ),
+        AssetType::Cw20 => {
+            let token_contract_addr = deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?;
+            build_send_cw20_token_msg(redeemer_address, token_contract_addr, redeem_amount)?
+        }
+    };
+
+    messages.push(redeem_msg);
 
     Ok(HandleResponse {
         messages,
@@ -411,7 +411,7 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
 pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: &Env,
-    depositor: HumanAddr,
+    depositor_address: HumanAddr,
     asset_reference: &[u8],
     asset_label: &str,
     deposit_amount: Uint256,
@@ -426,7 +426,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
-    let depositor_canonical_addr = deps.api.canonical_address(&depositor)?;
+    let depositor_canonical_addr = deps.api.canonical_address(&depositor_address)?;
     let mut user: User =
         match users_state_read(&deps.storage).may_load(depositor_canonical_addr.as_slice()) {
             Ok(Some(user)) => user,
@@ -455,7 +455,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     let mut log = vec![
         log("action", "deposit"),
         log("reserve", asset_label),
-        log("user", depositor.as_str()),
+        log("user", depositor_address.as_str()),
         log("amount", deposit_amount),
     ];
 
@@ -468,7 +468,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: depositor,
+                recipient: depositor_address,
                 amount: mint_amount.into(),
             })?,
         })],
@@ -482,7 +482,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     asset: Asset,
     borrow_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    let borrower = env.message.sender.clone();
+    let borrower_address = env.message.sender.clone();
 
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
 
@@ -505,7 +505,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 )));
             }
         };
-    let borrower_canonical_addr = deps.api.canonical_address(&borrower)?;
+    let borrower_canonical_addr = deps.api.canonical_address(&borrower_address)?;
     let mut user: User =
         match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
             Ok(Some(user)) => user,
@@ -640,14 +640,15 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     let mut log = vec![
         log("action", "borrow"),
         log("reserve", asset_label.as_str()),
-        log("user", borrower.as_str()),
+        log("user", borrower_address.as_str()),
         log("amount", borrow_amount),
     ];
 
     append_indices_and_rates_to_logs(&mut log, &borrow_reserve);
 
     // Send borrow amount to borrower
-    let send_msg = build_send_asset_msg(env.contract.address, borrower, asset, borrow_amount)?;
+    let send_msg =
+        build_send_asset_msg(env.contract.address, borrower_address, asset, borrow_amount)?;
 
     Ok(HandleResponse {
         data: None,
