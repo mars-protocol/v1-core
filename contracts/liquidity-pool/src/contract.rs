@@ -16,9 +16,11 @@ use crate::msg::{
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read,
     reserve_ma_tokens_state, reserve_ma_tokens_state_read, reserve_references_state,
-    reserve_references_state_read, reserves_state, reserves_state_read, users_state,
-    users_state_read, Config, Debt, Reserve, ReserveReferences, User,
+    reserve_references_state_read, reserves_state, reserves_state_read,
+    uncollateralized_loan_allowance, users_state, users_state_read, Config, Debt, Reserve,
+    ReserveReferences, User,
 };
+use std::cmp::min;
 use std::str;
 use terra_cosmwasm::TerraQuerier;
 
@@ -106,6 +108,16 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 receive_ma_token,
             )
         }
+        HandleMsg::IncreaseAllowance {
+            user,
+            asset,
+            amount,
+        } => handle_increase_allowance(deps, asset, user, amount),
+        HandleMsg::DecreaseAllowance {
+            user,
+            asset,
+            amount,
+        } => handle_decrease_allowance(deps, asset, user, amount),
     }
 }
 
@@ -1093,6 +1105,72 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         data: None,
         log,
         messages,
+    })
+}
+
+pub fn handle_increase_allowance<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    asset: Asset,
+    user_address: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+
+    let mut allowance_bucket =
+        uncollateralized_loan_allowance(&mut deps.storage, asset_reference.as_slice());
+    let mut allowance: Uint128 = match allowance_bucket.may_load(user_canonical_address.as_slice())
+    {
+        Ok(Some(allowance)) => allowance,
+        Ok(None) => Uint128::zero(),
+        Err(error) => return Err(error),
+    };
+
+    allowance += amount;
+
+    allowance_bucket.save(user_canonical_address.as_slice(), &allowance)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("user", user_address),
+            log("asset", asset_label),
+            log("new_allowance", allowance),
+        ],
+        data: None,
+    })
+}
+
+pub fn handle_decrease_allowance<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    asset: Asset,
+    user_address: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+
+    let mut allowance_bucket =
+        uncollateralized_loan_allowance(&mut deps.storage, asset_reference.as_slice());
+    let mut allowance: Uint128 = match allowance_bucket.may_load(user_canonical_address.as_slice())
+    {
+        Ok(Some(allowance)) => allowance,
+        Ok(None) => return Err(StdError::generic_err("user has no existing allowance")),
+        Err(error) => return Err(error),
+    };
+
+    allowance = min((allowance - amount)?, Uint128::zero());
+
+    allowance_bucket.save(user_canonical_address.as_slice(), &allowance)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("user", user_address),
+            log("asset", asset_label),
+            log("new_allowance", allowance),
+        ],
+        data: None,
     })
 }
 

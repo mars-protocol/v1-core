@@ -18,6 +18,7 @@ pub static DEBTS_NAMESPACE: &[u8] = b"debts";
 pub static USERS_NAMESPACE: &[u8] = b"users";
 pub static RESERVE_REFERENCES_NAMESPACE: &[u8] = b"reserve_references";
 pub static RESERVE_MA_TOKENS_NAMESPACE: &[u8] = b"reserve_ma_tokens";
+pub static UNCOLLATERALIZED_LOAN_ALLOWANCE_NAMESPACE: &[u8] = b"uncollateralized_loan_allowance";
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -144,4 +145,19 @@ pub fn reserve_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, Vec<u8>
 
 pub fn reserve_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Vec<u8>> {
     bucket_read(RESERVE_MA_TOKENS_NAMESPACE, storage)
+}
+
+/// Uncollateralized loan allowance
+pub fn uncollateralized_loan_allowance<'a, S: Storage>(
+    storage: &'a mut S,
+    asset: &[u8],
+) -> Bucket<'a, S, Uint128> {
+    Bucket::multilevel(&[UNCOLLATERALIZED_LOAN_ALLOWANCE_NAMESPACE, asset], storage)
+}
+
+pub fn uncollateralized_loan_allowance_read<'a, S: Storage>(
+    storage: &'a S,
+    asset: &[u8],
+) -> ReadonlyBucket<'a, S, Uint128> {
+    ReadonlyBucket::multilevel(&[UNCOLLATERALIZED_LOAN_ALLOWANCE_NAMESPACE, asset], storage)
 }
