@@ -110,8 +110,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::UpdateUncollateralizedLoanLimit {
             user_address,
             asset,
-            amount,
-        } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, amount),
+            new_limit,
+        } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
     }
 }
 
@@ -513,15 +513,14 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         };
     let borrower_canonical_addr = deps.api.canonical_address(&borrower_address)?;
 
-    let uncollateralized_loan_limits_bucket_read =
+    let uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice());
-    let uncollateralized_loan_limit = match uncollateralized_loan_limits_bucket_read
-        .may_load(borrower_canonical_addr.as_slice())
-    {
-        Ok(Some(limit)) => limit,
-        Ok(None) => Uint128::zero(),
-        Err(error) => return Err(error),
-    };
+    let uncollateralized_loan_limit =
+        match uncollateralized_loan_limits_bucket.may_load(borrower_canonical_addr.as_slice()) {
+            Ok(Some(limit)) => limit,
+            Ok(None) => Uint128::zero(),
+            Err(error) => return Err(error),
+        };
 
     let mut user: User =
         match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
@@ -530,7 +529,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 if uncollateralized_loan_limit.is_zero() {
                     return Err(StdError::generic_err("address has no collateral deposited"));
                 }
-                // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and create a new one.
+                // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
                 User {
                     deposited_assets: Uint128::zero(),
                     borrowed_assets: Uint128::zero(),
@@ -1171,13 +1170,13 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handle the updating of uncollateralized loan limits
+/// Update uncollateralized loan limit by a given amount in uusd
 pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     user_address: HumanAddr,
     asset: Asset,
-    amount: Uint128,
+    new_limit: Uint128,
 ) -> StdResult<HandleResponse> {
     // Get config
     let config = config_state_read(&deps.storage).load()?;
@@ -1193,7 +1192,7 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
     let mut uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits(&mut deps.storage, asset_reference.as_slice());
 
-    uncollateralized_loan_limits_bucket.save(user_canonical_address.as_slice(), &amount)?;
+    uncollateralized_loan_limits_bucket.save(user_canonical_address.as_slice(), &new_limit)?;
 
     Ok(HandleResponse {
         messages: vec![],
@@ -1201,7 +1200,7 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
             log("action", "update_uncollateralized_loan_limit"),
             log("user", user_address),
             log("asset", asset_label),
-            log("new_allowance", amount),
+            log("new_allowance", new_limit),
         ],
         data: None,
     })
@@ -3716,7 +3715,7 @@ mod tests {
         let available_liquidity = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
 
-        let exchange_rates = [(String::from("somecoin"), Decimal::one())];
+        let exchange_rates = [(String::from("somecoin"), Decimal::from_ratio(2_u64, 1_u64))];
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
@@ -3740,21 +3739,20 @@ mod tests {
         let borrower_addr = HumanAddr::from("borrower");
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
 
-        // Attempt borrow with no allowance
         let mut block_time = mock_reserve.interests_last_updated + 10000u64;
         let initial_uncollateralized_loan_limit = Uint128::from(2400_u128);
 
         // Update uncollateralized loan limit
-        let update_allowance_msg = HandleMsg::UpdateUncollateralizedLoanLimit {
+        let update_limit_msg = HandleMsg::UpdateUncollateralizedLoanLimit {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
             user_address: borrower_addr.clone(),
-            amount: initial_uncollateralized_loan_limit,
+            new_limit: initial_uncollateralized_loan_limit,
         };
 
-        // borrow as unauthorized user, should fail
-        let allowance_env = mars::testing::mock_env(
+        // update limit as unauthorized user, should fail
+        let update_limit_env = mars::testing::mock_env(
             "random",
             MockEnvParams {
                 sent_funds: &[],
@@ -3762,10 +3760,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, allowance_env, update_allowance_msg.clone()).unwrap_err();
+        handle(&mut deps, update_limit_env, update_limit_msg.clone()).unwrap_err();
 
-        // Update as owner
-        let allowance_env = mars::testing::mock_env(
+        // Update borrower limit as owner
+        let update_limit_env = mars::testing::mock_env(
             "owner",
             MockEnvParams {
                 sent_funds: &[],
@@ -3774,19 +3772,19 @@ mod tests {
             },
         );
 
-        handle(&mut deps, allowance_env, update_allowance_msg).unwrap();
+        handle(&mut deps, update_limit_env, update_limit_msg).unwrap();
 
-        // check user's allowance increased by the appropriate amount
-        let allowance = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
+        // check user's limit has been updated to the appropriate amount
+        let limit = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
 
-        assert_eq!(allowance, initial_uncollateralized_loan_limit);
+        assert_eq!(limit, initial_uncollateralized_loan_limit);
 
         // Borrow asset
         block_time += 1000_u64;
         let initial_borrow_amount =
-            initial_uncollateralized_loan_limit.multiply_ratio(1_u128, 2_u128);
+            initial_uncollateralized_loan_limit.multiply_ratio(1_u64, 4_u64);
         let borrow_msg = HandleMsg::Borrow {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
@@ -3855,9 +3853,10 @@ mod tests {
         assert_eq!(expected_debt_scaled_after_borrow, debt.amount_scaled);
 
         // Borrow an amount less than initial limit but exceeding current limit
-        let remaining_limit =
-            (initial_uncollateralized_loan_limit - initial_borrow_amount).unwrap();
-        let exceeding_limit = remaining_limit + Uint128::from(100_u64);
+        let remaining_limit = (initial_uncollateralized_loan_limit
+            - initial_borrow_amount.multiply_ratio(2_u64, 1_u64))
+        .unwrap();
+        let exceeding_limit = remaining_limit.multiply_ratio(1_u64, 2_u64) + Uint128::from(100_u64);
 
         block_time += 1000_u64;
         let borrow_msg = HandleMsg::Borrow {
@@ -3882,7 +3881,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Uint256::from(remaining_limit),
+            amount: Uint256::from(remaining_limit.multiply_ratio(1_u64, 2_u64)),
         };
         let borrow_env = mars::testing::mock_env(
             "borrower",
@@ -3900,7 +3899,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             user_address: borrower_addr,
-            amount: Uint128::zero(),
+            new_limit: Uint128::zero(),
         };
 
         let allowance_env = mars::testing::mock_env(

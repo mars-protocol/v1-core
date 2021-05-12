@@ -59,7 +59,7 @@ pub enum HandleMsg {
     UpdateUncollateralizedLoanLimit {
         user_address: HumanAddr,
         asset: Asset,
-        amount: Uint128,
+        new_limit: Uint128,
     },
 }
 
