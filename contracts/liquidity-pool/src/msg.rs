@@ -1,5 +1,5 @@
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::HumanAddr;
+use cosmwasm_std::{HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -54,6 +54,12 @@ pub enum HandleMsg {
         user_address: HumanAddr,
         /// Sends maAsset to liquidator if true and underlying collateral asset if false
         receive_ma_token: bool,
+    },
+    /// Update uncollateralized loan limit
+    UpdateUncollateralizedLoanLimit {
+        user_address: HumanAddr,
+        asset: Asset,
+        new_limit: Uint128,
     },
 }
 
