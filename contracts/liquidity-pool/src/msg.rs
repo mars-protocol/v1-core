@@ -55,15 +55,9 @@ pub enum HandleMsg {
         /// Sends maAsset to liquidator if true and underlying collateral asset if false
         receive_ma_token: bool,
     },
-    /// Increase uncollateralized loan allowance
-    IncreaseAllowance {
-        user: HumanAddr,
-        asset: Asset,
-        amount: Uint128,
-    },
-    /// Decrease uncollateralized loan allowance
-    DecreaseAllowance {
-        user: HumanAddr,
+    /// Update uncollateralized loan limit
+    UpdateUncollateralizedLoanLimit {
+        user_address: HumanAddr,
         asset: Asset,
         amount: Uint128,
     },
