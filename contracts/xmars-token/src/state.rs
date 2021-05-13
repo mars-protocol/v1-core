@@ -42,7 +42,7 @@ pub struct Snapshot {
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 /// Metadata snapshots for a given address
 pub struct SnapshotInfo {
-    /// Index where snapshot search should start (Could be different than 0 if, in the 
+    /// Index where snapshot search should start (Could be different than 0 if, in the
     /// future, sample should get smaller than all available to guarantee less operations
     /// when searching for a snapshot
     pub start_index: u64,
@@ -105,7 +105,9 @@ pub fn total_supply_snapshot_info<S: Storage>(storage: &mut S) -> Singleton<S, S
     singleton(storage, TOTAL_SUPPLY_SNAPSHOT_INFO_KEY)
 }
 
-pub fn total_supply_snapshot_info_read<S: ReadonlyStorage>(storage: &S) -> ReadonlySingleton<S, SnapshotInfo> {
+pub fn total_supply_snapshot_info_read<S: ReadonlyStorage>(
+    storage: &S,
+) -> ReadonlySingleton<S, SnapshotInfo> {
     singleton_read(storage, TOTAL_SUPPLY_SNAPSHOT_INFO_KEY)
 }
 
@@ -123,15 +125,23 @@ pub fn balance_snapshot_info<S: Storage>(storage: &mut S) -> Bucket<S, SnapshotI
     bucket(PREFIX_BALANCE_SNAPSHOT_INFO, storage)
 }
 
-pub fn balance_snapshot_info_read<S: ReadonlyStorage>(storage: &S) -> ReadonlyBucket<S, SnapshotInfo> {
+pub fn balance_snapshot_info_read<S: ReadonlyStorage>(
+    storage: &S,
+) -> ReadonlyBucket<S, SnapshotInfo> {
     bucket_read(PREFIX_BALANCE_SNAPSHOT_INFO, storage)
 }
 
 /// balance Shapshots for a given address
-pub fn balance_snapshot<'a, S: Storage>(storage: &'a mut S, address_raw: &CanonicalAddr) -> Bucket<'a, S, Snapshot> {
+pub fn balance_snapshot<'a, S: Storage>(
+    storage: &'a mut S,
+    address_raw: &CanonicalAddr,
+) -> Bucket<'a, S, Snapshot> {
     Bucket::multilevel(&[PREFIX_BALANCE_SNAPSHOT, address_raw.as_slice()], storage)
 }
 
-pub fn balance_snapshot_read<'a, S: Storage>(storage: &'a S, address_raw: &CanonicalAddr) -> ReadonlyBucket<'a, S, Snapshot> {
+pub fn balance_snapshot_read<'a, S: Storage>(
+    storage: &'a S,
+    address_raw: &CanonicalAddr,
+) -> ReadonlyBucket<'a, S, Snapshot> {
     ReadonlyBucket::multilevel(&[PREFIX_BALANCE_SNAPSHOT, address_raw.as_slice()], storage)
 }

@@ -1,6 +1,6 @@
 pub mod allowances;
-pub mod base;
 pub mod contract;
+pub mod core;
 pub mod enumerable;
 pub mod msg;
 pub mod state;
