@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    log, to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     MigrateResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
@@ -134,35 +134,8 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     let rcpt_balance_new = rcpt_balance_old + amount;
     accounts.save(rcpt_raw.as_slice(), &rcpt_balance_new)?;
 
-    let mut balance_snapshot_info_bucket = balance_snapshot_info(&mut deps.storage);
-
-    // Update snapshot info
-    let mut sender_balance_snapshot_info = 
-        balance_snapshot_info_bucket
-            .may_load(sender_raw.as_slice())?
-            .unwrap_or(SnapshotInfo { 
-                start_index: 0,
-                end_index: 0,
-                end_block: env.block.height
-            });
-
-    if sender_balance_snapshot_info.end_block != env.block.height {
-        sender_balance_snapshot_info.end_index += 1;  
-        sender_balance_snapshot_info.end_block = env.block.height;  
-    }
-
-    balance_snapshot_info_bucket.save(sender_raw.as_slice(), &sender_balance_snapshot_info)?;
-
-    // Save new balance (always end index/end block)
-    let mut balance_snapshot_bucket = balance_snapshot(&mut deps.storage, &sender_raw);
-
-    balance_snapshot_bucket.save(
-        &sender_balance_snapshot_info.end_index.to_be_bytes(),
-        &Snapshot {
-            block: sender_balance_snapshot_info.end_block,
-            value: sender_balance_new, 
-        },
-    )?;
+    save_balance_snapshot(deps, &env, &sender_raw, sender_balance_new)?;
+    save_balance_snapshot(deps, &env, &rcpt_raw, rcpt_balance_new)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -175,6 +148,44 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
         data: None,
     };
     Ok(res)
+}
+
+pub fn save_balance_snapshot<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    addr_raw: &CanonicalAddr,
+    balance: Uint128,
+) -> StdResult<()> {
+    let mut balance_snapshot_info_bucket = balance_snapshot_info(&mut deps.storage);
+    // Update snapshot info
+    let mut balance_snapshot_info = 
+        balance_snapshot_info_bucket
+            .may_load(addr_raw.as_slice())?
+            .unwrap_or(SnapshotInfo { 
+                start_index: 0,
+                end_index: 0,
+                end_block: env.block.height
+            });
+
+    if balance_snapshot_info.end_block != env.block.height {
+        balance_snapshot_info.end_index += 1;  
+        balance_snapshot_info.end_block = env.block.height;  
+    }
+
+    balance_snapshot_info_bucket.save(addr_raw.as_slice(), &balance_snapshot_info)?;
+
+    // Save new balance (always end index/end block)
+    let mut balance_snapshot_bucket = balance_snapshot(&mut deps.storage, &addr_raw);
+
+    balance_snapshot_bucket.save(
+        &balance_snapshot_info.end_index.to_be_bytes(),
+        &Snapshot {
+            block: balance_snapshot_info.end_block,
+            value: balance, 
+        },
+    )?;
+
+    Ok(())
 }
 
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
@@ -346,8 +357,12 @@ pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
     block: u64,
 ) -> StdResult<BalanceResponse> {
     let addr_raw = deps.api.canonical_address(&address)?;
-    let balance_snapshot_info = balance_snapshot_info_read(&deps.storage)
-        .load(addr_raw.as_slice())?;
+    let balance_snapshot_info = 
+        match balance_snapshot_info_read(&deps.storage).may_load(addr_raw.as_slice()) {
+            Ok(Some(snapshot_info)) => snapshot_info,
+            Ok(None) => return Ok(BalanceResponse{balance: Uint128::zero()}),
+            Err(err) => return Err(err),
+        };
     let balance_snapshot_bucket = balance_snapshot_read(&deps.storage, &addr_raw);
 
     // If block is higher than end block, return last recorded balance
@@ -860,6 +875,7 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &addr2), transfer);
         assert_eq!(query_balance_at(&deps, addr1, 100_000).unwrap().balance, remainder);
+        assert_eq!(query_balance_at(&deps, addr2, 100_000).unwrap().balance, transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
     }
 
