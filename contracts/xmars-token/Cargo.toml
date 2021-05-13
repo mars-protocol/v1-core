@@ -1,13 +1,14 @@
 [package]
 name = "xmars-token"
 version = "0.2.0"
-authors = ["Spike Spiegel  <ethanfrey@users.noreply.github.com>"]
+authors = ["Spike Spiegel  <spikeonmars@protonmail.com>"]
 edition = "2018"
-description = "Extension of cw20-base to implement balance and total supply snapshots"
-license = "Apache-2.0"
-repository = "https://github.com/CosmWasm/cosmwasm-plus"
-homepage = "https://cosmwasm.com"
-documentation = "https://docs.cosmwasm.com"
+
+exclude = [
+  # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
+  "contract.wasm",
+  "hash.txt",
+]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -21,6 +22,7 @@ library = []
 cw0 = "0.2" 
 cw2 = "0.2" 
 cw20 = "0.2" 
+mars = { path = "../../packages/mars", version = "0.1.0" }
 cosmwasm-std = { version = "0.10.1", features = ["iterator"] }
 cosmwasm-storage = { version = "0.10.1", features = ["iterator"] }
 schemars = "0.7"

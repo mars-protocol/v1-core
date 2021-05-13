@@ -460,6 +460,7 @@ dependencies = [
  "cw0",
  "cw2",
  "cw20",
+ "mars",
  "schemars",
  "serde",
  "snafu",
