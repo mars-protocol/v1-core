@@ -2,7 +2,7 @@ use cosmwasm_std::{
     Api, CanonicalAddr, Env, Extern, Querier, StdResult, Storage, Uint128,
 };
 use crate::state::{
-    balances, balance_snapshot, balance_snapshot_info, SnapshotInfo, Snapshot,
+    balances, balance_snapshot, balance_snapshot_info, token_info, SnapshotInfo, Snapshot,
 };
 
 pub fn transfer<S: Storage, A: Api, Q: Querier>(
@@ -41,6 +41,27 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
         save_balance_snapshot(deps, &env, &rcpt_raw, rcpt_balance_new)?;
     }
 
+    Ok(())
+}
+
+pub fn burn<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: &Env,
+    sender_raw: &CanonicalAddr,
+    amount: Uint128,
+) -> StdResult<()> {
+    // lower balance
+    transfer(deps, env, Some(&sender_raw), None, amount)?;
+
+    // reduce total_supply
+    let mut new_total_supply = Uint128::zero();
+    token_info(&mut deps.storage).update(|mut info| {
+        info.total_supply = (info.total_supply - amount)?;
+        new_total_supply = info.total_supply;
+        Ok(info)
+    })?;
+
+    //save_total_supply_snapshot(deps, &env, new_total_supply);
     Ok(())
 }
 

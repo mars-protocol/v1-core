@@ -4,7 +4,8 @@ use cosmwasm_std::{
 };
 use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
 
-use crate::state::{allowances, allowances_read, balances, token_info};
+use crate::base;
+use crate::state::{allowances, allowances_read, balances};
 
 pub fn handle_increase_allowance<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -167,16 +168,7 @@ pub fn handle_burn_from<S: Storage, A: Api, Q: Querier>(
         amount,
     )?;
 
-    // lower balance
-    let mut accounts = balances(&mut deps.storage);
-    accounts.update(owner_raw.as_slice(), |balance: Option<Uint128>| {
-        balance.unwrap_or_default() - amount
-    })?;
-    // reduce total_supply
-    token_info(&mut deps.storage).update(|mut meta| {
-        meta.total_supply = (meta.total_supply - amount)?;
-        Ok(meta)
-    })?;
+    base::burn(deps, &env, &owner_raw, amount)?;
 
     let res = HandleResponse {
         messages: vec![],
