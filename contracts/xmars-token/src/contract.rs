@@ -152,18 +152,7 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
 
-    // lower balance
-    base::transfer(deps, &env, Some(&sender_raw), None, amount)?;
-
-    // reduce total_supply
-    let mut new_total_supply = Uint128::zero();
-    token_info(&mut deps.storage).update(|mut info| {
-        info.total_supply = (info.total_supply - amount)?;
-        new_total_supply = info.total_supply;
-        Ok(info)
-    })?;
-
-    //save_total_supply_snapshot(deps, &env, new_total_supply);
+    base::burn(deps, &env, &sender_raw, amount)?;
 
     let res = HandleResponse {
         messages: vec![],
