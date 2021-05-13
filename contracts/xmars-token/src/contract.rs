@@ -1,10 +1,11 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    log, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     MigrateResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
 
+use crate::base;
 use crate::allowances::{
     handle_burn_from, handle_decrease_allowance, handle_increase_allowance, handle_send_from,
     handle_transfer_from, query_allowance,
@@ -13,9 +14,9 @@ use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    balances, balances_read, balance_snapshot, balance_snapshot_read, balance_snapshot_info,
-    balance_snapshot_info_read, token_info, token_info_read, MinterData, SnapshotInfo,
-    Snapshot, TokenInfo,
+    balances, balances_read,  balance_snapshot_read,
+    balance_snapshot_info_read, token_info, token_info_read, MinterData,
+    TokenInfo,
 };
 
 // version info for migration info
@@ -121,21 +122,10 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
-    let rcpt_raw = deps.api.canonical_address(&recipient)?;
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
+    let rcpt_raw = deps.api.canonical_address(&recipient)?;
 
-    let mut accounts = balances(&mut deps.storage);
-
-    let sender_balance_old = accounts.load(sender_raw.as_slice()).unwrap_or_default();
-    let sender_balance_new = (sender_balance_old - amount)?;
-    accounts.save(sender_raw.as_slice(), &sender_balance_new)?;
-
-    let rcpt_balance_old = accounts.load(rcpt_raw.as_slice()).unwrap_or_default();
-    let rcpt_balance_new = rcpt_balance_old + amount;
-    accounts.save(rcpt_raw.as_slice(), &rcpt_balance_new)?;
-
-    save_balance_snapshot(deps, &env, &sender_raw, sender_balance_new)?;
-    save_balance_snapshot(deps, &env, &rcpt_raw, rcpt_balance_new)?;
+    base::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -150,43 +140,6 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
-pub fn save_balance_snapshot<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: &Env,
-    addr_raw: &CanonicalAddr,
-    balance: Uint128,
-) -> StdResult<()> {
-    let mut balance_snapshot_info_bucket = balance_snapshot_info(&mut deps.storage);
-    // Update snapshot info
-    let mut balance_snapshot_info = 
-        balance_snapshot_info_bucket
-            .may_load(addr_raw.as_slice())?
-            .unwrap_or(SnapshotInfo { 
-                start_index: 0,
-                end_index: 0,
-                end_block: env.block.height
-            });
-
-    if balance_snapshot_info.end_block != env.block.height {
-        balance_snapshot_info.end_index += 1;  
-        balance_snapshot_info.end_block = env.block.height;  
-    }
-
-    balance_snapshot_info_bucket.save(addr_raw.as_slice(), &balance_snapshot_info)?;
-
-    // Save new balance (always end index/end block)
-    let mut balance_snapshot_bucket = balance_snapshot(&mut deps.storage, &addr_raw);
-
-    balance_snapshot_bucket.save(
-        &balance_snapshot_info.end_index.to_be_bytes(),
-        &Snapshot {
-            block: balance_snapshot_info.end_block,
-            value: balance, 
-        },
-    )?;
-
-    Ok(())
-}
 
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -200,15 +153,17 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
 
     // lower balance
-    let mut accounts = balances(&mut deps.storage);
-    accounts.update(sender_raw.as_slice(), |balance: Option<Uint128>| {
-        balance.unwrap_or_default() - amount
-    })?;
+    base::transfer(deps, &env, Some(&sender_raw), None, amount)?;
+
     // reduce total_supply
+    let mut new_total_supply = Uint128::zero();
     token_info(&mut deps.storage).update(|mut info| {
         info.total_supply = (info.total_supply - amount)?;
+        new_total_supply = info.total_supply;
         Ok(info)
     })?;
+
+    //save_total_supply_snapshot(deps, &env, new_total_supply);
 
     let res = HandleResponse {
         messages: vec![],
@@ -251,9 +206,7 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
 
     // add amount to recipient balance
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
-    balances(&mut deps.storage).update(rcpt_raw.as_slice(), |balance: Option<Uint128>| {
-        Ok(balance.unwrap_or_default() + amount)
-    })?;
+    base::transfer(deps, &env, None, Some(&rcpt_raw), amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -282,13 +235,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
 
     // move the tokens to the contract
-    let mut accounts = balances(&mut deps.storage);
-    accounts.update(sender_raw.as_slice(), |balance: Option<Uint128>| {
-        balance.unwrap_or_default() - amount
-    })?;
-    accounts.update(rcpt_raw.as_slice(), |balance: Option<Uint128>| {
-        Ok(balance.unwrap_or_default() + amount)
-    })?;
+    base::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
 
     let sender = deps.api.human_address(&sender_raw)?;
     let logs = vec![
