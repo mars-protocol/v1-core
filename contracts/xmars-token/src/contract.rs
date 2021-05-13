@@ -13,7 +13,9 @@ use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    balances, balances_read, balance_snapshot, balance_snapshot_info, token_info, token_info_read, MinterData, SnapshotInfo, Snapshot, TokenInfo
+    balances, balances_read, balance_snapshot, balance_snapshot_read, balance_snapshot_info,
+    balance_snapshot_info_read, token_info, token_info_read, MinterData, SnapshotInfo,
+    Snapshot, TokenInfo,
 };
 
 // version info for migration info
@@ -310,6 +312,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
+        QueryMsg::BalanceAt { address, block } => to_binary(&query_balance_at(deps, address, block)?),
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(deps)?),
         QueryMsg::Minter {} => to_binary(&query_minter(deps)?),
         QueryMsg::Allowance { owner, spender } => {
@@ -335,6 +338,60 @@ pub fn query_balance<S: Storage, A: Api, Q: Querier>(
         .may_load(addr_raw.as_slice())?
         .unwrap_or_default();
     Ok(BalanceResponse { balance })
+}
+
+pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+    block: u64,
+) -> StdResult<BalanceResponse> {
+    let addr_raw = deps.api.canonical_address(&address)?;
+    let balance_snapshot_info = balance_snapshot_info_read(&deps.storage)
+        .load(addr_raw.as_slice())?;
+    let balance_snapshot_bucket = balance_snapshot_read(&deps.storage, &addr_raw);
+
+    // If block is higher than end block, return last recorded balance
+    if block >= balance_snapshot_info.end_block {
+       let balance = balance_snapshot_bucket
+           .load(&balance_snapshot_info.end_index.to_be_bytes())?
+           .value;
+       return Ok(BalanceResponse { balance });
+    }
+
+    // If block is lower than start block, return zero
+    let start_snapshot = balance_snapshot_bucket 
+        .load(&balance_snapshot_info.start_index.to_be_bytes())?;
+    if block < start_snapshot.block {
+       return Ok(BalanceResponse { balance: Uint128::zero() });
+    }
+
+    if block == start_snapshot.block {
+       return Ok(BalanceResponse { balance: start_snapshot.value});
+    }
+
+    let mut start_index = balance_snapshot_info.start_index;
+    let mut end_index = balance_snapshot_info.end_index;
+
+    let mut ret_value = start_snapshot.value;
+
+    while end_index > start_index {
+        let middle_index = end_index - ((end_index - start_index) / 2);
+
+        let middle_snapshot = balance_snapshot_bucket
+            .load(&middle_index.to_be_bytes())?;
+
+        if block >= middle_snapshot.block  {
+           ret_value = middle_snapshot.value;
+           if middle_snapshot.block == block {
+               break;
+           }
+           start_index = middle_index;
+        } else {
+           end_index = middle_index - 1;
+        }
+    }
+
+    Ok(BalanceResponse { balance: ret_value })
 }
 
 pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
@@ -392,6 +449,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
+    use mars::testing::{MockEnvParams};
     use cosmwasm_std::{coins, from_binary, CosmosMsg, Order, StdError, WasmMsg};
     use cw2::ContractVersion;
 
@@ -787,7 +845,10 @@ mod tests {
         }
 
         // valid transfer
-        let env = mock_env(addr1.clone(), &[]);
+        let env = mars::testing::mock_env(
+            addr1.as_str(),
+            MockEnvParams { block_height: 100_000, ..Default::default() }
+        );
         let msg = HandleMsg::Transfer {
             recipient: addr2.clone(),
             amount: transfer,
@@ -798,6 +859,7 @@ mod tests {
         let remainder = (amount1 - transfer).unwrap();
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &addr2), transfer);
+        assert_eq!(query_balance_at(&deps, addr1, 100_000).unwrap().balance, remainder);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
     }
 

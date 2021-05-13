@@ -121,6 +121,9 @@ pub enum QueryMsg {
     /// Returns the current balance of the given address, 0 if unset.
     /// Return type: BalanceResponse.
     Balance { address: HumanAddr },
+    /// Returns the balance of the given address at a given block
+    /// Return type: BalanceResponse.
+    BalanceAt { address: HumanAddr, block: u64 },
     /// Returns metadata on the contract - name, decimals, supply, etc.
     /// Return type: TokenInfoResponse.
     TokenInfo {},
