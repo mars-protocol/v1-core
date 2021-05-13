@@ -5,18 +5,17 @@ use cosmwasm_std::{
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
 
-use crate::base;
 use crate::allowances::{
     handle_burn_from, handle_decrease_allowance, handle_increase_allowance, handle_send_from,
     handle_transfer_from, query_allowance,
 };
+use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{
-    balances, balances_read,  balance_snapshot_read,
-    balance_snapshot_info_read, token_info, token_info_read, MinterData,
-    TokenInfo,
+    balance_snapshot_info_read, balance_snapshot_read, balances, balances_read, token_info,
+    token_info_read, MinterData, TokenInfo,
 };
 
 // version info for migration info
@@ -125,7 +124,7 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
 
-    base::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
+    core::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -140,7 +139,6 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
-
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -152,7 +150,7 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
 
-    base::burn(deps, &env, &sender_raw, amount)?;
+    core::burn(deps, &env, &sender_raw, amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -195,7 +193,7 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
 
     // add amount to recipient balance
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
-    base::transfer(deps, &env, None, Some(&rcpt_raw), amount)?;
+    core::transfer(deps, &env, None, Some(&rcpt_raw), amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -224,7 +222,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
     let sender_raw = deps.api.canonical_address(&env.message.sender)?;
 
     // move the tokens to the contract
-    base::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
+    core::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
 
     let sender = deps.api.human_address(&sender_raw)?;
     let logs = vec![
@@ -250,7 +248,6 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
-
 // QUERY
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -259,7 +256,9 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
-        QueryMsg::BalanceAt { address, block } => to_binary(&query_balance_at(deps, address, block)?),
+        QueryMsg::BalanceAt { address, block } => {
+            to_binary(&query_balance_at(deps, address, block)?)
+        }
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(deps)?),
         QueryMsg::Minter {} => to_binary(&query_minter(deps)?),
         QueryMsg::Allowance { owner, spender } => {
@@ -293,31 +292,39 @@ pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
     block: u64,
 ) -> StdResult<BalanceResponse> {
     let addr_raw = deps.api.canonical_address(&address)?;
-    let balance_snapshot_info = 
+    let balance_snapshot_info =
         match balance_snapshot_info_read(&deps.storage).may_load(addr_raw.as_slice()) {
             Ok(Some(snapshot_info)) => snapshot_info,
-            Ok(None) => return Ok(BalanceResponse{balance: Uint128::zero()}),
+            Ok(None) => {
+                return Ok(BalanceResponse {
+                    balance: Uint128::zero(),
+                })
+            }
             Err(err) => return Err(err),
         };
     let balance_snapshot_bucket = balance_snapshot_read(&deps.storage, &addr_raw);
 
     // If block is higher than end block, return last recorded balance
     if block >= balance_snapshot_info.end_block {
-       let balance = balance_snapshot_bucket
-           .load(&balance_snapshot_info.end_index.to_be_bytes())?
-           .value;
-       return Ok(BalanceResponse { balance });
+        let balance = balance_snapshot_bucket
+            .load(&balance_snapshot_info.end_index.to_be_bytes())?
+            .value;
+        return Ok(BalanceResponse { balance });
     }
 
     // If block is lower than start block, return zero
-    let start_snapshot = balance_snapshot_bucket 
-        .load(&balance_snapshot_info.start_index.to_be_bytes())?;
+    let start_snapshot =
+        balance_snapshot_bucket.load(&balance_snapshot_info.start_index.to_be_bytes())?;
     if block < start_snapshot.block {
-       return Ok(BalanceResponse { balance: Uint128::zero() });
+        return Ok(BalanceResponse {
+            balance: Uint128::zero(),
+        });
     }
 
     if block == start_snapshot.block {
-       return Ok(BalanceResponse { balance: start_snapshot.value});
+        return Ok(BalanceResponse {
+            balance: start_snapshot.value,
+        });
     }
 
     let mut start_index = balance_snapshot_info.start_index;
@@ -328,17 +335,16 @@ pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
     while end_index > start_index {
         let middle_index = end_index - ((end_index - start_index) / 2);
 
-        let middle_snapshot = balance_snapshot_bucket
-            .load(&middle_index.to_be_bytes())?;
+        let middle_snapshot = balance_snapshot_bucket.load(&middle_index.to_be_bytes())?;
 
-        if block >= middle_snapshot.block  {
-           ret_value = middle_snapshot.value;
-           if middle_snapshot.block == block {
-               break;
-           }
-           start_index = middle_index;
+        if block >= middle_snapshot.block {
+            ret_value = middle_snapshot.value;
+            if middle_snapshot.block == block {
+                break;
+            }
+            start_index = middle_index;
         } else {
-           end_index = middle_index - 1;
+            end_index = middle_index - 1;
         }
     }
 
@@ -400,9 +406,9 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use mars::testing::{MockEnvParams};
     use cosmwasm_std::{coins, from_binary, CosmosMsg, Order, StdError, WasmMsg};
     use cw2::ContractVersion;
+    use mars::testing::MockEnvParams;
 
     use super::*;
     use crate::migrations::generate_v01_test_data;
@@ -798,7 +804,10 @@ mod tests {
         // valid transfer
         let env = mars::testing::mock_env(
             addr1.as_str(),
-            MockEnvParams { block_height: 100_000, ..Default::default() }
+            MockEnvParams {
+                block_height: 100_000,
+                ..Default::default()
+            },
         );
         let msg = HandleMsg::Transfer {
             recipient: addr2.clone(),
@@ -810,8 +819,14 @@ mod tests {
         let remainder = (amount1 - transfer).unwrap();
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &addr2), transfer);
-        assert_eq!(query_balance_at(&deps, addr1, 100_000).unwrap().balance, remainder);
-        assert_eq!(query_balance_at(&deps, addr2, 100_000).unwrap().balance, transfer);
+        assert_eq!(
+            query_balance_at(&deps, addr1, 100_000).unwrap().balance,
+            remainder
+        );
+        assert_eq!(
+            query_balance_at(&deps, addr2, 100_000).unwrap().balance,
+            transfer
+        );
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
     }
 
