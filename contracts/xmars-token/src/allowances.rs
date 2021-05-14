@@ -5,7 +5,7 @@ use cosmwasm_std::{
 use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
 
 use crate::core;
-use crate::state::{allowances, allowances_read, balances};
+use crate::state::{allowances, allowances_read};
 
 pub fn handle_increase_allowance<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -128,13 +128,7 @@ pub fn handle_transfer_from<S: Storage, A: Api, Q: Querier>(
         amount,
     )?;
 
-    let mut accounts = balances(&mut deps.storage);
-    accounts.update(owner_raw.as_slice(), |balance: Option<Uint128>| {
-        balance.unwrap_or_default() - amount
-    })?;
-    accounts.update(rcpt_raw.as_slice(), |balance: Option<Uint128>| {
-        Ok(balance.unwrap_or_default() + amount)
-    })?;
+    core::transfer(deps, &env, Some(&owner_raw), Some(&rcpt_raw), amount)?;
 
     let res = HandleResponse {
         messages: vec![],
@@ -205,13 +199,7 @@ pub fn handle_send_from<S: Storage, A: Api, Q: Querier>(
     )?;
 
     // move the tokens to the contract
-    let mut accounts = balances(&mut deps.storage);
-    accounts.update(owner_raw.as_slice(), |balance: Option<Uint128>| {
-        balance.unwrap_or_default() - amount
-    })?;
-    accounts.update(rcpt_raw.as_slice(), |balance: Option<Uint128>| {
-        Ok(balance.unwrap_or_default() + amount)
-    })?;
+    core::transfer(deps, &env, Some(&owner_raw), Some(&rcpt_raw), amount)?;
 
     let spender = deps.api.human_address(&spender_raw)?;
     let logs = vec![
