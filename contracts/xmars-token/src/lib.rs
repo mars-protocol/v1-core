@@ -3,6 +3,7 @@ pub mod contract;
 pub mod core;
 pub mod enumerable;
 pub mod msg;
+pub mod snapshots;
 pub mod state;
 
 mod migrations;
