@@ -7,6 +7,7 @@
     "close_factor",
     "ma_token_code_id",
     "owner",
+    "reserve_contract_address",
     "reserve_count"
   ],
   "properties": {
@@ -21,6 +22,14 @@
     },
     "owner": {
       "description": "Contract owner",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "reserve_contract_address": {
+      "description": "Reserve contract address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"

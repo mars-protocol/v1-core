@@ -36,6 +36,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<InitResponse> {
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
+        reserve_contract_address: deps.api.canonical_address(&msg.reserve_contract_address)?,
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
         close_factor: msg.close_factor,
@@ -1225,6 +1226,8 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<ConfigResponse> {
     let config = config_state_read(&deps.storage).load()?;
     Ok(ConfigResponse {
+        owner: deps.api.human_address(&config.owner)?,
+        reserve_contract_address: deps.api.human_address(&config.reserve_contract_address)?,
         ma_token_code_id: config.ma_token_code_id,
         reserve_count: config.reserve_count,
         close_factor: config.close_factor,
@@ -1687,6 +1690,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
+            reserve_contract_address: HumanAddr::from("reserve_contract"),
             ma_token_code_id: 10u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -1708,6 +1712,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
+            reserve_contract_address: HumanAddr::from("reserve_contract"),
             ma_token_code_id: 5u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -3926,6 +3931,7 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         let msg = InitMsg {
+            reserve_contract_address: HumanAddr::from("reserve_contract"),
             ma_token_code_id: 1u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };

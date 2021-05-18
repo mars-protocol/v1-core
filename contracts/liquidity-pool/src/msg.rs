@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
+    pub reserve_contract_address: HumanAddr,
     pub ma_token_code_id: u64,
     pub close_factor: Decimal256,
 }
@@ -97,6 +98,8 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
+    pub owner: HumanAddr,
+    pub reserve_contract_address: HumanAddr,
     pub ma_token_code_id: u64,
     pub reserve_count: u32,
     pub close_factor: Decimal256,
