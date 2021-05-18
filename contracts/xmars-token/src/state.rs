@@ -145,3 +145,4 @@ pub fn balance_snapshot_read<'a, S: Storage>(
 ) -> ReadonlyBucket<'a, S, Snapshot> {
     ReadonlyBucket::multilevel(&[PREFIX_BALANCE_SNAPSHOT, address_raw.as_slice()], storage)
 }
+

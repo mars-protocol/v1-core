@@ -32,11 +32,11 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     };
 
     if let Some((sender_raw, sender_balance_new)) = option_sender_balance_new {
-        capture_balance_snapshot(deps, &env, &sender_raw, sender_balance_new)?;
+        capture_balance_snapshot(&mut deps.storage, &env, &sender_raw, sender_balance_new)?;
     }
 
     if let Some((rcpt_raw, rcpt_balance_new)) = option_rcpt_balance_new {
-        capture_balance_snapshot(deps, &env, &rcpt_raw, rcpt_balance_new)?;
+        capture_balance_snapshot(&mut deps.storage, &env, &rcpt_raw, rcpt_balance_new)?;
     }
 
     Ok(())
