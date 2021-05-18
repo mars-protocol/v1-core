@@ -188,6 +188,34 @@
           }
         }
       }
+    },
+    {
+      "description": "Update uncollateralized loan limit",
+      "type": "object",
+      "required": [
+        "update_uncollateralized_loan_limit"
+      ],
+      "properties": {
+        "update_uncollateralized_loan_limit": {
+          "type": "object",
+          "required": [
+            "asset",
+            "new_limit",
+            "user_address"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "new_limit": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "user_address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
   ],
   "definitions": {

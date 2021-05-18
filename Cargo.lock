@@ -283,6 +283,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "reserve"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-bignumber",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw20",
+ "mars",
+ "schemars",
+ "serde",
+ "snafu",
+ "terra-cosmwasm",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
