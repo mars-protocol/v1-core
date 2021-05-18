@@ -29,7 +29,7 @@
       ]
     },
     "reserve_contract_address": {
-      "description": "Reserve contract address",
+      "description": "Protocol reserve contract address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"

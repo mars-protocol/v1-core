@@ -1,9 +1,7 @@
 use cosmwasm_std::{
-    from_binary, to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse,
-    MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage,
+    to_binary, Api, Binary, Env, Extern, HandleResponse, InitResponse, MigrateResponse,
+    MigrateResult, Querier, StdResult, Storage,
 };
-
-use cw20::Cw20ReceiveMsg;
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{config_state, config_state_read, Config};
@@ -36,21 +34,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     _msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     Ok(HandleResponse::default())
-}
-
-/// cw20 receive implementation
-pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    cw20_msg: Cw20ReceiveMsg,
-) -> StdResult<HandleResponse> {
-    if let Some(msg) = cw20_msg.msg {
-        match from_binary(&msg)? {
-            _ => Ok(HandleResponse::default()),
-        }
-    } else {
-        Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
-    }
 }
 
 // QUERIES
