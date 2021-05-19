@@ -247,7 +247,9 @@ mod tests {
     use cosmwasm_std::{coins, CosmosMsg, StdError, WasmMsg};
     use cw20::{Cw20CoinHuman, TokenInfoResponse};
 
-    use crate::contract::{handle, init, query_balance, query_token_info};
+    use crate::contract::{
+        handle, init, query_balance, query_balance_at, query_token_info, query_total_supply_at,
+    };
     use crate::msg::{HandleMsg, InitMsg};
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
@@ -523,6 +525,18 @@ mod tests {
         // make sure money arrived
         assert_eq!(get_balance(&deps, &owner), (start - transfer).unwrap());
         assert_eq!(get_balance(&deps, &rcpt), transfer);
+        assert_eq!(
+            query_balance_at(&deps, owner.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            (start - transfer).unwrap()
+        );
+        assert_eq!(
+            query_balance_at(&deps, rcpt.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            transfer
+        );
 
         // ensure it looks good
         let allowance = query_allowance(&deps, owner.clone(), spender.clone()).unwrap();
@@ -599,6 +613,18 @@ mod tests {
 
         // make sure money burnt
         assert_eq!(get_balance(&deps, &owner), (start - transfer).unwrap());
+        assert_eq!(
+            query_balance_at(&deps, owner.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            (start - transfer).unwrap()
+        );
+        assert_eq!(
+            query_total_supply_at(&deps, env.block.height)
+                .unwrap()
+                .total_supply,
+            (start - transfer).unwrap()
+        );
 
         // ensure it looks good
         let allowance = query_allowance(&deps, owner.clone(), spender.clone()).unwrap();
