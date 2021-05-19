@@ -7,7 +7,7 @@ use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
 
-/// Basecamp global configuration
+/// Treasury global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: CanonicalAddr,
