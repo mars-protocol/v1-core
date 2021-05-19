@@ -13,7 +13,10 @@ use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg, TotalSupplyResponse};
-use crate::snapshots::{get_balance_snapshot_value_at, get_total_supply_snapshot_value_at};
+use crate::snapshots::{
+    capture_balance_snapshot, capture_total_supply_snapshot, get_balance_snapshot_value_at,
+    get_total_supply_snapshot_value_at,
+};
 use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
 
 // version info for migration info
@@ -22,19 +25,23 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     // check valid token info
     msg.validate()?;
     // create initial accounts
-    let total_supply = create_accounts(deps, &msg.initial_balances)?;
+    let total_supply = create_accounts(deps, &env, &msg.initial_balances)?;
 
     if let Some(limit) = msg.get_cap() {
         if total_supply > limit {
             return Err(StdError::generic_err("Initial supply greater than cap"));
         }
+    }
+
+    if total_supply > Uint128::zero() {
+        capture_total_supply_snapshot(&mut deps.storage, &env, total_supply)?;
     }
 
     let mint = match msg.mint {
@@ -59,13 +66,15 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
 pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
+    env: &Env,
     accounts: &[Cw20CoinHuman],
 ) -> StdResult<Uint128> {
     let mut total_supply = Uint128::zero();
-    let mut store = balances(&mut deps.storage);
     for row in accounts {
         let raw_address = deps.api.canonical_address(&row.address)?;
-        store.save(raw_address.as_slice(), &row.amount)?;
+        let mut accounts = balances(&mut deps.storage);
+        accounts.save(raw_address.as_slice(), &row.amount)?;
+        capture_balance_snapshot(&mut deps.storage, env, &raw_address, row.amount)?;
         total_supply += row.amount;
     }
     Ok(total_supply)
@@ -455,7 +464,7 @@ mod tests {
             mint: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env, init_msg).unwrap();
+        let res = init(&mut deps, env.clone(), init_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         assert_eq!(
@@ -468,6 +477,18 @@ mod tests {
             }
         );
         assert_eq!(get_balance(&deps, "addr0000"), Uint128(11223344));
+        assert_eq!(
+            query_balance_at(&deps, HumanAddr::from("addr0000"), env.block.height)
+                .unwrap()
+                .balance,
+            Uint128(11223344)
+        );
+        assert_eq!(
+            query_total_supply_at(&deps, env.block.height)
+                .unwrap()
+                .total_supply,
+            Uint128(11223344)
+        );
     }
 
     #[test]
