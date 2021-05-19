@@ -12,8 +12,8 @@ use crate::allowances::{
 use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
-use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
-use crate::snapshots::get_balance_snapshot_value_at;
+use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg, TotalSupplyResponse};
+use crate::snapshots::{get_balance_snapshot_value_at, get_total_supply_snapshot_value_at};
 use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
 
 // version info for migration info
@@ -258,6 +258,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
             to_binary(&query_balance_at(deps, address, block)?)
         }
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(deps)?),
+        QueryMsg::TotalSupplyAt { block } => to_binary(&query_total_supply_at(deps, block)?),
         QueryMsg::Minter {} => to_binary(&query_minter(deps)?),
         QueryMsg::Allowance { owner, spender } => {
             to_binary(&query_allowance(deps, owner, spender)?)
@@ -305,6 +306,14 @@ pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
         total_supply: info.total_supply,
     };
     Ok(res)
+}
+
+pub fn query_total_supply_at<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    block: u64,
+) -> StdResult<TotalSupplyResponse> {
+    let total_supply = get_total_supply_snapshot_value_at(&deps.storage, block)?;
+    Ok(TotalSupplyResponse { total_supply })
 }
 
 pub fn query_minter<S: Storage, A: Api, Q: Querier>(
@@ -806,7 +815,13 @@ mod tests {
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // valid burn reduces total supply
-        let env = mock_env(addr1.clone(), &[]);
+        let env = mars::testing::mock_env(
+            addr1.as_str(),
+            MockEnvParams {
+                block_height: 200_000,
+                ..Default::default()
+            },
+        );
         let msg = HandleMsg::Burn { amount: burn };
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(res.messages.len(), 0);
@@ -814,6 +829,16 @@ mod tests {
         let remainder = (amount1 - burn).unwrap();
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, remainder);
+        assert_eq!(
+            query_balance_at(&deps, addr1.clone(), 200_000)
+                .unwrap()
+                .balance,
+            remainder
+        );
+        assert_eq!(
+            query_total_supply_at(&deps, 200_000).unwrap().total_supply,
+            remainder
+        );
     }
 
     #[test]
