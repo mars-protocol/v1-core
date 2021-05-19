@@ -197,6 +197,7 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
         }
     }
     token_info(&mut deps.storage).save(&config)?;
+    capture_total_supply_snapshot(&mut deps.storage, &env, config.total_supply)?;
 
     // add amount to recipient balance
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
@@ -579,10 +580,32 @@ mod tests {
         };
 
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg.clone()).unwrap();
+        let res = handle(&mut deps, env.clone(), msg.clone()).unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(get_balance(&deps, &genesis), amount);
         assert_eq!(get_balance(&deps, &winner), prize);
+        assert_eq!(
+            query_balance_at(&deps, genesis.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            amount
+        );
+        assert_eq!(
+            query_balance_at(&deps, winner.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            prize
+        );
+        assert_eq!(
+            query_token_info(&deps).unwrap().total_supply,
+            amount + prize
+        );
+        assert_eq!(
+            query_total_supply_at(&deps, env.block.height)
+                .unwrap()
+                .total_supply,
+            amount + prize
+        );
 
         // but cannot mint nothing
         let msg = HandleMsg::Mint {
