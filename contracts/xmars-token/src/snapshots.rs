@@ -1,9 +1,9 @@
-use schemars::JsonSchema;
-use std::any::type_name; 
-use serde::{Deserialize, Serialize};
-use serde::de::DeserializeOwned;
-use cosmwasm_std::{to_vec, from_slice, CanonicalAddr, Env, StdError, StdResult, Storage, Uint128};
+use cosmwasm_std::{from_slice, to_vec, CanonicalAddr, Env, StdError, StdResult, Storage, Uint128};
 use cosmwasm_storage::{to_length_prefixed, to_length_prefixed_nested};
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use std::any::type_name;
 
 // STATE
 
@@ -33,10 +33,9 @@ pub struct SnapshotInfo {
     pub end_block: u64,
 }
 
-fn may_load_snapshot_info<S: Storage>(storage: &S, key: &[u8])
--> StdResult<Option<SnapshotInfo>> {
-   let value = storage.get(key);
-   may_deserialize(&value)
+fn may_load_snapshot_info<S: Storage>(storage: &S, key: &[u8]) -> StdResult<Option<SnapshotInfo>> {
+    let value = storage.get(key);
+    may_deserialize(&value)
 }
 
 fn save_snapshot_info<S: Storage>(
@@ -44,8 +43,13 @@ fn save_snapshot_info<S: Storage>(
     key: &[u8],
     snapshot_info: &SnapshotInfo,
 ) -> StdResult<()> {
-	storage.set(key, &to_vec(snapshot_info)?);
-	Ok(())
+    storage.set(key, &to_vec(snapshot_info)?);
+    Ok(())
+}
+
+fn load_snapshot<S: Storage>(storage: &S, namespace: &[u8], index: u64) -> StdResult<Snapshot> {
+    let value = storage.get(&kv_build_key(namespace, &index.to_be_bytes()));
+    must_deserialize(&value)
 }
 
 fn save_snapshot<S: Storage>(
@@ -54,18 +58,19 @@ fn save_snapshot<S: Storage>(
     index: u64,
     snapshot: &Snapshot,
 ) -> StdResult<()> {
-    storage.set(&kv_build_key(namespace, &index.to_be_bytes()), &to_vec(snapshot)?);
+    storage.set(
+        &kv_build_key(namespace, &index.to_be_bytes()),
+        &to_vec(snapshot)?,
+    );
     Ok(())
-} 
+}
 
 // STORAGE HELPERS (Taken from cosmwasm storage)
 /// may_deserialize parses json bytes from storage (Option), returning Ok(None) if no data present
 ///
 /// value is an odd type, but this is meant to be easy to use with output from storage.get (Option<Vec<u8>>)
 /// and value.map(|s| s.as_slice()) seems trickier than &value
-fn may_deserialize<T: DeserializeOwned>(
-    value: &Option<Vec<u8>>,
-) -> StdResult<Option<T>> {
+fn may_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResult<Option<T>> {
     match value {
         Some(vec) => Ok(Some(from_slice(&vec)?)),
         None => Ok(None),
@@ -87,7 +92,6 @@ fn kv_build_key(namespace: &[u8], key: &[u8]) -> Vec<u8> {
     k
 }
 
-
 // CORE
 //
 fn capture_snapshot<S: Storage>(
@@ -99,18 +103,17 @@ fn capture_snapshot<S: Storage>(
 ) -> StdResult<()> {
     // Update snapshot info
     let mut persist_snapshot_info = false;
-    let mut snapshot_info = 
-       match may_load_snapshot_info(storage, snapshot_info_key)? {
-           Some(some_snapshot_info) => some_snapshot_info,
-           None => {
-               persist_snapshot_info = true;
-               SnapshotInfo {
-                   start_index: 0,
-                   end_index: 0,
-                   end_block: env.block.height,
-               }
-           },
-       };
+    let mut snapshot_info = match may_load_snapshot_info(storage, snapshot_info_key)? {
+        Some(some_snapshot_info) => some_snapshot_info,
+        None => {
+            persist_snapshot_info = true;
+            SnapshotInfo {
+                start_index: 0,
+                end_index: 0,
+                end_block: env.block.height,
+            }
+        }
+    };
 
     if snapshot_info.end_block != env.block.height {
         persist_snapshot_info = true;
@@ -136,6 +139,58 @@ fn capture_snapshot<S: Storage>(
     Ok(())
 }
 
+pub fn get_snapshot_value_at<S: Storage>(
+    storage: &S,
+    snapshot_info_key: &[u8],
+    snapshot_namespace: &[u8],
+    block: u64,
+) -> StdResult<Uint128> {
+    let snapshot_info = match may_load_snapshot_info(storage, snapshot_info_key)? {
+        Some(some_snapshot_info) => some_snapshot_info,
+        None => return Ok(Uint128::zero()),
+    };
+
+    // If block is higher than end block, return last recorded balance
+    if block >= snapshot_info.end_block {
+        let value = load_snapshot(storage, snapshot_namespace, snapshot_info.end_index)?.value;
+        return Ok(value);
+    }
+
+    // If block is lower than start block, return zero
+    let start_snapshot = load_snapshot(storage, snapshot_namespace, snapshot_info.start_index)?;
+
+    if block < start_snapshot.block {
+        return Ok(Uint128::zero());
+    }
+
+    if block == start_snapshot.block {
+        return Ok(start_snapshot.value);
+    }
+
+    let mut start_index = snapshot_info.start_index;
+    let mut end_index = snapshot_info.end_index;
+
+    let mut ret_value = start_snapshot.value;
+
+    while end_index > start_index {
+        let middle_index = end_index - ((end_index - start_index) / 2);
+
+        let middle_snapshot = load_snapshot(storage, snapshot_namespace, middle_index)?;
+
+        if block >= middle_snapshot.block {
+            ret_value = middle_snapshot.value;
+            if middle_snapshot.block == block {
+                break;
+            }
+            start_index = middle_index;
+        } else {
+            end_index = middle_index - 1;
+        }
+    }
+
+    Ok(ret_value)
+}
+
 // BALANCE
 
 pub fn capture_balance_snapshot<S: Storage>(
@@ -147,10 +202,29 @@ pub fn capture_balance_snapshot<S: Storage>(
     capture_snapshot(
         storage,
         env,
-        &kv_build_key(&to_length_prefixed(PREFIX_BALANCE_SNAPSHOT_INFO), addr_raw.as_slice()),
+        &kv_build_key(
+            &to_length_prefixed(PREFIX_BALANCE_SNAPSHOT_INFO),
+            addr_raw.as_slice(),
+        ),
         to_length_prefixed_nested(&[PREFIX_BALANCE_SNAPSHOT, addr_raw.as_slice()]).as_slice(),
-        balance
-    ) 
+        balance,
+    )
+}
+
+pub fn get_balance_snapshot_value_at<S: Storage>(
+    storage: &S,
+    addr_raw: &CanonicalAddr,
+    block: u64,
+) -> StdResult<Uint128> {
+    get_snapshot_value_at(
+        storage,
+        &kv_build_key(
+            &to_length_prefixed(PREFIX_BALANCE_SNAPSHOT_INFO),
+            addr_raw.as_slice(),
+        ),
+        to_length_prefixed_nested(&[PREFIX_BALANCE_SNAPSHOT, addr_raw.as_slice()]).as_slice(),
+        block,
+    )
 }
 
 // TOTAL SUPPLY
@@ -165,7 +239,6 @@ pub fn capture_total_supply_snapshot<S: Storage>(
         env,
         &to_length_prefixed(KEY_TOTAL_SUPPLY_SNAPSHOT_INFO),
         &to_length_prefixed(PREFIX_TOTAL_SUPPLY_SNAPSHOT),
-        total_supply
-    ) 
+        total_supply,
+    )
 }
-

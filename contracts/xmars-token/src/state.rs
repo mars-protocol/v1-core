@@ -31,34 +31,9 @@ impl TokenInfo {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-/// Snapshot for a given amount, could be applied to the total supply or to the balance of
-/// a specific address
-pub struct Snapshot {
-    pub block: u64,
-    pub value: Uint128,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-/// Metadata snapshots for a given address
-pub struct SnapshotInfo {
-    /// Index where snapshot search should start (Could be different than 0 if, in the
-    /// future, sample should get smaller than all available to guarantee less operations
-    /// when searching for a snapshot
-    pub start_index: u64,
-    /// Last index for snapshot search
-    pub end_index: u64,
-    /// Last block a snapshot was taken
-    pub end_block: u64,
-}
-
 const TOKEN_INFO_KEY: &[u8] = b"token_info";
-const TOTAL_SUPPLY_SNAPSHOT_INFO_KEY: &[u8] = b"total_supply_snapshot_info";
 const PREFIX_BALANCE: &[u8] = b"balance";
 const PREFIX_ALLOWANCE: &[u8] = b"allowance";
-const PREFIX_TOTAL_SUPPLY_SNAPSHOT: &[u8] = b"total_supply_snapshot";
-const PREFIX_BALANCE_SNAPSHOT_INFO: &[u8] = b"balance_snapshot_info";
-const PREFIX_BALANCE_SNAPSHOT: &[u8] = b"balance_snapshot";
 
 // meta is the token definition as well as the total_supply
 pub fn token_info<S: Storage>(storage: &mut S) -> Singleton<S, TokenInfo> {
@@ -99,50 +74,3 @@ pub fn allowances_read<'a, S: ReadonlyStorage>(
 ) -> ReadonlyBucket<'a, S, AllowanceResponse> {
     ReadonlyBucket::multilevel(&[PREFIX_ALLOWANCE, owner.as_slice()], storage)
 }
-
-/// Metadata for total supply snapshot
-pub fn total_supply_snapshot_info<S: Storage>(storage: &mut S) -> Singleton<S, SnapshotInfo> {
-    singleton(storage, TOTAL_SUPPLY_SNAPSHOT_INFO_KEY)
-}
-
-pub fn total_supply_snapshot_info_read<S: ReadonlyStorage>(
-    storage: &S,
-) -> ReadonlySingleton<S, SnapshotInfo> {
-    singleton_read(storage, TOTAL_SUPPLY_SNAPSHOT_INFO_KEY)
-}
-
-/// Snapshots for total supply
-pub fn total_supply_snapshot<S: Storage>(storage: &mut S) -> Bucket<S, Snapshot> {
-    bucket(PREFIX_TOTAL_SUPPLY_SNAPSHOT, storage)
-}
-
-pub fn total_supply_snapshot_read<S: ReadonlyStorage>(storage: &S) -> ReadonlyBucket<S, Snapshot> {
-    bucket_read(PREFIX_TOTAL_SUPPLY_SNAPSHOT, storage)
-}
-
-/// Metadata for balance snapshots
-pub fn balance_snapshot_info<S: Storage>(storage: &mut S) -> Bucket<S, SnapshotInfo> {
-    bucket(PREFIX_BALANCE_SNAPSHOT_INFO, storage)
-}
-
-pub fn balance_snapshot_info_read<S: ReadonlyStorage>(
-    storage: &S,
-) -> ReadonlyBucket<S, SnapshotInfo> {
-    bucket_read(PREFIX_BALANCE_SNAPSHOT_INFO, storage)
-}
-
-/// balance Shapshots for a given address
-pub fn balance_snapshot<'a, S: Storage>(
-    storage: &'a mut S,
-    address_raw: &CanonicalAddr,
-) -> Bucket<'a, S, Snapshot> {
-    Bucket::multilevel(&[PREFIX_BALANCE_SNAPSHOT, address_raw.as_slice()], storage)
-}
-
-pub fn balance_snapshot_read<'a, S: Storage>(
-    storage: &'a S,
-    address_raw: &CanonicalAddr,
-) -> ReadonlyBucket<'a, S, Snapshot> {
-    ReadonlyBucket::multilevel(&[PREFIX_BALANCE_SNAPSHOT, address_raw.as_slice()], storage)
-}
-

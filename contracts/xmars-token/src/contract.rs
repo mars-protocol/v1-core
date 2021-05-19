@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, Extern, Env, HandleResponse, HumanAddr, InitResponse,
+    log, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     MigrateResponse, Querier, StdError, StdResult, Storage, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
@@ -13,11 +13,8 @@ use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
-use crate::state::{
-    balance_snapshot_read, balance_snapshot_info_read,
-    balances, balances_read, token_info,
-    token_info_read, MinterData, TokenInfo,
-};
+use crate::snapshots::get_balance_snapshot_value_at;
+use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:cw20-base";
@@ -293,56 +290,8 @@ pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
     block: u64,
 ) -> StdResult<BalanceResponse> {
     let addr_raw = deps.api.canonical_address(&address)?;
-    let balance_snapshot_info = 
-        match balance_snapshot_info_read(&deps.storage).may_load(addr_raw.as_slice()) {
-            Ok(Some(snapshot_info)) => snapshot_info,
-            Ok(None) => return Ok(BalanceResponse{balance: Uint128::zero()}),
-            Err(err) => return Err(err),
-        };
-    let balance_snapshot_bucket = balance_snapshot_read(&deps.storage, &addr_raw);
-
-    // If block is higher than end block, return last recorded balance
-    if block >= balance_snapshot_info.end_block {
-       let balance = balance_snapshot_bucket
-           .load(&balance_snapshot_info.end_index.to_be_bytes())?
-           .value;
-       return Ok(BalanceResponse { balance });
-    }
-
-    // If block is lower than start block, return zero
-    let start_snapshot = balance_snapshot_bucket 
-        .load(&balance_snapshot_info.start_index.to_be_bytes())?;
-    if block < start_snapshot.block {
-       return Ok(BalanceResponse { balance: Uint128::zero() });
-    }
-
-    if block == start_snapshot.block {
-       return Ok(BalanceResponse { balance: start_snapshot.value});
-    }
-
-    let mut start_index = balance_snapshot_info.start_index;
-    let mut end_index = balance_snapshot_info.end_index;
-
-    let mut ret_value = start_snapshot.value;
-
-    while end_index > start_index {
-        let middle_index = end_index - ((end_index - start_index) / 2);
-
-        let middle_snapshot = balance_snapshot_bucket
-            .load(&middle_index.to_be_bytes())?;
-
-        if block >= middle_snapshot.block  {
-           ret_value = middle_snapshot.value;
-           if middle_snapshot.block == block {
-               break;
-           }
-           start_index = middle_index;
-        } else {
-           end_index = middle_index - 1;
-        }
-    }
-
-    Ok(BalanceResponse { balance: ret_value })
+    let balance = get_balance_snapshot_value_at(&deps.storage, &addr_raw, block)?;
+    Ok(BalanceResponse { balance })
 }
 
 pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
