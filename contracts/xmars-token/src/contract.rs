@@ -11,7 +11,6 @@ use crate::allowances::{
 };
 use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
-use crate::migrations::migrate_v01_to_v02;
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg, TotalSupplyResponse};
 use crate::snapshots::{
     capture_balance_snapshot, capture_total_supply_snapshot, get_balance_snapshot_value_at,
@@ -20,7 +19,7 @@ use crate::snapshots::{
 use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
 
 // version info for migration info
-const CONTRACT_NAME: &str = "crates.io:cw20-base";
+const CONTRACT_NAME: &str = "crates.io:xmars-token";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
@@ -352,13 +351,6 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
             CONTRACT_NAME, old_version.contract
         )));
     }
-    // note: v0.1.0 were not auto-generated and started with v0.
-    // more recent versions do not have the v prefix
-    if old_version.version.starts_with("v0.1.") {
-        migrate_v01_to_v02(&mut deps.storage)?;
-        set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-        return Ok(MigrateResponse::default());
-    }
     Err(StdError::generic_err(format!(
         "Unknown version {}",
         old_version.version
@@ -368,14 +360,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{coins, from_binary, CosmosMsg, Order, StdError, WasmMsg};
-    use cw2::ContractVersion;
+    use cosmwasm_std::{coins, from_binary, CosmosMsg, StdError, WasmMsg};
     use mars::testing::MockEnvParams;
 
     use super::*;
-    use crate::migrations::generate_v01_test_data;
-    use crate::state::allowances_read;
-    use cw20::{AllowanceResponse, Expiration};
 
     const CANONICAL_LENGTH: usize = 20;
 
@@ -957,104 +945,5 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &contract), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
-    }
-
-    #[test]
-    fn migrate_from_v01() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        generate_v01_test_data(&mut deps.storage, &deps.api).unwrap();
-        // make sure this really is 0.1.0
-        assert_eq!(
-            get_contract_version(&deps.storage).unwrap(),
-            ContractVersion {
-                contract: CONTRACT_NAME.to_string(),
-                version: "v0.1.0".to_string(),
-            }
-        );
-
-        // run the migration
-        let env = mock_env(HumanAddr::from("admin"), &[]);
-        migrate(&mut deps, env, MigrateMsg {}).unwrap();
-
-        // make sure the version is updated
-        assert_eq!(
-            get_contract_version(&deps.storage).unwrap(),
-            ContractVersion {
-                contract: CONTRACT_NAME.to_string(),
-                version: CONTRACT_VERSION.to_string(),
-            }
-        );
-
-        // check all the data (against the spec in generate_v01_test_data)
-        let info = token_info_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            info,
-            TokenInfo {
-                name: "Sample Coin".to_string(),
-                symbol: "SAMP".to_string(),
-                decimals: 2,
-                total_supply: Uint128(777777),
-                mint: None,
-            }
-        );
-
-        // 2 users
-        let user1 = deps
-            .api
-            .canonical_address(&HumanAddr::from("user1"))
-            .unwrap();
-        let user2 = deps
-            .api
-            .canonical_address(&HumanAddr::from("user2"))
-            .unwrap();
-
-        let bal = balances_read(&deps.storage);
-        assert_eq!(2, bal.range(None, None, Order::Descending).count());
-        assert_eq!(bal.load(user1.as_slice()).unwrap(), Uint128(123456));
-        assert_eq!(bal.load(user2.as_slice()).unwrap(), Uint128(654321));
-
-        let spender1 = deps
-            .api
-            .canonical_address(&HumanAddr::from("spender1"))
-            .unwrap();
-        let spender2 = deps
-            .api
-            .canonical_address(&HumanAddr::from("spender2"))
-            .unwrap();
-
-        let num_allows = allowances_read(&deps.storage, &user1)
-            .range(None, None, Order::Ascending)
-            .count();
-        assert_eq!(num_allows, 1);
-        let allow = allowances_read(&deps.storage, &user1)
-            .load(spender1.as_slice())
-            .unwrap();
-        let expect = AllowanceResponse {
-            allowance: Uint128(5000),
-            expires: Expiration::AtHeight(5000),
-        };
-        assert_eq!(allow, expect);
-
-        let num_allows = allowances_read(&deps.storage, &user2)
-            .range(None, None, Order::Ascending)
-            .count();
-        assert_eq!(num_allows, 2);
-        let allow = allowances_read(&deps.storage, &user2)
-            .load(spender1.as_slice())
-            .unwrap();
-        let expect = AllowanceResponse {
-            allowance: Uint128(15000),
-            expires: Expiration::AtTime(1598647517),
-        };
-        assert_eq!(allow, expect);
-        let allow = allowances_read(&deps.storage, &user2)
-            .load(spender2.as_slice())
-            .unwrap();
-        let expect = AllowanceResponse {
-            allowance: Uint128(77777),
-            expires: Expiration::Never {},
-        };
-        assert_eq!(allow, expect);
     }
 }
