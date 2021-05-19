@@ -120,16 +120,23 @@ pub enum HandleMsg {
 pub enum QueryMsg {
     /// Returns the current balance of the given address, 0 if unset.
     /// Return type: BalanceResponse.
-    Balance { address: HumanAddr },
+    Balance {
+        address: HumanAddr,
+    },
     /// Returns the balance of the given address at a given block
     /// Return type: BalanceResponse.
-    BalanceAt { address: HumanAddr, block: u64 },
+    BalanceAt {
+        address: HumanAddr,
+        block: u64,
+    },
     /// Returns metadata on the contract - name, decimals, supply, etc.
     /// Return type: TokenInfoResponse.
     TokenInfo {},
-    /// Only with "mintable" extension.
-    /// Returns who can mint and how much.
-    /// Return type: MinterResponse.
+    /// Total Supply at a given block
+    /// Return type: TotalSupplyResponse
+    TotalSupplyAt {
+        block: u64,
+    },
     Minter {},
     /// Only with "allowance" extension.
     /// Returns how much spender can use from owner account, 0 if unset.
@@ -153,6 +160,11 @@ pub enum QueryMsg {
         start_after: Option<HumanAddr>,
         limit: Option<u32>,
     },
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+pub struct TotalSupplyResponse {
+    pub total_supply: Uint128,
 }
 
 /// We currently take no arguments for migrations

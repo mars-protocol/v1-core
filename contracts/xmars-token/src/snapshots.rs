@@ -21,11 +21,11 @@ pub struct Snapshot {
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-/// Metadata snapshots for a given address
+/// Snapshot metadata for a given value
 pub struct SnapshotInfo {
-    /// Index where snapshot search should start (Could be different than 0 if, in the
-    /// future, sample should get smaller than all available to guarantee less operations
-    /// when searching for a snapshot
+    /// Index where snapshot search should start. Could be different than 0 if the
+    /// target sample should get smaller than all available snapshots to guarantee
+    /// less operations when searching for a snapshot
     pub start_index: u64,
     /// Last index for snapshot search
     pub end_index: u64,
@@ -139,7 +139,7 @@ fn capture_snapshot<S: Storage>(
     Ok(())
 }
 
-pub fn get_snapshot_value_at<S: Storage>(
+fn get_snapshot_value_at<S: Storage>(
     storage: &S,
     snapshot_info_key: &[u8],
     snapshot_namespace: &[u8],
@@ -240,5 +240,17 @@ pub fn capture_total_supply_snapshot<S: Storage>(
         &to_length_prefixed(KEY_TOTAL_SUPPLY_SNAPSHOT_INFO),
         &to_length_prefixed(PREFIX_TOTAL_SUPPLY_SNAPSHOT),
         total_supply,
+    )
+}
+
+pub fn get_total_supply_snapshot_value_at<S: Storage>(
+    storage: &S,
+    block: u64,
+) -> StdResult<Uint128> {
+    get_snapshot_value_at(
+        storage,
+        &to_length_prefixed(KEY_TOTAL_SUPPLY_SNAPSHOT_INFO),
+        &to_length_prefixed(PREFIX_TOTAL_SUPPLY_SNAPSHOT),
+        block,
     )
 }
