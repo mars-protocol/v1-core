@@ -1,9 +1,6 @@
-use crate::state::{
-     balances, token_info,
-};
-use crate::snapshots::{capture_balance_snapshot};
+use crate::snapshots::capture_balance_snapshot;
+use crate::state::{balances, token_info};
 use cosmwasm_std::{Api, CanonicalAddr, Env, Extern, Querier, StdResult, Storage, Uint128};
-
 
 pub fn transfer<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -62,4 +59,3 @@ pub fn burn<S: Storage, A: Api, Q: Querier>(
     //save_total_supply_snapshot(deps, &env, new_total_supply);
     Ok(())
 }
-
