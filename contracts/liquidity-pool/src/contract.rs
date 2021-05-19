@@ -635,7 +635,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             ));
         }
     } else {
-        // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan allowance
+        // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
         let debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
         let borrower_debt: Debt =
             match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
