@@ -544,8 +544,6 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // TODO: Check the contract has enough funds to safely lend them
 
-    let borrow_amount_in_uusd: Uint256;
-
     if uncollateralized_loan_limit.is_zero() {
         // Collateralized loan: validate user has enough collateral if they have no uncollateralized loan limit
         let mut native_asset_prices_to_query: Vec<String> = match asset {
@@ -628,7 +626,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
 
         let borrow_asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
-        borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
+        let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
         if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd
         {
@@ -637,13 +635,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             ));
         }
     } else {
-        // Uncollateralized loan: check borrow amount in uusd plus debt in uusd does not exceed uncollateralized loan allowance
-        // TODO: fetch CW20 price with oracle if asset is not native
-        let asset_price_vec = get_native_asset_prices(deps, &vec![asset_label.clone()])?;
-        let asset_price = asset_get_price(asset_label.as_str(), &asset_price_vec, &asset_type)?;
-        borrow_amount_in_uusd = borrow_amount * asset_price;
-
-        // query debt
+        // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan allowance
         let debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
         let borrower_debt: Debt =
             match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
@@ -656,9 +648,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
         let asset_reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
         let debt_amount = borrower_debt.amount_scaled * asset_reserve.borrow_index;
-        let debt_amount_in_uusd = debt_amount * asset_price;
-        if borrow_amount_in_uusd + debt_amount_in_uusd > Uint256::from(uncollateralized_loan_limit)
-        {
+        if borrow_amount + debt_amount > Uint256::from(uncollateralized_loan_limit) {
             return Err(StdError::generic_err(
                 "borrow amount exceeds uncollateralized loan limit given existing debt",
             ));
@@ -3728,10 +3718,6 @@ mod tests {
         let available_liquidity = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
 
-        let exchange_rates = [(String::from("somecoin"), Decimal::from_ratio(2_u64, 1_u64))];
-        deps.querier
-            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
-
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
             borrow_index: Decimal256::from_ratio(12, 10),
@@ -3797,7 +3783,7 @@ mod tests {
         // Borrow asset
         block_time += 1000_u64;
         let initial_borrow_amount =
-            initial_uncollateralized_loan_limit.multiply_ratio(1_u64, 4_u64);
+            initial_uncollateralized_loan_limit.multiply_ratio(1_u64, 2_u64);
         let borrow_msg = HandleMsg::Borrow {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
@@ -3866,10 +3852,9 @@ mod tests {
         assert_eq!(expected_debt_scaled_after_borrow, debt.amount_scaled);
 
         // Borrow an amount less than initial limit but exceeding current limit
-        let remaining_limit = (initial_uncollateralized_loan_limit
-            - initial_borrow_amount.multiply_ratio(2_u64, 1_u64))
-        .unwrap();
-        let exceeding_limit = remaining_limit.multiply_ratio(1_u64, 2_u64) + Uint128::from(100_u64);
+        let remaining_limit =
+            (initial_uncollateralized_loan_limit - initial_borrow_amount).unwrap();
+        let exceeding_limit = remaining_limit + Uint128::from(100_u64);
 
         block_time += 1000_u64;
         let borrow_msg = HandleMsg::Borrow {
@@ -3894,7 +3879,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Uint256::from(remaining_limit.multiply_ratio(1_u64, 2_u64)),
+            amount: Uint256::from(remaining_limit),
         };
         let borrow_env = mars::testing::mock_env(
             "borrower",
