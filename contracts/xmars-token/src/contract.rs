@@ -918,7 +918,7 @@ mod tests {
             amount: transfer,
             msg: Some(send_msg.clone()),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = handle(&mut deps, env.clone(), msg).unwrap();
         assert_eq!(res.messages.len(), 1);
 
         // ensure proper send message sent
@@ -945,6 +945,18 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &contract), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        assert_eq!(
+            query_balance_at(&deps, addr1.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            remainder
+        );
+        assert_eq!(
+            query_balance_at(&deps, contract.clone(), env.block.height)
+                .unwrap()
+                .balance,
+            transfer
+        );
     }
 
     #[test]
