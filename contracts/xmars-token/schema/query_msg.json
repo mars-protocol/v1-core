@@ -23,6 +23,32 @@
       }
     },
     {
+      "description": "Returns the balance of the given address at a given block Return type: BalanceResponse.",
+      "type": "object",
+      "required": [
+        "balance_at"
+      ],
+      "properties": {
+        "balance_at": {
+          "type": "object",
+          "required": [
+            "address",
+            "block"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
       "type": "object",
       "required": [
@@ -35,7 +61,28 @@
       }
     },
     {
-      "description": "Only with \"mintable\" extension. Returns who can mint and how much. Return type: MinterResponse.",
+      "description": "Total Supply at a given block Return type: TotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "total_supply_at"
+      ],
+      "properties": {
+        "total_supply_at": {
+          "type": "object",
+          "required": [
+            "block"
+          ],
+          "properties": {
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
       "type": "object",
       "required": [
         "minter"
