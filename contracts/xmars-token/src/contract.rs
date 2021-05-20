@@ -946,4 +946,192 @@ mod tests {
         assert_eq!(get_balance(&deps, &contract), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
     }
+
+    #[test]
+    fn snapshots_are_taken_and_retrieved_correctly() {
+        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
+
+        let addr1 = HumanAddr::from("addr1");
+        let addr2 = HumanAddr::from("addr2");
+
+        let mut current_total_supply = Uint128(100_000);
+        let mut current_block = 12_345;
+        let mut current_addr1_balance = current_total_supply;
+        let mut current_addr2_balance = Uint128::zero();
+
+        let minter = HumanAddr::from("minter");
+        do_init_with_minter(&mut deps, &addr1, current_total_supply, &minter, None);
+
+        let mut expected_total_supplies = vec![(current_block, current_total_supply)];
+        let mut expected_addr1_balances = vec![(current_block, current_addr1_balance)];
+        let mut expected_addr2_balances: Vec<(u64, Uint128)> = vec![];
+
+        // Mint to addr2 3 times
+        for _i in 0..3 {
+            current_block += 100_000;
+
+            let mint_amount = Uint128(20_000);
+            current_total_supply = current_total_supply + mint_amount;
+            current_addr2_balance = current_addr2_balance + mint_amount;
+
+            let env = mars::testing::mock_env(
+                minter.as_str(),
+                MockEnvParams {
+                    block_height: current_block,
+                    ..Default::default()
+                },
+            );
+
+            let msg = HandleMsg::Mint {
+                recipient: addr2.clone(),
+                amount: mint_amount,
+            };
+
+            handle(&mut deps, env, msg).unwrap();
+
+            expected_total_supplies.push((current_block, current_total_supply));
+            expected_addr2_balances.push((current_block, current_addr2_balance));
+        }
+
+        // Transfer from addr1 to addr2 4 times
+        for _i in 0..4 {
+            current_block += 60_000;
+
+            let transfer_amount = Uint128(10_000);
+            current_addr1_balance = (current_addr1_balance - transfer_amount).unwrap();
+            current_addr2_balance = current_addr2_balance + transfer_amount;
+
+            let env = mars::testing::mock_env(
+                addr1.as_str(),
+                MockEnvParams {
+                    block_height: current_block,
+                    ..Default::default()
+                },
+            );
+
+            let msg = HandleMsg::Transfer {
+                recipient: addr2.clone(),
+                amount: transfer_amount,
+            };
+
+            handle(&mut deps, env, msg).unwrap();
+
+            expected_addr1_balances.push((current_block, current_addr1_balance));
+            expected_addr2_balances.push((current_block, current_addr2_balance));
+        }
+
+        // Burn from addr2 3 times
+        for _i in 0..3 {
+            current_block += 50_000;
+
+            let burn_amount = Uint128(20_000);
+            current_total_supply = (current_total_supply - burn_amount).unwrap();
+            current_addr2_balance = (current_addr2_balance - burn_amount).unwrap();
+
+            let env = mars::testing::mock_env(
+                addr2.as_str(),
+                MockEnvParams {
+                    block_height: current_block,
+                    ..Default::default()
+                },
+            );
+
+            let msg = HandleMsg::Burn {
+                amount: burn_amount,
+            };
+
+            handle(&mut deps, env, msg).unwrap();
+
+            expected_total_supplies.push((current_block, current_total_supply));
+            expected_addr2_balances.push((current_block, current_addr2_balance));
+        }
+
+        // Check total supplies;
+        let mut total_supply_previous_value = Uint128::zero();
+        for (block, expected_total_supply) in expected_total_supplies {
+            // block before gives previous value
+            assert_eq!(
+                query_total_supply_at(&deps, block - 1)
+                    .unwrap()
+                    .total_supply,
+                total_supply_previous_value
+            );
+
+            // block gives expected value
+            assert_eq!(
+                query_total_supply_at(&deps, block).unwrap().total_supply,
+                expected_total_supply,
+            );
+
+            // block after still gives expected value
+            assert_eq!(
+                query_total_supply_at(&deps, block + 10)
+                    .unwrap()
+                    .total_supply,
+                expected_total_supply,
+            );
+
+            total_supply_previous_value = expected_total_supply;
+        }
+
+        // Check addr1 balances
+        let mut balance_previous_value = Uint128::zero();
+        for (block, expected_balance) in expected_addr1_balances {
+            // block before gives previous value
+            assert_eq!(
+                query_balance_at(&deps, addr1.clone(), block - 10)
+                    .unwrap()
+                    .balance,
+                balance_previous_value
+            );
+
+            // block gives expected value
+            assert_eq!(
+                query_balance_at(&deps, addr1.clone(), block)
+                    .unwrap()
+                    .balance,
+                expected_balance
+            );
+
+            // block after still gives expected value
+            assert_eq!(
+                query_balance_at(&deps, addr1.clone(), block + 1)
+                    .unwrap()
+                    .balance,
+                expected_balance
+            );
+
+            balance_previous_value = expected_balance;
+        }
+
+        // Check addr2 balances
+        let mut balance_previous_value = Uint128::zero();
+        for (block, expected_balance) in expected_addr2_balances {
+            // block before gives previous value
+            assert_eq!(
+                query_balance_at(&deps, addr2.clone(), block - 10)
+                    .unwrap()
+                    .balance,
+                balance_previous_value
+            );
+
+            // block gives expected value
+            assert_eq!(
+                query_balance_at(&deps, addr2.clone(), block)
+                    .unwrap()
+                    .balance,
+                expected_balance
+            );
+
+            // block after still gives expected value
+            assert_eq!(
+                query_balance_at(&deps, addr2.clone(), block + 1)
+                    .unwrap()
+                    .balance,
+                expected_balance
+            );
+
+            balance_previous_value = expected_balance;
+        }
+    }
 }
