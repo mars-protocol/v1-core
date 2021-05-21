@@ -46,7 +46,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 })?,
+                    msg: to_binary(&HandleMsg::InitTokenCallback {})?,
                     contract_addr: env.contract.address,
                 }),
             })?,
@@ -65,9 +65,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitTokenCallback { token_id } => {
-            handle_init_token_callback(deps, env, token_id)
-        }
+        HandleMsg::InitTokenCallback {} => handle_init_xmars_token_callback(deps, env),
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
     }
 }
@@ -235,38 +233,29 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles token post initialization storing the addresses
-/// in config
-/// token is a byte: 0 = xMars, others are not authorized
-pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
+/// Handles xMars post-initialization storing the address in config
+pub fn handle_init_xmars_token_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    token_id: u8,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
 
-    return match token_id {
-        // xMars
-        0 => {
-            if config.xmars_token_address == CanonicalAddr::default() {
-                config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_xmars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        _ => Err(StdError::unauthorized()),
-    };
+    if config.xmars_token_address == CanonicalAddr::default() {
+        config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
+        config_singleton.save(&config)?;
+        Ok(HandleResponse {
+            messages: vec![],
+            log: vec![
+                log("action", "init_xmars_token"),
+                log("token_address", &env.message.sender),
+            ],
+            data: None,
+        })
+    } else {
+        // Can do this only once
+        Err(StdError::unauthorized())
+    }
 }
 
 /// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
@@ -408,7 +397,7 @@ mod tests {
                         cap: None,
                     }),
                     init_hook: Some(cw20_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 }).unwrap(),
+                        msg: to_binary(&HandleMsg::InitTokenCallback {}).unwrap(),
                         contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     }),
                 })
@@ -434,7 +423,7 @@ mod tests {
         assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
 
         // xmars token init callback
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("xmars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
@@ -453,7 +442,7 @@ mod tests {
         );
 
         // trying again fails
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("xmars_token_again", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
         let config = config_state_read(&deps.storage).load().unwrap();
@@ -478,12 +467,6 @@ mod tests {
             .api
             .canonical_address(&HumanAddr::from("staker"))
             .unwrap();
-
-        // let mut basecamp_singleton = basecamp_state(&mut deps.storage);
-        // let mut basecamp = basecamp_singleton.load().unwrap();
-        // let proposal_total_deposits = Uint128(200_000);
-        // basecamp.proposal_total_deposits = proposal_total_deposits;
-        // basecamp_singleton.save(&basecamp).unwrap();
 
         // no Mars in pool
         // stake X Mars -> should receive X xMars

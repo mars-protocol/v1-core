@@ -23,8 +23,8 @@ pub struct InitMsg {
 pub enum HandleMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
-    /// Callback to initialize Mars and xMars tokens
-    InitTokenCallback { token_id: u8 },
+    /// Callback to initialize Mars token
+    InitTokenCallback {},
 
     /// Mint Mars tokens to receiver (Temp action for Testing)
     MintMars {

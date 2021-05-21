@@ -18,8 +18,8 @@ pub enum HandleMsg {
     Receive(Cw20ReceiveMsg),
     /// Initialize or refresh cooldown
     Cooldown {},
-    /// Callback to initialize Mars and xMars tokens
-    InitTokenCallback { token_id: u8 },
+    /// Callback to initialize xMars token
+    InitTokenCallback {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
