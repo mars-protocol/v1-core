@@ -4,13 +4,23 @@
   "type": "object",
   "required": [
     "close_factor",
+    "insurance_fund_contract_address",
+    "insurance_fund_fee_share",
     "ma_token_code_id",
     "owner",
-    "reserve_contract_address",
-    "reserve_count"
+    "reserve_count",
+    "rewards_fee_share",
+    "treasury_contract_address",
+    "treasury_fee_share"
   ],
   "properties": {
     "close_factor": {
+      "$ref": "#/definitions/Decimal256"
+    },
+    "insurance_fund_contract_address": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "insurance_fund_fee_share": {
       "$ref": "#/definitions/Decimal256"
     },
     "ma_token_code_id": {
@@ -21,13 +31,19 @@
     "owner": {
       "$ref": "#/definitions/HumanAddr"
     },
-    "reserve_contract_address": {
-      "$ref": "#/definitions/HumanAddr"
-    },
     "reserve_count": {
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
+    },
+    "rewards_fee_share": {
+      "$ref": "#/definitions/Decimal256"
+    },
+    "treasury_contract_address": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "treasury_fee_share": {
+      "$ref": "#/definitions/Decimal256"
     }
   },
   "definitions": {
