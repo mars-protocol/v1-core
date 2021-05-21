@@ -15,24 +15,14 @@
       }
     },
     {
-      "description": "Callback to initialize Mars and xMars tokens",
+      "description": "Callback to initialize Mars token",
       "type": "object",
       "required": [
         "init_token_callback"
       ],
       "properties": {
         "init_token_callback": {
-          "type": "object",
-          "required": [
-            "token_id"
-          ],
-          "properties": {
-            "token_id": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0.0
-            }
-          }
+          "type": "object"
         }
       }
     },

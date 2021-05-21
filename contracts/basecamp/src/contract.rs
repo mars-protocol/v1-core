@@ -389,8 +389,17 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
             })?,
         }));
     }
-    // TODO: If staking gets separated from basecamp, a transfer needs to be sent to the
-    // contract that handles the staking
+
+    if new_proposal_status == ProposalStatus::Rejected {
+        handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+            msg: to_binary(&Cw20HandleMsg::Transfer {
+                recipient: deps.api.human_address(&config.staking_contract_address)?,
+                amount: proposal.deposit_amount,
+            })?,
+            send: vec![],
+        }))
+    }
 
     // Update proposal status
     proposal.status = new_proposal_status;
@@ -1350,7 +1359,18 @@ mod tests {
             ]
         );
 
-        assert_eq!(res.messages, vec![]);
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("mars_token"),
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: HumanAddr::from("staking_contract"),
+                    amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+                })
+                .unwrap(),
+                send: vec![],
+            })]
+        );
 
         let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&2u64.to_be_bytes())
@@ -1391,7 +1411,18 @@ mod tests {
             ]
         );
 
-        assert_eq!(res.messages, vec![]);
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("mars_token"),
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: HumanAddr::from("staking_contract"),
+                    amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+                })
+                .unwrap(),
+                send: vec![],
+            })]
+        );
 
         let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&3u64.to_be_bytes())
