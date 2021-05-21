@@ -106,7 +106,6 @@ pub struct ConfigResponse {
     pub insurance_fund_contract_address: HumanAddr,
     pub insurance_fund_fee_share: Decimal256,
     pub treasury_fee_share: Decimal256,
-    pub rewards_fee_share: Decimal256,
     pub ma_token_code_id: u64,
     pub reserve_count: u32,
     pub close_factor: Decimal256,

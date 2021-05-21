@@ -45,8 +45,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    let rewards_fee_share = Decimal256::one() - combined_fee_share;
-
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         treasury_contract_address: deps.api.canonical_address(&msg.treasury_contract_address)?,
@@ -58,7 +56,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         close_factor: msg.close_factor,
         insurance_fund_fee_share,
         treasury_fee_share,
-        rewards_fee_share,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -1244,7 +1241,6 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
             .human_address(&config.insurance_fund_contract_address)?,
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
-        rewards_fee_share: config.rewards_fee_share,
         ma_token_code_id: config.ma_token_code_id,
         reserve_count: config.reserve_count,
         close_factor: config.close_factor,
@@ -1736,9 +1732,6 @@ mod tests {
         let res = init(&mut deps, env, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        let expected_rewards_fee_share =
-            Decimal256::one() - (insurance_fund_fee_share + treasury_fee_share);
-
         // it worked, let's query the state
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
@@ -1746,7 +1739,6 @@ mod tests {
         assert_eq!(0, value.reserve_count);
         assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
         assert_eq!(treasury_fee_share, value.treasury_fee_share);
-        assert_eq!(expected_rewards_fee_share, value.rewards_fee_share);
     }
 
     #[test]

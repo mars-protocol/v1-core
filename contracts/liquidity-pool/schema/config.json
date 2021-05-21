@@ -10,7 +10,6 @@
     "ma_token_code_id",
     "owner",
     "reserve_count",
-    "rewards_fee_share",
     "treasury_contract_address",
     "treasury_fee_share"
   ],
@@ -48,9 +47,6 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
-    },
-    "rewards_fee_share": {
-      "$ref": "#/definitions/Decimal256"
     },
     "treasury_contract_address": {
       "description": "Protocol treasury contract address",
