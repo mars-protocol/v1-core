@@ -50,10 +50,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     config_state(&mut deps.storage).save(&config)?;
 
     // initialize State
-    basecamp_state(&mut deps.storage).save(&Basecamp {
-        proposal_count: 0,
-        proposal_total_deposits: Uint128(0),
-    })?;
+    basecamp_state(&mut deps.storage).save(&Basecamp { proposal_count: 0 })?;
 
     // Prepare response, should instantiate Mars and use the Register hook
     Ok(InitResponse {
@@ -194,7 +191,6 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     let mut basecamp_singleton = basecamp_state(&mut deps.storage);
     let mut basecamp = basecamp_singleton.load()?;
     basecamp.proposal_count += 1;
-    basecamp.proposal_total_deposits += deposit_amount;
     basecamp_singleton.save(&basecamp)?;
 
     // Transform MsgExecuteCalls into ProposalExecuteCalls by canonicalizing the contract address
@@ -406,13 +402,6 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     }
     // TODO: If staking gets separated from basecamp, a transfer needs to be sent to the
     // contract that handles the staking
-
-    // Update deposit totals
-    basecamp_state(&mut deps.storage).update(|mut basecamp| {
-        basecamp.proposal_total_deposits =
-            (basecamp.proposal_total_deposits - proposal.deposit_amount)?;
-        Ok(basecamp)
-    })?;
 
     // Update proposal status
     proposal.status = new_proposal_status;
@@ -877,10 +866,6 @@ mod tests {
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
         assert_eq!(basecamp.proposal_count, 1);
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            TEST_PROPOSAL_REQUIRED_DEPOSIT
-        );
 
         let proposal = proposals_state_read(&deps.storage)
             .load(&1_u64.to_be_bytes())
@@ -939,10 +924,6 @@ mod tests {
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
         assert_eq!(basecamp.proposal_count, 2);
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            TEST_PROPOSAL_REQUIRED_DEPOSIT + TEST_PROPOSAL_REQUIRED_DEPOSIT
-        );
 
         let proposal = proposals_state_read(&deps.storage)
             .load(&2_u64.to_be_bytes())
@@ -998,7 +979,7 @@ mod tests {
         );
 
         let msgs = vec![
-            // voting a non-existent proposal shold fail
+            // voting a non-existent proposal should fail
             (
                 HandleMsg::CastVote {
                     proposal_id: 3,
@@ -1228,13 +1209,6 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
 
-        basecamp_state(&mut deps.storage)
-            .update(|mut basecamp| {
-                basecamp.proposal_total_deposits = Uint128(100_000);
-                Ok(basecamp)
-            })
-            .unwrap();
-
         th_build_mock_proposal(
             &mut deps,
             MockProposal {
@@ -1289,14 +1263,6 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
 
-        let initial_proposal_deposits = Uint128(100_000);
-        basecamp_state(&mut deps.storage)
-            .update(|mut basecamp| {
-                basecamp.proposal_total_deposits = initial_proposal_deposits;
-                Ok(basecamp)
-            })
-            .unwrap();
-
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
         let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
         let proposal_end_height = 100_000u64;
@@ -1325,7 +1291,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 1 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -1360,13 +1326,6 @@ mod tests {
             .load(&1u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Passed);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (initial_proposal_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
 
         // end rejected proposal (no quorum)
         let initial_passed_proposal = th_build_mock_proposal(
@@ -1384,7 +1343,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 2 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -1408,13 +1367,6 @@ mod tests {
             .load(&2u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
 
         // end rejected proposal (no threshold)
         let initial_passed_proposal = th_build_mock_proposal(
@@ -1432,7 +1384,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 3 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -1456,13 +1408,6 @@ mod tests {
             .load(&3u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
     }
 
     #[test]
