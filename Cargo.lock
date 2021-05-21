@@ -254,6 +254,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ma-token"
+version = "0.2.0"
+dependencies = [
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw0",
+ "cw2",
+ "cw20",
+ "mars",
+ "schemars",
+ "serde",
+ "snafu",
+]
+
+[[package]]
 name = "mars"
 version = "0.1.0"
 dependencies = [
