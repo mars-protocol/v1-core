@@ -34,6 +34,19 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
+    let insurance_fund_fee_share = msg.insurance_fund_fee_share;
+    let treasury_fee_share = msg.treasury_fee_share;
+    let combined_fee_share = insurance_fund_fee_share + treasury_fee_share;
+
+    // Combined fee shares cannot exceed one
+    if combined_fee_share > Decimal256::one() {
+        return Err(StdError::generic_err(
+            "invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+        ));
+    }
+
+    let rewards_fee_share = Decimal256::one() - combined_fee_share;
+
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         treasury_contract_address: deps.api.canonical_address(&msg.treasury_contract_address)?,
@@ -43,6 +56,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
         close_factor: msg.close_factor,
+        insurance_fund_fee_share,
+        treasury_fee_share,
+        rewards_fee_share,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -331,6 +347,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
                     borrow_slope: asset_params.borrow_slope,
 
                     loan_to_value: asset_params.loan_to_value,
+
+                    reserve_factor: asset_params.reserve_factor,
 
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
@@ -1224,6 +1242,9 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         insurance_fund_contract_address: deps
             .api
             .human_address(&config.insurance_fund_contract_address)?,
+        insurance_fund_fee_share: config.insurance_fund_fee_share,
+        treasury_fee_share: config.treasury_fee_share,
+        rewards_fee_share: config.rewards_fee_share,
         ma_token_code_id: config.ma_token_code_id,
         reserve_count: config.reserve_count,
         close_factor: config.close_factor,
@@ -1685,23 +1706,47 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {
+        let mut insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
+        let mut treasury_fee_share = Decimal256::from_ratio(4, 10);
+        let exceeding_fees_msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share,
+            treasury_fee_share,
             ma_token_code_id: 10u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = init(&mut deps, env.clone(), exceeding_fees_msg);
+        println!("{:?}", res);
+
+        insurance_fund_fee_share = Decimal256::from_ratio(5, 10);
+        treasury_fee_share = Decimal256::from_ratio(3, 10);
+
+        let msg = InitMsg {
+            treasury_contract_address: HumanAddr::from("reserve_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share,
+            treasury_fee_share,
+            ma_token_code_id: 10u64,
+            close_factor: Decimal256::from_ratio(1, 2),
+        };
 
         // we can just call .unwrap() to assert this was a success
         let res = init(&mut deps, env, msg).unwrap();
         assert_eq!(0, res.messages.len());
+
+        let expected_rewards_fee_share =
+            Decimal256::one() - (insurance_fund_fee_share + treasury_fee_share);
 
         // it worked, let's query the state
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.reserve_count);
+        assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
+        assert_eq!(treasury_fee_share, value.treasury_fee_share);
+        assert_eq!(expected_rewards_fee_share, value.rewards_fee_share);
     }
 
     #[test]
@@ -1711,6 +1756,8 @@ mod tests {
         let msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
+            treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 5u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -1728,11 +1775,12 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                reserve_factor: Decimal256::from_ratio(1, 100),
                 liquidation_threshold: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
             },
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         // *
         // owner is authorized
@@ -1745,6 +1793,7 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                reserve_factor: Decimal256::from_ratio(1, 100),
                 liquidation_threshold: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
             },
@@ -1849,6 +1898,7 @@ mod tests {
             asset_params: InitAssetParams {
                 borrow_slope: Decimal256::from_ratio(4, 100),
                 loan_to_value: Decimal256::from_ratio(8, 10),
+                reserve_factor: Decimal256::from_ratio(1, 100),
                 liquidation_threshold: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
             },
@@ -3926,6 +3976,8 @@ mod tests {
         let msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
+            treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 1u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -3947,6 +3999,8 @@ mod tests {
         borrow_slope: Decimal256,
         loan_to_value: Decimal256,
 
+        reserve_factor: Decimal256,
+
         interests_last_updated: u64,
         debt_total_scaled: Uint256,
 
@@ -3966,6 +4020,7 @@ mod tests {
                 liquidity_rate: Default::default(),
                 borrow_slope: Default::default(),
                 loan_to_value: Default::default(),
+                reserve_factor: Default::default(),
                 interests_last_updated: 0,
                 debt_total_scaled: Default::default(),
                 asset_type: AssetType::Native,
@@ -4003,6 +4058,7 @@ mod tests {
             liquidity_rate: reserve.liquidity_rate,
             borrow_slope: reserve.borrow_slope,
             loan_to_value: reserve.loan_to_value,
+            reserve_factor: reserve.reserve_factor,
             interests_last_updated: reserve.interests_last_updated,
             debt_total_scaled: reserve.debt_total_scaled,
             asset_type: reserve.asset_type.clone(),
