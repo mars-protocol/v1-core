@@ -39,8 +39,6 @@ pub struct Config {
     pub insurance_fund_fee_share: Decimal256,
     // Percentage of fees that are sent to the treasury
     pub treasury_fee_share: Decimal256,
-    // Percentage of fees that are sent as rewards to the staking contract
-    pub rewards_fee_share: Decimal256,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
