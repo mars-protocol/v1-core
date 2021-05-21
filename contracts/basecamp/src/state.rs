@@ -56,10 +56,6 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 pub struct Basecamp {
     /// Number of proposals
     pub proposal_count: u64,
-    // TODO: This accounting should not be necessary if staking/reserve are separated
-    // from basecamp
-    /// Total Mars deposited in order to submit proposals
-    pub proposal_total_deposits: Uint128,
 }
 
 pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
