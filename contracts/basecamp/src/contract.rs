@@ -55,7 +55,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Prepare response, should instantiate Mars and use the Register hook
     Ok(InitResponse {
         log: vec![],
-        // TODO: Tokens are initialized here. Evaluate doing this outside of the contract
+        // TODO: Mars token is initialized here. Evaluate doing this outside of the contract
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
             code_id: msg.cw20_code_id,
             msg: to_binary(&cw20_token::msg::InitMsg {
@@ -68,7 +68,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
                     cap: None,
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 })?,
+                    msg: to_binary(&HandleMsg::InitTokenCallback {})?,
                     contract_addr: env.contract.address.clone(),
                 }),
             })?,
@@ -87,9 +87,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitTokenCallback { token_id } => {
-            handle_init_token_callback(deps, env, token_id)
-        }
+        HandleMsg::InitTokenCallback {} => handle_init_mars_callback(deps, env),
 
         HandleMsg::CastVote {
             proposal_id,
@@ -238,38 +236,29 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles token post initialization storing the addresses
-/// in config
-/// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
-pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
+/// Handles Mars post-initialization storing the address in config
+pub fn handle_init_mars_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    token_id: u8,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
 
-    return match token_id {
-        // Mars
-        0 => {
-            if config.mars_token_address == CanonicalAddr::default() {
-                config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_mars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        _ => Err(StdError::unauthorized()),
-    };
+    if config.mars_token_address == CanonicalAddr::default() {
+        config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
+        config_singleton.save(&config)?;
+        Ok(HandleResponse {
+            messages: vec![],
+            log: vec![
+                log("action", "init_mars_token"),
+                log("token_address", &env.message.sender),
+            ],
+            data: None,
+        })
+    } else {
+        // Can do this only once
+        Err(StdError::unauthorized())
+    }
 }
 
 pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
@@ -585,7 +574,7 @@ mod tests {
                         cap: None,
                     }),
                     init_hook: Some(cw20_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 }).unwrap(),
+                        msg: to_binary(&HandleMsg::InitTokenCallback {}).unwrap(),
                         contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     }),
                 })
@@ -609,7 +598,7 @@ mod tests {
         assert_eq!(basecamp.proposal_count, 0);
 
         // mars token init callback
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
@@ -633,7 +622,7 @@ mod tests {
         assert_eq!(xmars_token_address, config.xmars_token_address);
 
         // trying again fails
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("mars_token_again", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
         let config = config_state_read(&deps.storage).load().unwrap();
