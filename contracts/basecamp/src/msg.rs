@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
-    pub cooldown_duration: u64,
-    pub unstake_window: u64,
+    pub xmars_token_address: HumanAddr,
+    pub staking_contract_address: HumanAddr,
 
     pub proposal_voting_period: u64,
     pub proposal_effective_delay: u64,
@@ -32,9 +32,6 @@ pub enum HandleMsg {
         amount: Uint128,
     },
 
-    /// Initialize or refresh cooldown
-    Cooldown {},
-
     /// Vote for a proposal
     CastVote {
         proposal_id: u64,
@@ -54,10 +51,6 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    /// Stake Mars and get minted xMars in return
-    Stake,
-    /// Unstake Mars and burn xMars
-    Unstake,
     // TODO: Vote while sending tokens?
     SubmitProposal {
         title: String,
