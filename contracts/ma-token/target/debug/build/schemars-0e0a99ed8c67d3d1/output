@@ -1,0 +1,3 @@
+cargo:rustc-cfg=num_nonzero_signed
+cargo:rustc-cfg=std_atomic64
+cargo:rustc-cfg=std_atomic
