@@ -1,4 +1,4 @@
-use crate::state::{balances};
+use crate::state::balances;
 use cosmwasm_std::{Api, CanonicalAddr, Extern, Querier, StdResult, Storage, Uint128};
 
 pub fn transfer<S: Storage, A: Api, Q: Querier>(

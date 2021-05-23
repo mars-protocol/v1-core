@@ -6,14 +6,16 @@ use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
 
 use crate::allowances::{
-    handle_decrease_allowance, handle_increase_allowance, handle_send_from,
-    handle_transfer_from, query_allowance,
+    handle_decrease_allowance, handle_increase_allowance, handle_send_from, handle_transfer_from,
+    query_allowance,
 };
 use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state;
-use crate::state::{balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo};
+use crate::state::{
+    balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo,
+};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
@@ -54,9 +56,12 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
     token_info(&mut deps.storage).save(&data)?;
 
-    state::save_config(&mut deps.storage, &Config {
-        money_market_address:  deps.api.canonical_address(&msg.money_market_address)?,
-    })?;
+    state::save_config(
+        &mut deps.storage,
+        &Config {
+            money_market_address: deps.api.canonical_address(&msg.money_market_address)?,
+        },
+    )?;
 
     // store token config
     Ok(InitResponse::default())
@@ -141,13 +146,19 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
+/// Burns tokens from user. Only contract owner (money market) can call this.
+/// Used when user is being liquidated
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    _env: Env,
+    env: Env,
     user: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // TODO: only owner
+    let config = state::load_config(&deps.storage)?;
+    // only owner can burn
+    if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
+        return Err(StdError::unauthorized());
+    }
 
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
@@ -776,6 +787,7 @@ mod tests {
     #[test]
     fn burn() {
         let mut deps = mock_dependencies(20, &coins(2, "token"));
+        let money_market = HumanAddr::from("money_market");
         let addr1 = HumanAddr::from("addr0001");
         let amount1 = Uint128::from(12340000u128);
         let burn = Uint128::from(76543u128);
@@ -784,7 +796,7 @@ mod tests {
         do_init(&mut deps, &addr1, amount1);
 
         // cannot burn nothing
-        let env = mock_env(addr1.clone(), &[]);
+        let env = mock_env(money_market.clone(), &[]);
         let msg = HandleMsg::Burn {
             user: addr1.clone(),
             amount: Uint128::zero(),
@@ -797,8 +809,11 @@ mod tests {
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // cannot burn more than we have
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Burn { user: addr1.clone(), amount: too_much };
+        let env = mock_env(money_market.clone(), &[]);
+        let msg = HandleMsg::Burn {
+            user: addr1.clone(),
+            amount: too_much,
+        };
         let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Underflow { .. } => {}
@@ -806,9 +821,25 @@ mod tests {
         }
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
+        // only money market can burn
+        let env = mock_env(HumanAddr::from("someone_else"), &[]);
+        let msg = HandleMsg::Burn {
+            user: addr1.clone(),
+            amount: burn,
+        };
+        let res = handle(&mut deps, env, msg);
+        match res.unwrap_err() {
+            StdError::Unauthorized { .. } => {}
+            e => panic!("Unexpected error: {}", e),
+        }
+        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+
         // valid burn reduces total supply
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Burn { user: addr1.clone(), amount: burn };
+        let env = mock_env(money_market.clone(), &[]);
+        let msg = HandleMsg::Burn {
+            user: addr1.clone(),
+            amount: burn,
+        };
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(res.messages.len(), 0);
 

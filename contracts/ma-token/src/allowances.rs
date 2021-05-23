@@ -214,9 +214,7 @@ mod tests {
     use cosmwasm_std::{coins, CosmosMsg, StdError, WasmMsg};
     use cw20::{Cw20CoinHuman, TokenInfoResponse};
 
-    use crate::contract::{
-        handle, init, query_balance, query_token_info,
-    };
+    use crate::contract::{handle, init, query_balance, query_token_info};
     use crate::msg::{HandleMsg, InitMsg};
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(

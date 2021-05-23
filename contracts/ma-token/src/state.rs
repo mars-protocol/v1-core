@@ -1,10 +1,9 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{to_vec, CanonicalAddr, ReadonlyStorage, Storage, StdResult, Uint128};
+use cosmwasm_std::{to_vec, CanonicalAddr, ReadonlyStorage, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
-    bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket,
-    to_length_prefixed,
+    bucket, bucket_read, singleton, singleton_read, to_length_prefixed, Bucket, ReadonlyBucket,
     ReadonlyPrefixedStorage, ReadonlySingleton, Singleton,
 };
 use cw20::AllowanceResponse;
@@ -42,10 +41,7 @@ const CONFIG_KEY: &[u8] = b"config";
 const PREFIX_BALANCE: &[u8] = b"balance";
 const PREFIX_ALLOWANCE: &[u8] = b"allowance";
 
-pub fn save_config<S: Storage>(
-    storage: &mut S,
-    config: &Config,
-) -> StdResult<()> {
+pub fn save_config<S: Storage>(storage: &mut S, config: &Config) -> StdResult<()> {
     storage.set(&to_length_prefixed(CONFIG_KEY), &to_vec(config)?);
     Ok(())
 }
