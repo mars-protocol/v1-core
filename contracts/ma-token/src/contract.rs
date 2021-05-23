@@ -12,7 +12,8 @@ use crate::allowances::{
 use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
-use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
+use crate::state;
+use crate::state::{balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
@@ -20,7 +21,7 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -52,6 +53,12 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         mint,
     };
     token_info(&mut deps.storage).save(&data)?;
+
+    state::save_config(&mut deps.storage, &Config {
+        money_market_address:  deps.api.canonical_address(&msg.money_market_address)?,
+    })?;
+
+    // store token config
     Ok(InitResponse::default())
 }
 
@@ -396,6 +403,7 @@ mod tests {
                 amount,
             }],
             mint: mint.clone(),
+            money_market_address: HumanAddr::from("money_market"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(deps, env, init_msg).unwrap();
@@ -420,6 +428,8 @@ mod tests {
     fn proper_initialization() {
         let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
         let amount = Uint128::from(11223344u128);
+        let money_market_address = HumanAddr::from("money_market");
+
         let init_msg = InitMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
@@ -429,6 +439,7 @@ mod tests {
                 amount,
             }],
             mint: None,
+            money_market_address: money_market_address.clone(),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env.clone(), init_msg).unwrap();
@@ -444,6 +455,11 @@ mod tests {
             }
         );
         assert_eq!(get_balance(&deps, "addr0000"), Uint128(11223344));
+        let config = state::load_config(&deps.storage).unwrap();
+        assert_eq!(
+            config.money_market_address,
+            deps.api.canonical_address(&money_market_address).unwrap()
+        );
     }
 
     #[test]
@@ -464,6 +480,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
+            money_market_address: HumanAddr::from("money_market"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
@@ -506,6 +523,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
+            money_market_address: HumanAddr::from("money_market"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg);
@@ -633,6 +651,7 @@ mod tests {
                 },
             ],
             mint: None,
+            money_market_address: HumanAddr::from("money_market"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
