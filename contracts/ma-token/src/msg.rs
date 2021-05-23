@@ -10,6 +10,7 @@ pub struct InitMsg {
     pub decimals: u8,
     pub initial_balances: Vec<Cw20CoinHuman>,
     pub mint: Option<MinterResponse>,
+    pub money_market_address: HumanAddr,
 }
 
 impl InitMsg {

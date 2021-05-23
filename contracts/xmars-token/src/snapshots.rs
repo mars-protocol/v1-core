@@ -1,9 +1,8 @@
-use cosmwasm_std::{from_slice, to_vec, CanonicalAddr, Env, StdError, StdResult, Storage, Uint128};
+use cosmwasm_std::{to_vec, CanonicalAddr, Env, StdResult, Storage, Uint128};
 use cosmwasm_storage::{to_length_prefixed, to_length_prefixed_nested};
 use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::any::type_name;
+use mars::storage::{may_deserialize, must_deserialize, kv_build_key};
 
 // STATE
 
@@ -65,32 +64,6 @@ fn save_snapshot<S: Storage>(
     Ok(())
 }
 
-// STORAGE HELPERS (Taken from cosmwasm storage)
-/// may_deserialize parses json bytes from storage (Option), returning Ok(None) if no data present
-///
-/// value is an odd type, but this is meant to be easy to use with output from storage.get (Option<Vec<u8>>)
-/// and value.map(|s| s.as_slice()) seems trickier than &value
-fn may_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResult<Option<T>> {
-    match value {
-        Some(vec) => Ok(Some(from_slice(&vec)?)),
-        None => Ok(None),
-    }
-}
-
-/// must_deserialize parses json bytes from storage (Option), returning NotFound error if no data present
-fn must_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResult<T> {
-    match value {
-        Some(vec) => from_slice(&vec),
-        None => Err(StdError::not_found(type_name::<T>())),
-    }
-}
-
-#[inline]
-fn kv_build_key(namespace: &[u8], key: &[u8]) -> Vec<u8> {
-    let mut k = namespace.to_vec();
-    k.extend_from_slice(key);
-    k
-}
 
 // CORE
 //

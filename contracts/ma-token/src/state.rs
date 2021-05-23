@@ -1,16 +1,17 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, ReadonlyStorage, Storage, Uint128};
+use cosmwasm_std::{to_vec, CanonicalAddr, ReadonlyStorage, Storage, StdResult, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket,
+    to_length_prefixed,
     ReadonlyPrefixedStorage, ReadonlySingleton, Singleton,
 };
 use cw20::AllowanceResponse;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
-    pub money_markets_canonical_address: CanonicalAddr,
+    pub money_market_address: CanonicalAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -40,6 +41,19 @@ const TOKEN_INFO_KEY: &[u8] = b"token_info";
 const CONFIG_KEY: &[u8] = b"config";
 const PREFIX_BALANCE: &[u8] = b"balance";
 const PREFIX_ALLOWANCE: &[u8] = b"allowance";
+
+pub fn save_config<S: Storage>(
+    storage: &mut S,
+    config: &Config,
+) -> StdResult<()> {
+    storage.set(&to_length_prefixed(CONFIG_KEY), &to_vec(config)?);
+    Ok(())
+}
+
+pub fn load_config<S: Storage>(storage: &S) -> StdResult<Config> {
+    let value = storage.get(&to_length_prefixed(CONFIG_KEY));
+    mars::storage::must_deserialize(&value)
+}
 
 // meta is the token definition as well as the total_supply
 pub fn token_info<S: Storage>(storage: &mut S) -> Singleton<S, TokenInfo> {
