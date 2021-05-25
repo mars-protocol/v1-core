@@ -29,6 +29,8 @@ pub struct Config {
     pub treasury_contract_address: CanonicalAddr,
     /// Protocol insurance fund contract address
     pub insurance_fund_contract_address: CanonicalAddr,
+    /// Protocol staking contract address
+    pub staking_contract_address: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
     /// Reserve count

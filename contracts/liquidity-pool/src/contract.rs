@@ -10,7 +10,7 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, cw20_get_total_supply};
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
     MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
@@ -52,6 +52,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         insurance_fund_contract_address: deps
             .api
             .canonical_address(&msg.insurance_fund_contract_address)?,
+        staking_contract_address: deps.api.canonical_address(&msg.staking_contract_address)?,
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
         close_factor: msg.close_factor,
@@ -720,11 +721,11 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    reserve_update_market_indices(&env, &mut reserve);
+    let borrow_accumulated_interest = reserve_update_market_indices(&env, &mut reserve);
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
-    let mut messages = vec![];
+    let mut messages: Vec<CosmosMsg> = vec![];
     let mut refund_amount = Uint256::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
@@ -769,6 +770,33 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         unset_bit(&mut user.borrowed_assets, reserve.index)?;
         users_bucket.save(repayer_canonical_address.as_slice(), &user)?;
     }
+
+    // query total supply of the debt token and multiply by borrow_accumulated_interest and reserve_factor
+    // to get debt_accrued_to_distribute since last timestamp
+    let debt_token_supply =
+        cw20_get_total_supply(deps, deps.api.human_address(&reserve.ma_token_address)?)?;
+    let debt_accrued_to_distribute =
+        Uint256::from(debt_token_supply) * borrow_accumulated_interest * reserve.reserve_factor;
+
+    // TODO: look into if a refactor here to use Asset now makes sense
+    let asset = match asset_type {
+        AssetType::Native => Asset::Native {
+            denom: asset_label.to_string(),
+        },
+        AssetType::Cw20 => Asset::Cw20 {
+            contract_addr: deps
+                .api
+                .human_address(&CanonicalAddr::from(asset_reference))?,
+        },
+    };
+
+    send_debt_accrued_to_distribute_to_contracts(
+        deps,
+        env,
+        &mut messages,
+        debt_accrued_to_distribute,
+        asset,
+    )?;
 
     let mut log = vec![
         log("action", "repay"),
@@ -1411,8 +1439,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 /// Updates reserve indices by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
+pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decimal256 {
     let current_timestamp = env.block.time;
+    // TODO: confirm math here for calculating debt_accrued_to_distribute
+    let mut borrow_accumulated_interest = Decimal256::zero();
 
     if reserve.interests_last_updated < current_timestamp {
         let time_elapsed =
@@ -1420,9 +1450,9 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
         let seconds_per_year = Decimal256::from_uint256(SECONDS_PER_YEAR);
 
         if reserve.borrow_rate > Decimal256::zero() {
-            let accumulated_interest =
+            borrow_accumulated_interest =
                 Decimal256::one() + reserve.borrow_rate * time_elapsed / seconds_per_year;
-            reserve.borrow_index = reserve.borrow_index * accumulated_interest;
+            reserve.borrow_index = reserve.borrow_index * borrow_accumulated_interest;
         }
         if reserve.liquidity_rate > Decimal256::zero() {
             let accumulated_interest =
@@ -1431,6 +1461,8 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
         }
         reserve.interests_last_updated = current_timestamp;
     }
+
+    borrow_accumulated_interest
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1629,6 +1661,53 @@ fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
         UserHealthStatus::Borrowing(health_factor),
         native_asset_prices,
     ))
+
+fn send_debt_accrued_to_distribute_to_contracts<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    messages: &mut Vec<CosmosMsg>,
+    debt_accrued_to_distribute: Uint256,
+    asset: Asset,
+) -> StdResult<()> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    let insurance_fund_address = deps
+        .api
+        .human_address(&config.insurance_fund_contract_address)?;
+    let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
+    let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
+
+    let insurance_fund_fee_share = debt_accrued_to_distribute * config.insurance_fund_fee_share;
+    let treasury_fund_fee_share = debt_accrued_to_distribute * config.treasury_fee_share;
+    let staking_rewards_fee_share =
+        debt_accrued_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
+
+    let insurance_fund_msg = build_send_asset_msg(
+        env.contract.address.clone(),
+        insurance_fund_address,
+        asset.clone(),
+        insurance_fund_fee_share,
+    )?;
+    let treasury_fund_msg = build_send_asset_msg(
+        env.contract.address.clone(),
+        treasury_fund_address,
+        asset.clone(),
+        treasury_fund_fee_share,
+    )?;
+    let staking_msg = build_send_asset_msg(
+        env.contract.address,
+        staking_contract_address,
+        asset,
+        staking_rewards_fee_share,
+    )?;
+
+    messages.append(&mut vec![
+        insurance_fund_msg,
+        treasury_fund_msg,
+        staking_msg,
+    ]);
+
+    Ok(())
 }
 
 // HELPERS
@@ -1824,8 +1903,9 @@ mod tests {
         let mut insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
         let mut treasury_fee_share = Decimal256::from_ratio(4, 10);
         let exceeding_fees_msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share,
             treasury_fee_share,
             ma_token_code_id: 10u64,
@@ -1845,6 +1925,9 @@ mod tests {
         treasury_fee_share = Decimal256::from_ratio(3, 10);
 
         let msg = InitMsg {
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share,
             treasury_fee_share,
             ..exceeding_fees_msg
@@ -1868,8 +1951,9 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
             treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 5u64,
@@ -4358,8 +4442,9 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
             treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 1u64,
