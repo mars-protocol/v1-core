@@ -593,10 +593,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                     }
                 };
 
-                let mut debt = Uint256::zero();
-                let mut max_borrow = Decimal256::zero();
-
-                if user_is_using_as_collateral {
+                let max_borrow = if user_is_using_as_collateral {
                     // query asset balance (ma_token contract gives back a scaled value)
                     let asset_balance = cw20_get_balance(
                         deps,
@@ -604,17 +601,21 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                         deps.api.human_address(&borrower_canonical_addr)?,
                     )?;
                     let collateral = Uint256::from(asset_balance) * asset_reserve.liquidity_index;
-                    max_borrow = Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value;
-                }
+                    Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value
+                } else {
+                    Decimal256::zero()
+                };
 
-                if user_is_borrowing {
+                let debt = if user_is_borrowing {
                     // query debt
                     let debts_asset_bucket =
                         debts_asset_state(&mut deps.storage, asset_reference_vec.as_slice());
                     let borrower_debt: Debt =
                         debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
-                    debt = borrower_debt.amount_scaled * asset_reserve.borrow_index;
-                }
+                    borrower_debt.amount_scaled * asset_reserve.borrow_index
+                } else {
+                    Uint256::zero()
+                };
 
                 let asset_label = asset_get_label_and_add_price_to_query_list(
                     deps,
@@ -826,6 +827,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Handle loan liquidations on under-collateralized loans
+#[allow(clippy::too_many_arguments)]
 pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -1487,10 +1489,11 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     }
     let available_liquidity = Decimal256::from_uint256(contract_current_balance - liquidity_taken);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
-    let mut utilization_rate = Decimal256::zero();
-    if total_debt > Decimal256::zero() {
-        utilization_rate = total_debt / (available_liquidity + total_debt);
-    }
+    let utilization_rate = if total_debt > Decimal256::zero() {
+        total_debt / (available_liquidity + total_debt)
+    } else {
+        Decimal256::zero()
+    };
 
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
     reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
@@ -1552,7 +1555,7 @@ fn build_send_asset_msg(
     asset: Asset,
     amount: Uint256,
 ) -> StdResult<CosmosMsg> {
-    return match asset {
+    match asset {
         Asset::Native { denom } => Ok(build_send_native_asset_msg(
             sender_address,
             recipient_address,
@@ -1562,7 +1565,7 @@ fn build_send_asset_msg(
         Asset::Cw20 { contract_addr } => {
             build_send_cw20_token_msg(recipient_address, contract_addr, amount)
         }
-    };
+    }
 }
 
 fn build_send_native_asset_msg(
@@ -1602,7 +1605,7 @@ fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Vec<(String, Decimal256)>> {
     let mut asset_prices: Vec<(String, Decimal256)> = vec![];
 
-    if assets_to_query.len() > 0 {
+    if !assets_to_query.is_empty() {
         let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
         let querier = TerraQuerier::new(&deps.querier);
         let asset_prices_in_uusd = querier
@@ -2117,7 +2120,7 @@ mod tests {
             100u64,
         );
         let expected_mint_amount: Uint256 =
-            (Uint256::from(deposit_amount) / expected_liquidity_index).into();
+            Uint256::from(deposit_amount) / expected_liquidity_index;
 
         let expected_params = th_get_expected_indices_and_rates(
             &reserve,
@@ -2203,7 +2206,7 @@ mod tests {
                     .canonical_address(&HumanAddr::from("matoken"))
                     .unwrap()
                     .as_slice(),
-                &"somecoin".as_bytes().to_vec(),
+                &(b"somecoin".to_vec()),
             )
             .unwrap();
 
@@ -2374,7 +2377,7 @@ mod tests {
             res.messages,
             vec![
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: ma_token_addr.clone(),
+                    contract_addr: ma_token_addr,
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Burn {
                         amount: Uint128(burn_amount),
@@ -3010,9 +3013,9 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_addr.clone(),
+                contract_addr: cw20_contract_addr,
                 msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: borrower_addr.clone(),
+                    recipient: borrower_addr,
                     amount: expected_refund_amount.into(),
                 })
                 .unwrap(),
@@ -3092,7 +3095,7 @@ mod tests {
         let deposit_coin_address = HumanAddr::from("matoken");
         deps.querier.set_cw20_balances(
             deposit_coin_address,
-            &[(borrower_addr.clone(), Uint128::from(deposit_amount))],
+            &[(borrower_addr, Uint128::from(deposit_amount))],
         );
 
         // borrow with insufficient collateral, should fail
@@ -3103,7 +3106,7 @@ mod tests {
             amount: Uint256::from(deposit_amount) * ltv + Uint256::from(1000u128),
         };
         let env = mars::testing::mock_env("borrower", MockEnvParams::default());
-        handle(&mut deps, env.clone(), msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
         let msg = HandleMsg::Borrow {
@@ -3239,18 +3242,12 @@ mod tests {
         let borrower_addr = HumanAddr(String::from("borrower"));
 
         // Set the querier to return a certain collateral balance
-        deps.querier.set_cw20_balances(
-            ma_token_address_1.clone(),
-            &[(borrower_addr.clone(), balance_1)],
-        );
-        deps.querier.set_cw20_balances(
-            ma_token_address_2.clone(),
-            &[(borrower_addr.clone(), balance_2)],
-        );
-        deps.querier.set_cw20_balances(
-            ma_token_address_3.clone(),
-            &[(borrower_addr.clone(), balance_3)],
-        );
+        deps.querier
+            .set_cw20_balances(ma_token_address_1, &[(borrower_addr.clone(), balance_1)]);
+        deps.querier
+            .set_cw20_balances(ma_token_address_2, &[(borrower_addr.clone(), balance_2)]);
+        deps.querier
+            .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3)]);
 
         let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
             * Uint256::from(balance_1)
@@ -3404,7 +3401,7 @@ mod tests {
         // Set the querier to return positive collateral balance
         let collateral_balance = Uint128(5_000_000);
         deps.querier.set_cw20_balances(
-            collateral_address.clone(),
+            collateral_address,
             &[(user_address.clone(), collateral_balance)],
         );
 
@@ -3704,7 +3701,7 @@ mod tests {
 
         // Set the querier to return a certain collateral balance
         deps.querier.set_cw20_balances(
-            collateral_address.clone(),
+            collateral_address,
             &[(
                 healthy_user_address.clone(),
                 healthy_user_collateral_balance,
@@ -3849,7 +3846,7 @@ mod tests {
                 to_address: borrower_addr.clone(),
                 amount: vec![Coin {
                     denom: String::from("somecoin"),
-                    amount: initial_borrow_amount.into(),
+                    amount: initial_borrow_amount,
                 }],
             })]
         );
@@ -4104,14 +4101,15 @@ mod tests {
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
         // When repaying, new computed index is used for scaled amount
         let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_borrow_index;
-        let mut new_debt_total = Uint256::zero();
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         // TODO: Maybe split index and interest rate calculations and take the needed inputs
         // for each
-        if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
-            new_debt_total = reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled;
-        }
+        let new_debt_total = if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
+            reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled
+        } else {
+            Uint256::zero()
+        };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
         let dec_liquidity_total =
             Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
