@@ -344,6 +344,12 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
 
+    // reserve_factor cannot be greater than 1
+    let reserve_factor = asset_params.reserve_factor;
+    if reserve_factor > Decimal256::one() {
+        return Err(StdError::generic_err("reserve factor cannot exceed one"));
+    }
+
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
     match reserves.may_load(asset_reference.as_slice()) {
@@ -364,7 +370,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
                     loan_to_value: asset_params.loan_to_value,
 
-                    reserve_factor: asset_params.reserve_factor,
+                    reserve_factor,
 
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
@@ -1471,7 +1477,8 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     };
 
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
-    reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
+    reserve.liquidity_rate =
+        reserve.borrow_rate * utilization_rate * (Decimal256::one() - reserve.reserve_factor);
 
     Ok(())
 }
@@ -2079,6 +2086,7 @@ mod tests {
     fn test_deposit_native_asset() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
+        let reserve_factor = Decimal256::from_ratio(1, 10);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -2087,6 +2095,7 @@ mod tests {
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_slope: Decimal256::from_ratio(1, 10),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor,
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             ..Default::default()
@@ -2154,8 +2163,8 @@ mod tests {
             .unwrap();
         // BR = U * Bslope = 0.5 * 0.01 = 0.05
         assert_eq!(reserve.borrow_rate, Decimal256::from_ratio(5, 100));
-        // LR = BR * U = 0.05 * 0.5 = 0.025
-        assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(25, 1000));
+        // LR = BR * U = 0.05 * 0.5 * (1 - reserve_factor)= 0.025 * .9 = .0225
+        assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(225, 10000));
         assert_eq!(reserve.liquidity_index, expected_liquidity_index);
         assert_eq!(reserve.borrow_index, Decimal256::from_ratio(1, 1));
 
@@ -2182,6 +2191,7 @@ mod tests {
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_slope: Decimal256::from_ratio(1, 10),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(4, 100),
             debt_total_scaled: Uint256::from(10_000_000u128),
             interests_last_updated: 10_000_000,
             asset_type: AssetType::Cw20,
@@ -2300,6 +2310,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
@@ -2428,6 +2439,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(2, 100),
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
@@ -2523,7 +2535,7 @@ mod tests {
             .load(cw20_contract_canonical_addr.as_slice())
             .unwrap();
 
-        // BR = U * Bslope = 0.5 * 0.01 = 0.05
+        // BR = U * Bslope
         assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
         assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
@@ -2584,6 +2596,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 100),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
@@ -2603,6 +2616,7 @@ mod tests {
             loan_to_value: Decimal256::from_ratio(7, 10),
             borrow_slope: Decimal256::from_ratio(4, 10),
             borrow_rate: Decimal256::from_ratio(30, 100),
+            reserve_factor: Decimal256::from_ratio(3, 100),
             liquidity_rate: Decimal256::from_ratio(20, 100),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
@@ -4035,6 +4049,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
@@ -4514,7 +4529,9 @@ mod tests {
 
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
-        let expected_liquidity_rate = expected_borrow_rate * expected_utilization_rate;
+        let expected_liquidity_rate = expected_borrow_rate
+            * expected_utilization_rate
+            * (Decimal256::one() - reserve.reserve_factor);
 
         TestInterestResults {
             borrow_index: expected_borrow_index,
