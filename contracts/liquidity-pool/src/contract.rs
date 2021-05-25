@@ -1715,9 +1715,10 @@ mod tests {
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let res = init(&mut deps, env.clone(), exceeding_fees_msg.clone());
         match res {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(msg, "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one")
-            }
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
+            ),
             _ => panic!("DO NOT ENTER HERE"),
         }
 
