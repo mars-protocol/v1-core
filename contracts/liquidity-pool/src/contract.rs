@@ -1432,34 +1432,22 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let current_timestamp = env.block.time;
 
     if reserve.interests_last_updated < current_timestamp {
-        let time_elapsed = current_timestamp - reserve.interests_last_updated;
+        let time_elapsed =
+            Decimal256::from_uint256(current_timestamp - reserve.interests_last_updated);
+        let seconds_per_year = Decimal256::from_uint256(SECONDS_PER_YEAR);
 
         if reserve.borrow_rate > Decimal256::zero() {
-            reserve.borrow_index = calculate_accumulated_index(
-                reserve.borrow_index,
-                reserve.borrow_rate,
-                time_elapsed,
-            );
+            let accumulated_interest =
+                Decimal256::one() + reserve.borrow_rate * time_elapsed / seconds_per_year;
+            reserve.borrow_index = reserve.borrow_index * accumulated_interest;
         }
         if reserve.liquidity_rate > Decimal256::zero() {
-            reserve.liquidity_index = calculate_accumulated_index(
-                reserve.liquidity_index,
-                reserve.liquidity_rate,
-                time_elapsed,
-            );
+            let accumulated_interest =
+                Decimal256::one() + reserve.liquidity_rate * time_elapsed / seconds_per_year;
+            reserve.liquidity_index = reserve.liquidity_index * accumulated_interest;
         }
         reserve.interests_last_updated = current_timestamp;
     }
-}
-
-fn calculate_accumulated_index(
-    index: Decimal256,
-    rate: Decimal256,
-    time_elapsed: u64,
-) -> Decimal256 {
-    let rate_factor =
-        rate * Decimal256::from_uint256(time_elapsed) / Decimal256::from_uint256(SECONDS_PER_YEAR);
-    index * (Decimal256::one() + rate_factor)
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1707,18 +1695,8 @@ mod tests {
     use super::*;
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, from_binary, Decimal, Empty, Extern};
+    use cosmwasm_std::{coin, from_binary, Decimal, Extern};
     use mars::testing::{mock_dependencies, MockEnvParams, WasmMockQuerier};
-
-    #[test]
-    fn test_accumulated_index_calculation() {
-        let index = Decimal256::from_ratio(1, 10);
-        let rate = Decimal256::from_ratio(2, 10);
-        let time_elapsed = 15768000; // half a year
-        let accumulated = calculate_accumulated_index(index, rate, time_elapsed);
-
-        assert_eq!(accumulated, Decimal256::from_ratio(11, 100));
-    }
 
     #[test]
     fn test_proper_initialization() {
@@ -2016,7 +1994,7 @@ mod tests {
         };
         let res = handle(&mut deps, env.clone(), msg).unwrap();
 
-        let expected_liquidity_index = calculate_accumulated_index(
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
             Decimal256::from_ratio(11, 10),
             Decimal256::from_ratio(10, 100),
             100u64,
@@ -2132,7 +2110,7 @@ mod tests {
 
         let res = handle(&mut deps, env.clone(), msg).unwrap();
 
-        let expected_liquidity_index = calculate_accumulated_index(
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
             Decimal256::from_ratio(11, 10),
             Decimal256::from_ratio(10, 100),
             100u64,
@@ -4109,14 +4087,17 @@ mod tests {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
 
         // market indices
-        let expected_liquidity_index = calculate_accumulated_index(
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
             reserve.liquidity_index,
             reserve.liquidity_rate,
             seconds_elapsed,
         );
 
-        let expected_borrow_index =
-            calculate_accumulated_index(reserve.borrow_index, reserve.borrow_rate, seconds_elapsed);
+        let expected_borrow_index = th_calculate_applied_linear_interest_rate(
+            reserve.borrow_index,
+            reserve.borrow_rate,
+            seconds_elapsed,
+        );
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
@@ -4145,5 +4126,15 @@ mod tests {
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
         }
+    }
+
+    fn th_calculate_applied_linear_interest_rate(
+        index: Decimal256,
+        rate: Decimal256,
+        time_elapsed: u64,
+    ) -> Decimal256 {
+        let rate_factor = rate * Decimal256::from_uint256(time_elapsed)
+            / Decimal256::from_uint256(SECONDS_PER_YEAR);
+        index * (Decimal256::one() + rate_factor)
     }
 }
