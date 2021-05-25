@@ -9,6 +9,7 @@ pub mod msg {
     pub struct InitMsg {
         pub treasury_contract_address: HumanAddr,
         pub insurance_fund_contract_address: HumanAddr,
+        pub staking_contract_address: HumanAddr,
         pub insurance_fund_fee_share: Decimal256,
         pub treasury_fee_share: Decimal256,
         pub ma_token_code_id: u64,
