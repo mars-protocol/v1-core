@@ -132,7 +132,7 @@ fn capture_snapshot<S: Storage>(
         snapshot_info.end_index,
         &Snapshot {
             block: snapshot_info.end_block,
-            value: value,
+            value,
         },
     )?;
 

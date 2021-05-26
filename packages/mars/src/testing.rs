@@ -148,6 +148,7 @@ impl WasmMockQuerier {
     /// Set mock querier so that it returns a specific total supply on the token info query
     /// for a given cw20 token (note this will override existing token info with default
     /// values for the rest of the fields)
+    #[allow(clippy::or_fun_call)]
     pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
         let token_info = self
             .cw20_querier
@@ -158,6 +159,7 @@ impl WasmMockQuerier {
         token_info.total_supply = total_supply;
     }
 
+    #[allow(clippy::or_fun_call)]
     pub fn set_cw20_symbol(&mut self, cw20_address: HumanAddr, symbol: String) {
         let token_info = self
             .cw20_querier

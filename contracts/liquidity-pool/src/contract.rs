@@ -827,7 +827,6 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Handle loan liquidations on under-collateralized loans
-#[allow(clippy::too_many_arguments)]
 pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,

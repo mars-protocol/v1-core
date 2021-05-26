@@ -516,7 +516,7 @@ mod tests {
         assert_eq!(
             query_minter(&deps).unwrap(),
             Some(MinterResponse {
-                minter: minter.clone(),
+                minter,
                 cap: Some(limit)
             }),
         );
@@ -537,7 +537,7 @@ mod tests {
                 amount,
             }],
             mint: Some(MinterResponse {
-                minter: minter.clone(),
+                minter,
                 cap: Some(limit),
             }),
         };
@@ -568,12 +568,12 @@ mod tests {
         };
 
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env.clone(), msg.clone()).unwrap();
+        let res = handle(&mut deps, env.clone(), msg).unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(get_balance(&deps, &genesis), amount);
         assert_eq!(get_balance(&deps, &winner), prize);
         assert_eq!(
-            query_balance_at(&deps, genesis.clone(), env.block.height)
+            query_balance_at(&deps, genesis, env.block.height)
                 .unwrap()
                 .balance,
             amount
@@ -601,7 +601,7 @@ mod tests {
             amount: Uint128::zero(),
         };
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
             e => panic!("Unexpected error: {}", e),
@@ -610,11 +610,11 @@ mod tests {
         // but if it exceeds cap (even over multiple rounds), it fails
         // cap is enforced
         let msg = HandleMsg::Mint {
-            recipient: winner.clone(),
+            recipient: winner,
             amount: Uint128(333_222_222),
         };
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::GenericErr { msg, .. } => {
                 assert_eq!(msg, "Minting cannot exceed the cap".to_string())
@@ -639,7 +639,7 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("anyone else"), &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Unauthorized { .. } => {}
             e => panic!("expected unauthorized error, got {}", e),
@@ -656,7 +656,7 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("genesis"), &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Unauthorized { .. } => {}
             e => panic!("expected unauthorized error, got {}", e),
@@ -716,13 +716,7 @@ mod tests {
         assert_eq!(expected, loaded);
 
         // check balance query (full)
-        let data = query(
-            &deps,
-            QueryMsg::Balance {
-                address: addr1.clone(),
-            },
-        )
-        .unwrap();
+        let data = query(&deps, QueryMsg::Balance { address: addr1 }).unwrap();
         let loaded: BalanceResponse = from_binary(&data).unwrap();
         assert_eq!(loaded.balance, amount1);
 
@@ -862,9 +856,7 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, remainder);
         assert_eq!(
-            query_balance_at(&deps, addr1.clone(), 200_000)
-                .unwrap()
-                .balance,
+            query_balance_at(&deps, addr1, 200_000).unwrap().balance,
             remainder
         );
         assert_eq!(
@@ -881,7 +873,7 @@ mod tests {
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
-        let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
+        let send_msg = Binary::from(br#"{"some":123}"#);
 
         do_init(&mut deps, &addr1, amount1);
 
@@ -946,13 +938,13 @@ mod tests {
         assert_eq!(get_balance(&deps, &contract), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
         assert_eq!(
-            query_balance_at(&deps, addr1.clone(), env.block.height)
+            query_balance_at(&deps, addr1, env.block.height)
                 .unwrap()
                 .balance,
             remainder
         );
         assert_eq!(
-            query_balance_at(&deps, contract.clone(), env.block.height)
+            query_balance_at(&deps, contract, env.block.height)
                 .unwrap()
                 .balance,
             transfer
@@ -983,8 +975,8 @@ mod tests {
             current_block += 100_000;
 
             let mint_amount = Uint128(20_000);
-            current_total_supply = current_total_supply + mint_amount;
-            current_addr2_balance = current_addr2_balance + mint_amount;
+            current_total_supply += mint_amount;
+            current_addr2_balance += mint_amount;
 
             let env = mars::testing::mock_env(
                 minter.as_str(),
@@ -1011,7 +1003,7 @@ mod tests {
 
             let transfer_amount = Uint128(10_000);
             current_addr1_balance = (current_addr1_balance - transfer_amount).unwrap();
-            current_addr2_balance = current_addr2_balance + transfer_amount;
+            current_addr2_balance += transfer_amount;
 
             let env = mars::testing::mock_env(
                 addr1.as_str(),
