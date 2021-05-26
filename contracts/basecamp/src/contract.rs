@@ -69,7 +69,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
                 }),
                 init_hook: Some(cw20_token::msg::InitHook {
                     msg: to_binary(&HandleMsg::InitTokenCallback {})?,
-                    contract_addr: env.contract.address.clone(),
+                    contract_addr: env.contract.address,
                 }),
             })?,
             send: vec![],
@@ -135,6 +135,7 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Submit new proposal
+
 pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -950,7 +951,7 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
-            &[(voter_address.clone(), Uint128(100))],
+            &[(voter_address, Uint128(100))],
         );
 
         let active_proposal_id = 1_u64;
@@ -1037,7 +1038,7 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
-            &[(voter_address.clone(), Uint128(100))],
+            &[(voter_address, Uint128(100))],
         );
 
         let active_proposal = th_build_mock_proposal(
@@ -1524,7 +1525,7 @@ mod tests {
                     ProposalExecuteCall {
                         execution_order: 1,
                         msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
-                        target_contract_canonical_address: contract_canonical_address.clone(),
+                        target_contract_canonical_address: contract_canonical_address,
                     },
                 ]),
                 ..Default::default()
@@ -1566,7 +1567,7 @@ mod tests {
                     .unwrap(),
                 }),
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_address.clone(),
+                    contract_addr: contract_address,
                     send: vec![],
                     msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
                 }),

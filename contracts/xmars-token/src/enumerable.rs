@@ -112,7 +112,7 @@ mod tests {
         let msg = HandleMsg::IncreaseAllowance {
             spender: spender1.clone(),
             amount: allow1,
-            expires: Some(expires.clone()),
+            expires: Some(expires),
         };
         handle(&mut deps, env.clone(), msg).unwrap();
 
@@ -123,7 +123,7 @@ mod tests {
             amount: allow2,
             expires: None,
         };
-        handle(&mut deps, env.clone(), msg).unwrap();
+        handle(&mut deps, env, msg).unwrap();
 
         // query list gets 2
         let allowances = query_all_allowances(&deps, owner.clone(), None, None).unwrap();
@@ -138,8 +138,7 @@ mod tests {
         assert_eq!(&allow.allowance, &allow2);
 
         // next one is spender1 ("later")
-        let allowances =
-            query_all_allowances(&deps, owner.clone(), Some(spender2), Some(10000)).unwrap();
+        let allowances = query_all_allowances(&deps, owner, Some(spender2), Some(10000)).unwrap();
         assert_eq!(allowances.allowances.len(), 1);
         let allow = &allowances.allowances[0];
         assert_eq!(&allow.spender, &spender1);
@@ -161,7 +160,7 @@ mod tests {
         do_init(&mut deps, &acct1, Uint128(12340000));
 
         // put money everywhere (to create balanaces)
-        let env = mock_env(acct1.clone(), &[]);
+        let env = mock_env(acct1, &[]);
         handle(
             &mut deps,
             env.clone(),
@@ -182,7 +181,7 @@ mod tests {
         .unwrap();
         handle(
             &mut deps,
-            env.clone(),
+            env,
             HandleMsg::Transfer {
                 recipient: acct4,
                 amount: Uint128(444444),
@@ -192,7 +191,7 @@ mod tests {
 
         // make sure we get the proper results
         let accounts = query_all_accounts(&deps, None, None).unwrap();
-        assert_eq!(accounts.accounts, expected_order.clone());
+        assert_eq!(accounts.accounts, expected_order);
 
         // let's do pagination
         let accounts = query_all_accounts(&deps, None, Some(2)).unwrap();
