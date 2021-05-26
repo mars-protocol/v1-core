@@ -146,6 +146,40 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
+pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    from: HumanAddr,
+    to: HumanAddr,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    // only owner
+    let config = state::load_config(&deps.storage)?;
+    if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
+        return Err(StdError::unauthorized());
+    }
+
+    if amount == Uint128::zero() {
+        return Err(StdError::generic_err("Invalid zero amount"));
+    }
+    let from_raw = deps.api.canonical_address(&env.message.sender)?;
+    let to_raw = deps.api.canonical_address(&recipient)?;
+
+    core::transfer(deps, Some(&from_raw), Some(&to_raw), amount)?;
+
+    let res = HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "transfer_on_liquidation"),
+            log("from", from),
+            log("to", to),
+            log("amount", amount),
+        ],
+        data: None,
+    };
+    Ok(res)
+}
+
 /// Burns tokens from user. Only contract owner (money market) can call this.
 /// Used when user is being liquidated
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
@@ -154,8 +188,8 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     user: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    let config = state::load_config(&deps.storage)?;
     // only owner can burn
+    let config = state::load_config(&deps.storage)?;
     if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
         return Err(StdError::unauthorized());
     }
