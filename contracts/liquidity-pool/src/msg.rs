@@ -59,6 +59,14 @@ pub enum HandleMsg {
         /// Sends maAsset to liquidator if true and underlying collateral asset if false
         receive_ma_token: bool,
     },
+    /// Called by liquidity token. Validate liquidity token transfer is valid
+    /// and update collateral status
+    FinalizeLiquidityTokenTransfer {
+        from_address: HumanAddr,
+        to_address: HumanAddr,
+        //    from_new_balance: Uint128,
+        //    to_new_balance: Uint128,
+    },
     /// Update uncollateralized loan limit
     UpdateUncollateralizedLoanLimit {
         user_address: HumanAddr,
