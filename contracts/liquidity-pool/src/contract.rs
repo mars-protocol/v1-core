@@ -772,9 +772,8 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     }
 
     // query total supply of the debt token and multiply by borrow_accumulated_interest and reserve_factor
-    // to get debt_accrued_to_distribute since last timestamp
-    let debt_token_supply =
-        cw20_get_total_supply(deps, deps.api.human_address(&reserve.ma_token_address)?)?;
+    // to get debt_accrued_to_distribute since last timestamp (just use debt_total_scaled)
+    let debt_token_supply = reserve.debt_total_scaled;
     let debt_accrued_to_distribute =
         Uint256::from(debt_token_supply) * borrow_accumulated_interest * reserve.reserve_factor;
 
@@ -1439,10 +1438,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 /// Updates reserve indices by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decimal256 {
+pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Uint256 {
     let current_timestamp = env.block.time;
-    // TODO: confirm math here for calculating debt_accrued_to_distribute
-    let mut borrow_accumulated_interest = Decimal256::zero();
+    // keep track of previous borrow index to later calculate total debt accrued
+    let previous_borrow_index = reserve.borrow_index;
 
     if reserve.interests_last_updated < current_timestamp {
         let time_elapsed =
@@ -1450,9 +1449,9 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decima
         let seconds_per_year = Decimal256::from_uint256(SECONDS_PER_YEAR);
 
         if reserve.borrow_rate > Decimal256::zero() {
-            borrow_accumulated_interest =
+            let accumulated_interest =
                 Decimal256::one() + reserve.borrow_rate * time_elapsed / seconds_per_year;
-            reserve.borrow_index = reserve.borrow_index * borrow_accumulated_interest;
+            reserve.borrow_index = reserve.borrow_index * accumulated_interest;
         }
         if reserve.liquidity_rate > Decimal256::zero() {
             let accumulated_interest =
@@ -1462,7 +1461,18 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decima
         reserve.interests_last_updated = current_timestamp;
     }
 
-    borrow_accumulated_interest
+    let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
+    let new_debt_total = reserve.debt_total_scaled * reserve.borrow_index;
+
+    let debt_accrued = if new_debt_total > previous_debt_total {
+        new_debt_total - previous_debt_total
+    } else {
+        Uint256::zero()
+    };
+
+    let debt_accrued_to_distribute = debt_accrued * reserve.reserve_factor;
+
+    debt_accrued_to_distribute
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1679,6 +1689,7 @@ fn send_debt_accrued_to_distribute_to_contracts<S: Storage, A: Api, Q: Querier>(
 
     let insurance_fund_fee_share = debt_accrued_to_distribute * config.insurance_fund_fee_share;
     let treasury_fund_fee_share = debt_accrued_to_distribute * config.treasury_fee_share;
+    // check if fees of insurance + treasury > debt_accrued_to_distribute (underflow)
     let staking_rewards_fee_share =
         debt_accrued_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
 
@@ -4561,6 +4572,7 @@ mod tests {
         liquidity_index: Decimal256,
         borrow_rate: Decimal256,
         liquidity_rate: Decimal256,
+        debt_accrued_to_distribute: Uint256,
     }
 
     /// Deltas to be using in expected indices/rates results
@@ -4580,6 +4592,7 @@ mod tests {
         deltas: TestUtilizationDeltas,
     ) -> TestInterestResults {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
+        let previous_borrow_index = reserve.borrow_index;
 
         // market indices
         let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
@@ -4612,6 +4625,18 @@ mod tests {
             Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
+        // debt accrued to distribute
+        let previous_debt_total = new_debt_total * previous_borrow_index;
+        let new_debt_total = new_debt_total * expected_borrow_index;
+
+        let debt_accrued = if new_debt_total > previous_debt_total {
+            new_debt_total - previous_debt_total
+        } else {
+            Uint256::zero()
+        };
+
+        let expected_debt_accrued_to_distribute = debt_accrued * reserve.reserve_factor;
+
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
         let expected_liquidity_rate = expected_borrow_rate
@@ -4623,6 +4648,7 @@ mod tests {
             liquidity_index: expected_liquidity_index,
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
+            debt_accrued_to_distribute: expected_debt_accrued_to_distribute,
         }
     }
 
