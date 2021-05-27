@@ -105,6 +105,15 @@ pub struct User {
     pub deposited_assets: Uint128,
 }
 
+impl User {
+    pub fn new() -> Self {
+        User {
+            borrowed_assets: Uint128::zero(),
+            deposited_assets: Uint128::zero(),
+        }
+    }
+}
+
 pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {
     bucket(USERS_NAMESPACE, storage)
 }

@@ -64,8 +64,9 @@ pub enum HandleMsg {
     FinalizeLiquidityTokenTransfer {
         from_address: HumanAddr,
         to_address: HumanAddr,
-        //    from_new_balance: Uint128,
-        //    to_new_balance: Uint128,
+        from_previous_balance: Uint128,
+        to_previous_balance: Uint128,
+        amount: Uint128,
     },
     /// Update uncollateralized loan limit
     UpdateUncollateralizedLoanLimit {
