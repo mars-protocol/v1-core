@@ -1,13 +1,13 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::msg::AssetType;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use mars::liquidity_pool::msg::AssetType;
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
