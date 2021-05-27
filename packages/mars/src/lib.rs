@@ -1,4 +1,5 @@
 pub mod cw20_token;
+pub mod liquidity_pool;
 pub mod helpers;
 pub mod storage;
 

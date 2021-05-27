@@ -1,18 +1,21 @@
+use std::str;
+
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
     HandleResponse, HumanAddr, InitResponse, LogAttribute, MigrateResponse, MigrateResult, Order,
     Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
-
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
+use terra_cosmwasm::TerraQuerier;
+
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol};
-
-use crate::msg::{
+use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
     MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
 };
+
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read,
     reserve_ma_tokens_state, reserve_ma_tokens_state_read, reserve_references_state,
@@ -20,8 +23,6 @@ use crate::state::{
     uncollateralized_loan_limits, uncollateralized_loan_limits_read, users_state, users_state_read,
     Config, Debt, Reserve, ReserveReferences, User,
 };
-use std::str;
-use terra_cosmwasm::TerraQuerier;
 
 // CONSTANTS
 

@@ -273,6 +273,7 @@ dependencies = [
 name = "mars"
 version = "0.1.0"
 dependencies = [
+ "cosmwasm-bignumber",
  "cosmwasm-std",
  "cw20",
  "schemars",
