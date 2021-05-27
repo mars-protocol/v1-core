@@ -1666,8 +1666,8 @@ fn build_send_cw20_token_msg(
     }))
 }
 
-fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+fn get_native_asset_prices<Q: Querier>(
+    querier: &Q,
     assets_to_query: &[String],
 ) -> StdResult<Vec<(String, Decimal256)>> {
     let mut asset_prices: Vec<(String, Decimal256)> = vec![];
