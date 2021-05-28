@@ -104,14 +104,6 @@ pub enum HandleMsg {
         recipient: HumanAddr,
         amount: Uint128,
     },
-    /// Only with "approval" extension. Sends amount tokens from owner -> contract
-    /// if `env.sender` has sufficient pre-approval.
-    SendFrom {
-        owner: HumanAddr,
-        contract: HumanAddr,
-        amount: Uint128,
-        msg: Option<Binary>,
-    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
