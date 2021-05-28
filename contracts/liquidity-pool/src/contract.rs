@@ -251,7 +251,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
-    let debt_accrued_to_distribute = reserve_update_market_indices(&env, &mut reserve);
+    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
@@ -336,6 +336,9 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     };
 
     messages.push(redeem_msg);
+
+    let debt_accrued_to_distribute =
+        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
 
     send_debt_accrued_to_distribute_to_contracts(
         deps,
@@ -514,7 +517,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
         users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
-    let debt_accrued_to_distribute = reserve_update_market_indices(&env, &mut reserve);
+    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
@@ -551,6 +554,9 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
                 .human_address(&CanonicalAddr::from(asset_reference))?,
         },
     };
+
+    let debt_accrued_to_distribute =
+        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
 
     send_debt_accrued_to_distribute_to_contracts(
         deps,
@@ -679,7 +685,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
     }
 
-    let debt_accrued_to_distribute = reserve_update_market_indices(&env, &mut borrow_reserve);
+    let previous_borrow_index = reserve_update_market_indices(&env, &mut borrow_reserve);
 
     // Set borrowing asset for user
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_reserve.index)?;
@@ -731,6 +737,9 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     )?;
     let mut messages = vec![send_msg];
 
+    let debt_accrued_to_distribute =
+        calculate_debt_accrued_to_distribute(previous_borrow_index, &borrow_reserve);
+
     send_debt_accrued_to_distribute_to_contracts(
         deps,
         env,
@@ -781,7 +790,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    let debt_accrued_to_distribute = reserve_update_market_indices(&env, &mut reserve);
+    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
@@ -841,6 +850,9 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
                 .human_address(&CanonicalAddr::from(asset_reference))?,
         },
     };
+
+    let debt_accrued_to_distribute =
+        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
     send_debt_accrued_to_distribute_to_contracts(
         deps,
         env,
@@ -908,7 +920,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let mut collateral_reserve =
         reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
-    let collateral_reserve_debt_accrued_to_distribute =
+    let collateral_reserve_previous_borrow_index =
         reserve_update_market_indices(&env, &mut collateral_reserve);
 
     // check if user has available collateral in specified collateral asset to be liquidated
@@ -1024,8 +1036,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     // update debt reserve indices
-    let debt_reserve_debt_accrued_to_distribute =
-        reserve_update_market_indices(&env, &mut debt_reserve);
+    let debt_reserve_previous_borrow_index = reserve_update_market_indices(&env, &mut debt_reserve);
 
     let mut messages: Vec<CosmosMsg> = vec![];
 
@@ -1134,6 +1145,13 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // TODO: we should distinguish between these two in some way
     append_indices_and_rates_to_logs(&mut log, &collateral_reserve);
     append_indices_and_rates_to_logs(&mut log, &debt_reserve);
+
+    let collateral_reserve_debt_accrued_to_distribute = calculate_debt_accrued_to_distribute(
+        collateral_reserve_previous_borrow_index,
+        &collateral_reserve,
+    );
+    let debt_reserve_debt_accrued_to_distribute =
+        calculate_debt_accrued_to_distribute(debt_reserve_previous_borrow_index, &debt_reserve);
 
     send_debt_accrued_to_distribute_to_contracts(
         deps,
@@ -1508,7 +1526,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 /// Updates reserve indices by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Uint256 {
+pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decimal256 {
     let current_timestamp = env.block.time;
     // keep track of previous borrow index to later calculate total debt accrued
     let previous_borrow_index = reserve.borrow_index;
@@ -1531,18 +1549,7 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Uint25
         reserve.interests_last_updated = current_timestamp;
     }
 
-    let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
-    let new_debt_total = reserve.debt_total_scaled * reserve.borrow_index;
-
-    let debt_accrued = if new_debt_total > previous_debt_total {
-        new_debt_total - previous_debt_total
-    } else {
-        Uint256::zero()
-    };
-
-    let debt_accrued_to_distribute = debt_accrued * reserve.reserve_factor;
-
-    debt_accrued_to_distribute
+    previous_borrow_index
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1798,20 +1805,18 @@ fn send_debt_accrued_to_distribute_to_contracts<S: Storage, A: Api, Q: Querier>(
 
 fn calculate_debt_accrued_to_distribute(
     previous_borrow_index: Decimal256,
-    debt_total_scaled: Decimal256,
-    reserve_factor: Decimal256,
+    reserve: &Reserve,
 ) -> Uint256 {
-    let previous_debt_total = debt_total_scaled * previous_borrow_index;
+    let previous_debt_total_unscaled = reserve.debt_total_scaled * previous_borrow_index;
+    let new_debt_total_unscaled = reserve.debt_total_scaled * reserve.borrow_index;
 
-    let debt_accrued = if debt_total_scaled > previous_debt_total {
-        new_debt_total - previous_debt_total
+    let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+        new_debt_total_unscaled - previous_debt_total_unscaled
     } else {
         Uint256::zero()
     };
 
-    let expected_debt_accrued_to_distribute = debt_accrued * reserve_factor;
-
-    expected_debt_accrued_to_distribute
+    debt_accrued * reserve.reserve_factor
 }
 
 // HELPERS
@@ -4683,7 +4688,7 @@ mod tests {
         let mut expected_messages = vec![CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: cw20_contract_addr.clone(),
             msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: borrower_addr.clone(),
+                recipient: borrower_addr,
                 amount: borrow_amount.into(),
             })
             .unwrap(),
@@ -4693,7 +4698,7 @@ mod tests {
         let initial_message_length = expected_messages.len();
 
         let asset = Asset::Cw20 {
-            contract_addr: cw20_contract_addr.clone(),
+            contract_addr: cw20_contract_addr,
         };
         th_send_debt_accrued_to_distribute_to_contracts(
             &deps.api,
@@ -4872,8 +4877,6 @@ mod tests {
     ) -> TestInterestResults {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
         let previous_borrow_index = reserve.borrow_index;
-        println!("seconds elapsed {}", seconds_elapsed);
-        println!("previous borrow index {}", previous_borrow_index);
 
         // market indices
         let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
@@ -4888,9 +4891,6 @@ mod tests {
             seconds_elapsed,
         );
 
-        println!("borrow rate {}", reserve.borrow_rate);
-        println!("expected borrow index {}", expected_borrow_index);
-
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
         // When repaying, new computed index is used for scaled amount
@@ -4899,7 +4899,6 @@ mod tests {
         // when less debt is greater than outstanding debt
         // TODO: Maybe split index and interest rate calculations and take the needed inputs
         // for each
-        println!("debt total scaled {}", reserve.debt_total_scaled);
         let new_debt_total = if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
             reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled
         } else {
@@ -4911,33 +4910,22 @@ mod tests {
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // debt accrued to distribute
-        let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
+        let previous_debt_total_unscaled = new_debt_total * previous_borrow_index;
+        let new_debt_total_unscaled = new_debt_total * expected_borrow_index;
 
-        println!("previous debt total {}", previous_debt_total);
-        println!("new debt total {}", new_debt_total);
-
-        let debt_accrued = if new_debt_total > previous_debt_total {
-            new_debt_total - previous_debt_total
+        let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+            new_debt_total_unscaled - previous_debt_total_unscaled
         } else {
             Uint256::zero()
         };
 
-        println!("debt accrued {}", debt_accrued);
-        println!("reserve factor {}", reserve.reserve_factor);
         let expected_debt_accrued_to_distribute = debt_accrued * reserve.reserve_factor;
-
-        println!(
-            "debt accrued to distribute {}",
-            expected_debt_accrued_to_distribute
-        );
 
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
         let expected_liquidity_rate = expected_borrow_rate
             * expected_utilization_rate
             * (Decimal256::one() - reserve.reserve_factor);
-        println!("expected borrow rate {}", expected_borrow_rate);
-        println!("expected liquidity rate {}", expected_liquidity_rate);
 
         TestInterestResults {
             borrow_index: expected_borrow_index,
@@ -5032,10 +5020,6 @@ mod tests {
         // check if fees of insurance + treasury > debt_accrued_to_distribute (underflow)
         let staking_rewards_fee_share =
             debt_accrued_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
-
-        println!("insurance fund: {:?}", insurance_fund_fee_share);
-        println!("treasury fund: {:?}", treasury_fund_fee_share);
-        println!("staking rewards: {:?}", staking_rewards_fee_share);
 
         if !insurance_fund_fee_share.is_zero() {
             let insurance_fund_msg = th_build_send_asset_msg(

@@ -7,6 +7,7 @@
     "insurance_fund_contract_address",
     "insurance_fund_fee_share",
     "ma_token_code_id",
+    "staking_contract_address",
     "treasury_contract_address",
     "treasury_fee_share"
   ],
@@ -24,6 +25,9 @@
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "staking_contract_address": {
+      "$ref": "#/definitions/HumanAddr"
     },
     "treasury_contract_address": {
       "$ref": "#/definitions/HumanAddr"
