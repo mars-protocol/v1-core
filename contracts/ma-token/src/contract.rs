@@ -87,6 +87,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
+        HandleMsg::TransferOnLiquidation { from, to, amount } => {
+            handle_transfer_on_liquidation(deps, env, from, to, amount)
+        }
         HandleMsg::Burn { user, amount } => handle_burn(deps, env, user, amount),
         HandleMsg::Send {
             contract,
@@ -155,7 +158,7 @@ pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
     to: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // only owner
+    // only money market can call
     let config = state::load_config(&deps.storage)?;
     if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
         return Err(StdError::unauthorized());
@@ -182,15 +185,13 @@ pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
     Ok(res)
 }
 
-/// Burns tokens from user. Only contract owner (money market) can call this.
-/// Used when user is being liquidated
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     user: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // only owner can burn
+    // only money market can burn
     let config = state::load_config(&deps.storage)?;
     if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
         return Err(StdError::unauthorized());
@@ -422,7 +423,6 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
     use cosmwasm_std::{coins, from_binary, CosmosMsg, StdError, WasmMsg};
-    use mars::testing::MockEnvParams;
 
     use super::*;
 
@@ -829,13 +829,7 @@ mod tests {
         }
 
         // valid transfer
-        let env = mars::testing::mock_env(
-            addr1.as_str(),
-            MockEnvParams {
-                block_height: 100_000,
-                ..Default::default()
-            },
-        );
+        let env = mock_env(addr1.clone(), &[]);
         let msg = HandleMsg::Transfer {
             recipient: addr2.clone(),
             amount: transfer,
@@ -863,6 +857,96 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &addr2), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+    }
+
+    #[test]
+    fn transfer_on_liquidation() {
+        let mut deps = mock_dependencies(20, &coins(2, "token"));
+        let addr1 = HumanAddr::from("addr0001");
+        let addr2 = HumanAddr::from("addr0002");
+        let money_market = HumanAddr::from("money_market");
+        let amount1 = Uint128::from(12340000u128);
+        let transfer = Uint128::from(76543u128);
+        let too_much = Uint128::from(12340321u128);
+
+        do_init(&mut deps, &addr1, amount1);
+
+        // cannot transfer nothing
+        {
+            let env = mock_env(money_market.clone(), &[]);
+            let msg = HandleMsg::TransferOnLiquidation {
+                from: addr1.clone(),
+                to: addr2.clone(),
+                amount: Uint128::zero(),
+            };
+            let res = handle(&mut deps, env, msg);
+            match res.unwrap_err() {
+                StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
+                e => panic!("Unexpected error: {}", e),
+            }
+        }
+
+        // cannot send more than we have
+        {
+            let env = mock_env(money_market.clone(), &[]);
+            let msg = HandleMsg::TransferOnLiquidation {
+                from: addr1.clone(),
+                to: addr2.clone(),
+                amount: too_much,
+            };
+            let res = handle(&mut deps, env, msg);
+            match res.unwrap_err() {
+                StdError::Underflow { .. } => {}
+                e => panic!("Unexpected error: {}", e),
+            }
+        }
+
+        // cannot send from empty account
+        {
+            let env = mock_env(money_market.clone(), &[]);
+            let msg = HandleMsg::TransferOnLiquidation {
+                from: addr2.clone(),
+                to: addr1.clone(),
+                amount: transfer,
+            };
+            let res = handle(&mut deps, env, msg);
+            match res.unwrap_err() {
+                StdError::Underflow { .. } => {}
+                e => panic!("Unexpected error: {}", e),
+            }
+        }
+
+        // only money market can call transfer on liquidation
+        {
+            let env = mock_env(addr1.clone(), &[]);
+            let msg = HandleMsg::TransferOnLiquidation {
+                from: addr1.clone(),
+                to: addr2.clone(),
+                amount: transfer,
+            };
+            let res = handle(&mut deps, env, msg);
+            match res.unwrap_err() {
+                StdError::Unauthorized { .. } => {}
+                e => panic!("Unexpected error: {}", e),
+            }
+        }
+
+        // valid transfer on liquidation
+        {
+            let env = mock_env(money_market, &[]);
+            let msg = HandleMsg::TransferOnLiquidation {
+                from: addr1.clone(),
+                to: addr2.clone(),
+                amount: transfer,
+            };
+            let res = handle(&mut deps, env, msg).unwrap();
+            assert_eq!(res.messages.len(), 0);
+
+            let remainder = (amount1 - transfer).unwrap();
+            assert_eq!(get_balance(&deps, &addr1), remainder);
+            assert_eq!(get_balance(&deps, &addr2), transfer);
+            assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        }
     }
 
     #[test]
