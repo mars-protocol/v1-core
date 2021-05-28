@@ -61,12 +61,20 @@ fn is_valid_symbol(symbol: &str) -> bool {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    /// Transfer is a base message to move tokens to another account without triggering actions
+    /// Transfer is a base message to move tokens to another account. Requires to be finalized
+    /// by the money market.
     Transfer {
         recipient: HumanAddr,
         amount: Uint128,
     },
-    /// Burn is a base message to destroy tokens forever. Only owner can call it.
+    /// Forced transfer called by the money market when an account is being liquidated
+    TransferOnLiquidation {
+        from: HumanAddr,
+        to: HumanAddr,
+        amount: Uint128,
+    },
+    /// Burns tokens from user. Only money market can call this.
+    /// Used when user is being liquidated
     Burn { user: HumanAddr, amount: Uint128 },
     /// Send is a base message to transfer tokens to a contract and trigger an action
     /// on the receiving contract.
