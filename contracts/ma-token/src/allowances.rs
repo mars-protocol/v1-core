@@ -1,10 +1,11 @@
 use cosmwasm_std::{
-    log, Api, Binary, BlockInfo, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr, Querier,
-    StdError, StdResult, Storage, Uint128,
+    log, Api, BlockInfo, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr, Querier, StdError,
+    StdResult, Storage, Uint128,
 };
-use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
+use cw20::{AllowanceResponse, Expiration};
 
 use crate::core;
+use crate::state;
 use crate::state::{allowances, allowances_read};
 
 pub fn handle_increase_allowance<S: Storage, A: Api, Q: Querier>(
@@ -128,10 +129,20 @@ pub fn handle_transfer_from<S: Storage, A: Api, Q: Querier>(
         amount,
     )?;
 
-    core::transfer(deps, Some(&owner_raw), Some(&rcpt_raw), amount)?;
+    // move the tokens to the contract
+    let (from_previous_balance, to_previous_balance) =
+        core::transfer(deps, &owner_raw, &rcpt_raw, amount)?;
 
     let res = HandleResponse {
-        messages: vec![],
+        messages: vec![core::finalize_transfer_msg(
+            &deps.api,
+            &state::load_config(&deps.storage)?.money_market_address,
+            owner.clone(),
+            recipient.clone(),
+            from_previous_balance,
+            to_previous_balance,
+            amount,
+        )?],
         log: vec![
             log("action", "transfer_from"),
             log("from", owner),
@@ -139,55 +150,6 @@ pub fn handle_transfer_from<S: Storage, A: Api, Q: Querier>(
             log("by", deps.api.human_address(&spender_raw)?),
             log("amount", amount),
         ],
-        data: None,
-    };
-    Ok(res)
-}
-
-pub fn handle_send_from<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    owner: HumanAddr,
-    contract: HumanAddr,
-    amount: Uint128,
-    msg: Option<Binary>,
-) -> StdResult<HandleResponse> {
-    let rcpt_raw = deps.api.canonical_address(&contract)?;
-    let owner_raw = deps.api.canonical_address(&owner)?;
-    let spender_raw = deps.api.canonical_address(&env.message.sender)?;
-
-    // deduct allowance before doing anything else have enough allowance
-    deduct_allowance(
-        &mut deps.storage,
-        &owner_raw,
-        &spender_raw,
-        &env.block,
-        amount,
-    )?;
-
-    // move the tokens to the contract
-    core::transfer(deps, Some(&owner_raw), Some(&rcpt_raw), amount)?;
-
-    let spender = deps.api.human_address(&spender_raw)?;
-    let logs = vec![
-        log("action", "send_from"),
-        log("from", &owner),
-        log("to", &contract),
-        log("by", &spender),
-        log("amount", amount),
-    ];
-
-    // create a send message
-    let msg = Cw20ReceiveMsg {
-        sender: spender,
-        amount,
-        msg,
-    }
-    .into_cosmos_msg(contract)?;
-
-    let res = HandleResponse {
-        messages: vec![msg],
-        log: logs,
         data: None,
     };
     Ok(res)
@@ -211,7 +173,7 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{coins, CosmosMsg, StdError, WasmMsg};
+    use cosmwasm_std::{coins, to_binary, CosmosMsg, StdError, WasmMsg};
     use cw20::{Cw20CoinHuman, TokenInfoResponse};
 
     use crate::contract::{handle, init, query_balance, query_token_info};
@@ -487,6 +449,23 @@ mod tests {
         let env = mock_env(spender.clone(), &[]);
         let res = handle(&mut deps, env.clone(), msg).unwrap();
         assert_eq!(res.log[0], log("action", "transfer_from"));
+        assert_eq!(
+            res.messages[0],
+            CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("money_market"),
+                msg: to_binary(
+                    &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                        from_address: owner.clone(),
+                        to_address: rcpt.clone(),
+                        from_previous_balance: start,
+                        to_previous_balance: Uint128::zero(),
+                        amount: transfer,
+                    }
+                )
+                .unwrap(),
+                send: vec![],
+            }),
+        );
 
         // make sure money arrived
         assert_eq!(get_balance(&deps, &owner), (start - transfer).unwrap());
@@ -527,107 +506,6 @@ mod tests {
             owner: owner.clone(),
             recipient: rcpt.clone(),
             amount: Uint128(33443),
-        };
-        let env = mock_env(spender.clone(), &[]);
-        let res = handle(&mut deps, env.clone(), msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(msg, "Allowance is expired"),
-            e => panic!("Unexpected error: {}", e),
-        }
-    }
-
-    #[test]
-    fn send_from_respects_limits() {
-        let mut deps = mock_dependencies(20, &[]);
-        let owner = HumanAddr::from("addr0001");
-        let spender = HumanAddr::from("addr0002");
-        let contract = HumanAddr::from("cool-dex");
-        let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
-
-        let start = Uint128(999999);
-        do_init(&mut deps, &owner, start);
-
-        // provide an allowance
-        let allow1 = Uint128(77777);
-        let msg = HandleMsg::IncreaseAllowance {
-            spender: spender.clone(),
-            amount: allow1,
-            expires: None,
-        };
-        let env = mock_env(owner.clone(), &[]);
-        handle(&mut deps, env.clone(), msg).unwrap();
-
-        // valid send of part of the allowance
-        let transfer = Uint128(44444);
-        let msg = HandleMsg::SendFrom {
-            owner: owner.clone(),
-            amount: transfer,
-            contract: contract.clone(),
-            msg: Some(send_msg.clone()),
-        };
-        let env = mock_env(spender.clone(), &[]);
-        let res = handle(&mut deps, env.clone(), msg).unwrap();
-        assert_eq!(res.log[0], log("action", "send_from"));
-        assert_eq!(1, res.messages.len());
-
-        // we record this as sent by the one who requested, not the one who was paying
-        let binary_msg = Cw20ReceiveMsg {
-            sender: spender.clone(),
-            amount: transfer,
-            msg: Some(send_msg.clone()),
-        }
-        .into_binary()
-        .unwrap();
-        assert_eq!(
-            res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract.clone(),
-                msg: binary_msg,
-                send: vec![],
-            })
-        );
-
-        // make sure money sent
-        assert_eq!(get_balance(&deps, &owner), (start - transfer).unwrap());
-        assert_eq!(get_balance(&deps, &contract), transfer);
-
-        // ensure it looks good
-        let allowance = query_allowance(&deps, owner.clone(), spender.clone()).unwrap();
-        let expect = AllowanceResponse {
-            allowance: (allow1 - transfer).unwrap(),
-            expires: Expiration::Never {},
-        };
-        assert_eq!(expect, allowance);
-
-        // cannot send more than the allowance
-        let msg = HandleMsg::SendFrom {
-            owner: owner.clone(),
-            amount: Uint128(33443),
-            contract: contract.clone(),
-            msg: Some(send_msg.clone()),
-        };
-        let env = mock_env(spender.clone(), &[]);
-        let res = handle(&mut deps, env.clone(), msg);
-        match res.unwrap_err() {
-            StdError::Underflow { .. } => {}
-            e => panic!("Unexpected error: {}", e),
-        }
-
-        // let us increase limit, but set the expiration to current block (expired)
-        let env = mock_env(owner.clone(), &[]);
-        let msg = HandleMsg::IncreaseAllowance {
-            spender: spender.clone(),
-            amount: Uint128(1000),
-            expires: Some(Expiration::AtHeight(env.block.height)),
-        };
-        handle(&mut deps, env.clone(), msg).unwrap();
-
-        // we should now get the expiration error
-        let msg = HandleMsg::SendFrom {
-            owner: owner.clone(),
-            amount: Uint128(33443),
-            contract: contract.clone(),
-            msg: Some(send_msg.clone()),
         };
         let env = mock_env(spender.clone(), &[]);
         let res = handle(&mut deps, env.clone(), msg);
