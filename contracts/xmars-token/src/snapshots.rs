@@ -1,8 +1,8 @@
 use cosmwasm_std::{to_vec, CanonicalAddr, Env, StdResult, Storage, Uint128};
 use cosmwasm_storage::{to_length_prefixed, to_length_prefixed_nested};
+use mars::storage::{kv_build_key, may_deserialize, must_deserialize};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use mars::storage::{may_deserialize, must_deserialize, kv_build_key};
 
 // STATE
 
@@ -63,7 +63,6 @@ fn save_snapshot<S: Storage>(
     );
     Ok(())
 }
-
 
 // CORE
 //
