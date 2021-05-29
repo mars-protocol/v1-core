@@ -1748,12 +1748,10 @@ fn reserve_get_from_index<S: Storage>(storage: &S, index: u32) -> StdResult<(Vec
         .reference;
     match reserves_state_read(storage).load(&asset_reference_vec) {
         Ok(asset_reserve) => Ok((asset_reference_vec, asset_reserve)),
-        Err(_) => {
-            Err(StdError::generic_err(format!(
-                "no asset reserve exists with asset reference: {}",
-                String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
-            )))
-        }
+        Err(_) => Err(StdError::generic_err(format!(
+            "no asset reserve exists with asset reference: {}",
+            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
+        ))),
     }
 }
 

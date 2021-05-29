@@ -759,13 +759,7 @@ mod tests {
         assert_eq!(expected, loaded);
 
         // check balance query (full)
-        let data = query(
-            &deps,
-            QueryMsg::Balance {
-                address: addr1,
-            },
-        )
-        .unwrap();
+        let data = query(&deps, QueryMsg::Balance { address: addr1 }).unwrap();
         let loaded: BalanceResponse = from_binary(&data).unwrap();
         assert_eq!(loaded.balance, amount1);
 
