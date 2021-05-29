@@ -331,7 +331,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
     );
 
     let res = HandleResponse {
-        messages: messages,
+        messages,
         log: logs,
         data: None,
     };
@@ -518,7 +518,7 @@ mod tests {
             money_market_address: money_market_address.clone(),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env.clone(), init_msg).unwrap();
+        let res = init(&mut deps, env, init_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         assert_eq!(
@@ -575,7 +575,7 @@ mod tests {
         assert_eq!(
             query_minter(&deps).unwrap(),
             Some(MinterResponse {
-                minter: minter.clone(),
+                minter,
                 cap: Some(limit)
             }),
         );
@@ -596,7 +596,7 @@ mod tests {
                 amount,
             }],
             mint: Some(MinterResponse {
-                minter: minter.clone(),
+                minter,
                 cap: Some(limit),
             }),
             money_market_address: HumanAddr::from("money_market"),
@@ -628,7 +628,7 @@ mod tests {
         };
 
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env.clone(), msg.clone()).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(0, res.messages.len());
         assert_eq!(get_balance(&deps, &genesis), amount);
         assert_eq!(get_balance(&deps, &winner), prize);
@@ -643,7 +643,7 @@ mod tests {
             amount: Uint128::zero(),
         };
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
             e => panic!("Unexpected error: {}", e),
@@ -652,11 +652,11 @@ mod tests {
         // but if it exceeds cap (even over multiple rounds), it fails
         // cap is enforced
         let msg = HandleMsg::Mint {
-            recipient: winner.clone(),
+            recipient: winner,
             amount: Uint128(333_222_222),
         };
         let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::GenericErr { msg, .. } => {
                 assert_eq!(msg, "Minting cannot exceed the cap".to_string())
@@ -681,7 +681,7 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("anyone else"), &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Unauthorized { .. } => {}
             e => panic!("expected unauthorized error, got {}", e),
@@ -698,7 +698,7 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("genesis"), &[]);
-        let res = handle(&mut deps, env, msg.clone());
+        let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Unauthorized { .. } => {}
             e => panic!("expected unauthorized error, got {}", e),
@@ -762,7 +762,7 @@ mod tests {
         let data = query(
             &deps,
             QueryMsg::Balance {
-                address: addr1.clone(),
+                address: addr1,
             },
         )
         .unwrap();
@@ -1000,7 +1000,7 @@ mod tests {
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // valid burn reduces total supply
-        let env = mock_env(money_market.clone(), &[]);
+        let env = mock_env(money_market, &[]);
         let msg = HandleMsg::Burn {
             user: addr1.clone(),
             amount: burn,
@@ -1058,7 +1058,7 @@ mod tests {
             amount: transfer,
             msg: Some(send_msg.clone()),
         };
-        let res = handle(&mut deps, env.clone(), msg).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(res.messages.len(), 2);
 
         // Ensure finalize liquidity token transfer msg is sent
@@ -1112,14 +1112,14 @@ mod tests {
             amount: transfer,
             msg: Some(send_msg.clone()),
         };
-        let res = handle(&mut deps, env.clone(), msg).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
 
         // should not have finalize token transfer call
         assert_eq!(res.messages.len(), 1);
         // ensure proper send message sent
         // this is the message we want delivered to the other side
         let binary_msg = Cw20ReceiveMsg {
-            sender: addr1.clone(),
+            sender: addr1,
             amount: transfer,
             msg: Some(send_msg),
         }

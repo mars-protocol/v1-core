@@ -1749,10 +1749,10 @@ fn reserve_get_from_index<S: Storage>(storage: &S, index: u32) -> StdResult<(Vec
     match reserves_state_read(storage).load(&asset_reference_vec) {
         Ok(asset_reserve) => Ok((asset_reference_vec, asset_reserve)),
         Err(_) => {
-            return Err(StdError::generic_err(format!(
+            Err(StdError::generic_err(format!(
                 "no asset reserve exists with asset reference: {}",
                 String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
-            )));
+            )))
         }
     }
 }
@@ -2864,7 +2864,7 @@ mod tests {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
-            amount: Uint256::from(10000 as u128),
+            amount: Uint256::from(10000_u128),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -3111,9 +3111,9 @@ mod tests {
         let reserve_1_after_repay_1 = reserves_state_read(&deps.storage)
             .load(cw20_contract_addr_canonical.as_slice())
             .unwrap();
-        assert_eq!(Uint256::from(0 as u128), debt1.amount_scaled);
+        assert_eq!(Uint256::from(0_u128), debt1.amount_scaled);
         assert_eq!(
-            Uint256::from(0 as u128),
+            Uint256::from(0_u128),
             reserve_1_after_repay_1.debt_total_scaled
         );
     }
@@ -3319,10 +3319,10 @@ mod tests {
                 * Decimal256::from(exchange_rate_3));
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
             / Decimal256::from(exchange_rate_2))
-            + Uint256::from(100 as u64);
+            + Uint256::from(100_u64);
         let permissible_borrow_amount = (max_borrow_allowed_in_uusd
             / Decimal256::from(exchange_rate_2))
-            - Uint256::from(100 as u64);
+            - Uint256::from(100_u64);
 
         // borrow above the allowed amount given current collateral, should fail
         let borrow_msg = HandleMsg::Borrow {
@@ -3939,7 +3939,7 @@ mod tests {
                 amount: Uint128(500_000),
             };
 
-            handle(&mut deps, env_matoken.clone(), msg).unwrap();
+            handle(&mut deps, env_matoken, msg).unwrap();
 
             let users_bucket = users_state_read(&deps.storage);
             let from_user = users_bucket
@@ -3960,8 +3960,8 @@ mod tests {
         // Calling this with other token fails
         {
             let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
-                from_address: from_address,
-                to_address: to_address,
+                from_address,
+                to_address,
                 from_previous_balance: Uint128(500_000),
                 to_previous_balance: Uint128(500_000),
                 amount: Uint128(500_000),
