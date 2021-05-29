@@ -114,6 +114,12 @@ impl User {
     }
 }
 
+impl Default for User {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {
     bucket(USERS_NAMESPACE, storage)
 }
