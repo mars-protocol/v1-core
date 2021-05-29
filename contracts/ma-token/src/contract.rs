@@ -1015,7 +1015,7 @@ mod tests {
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
-        let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
+        let send_msg = Binary::from(br#"{"some":123}"#);
 
         do_init(&mut deps, &addr1, amount1);
 
