@@ -139,8 +139,7 @@ mod tests {
         assert_eq!(&allow.allowance, &allow2);
 
         // next one is spender1 ("later")
-        let allowances =
-            query_all_allowances(&deps, owner, Some(spender2), Some(10000)).unwrap();
+        let allowances = query_all_allowances(&deps, owner, Some(spender2), Some(10000)).unwrap();
         assert_eq!(allowances.allowances.len(), 1);
         let allow = &allowances.allowances[0];
         assert_eq!(&allow.spender, &spender1);
