@@ -5,6 +5,7 @@
   "required": [
     "decimals",
     "initial_balances",
+    "money_market_address",
     "name",
     "symbol"
   ],
@@ -29,6 +30,9 @@
           "type": "null"
         }
       ]
+    },
+    "money_market_address": {
+      "$ref": "#/definitions/HumanAddr"
     },
     "name": {
       "type": "string"

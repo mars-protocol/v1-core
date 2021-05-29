@@ -227,7 +227,7 @@ mod tests {
         let msg = HandleMsg::IncreaseAllowance {
             spender: spender.clone(),
             amount: allow1,
-            expires: Some(expires.clone()),
+            expires: Some(expires),
         };
         handle(&mut deps, env.clone(), msg).unwrap();
 
@@ -237,7 +237,7 @@ mod tests {
             allowance,
             AllowanceResponse {
                 allowance: allow1,
-                expires: expires.clone()
+                expires: expires
             }
         );
 
@@ -255,7 +255,7 @@ mod tests {
             allowance,
             AllowanceResponse {
                 allowance: allow2,
-                expires: expires.clone()
+                expires: expires
             }
         );
 
@@ -266,7 +266,7 @@ mod tests {
         let msg = HandleMsg::IncreaseAllowance {
             spender: spender.clone(),
             amount: raise,
-            expires: Some(new_expire.clone()),
+            expires: Some(new_expire),
         };
         handle(&mut deps, env.clone(), msg).unwrap();
         let allowance = query_allowance(&deps, owner.clone(), spender.clone()).unwrap();
@@ -274,7 +274,7 @@ mod tests {
             allowance,
             AllowanceResponse {
                 allowance: allow3,
-                expires: new_expire.clone()
+                expires: new_expire
             }
         );
 
@@ -319,7 +319,7 @@ mod tests {
         let msg = HandleMsg::IncreaseAllowance {
             spender: spender.clone(),
             amount: allow1,
-            expires: Some(expires.clone()),
+            expires: Some(expires),
         };
         handle(&mut deps, env.clone(), msg).unwrap();
 
@@ -361,7 +361,7 @@ mod tests {
         let msg = HandleMsg::IncreaseAllowance {
             spender: spender2.clone(),
             amount: allow3,
-            expires: Some(expires3.clone()),
+            expires: Some(expires3),
         };
         handle(&mut deps, env.clone(), msg).unwrap();
         let expect_three = AllowanceResponse {
