@@ -76,10 +76,7 @@ pub mod msg {
             new_limit: Uint128,
         },
         /// Update (enable / disable) asset as collateral
-        UpdateUserCollateralAssetStatus {
-            asset: Asset,
-            enable: bool
-        }
+        UpdateUserCollateralAssetStatus { asset: Asset, enable: bool },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
