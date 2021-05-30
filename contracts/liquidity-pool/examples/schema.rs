@@ -2,7 +2,7 @@ use std::env::current_dir;
 use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use liquidity_pool::msg::{
+use mars::liquidity_pool::msg::{
     ConfigResponse, DebtResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
     ReserveResponse, ReservesListResponse,
 };
