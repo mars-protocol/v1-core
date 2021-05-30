@@ -102,14 +102,14 @@ pub struct User {
     /// bitmap representing borrowed asset. 1 on the corresponding bit means asset is
     /// being borrowed
     pub borrowed_assets: Uint128,
-    pub deposited_assets: Uint128,
+    pub collateral_assets: Uint128,
 }
 
 impl User {
     pub fn new() -> Self {
         User {
             borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
+            collateral_assets: Uint128::zero(),
         }
     }
 }
