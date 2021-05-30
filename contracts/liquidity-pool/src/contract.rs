@@ -4236,6 +4236,115 @@ mod tests {
         assert_eq!(allowance, Uint128::zero());
     }
 
+    #[test]
+    fn test_update_asset_collateral() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = HumanAddr(String::from("user"));
+        let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
+
+        let ma_token_address_1 = HumanAddr::from("matoken1");
+        let mock_reserve_1 = MockReserve {
+            ma_token_address: ma_token_address_1.as_str(),
+            asset_type: AssetType::Cw20,
+            ..Default::default()
+        };
+        let mock_reserve_2 = MockReserve {
+            ma_token_address: "matoken2",
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+
+        let cw20_contract_addr = HumanAddr::from("depositedcoin1");
+        let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
+
+        // Should get index 0
+        let reserve_1_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            cw20_contract_addr_canonical.as_slice(),
+            &mock_reserve_1,
+        );
+        // Should get index 1
+        let reserve_2_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"depositedcoin2",
+            &mock_reserve_2,
+        );
+
+        // Set second asset as collateral
+        let mut user = User::new();
+        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Set the querier to return zero for the first asset
+        deps.querier.set_cw20_balances(
+            ma_token_address_1.clone(),
+            &[(user_addr.clone(), Uint128::zero())],
+        );
+
+        // Enable first reserve index which is currently disabled as collateral and ma-token balance is 0
+        let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
+            asset: Asset::Cw20 {
+                contract_addr: cw20_contract_addr.clone(),
+            },
+            enable: true,
+        };
+        let env = cosmwasm_std::testing::mock_env("user", &[]);
+        let res_error = handle(&mut deps, env.clone(), update_msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                format!(
+                    "User address {} has no balance in specified collateral asset {}",
+                    user_addr.as_str(),
+                    String::from(cw20_contract_addr.as_str())
+                )
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_1_collateral =
+            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        // Balance for first asset is zero so don't update bit
+        assert_eq!(reserve_1_collateral, false);
+
+        // Set the querier to return balance more than zero for the first asset
+        deps.querier
+            .set_cw20_balances(ma_token_address_1, &[(user_addr, Uint128(100_000))]);
+
+        // Enable first reserve index which is currently disabled as collateral and ma-token balance is more than 0
+        let _res = handle(&mut deps, env.clone(), update_msg).unwrap();
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_1_collateral =
+            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        // Balance for first asset is more than zero so update bit
+        assert_eq!(reserve_1_collateral, true);
+
+        // Disable second reserve index
+        let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
+            asset: Asset::Native {
+                denom: "depositedcoin2".to_string(),
+            },
+            enable: false,
+        };
+        let _res = handle(&mut deps, env, update_msg).unwrap();
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_2_collateral =
+            get_bit(user.collateral_assets, reserve_2_initial.index).unwrap();
+        assert_eq!(reserve_2_collateral, false);
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
