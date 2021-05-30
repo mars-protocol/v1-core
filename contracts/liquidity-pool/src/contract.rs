@@ -145,6 +145,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             asset,
             new_limit,
         } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
+        HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
+            handle_update_user_collateral_asset_status(deps, env, asset, enable)
+        }
     }
 }
 
@@ -475,9 +478,9 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
             Err(error) => return Err(error),
         };
 
-    let has_deposited_asset = get_bit(user.deposited_assets, reserve.index)?;
+    let has_deposited_asset = get_bit(user.collateral_assets, reserve.index)?;
     if !has_deposited_asset {
-        set_bit(&mut user.deposited_assets, reserve.index)?;
+        set_bit(&mut user.collateral_assets, reserve.index)?;
         users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
@@ -992,9 +995,9 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
         // set liquidator's deposited bit to true if not already true
         let liquidator_is_using_as_collateral =
-            get_bit(liquidator.deposited_assets, collateral_reserve.index)?;
+            get_bit(liquidator.collateral_assets, collateral_reserve.index)?;
         if !liquidator_is_using_as_collateral {
-            set_bit(&mut liquidator.deposited_assets, collateral_reserve.index)?;
+            set_bit(&mut liquidator.collateral_assets, collateral_reserve.index)?;
             users_state(&mut deps.storage)
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
         }
@@ -1028,7 +1031,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // if max collateral to liquidate equals the user's balance then unset deposited bit
     if actual_collateral_amount_to_liquidate == user_collateral_balance {
         let mut user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
-        unset_bit(&mut user.deposited_assets, collateral_reserve.index)?;
+        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
         users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
     }
 
@@ -1096,7 +1099,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
         if (from_previous_balance - amount)? == Uint128::zero() {
-            unset_bit(&mut from_user.deposited_assets, reserve.index)?;
+            unset_bit(&mut from_user.collateral_assets, reserve.index)?;
             users_state(&mut deps.storage).save(from_canonical_address.as_slice(), &from_user)?;
         }
 
@@ -1106,7 +1109,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
             let mut to_user = users_bucket
                 .may_load(&to_canonical_address.as_slice())?
                 .unwrap_or_else(User::new);
-            set_bit(&mut to_user.deposited_assets, reserve.index)?;
+            set_bit(&mut to_user.collateral_assets, reserve.index)?;
             users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
         }
     }
@@ -1145,6 +1148,60 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
             log("user", user_address),
             log("asset", asset_label),
             log("new_allowance", new_limit),
+        ],
+        data: None,
+    })
+}
+
+/// Update (enable / disable) collateral asset for specific user
+pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    enable: bool,
+) -> StdResult<HandleResponse> {
+    let user_address = env.message.sender;
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let mut user = users_state_read(&deps.storage)
+        .may_load(user_canonical_address.as_slice())
+        .map(|u| u.unwrap_or_default())?;
+
+    let (collateral_asset_label, collateral_asset_reference, _) =
+        asset_get_attributes(deps, &asset)?;
+    let collateral_reserve =
+        reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
+    let has_collateral_asset = get_bit(user.collateral_assets, collateral_reserve.index)?;
+    if !has_collateral_asset && enable {
+        let collateral_ma_address = deps
+            .api
+            .human_address(&collateral_reserve.ma_token_address)?;
+        let user_collateral_balance =
+            cw20_get_balance(deps, collateral_ma_address, user_address.clone())?;
+        if user_collateral_balance > Uint128::zero() {
+            // enable collateral asset
+            set_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+            users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+        } else {
+            return Err(StdError::generic_err(format!(
+                "User address {} has no balance in specified collateral asset {}",
+                user_address.as_str(),
+                collateral_asset_label
+            )));
+        }
+    } else if has_collateral_asset && !enable {
+        // disable collateral asset
+        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+        users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+    }
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "update_user_collateral_asset_status"),
+            log("user", user_address),
+            log("asset", collateral_asset_label),
+            log("has_collateral", has_collateral_asset),
+            log("enable", enable),
         ],
         data: None,
     })
@@ -1463,7 +1520,7 @@ where
     let mut ret: Vec<(String, Uint256, Decimal256, AssetType)> = vec![];
 
     for i in 0_u32..config.reserve_count {
-        let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
+        let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if !(user_is_using_as_collateral || user_is_borrowing) {
             continue;
@@ -2593,7 +2650,7 @@ mod tests {
         // Set user as having the reserve_collateral deposited
         let mut user = User::new();
 
-        set_bit(&mut user.deposited_assets, reserve_collateral.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_collateral.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -3144,7 +3201,7 @@ mod tests {
         // Set user as having the reserve_collateral deposited
         let deposit_amount = 110000u64;
         let mut user = User::new();
-        set_bit(&mut user.deposited_assets, reserve.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -3279,9 +3336,9 @@ mod tests {
         // Set user as having all the reserves as collateral
         let mut user = User::new();
 
-        set_bit(&mut user.deposited_assets, reserve_1_initial.index).unwrap();
-        set_bit(&mut user.deposited_assets, reserve_2_initial.index).unwrap();
-        set_bit(&mut user.deposited_assets, reserve_3_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_3_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
@@ -3413,7 +3470,11 @@ mod tests {
         // Set user as having collateral and debt in respective reserves
         let mut user = User::new();
 
-        set_bit(&mut user.deposited_assets, collateral_reserve_initial.index).unwrap();
+        set_bit(
+            &mut user.collateral_assets,
+            collateral_reserve_initial.index,
+        )
+        .unwrap();
         set_bit(&mut user.borrowed_assets, debt_reserve_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
@@ -3648,7 +3709,7 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(false, get_bit(user.deposited_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.collateral_assets, 0).unwrap());
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
         // check user's debt decreased by the appropriate amount
@@ -3733,7 +3794,7 @@ mod tests {
         let mut healthy_user = User::new();
 
         set_bit(
-            &mut healthy_user.deposited_assets,
+            &mut healthy_user.collateral_assets,
             collateral_reserve_initial.index,
         )
         .unwrap();
@@ -3838,7 +3899,7 @@ mod tests {
 
         {
             let mut from_user = User::new();
-            set_bit(&mut from_user.deposited_assets, reserve.index).unwrap();
+            set_bit(&mut from_user.collateral_assets, reserve.index).unwrap();
             users_state(&mut deps.storage)
                 .save(from_canonical_address.as_slice(), &from_user)
                 .unwrap();
@@ -3862,12 +3923,12 @@ mod tests {
                 .unwrap();
             let to_user = users_bucket.load(to_canonical_address.as_slice()).unwrap();
             assert_eq!(
-                get_bit(from_user.deposited_assets, reserve.index).unwrap(),
+                get_bit(from_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
             // Should create user and set deposited to true as previous balance is 0
             assert_eq!(
-                get_bit(to_user.deposited_assets, reserve.index).unwrap(),
+                get_bit(to_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
         }
@@ -3946,11 +4007,11 @@ mod tests {
             let to_user = users_bucket.load(to_canonical_address.as_slice()).unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
             assert_eq!(
-                get_bit(from_user.deposited_assets, reserve.index).unwrap(),
+                get_bit(from_user.collateral_assets, reserve.index).unwrap(),
                 false
             );
             assert_eq!(
-                get_bit(to_user.deposited_assets, reserve.index).unwrap(),
+                get_bit(to_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
         }
