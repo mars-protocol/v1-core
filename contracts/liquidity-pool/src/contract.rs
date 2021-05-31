@@ -149,6 +149,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
         HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
             handle_update_user_collateral_asset_status(deps, env, asset, enable)
+
+        HandleMsg::DistributeProtocolIncome { asset, amount } => {
+            handle_distribute_protocol_income(deps, env, asset, amount)
         }
     }
 }
@@ -251,7 +254,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
-    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
+    reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
@@ -310,43 +313,22 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
         })?,
     })];
 
-    let (redeem_msg, asset) = match reserve.asset_type {
-        AssetType::Native => (
-            build_send_native_asset_msg(
-                env.contract.address.clone(),
-                redeemer_address,
-                asset_label.as_str(),
-                redeem_amount,
-            ),
-            Asset::Native { denom: asset_label },
+    let redeem_msg = match reserve.asset_type {
+        AssetType::Native => build_send_native_asset_msg(
+            env.contract.address.clone(),
+            redeemer_address,
+            asset_label.as_str(),
+            redeem_amount,
         ),
         AssetType::Cw20 => {
             let token_contract_addr = deps
                 .api
                 .human_address(&CanonicalAddr::from(asset_reference))?;
-            (
-                build_send_cw20_token_msg(redeemer_address, token_contract_addr, redeem_amount)?,
-                Asset::Cw20 {
-                    contract_addr: deps
-                        .api
-                        .human_address(&CanonicalAddr::from(asset_reference))?,
-                },
-            )
+            build_send_cw20_token_msg(redeemer_address, token_contract_addr, redeem_amount)?
         }
     };
 
     messages.push(redeem_msg);
-
-    let debt_accrued_to_distribute =
-        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
-
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env,
-        &mut messages,
-        debt_accrued_to_distribute,
-        asset,
-    )?;
 
     Ok(HandleResponse {
         messages,
@@ -409,6 +391,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
                     liquidation_threshold: asset_params.liquidation_threshold,
                     liquidation_bonus: asset_params.liquidation_bonus,
+
+                    protocol_income_to_be_distributed: Uint256::zero(),
                 },
             )?;
 
@@ -517,7 +501,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
         users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
-    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
+    reserve_update_market_indices(&env, &mut reserve);
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
@@ -535,41 +519,17 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
 
     append_indices_and_rates_to_logs(&mut log, &reserve);
 
-    let mut messages = vec![CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
-        send: vec![],
-        msg: to_binary(&Cw20HandleMsg::Mint {
-            recipient: depositor_address,
-            amount: mint_amount.into(),
-        })?,
-    })];
-
-    let asset = match reserve.asset_type {
-        AssetType::Native => Asset::Native {
-            denom: asset_label.to_string(),
-        },
-        AssetType::Cw20 => Asset::Cw20 {
-            contract_addr: deps
-                .api
-                .human_address(&CanonicalAddr::from(asset_reference))?,
-        },
-    };
-
-    let debt_accrued_to_distribute =
-        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
-
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env,
-        &mut messages,
-        debt_accrued_to_distribute,
-        asset,
-    )?;
-
     Ok(HandleResponse {
         data: None,
         log,
-        messages,
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: depositor_address,
+                amount: mint_amount.into(),
+            })?,
+        })],
     })
 }
 
@@ -685,7 +645,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
     }
 
-    let previous_borrow_index = reserve_update_market_indices(&env, &mut borrow_reserve);
+    reserve_update_market_indices(&env, &mut borrow_reserve);
 
     // Set borrowing asset for user
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_reserve.index)?;
@@ -735,23 +695,11 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         asset.clone(),
         borrow_amount,
     )?;
-    let mut messages = vec![send_msg];
-
-    let debt_accrued_to_distribute =
-        calculate_debt_accrued_to_distribute(previous_borrow_index, &borrow_reserve);
-
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env,
-        &mut messages,
-        debt_accrued_to_distribute,
-        asset,
-    )?;
 
     Ok(HandleResponse {
         data: None,
         log,
-        messages,
+        messages: vec![send_msg],
     })
 }
 
@@ -790,7 +738,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    let previous_borrow_index = reserve_update_market_indices(&env, &mut reserve);
+    reserve_update_market_indices(&env, &mut reserve);
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
@@ -839,27 +787,6 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         unset_bit(&mut user.borrowed_assets, reserve.index)?;
         users_bucket.save(repayer_canonical_address.as_slice(), &user)?;
     }
-
-    let asset = match asset_type {
-        AssetType::Native => Asset::Native {
-            denom: asset_label.to_string(),
-        },
-        AssetType::Cw20 => Asset::Cw20 {
-            contract_addr: deps
-                .api
-                .human_address(&CanonicalAddr::from(asset_reference))?,
-        },
-    };
-
-    let debt_accrued_to_distribute =
-        calculate_debt_accrued_to_distribute(previous_borrow_index, &reserve);
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env,
-        &mut messages,
-        debt_accrued_to_distribute,
-        asset,
-    )?;
 
     let mut log = vec![
         log("action", "repay"),
@@ -920,8 +847,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let mut collateral_reserve =
         reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
-    let collateral_reserve_previous_borrow_index =
-        reserve_update_market_indices(&env, &mut collateral_reserve);
+    reserve_update_market_indices(&env, &mut collateral_reserve);
 
     // check if user has available collateral in specified collateral asset to be liquidated
     let collateral_ma_address = deps
@@ -1036,7 +962,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     // update debt reserve indices
-    let debt_reserve_previous_borrow_index = reserve_update_market_indices(&env, &mut debt_reserve);
+    reserve_update_market_indices(&env, &mut debt_reserve);
 
     let mut messages: Vec<CosmosMsg> = vec![];
 
@@ -1145,28 +1071,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // TODO: we should distinguish between these two in some way
     append_indices_and_rates_to_logs(&mut log, &collateral_reserve);
     append_indices_and_rates_to_logs(&mut log, &debt_reserve);
-
-    let collateral_reserve_debt_accrued_to_distribute = calculate_debt_accrued_to_distribute(
-        collateral_reserve_previous_borrow_index,
-        &collateral_reserve,
-    );
-    let debt_reserve_debt_accrued_to_distribute =
-        calculate_debt_accrued_to_distribute(debt_reserve_previous_borrow_index, &debt_reserve);
-
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env.clone(),
-        &mut messages,
-        collateral_reserve_debt_accrued_to_distribute,
-        collateral_asset,
-    )?;
-    send_debt_accrued_to_distribute_to_contracts(
-        deps,
-        env,
-        &mut messages,
-        debt_reserve_debt_accrued_to_distribute,
-        debt_asset,
-    )?;
 
     Ok(HandleResponse {
         data: None,
@@ -1313,6 +1217,85 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
             log("asset", collateral_asset_label),
             log("has_collateral", has_collateral_asset),
             log("enable", enable),
+        data: None,
+    })
+}
+
+/// Send accumulated asset income to protocol contracts
+pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    amount: Option<Uint256>,
+) -> StdResult<HandleResponse> {
+    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+
+    let amount_to_distribute = match amount {
+        Some(amount) => amount,
+        None => reserve.protocol_income_to_be_distributed,
+    };
+
+    if amount_to_distribute > reserve.protocol_income_to_be_distributed {
+        return Err(StdError::generic_err(
+            "amount specified exceeds reserve's income to be distributed",
+        ));
+    }
+
+    let config = config_state_read(&deps.storage).load()?;
+    let mut messages = vec![];
+
+    let insurance_fund_address = deps
+        .api
+        .human_address(&config.insurance_fund_contract_address)?;
+    let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
+    let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
+
+    let insurance_fund_fee_share = amount_to_distribute * config.insurance_fund_fee_share;
+    let treasury_fund_fee_share = amount_to_distribute * config.treasury_fee_share;
+    let staking_rewards_fee_share =
+        amount_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
+
+    // only build and add send message if fee is non-zero
+    if !insurance_fund_fee_share.is_zero() {
+        let insurance_fund_msg = build_send_asset_msg(
+            env.contract.address.clone(),
+            insurance_fund_address,
+            asset.clone(),
+            insurance_fund_fee_share,
+        )?;
+        messages.push(insurance_fund_msg);
+    }
+
+    if !treasury_fund_fee_share.is_zero() {
+        let scaled_mint_amount = treasury_fund_fee_share / reserve.liquidity_index;
+        let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: treasury_fund_address,
+                amount: scaled_mint_amount.into(),
+            })?,
+        });
+        messages.push(treasury_fund_msg);
+    }
+
+    if !staking_rewards_fee_share.is_zero() {
+        let staking_msg = build_send_asset_msg(
+            env.contract.address,
+            staking_contract_address,
+            asset,
+            staking_rewards_fee_share,
+        )?;
+        messages.push(staking_msg);
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![
+            log("action", "distribute_protocol_income"),
+            log("asset", asset_label),
+            log("amount", amount_to_distribute),
         ],
         data: None,
     })
@@ -1526,7 +1509,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 /// Updates reserve indices by applying current interest rates on the time between last interest update
 /// and current block. Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decimal256 {
+pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let current_timestamp = env.block.time;
     // keep track of previous borrow index to later calculate total debt accrued
     let previous_borrow_index = reserve.borrow_index;
@@ -1549,7 +1532,16 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) -> Decima
         reserve.interests_last_updated = current_timestamp;
     }
 
-    previous_borrow_index
+    let previous_debt_total_unscaled = reserve.debt_total_scaled * previous_borrow_index;
+    let new_debt_total_unscaled = reserve.debt_total_scaled * reserve.borrow_index;
+
+    let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+        new_debt_total_unscaled - previous_debt_total_unscaled
+    } else {
+        Uint256::zero()
+    };
+
+    reserve.protocol_income_to_be_distributed += debt_accrued * reserve.reserve_factor;
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -4672,7 +4664,6 @@ mod tests {
             asset: Asset::Native {
                 denom: "depositedcoin2".to_string(),
             },
-<<<<<<< HEAD
             enable: false,
         };
         let _res = handle(&mut deps, env, update_msg).unwrap();
@@ -4682,53 +4673,6 @@ mod tests {
         let reserve_2_collateral =
             get_bit(user.collateral_assets, reserve_2_initial.index).unwrap();
         assert_eq!(reserve_2_collateral, false);
-=======
-        );
-
-        let mut expected_messages = vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: cw20_contract_addr.clone(),
-            msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: borrower_addr,
-                amount: borrow_amount.into(),
-            })
-            .unwrap(),
-            send: vec![],
-        })];
-
-        let initial_message_length = expected_messages.len();
-
-        let asset = Asset::Cw20 {
-            contract_addr: cw20_contract_addr,
-        };
-        th_send_debt_accrued_to_distribute_to_contracts(
-            &deps.api,
-            &mut deps.storage,
-            HumanAddr::from(MOCK_CONTRACT_ADDR),
-            &mut expected_messages,
-            expected_params_cw20.debt_accrued_to_distribute,
-            asset,
-        );
-
-        // distribute function should not add any messages since reserve factor is zero
-        let final_message_length = expected_messages.len();
-        assert_eq!(initial_message_length, final_message_length);
-
-        // check correct messages and logging
-        assert_eq!(res.messages, expected_messages);
-        assert_eq!(
-            res.log,
-            vec![
-                log("action", "borrow"),
-                log("reserve", "borrowedcoincw20"),
-                log("user", "borrower"),
-                log("amount", borrow_amount),
-                log("borrow_index", expected_params_cw20.borrow_index),
-                log("liquidity_index", expected_params_cw20.liquidity_index),
-                log("borrow_rate", expected_params_cw20.borrow_rate),
-                log("liquidity_rate", expected_params_cw20.liquidity_rate),
-            ]
-        );
->>>>>>> 180a8ca (change logic to return previous borrow index when updating indices and then have a new function that does the debt_accrued_to_distribute calculation)
     }
 
     // TEST HELPERS
