@@ -521,6 +521,8 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     Ok(ConfigResponse {
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
         xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+        cooldown_duration: config.cooldown_duration,
+        proposal_required_deposit: config.proposal_required_deposit,
     })
 }
 
