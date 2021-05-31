@@ -95,14 +95,13 @@ fn deduct_allowance<S: Storage>(
 ) -> StdResult<AllowanceResponse> {
     allowances(storage, owner).update(spender.as_slice(), |current| {
         match current {
+            Some(a) if a.expires.is_expired(block) => {
+                Err(StdError::generic_err("Allowance is expired"))
+            }
             Some(mut a) => {
-                if a.expires.is_expired(block) {
-                    Err(StdError::generic_err("Allowance is expired"))
-                } else {
-                    // deduct the allowance if enough
-                    a.allowance = (a.allowance - amount)?;
-                    Ok(a)
-                }
+                // deduct the allowance if enough
+                a.allowance = (a.allowance - amount)?;
+                Ok(a)
             }
             None => Err(StdError::generic_err("No allowance for this account")),
         }
@@ -448,17 +447,26 @@ mod tests {
         };
         let env = mock_env(spender.clone(), &[]);
         let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(res.log[0], log("action", "transfer_from"));
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "transfer_from"),
+                log("from", owner.clone()),
+                log("to", rcpt.clone()),
+                log("by", spender.clone()),
+                log("amount", transfer),
+            ]
+        );
         assert_eq!(
             res.messages[0],
             CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: HumanAddr::from("money_market"),
                 msg: to_binary(
                     &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        from_address: owner.clone(),
-                        to_address: rcpt.clone(),
-                        from_previous_balance: start,
-                        to_previous_balance: Uint128::zero(),
+                        sender_address: owner.clone(),
+                        recipient_address: rcpt.clone(),
+                        sender_previous_balance: start,
+                        recipient_previous_balance: Uint128::zero(),
                         amount: transfer,
                     }
                 )

@@ -63,10 +63,10 @@ pub mod msg {
         /// Called by liquidity token. Validate liquidity token transfer is valid
         /// and update collateral status
         FinalizeLiquidityTokenTransfer {
-            from_address: HumanAddr,
-            to_address: HumanAddr,
-            from_previous_balance: Uint128,
-            to_previous_balance: Uint128,
+            sender_address: HumanAddr,
+            recipient_address: HumanAddr,
+            sender_previous_balance: Uint128,
+            recipient_previous_balance: Uint128,
             amount: Uint128,
         },
         /// Update uncollateralized loan limit
