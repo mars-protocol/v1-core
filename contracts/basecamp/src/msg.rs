@@ -87,6 +87,8 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
+    pub cooldown_duration: u64,
+    pub proposal_required_deposit: Uint128,
 }
 
 /// We currently take no arguments for migrations
