@@ -12,7 +12,6 @@ pub static CONFIG_KEY: &[u8] = b"config";
 pub static BASECAMP_KEY: &[u8] = b"basecamp";
 
 // namespaces (for buckets)
-pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
 pub static PROPOSALS_NAMESPACE: &[u8] = b"proposals";
 pub static PROPOSAL_VOTES_NAMESPACE: &[u8] = b"proposal_votes";
 
@@ -25,11 +24,8 @@ pub struct Config {
     pub mars_token_address: CanonicalAddr,
     /// xMars token address
     pub xmars_token_address: CanonicalAddr,
-    /// Cooldown duration in seconds
-    pub cooldown_duration: u64,
-    /// Time in seconds after the cooldown ends during which the unstaking of
-    /// the associated amount is allowed
-    pub unstake_window: u64,
+    /// Staking contract address
+    pub staking_contract_address: CanonicalAddr,
 
     /// Blocks during which a proposal is active since being submitted
     pub proposal_voting_period: u64,
@@ -60,10 +56,6 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
 pub struct Basecamp {
     /// Number of proposals
     pub proposal_count: u64,
-    // TODO: This accounting should not be neccesary if staking/reserve are separated
-    // from basecamp
-    /// Total Mars deposited in order to submit proposals
-    pub proposal_total_deposits: Uint128,
 }
 
 pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
@@ -72,23 +64,6 @@ pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
 
 pub fn basecamp_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Basecamp> {
     singleton_read(storage, BASECAMP_KEY)
-}
-
-/// Unstaking cooldown data
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Cooldown {
-    /// Timestamp where the cooldown was activated
-    pub timestamp: u64,
-    /// Amount that the user is allowed to unstake during the unstake window
-    pub amount: Uint128,
-}
-
-pub fn cooldowns_state<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
-    bucket(COOLDOWNS_NAMESPACE, storage)
-}
-
-pub fn cooldowns_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
-    bucket_read(COOLDOWNS_NAMESPACE, storage)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

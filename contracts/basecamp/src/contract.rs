@@ -12,10 +12,9 @@ use crate::msg::{
     ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
-    basecamp_state, basecamp_state_read, config_state, config_state_read, cooldowns_state,
-    proposal_votes_state, proposal_votes_state_read, proposals_state, proposals_state_read,
-    Basecamp, Config, Cooldown, Proposal, ProposalExecuteCall, ProposalStatus, ProposalVote,
-    ProposalVoteOption,
+    basecamp_state, config_state, config_state_read, proposal_votes_state,
+    proposal_votes_state_read, proposals_state, proposals_state_read, Basecamp, Config, Proposal,
+    ProposalExecuteCall, ProposalStatus, ProposalVote, ProposalVoteOption,
 };
 
 // CONSTANTS
@@ -37,9 +36,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
-        xmars_token_address: CanonicalAddr::default(),
-        cooldown_duration: msg.cooldown_duration,
-        unstake_window: msg.unstake_window,
+        xmars_token_address: deps.api.canonical_address(&msg.xmars_token_address)?,
+        staking_contract_address: deps.api.canonical_address(&msg.staking_contract_address)?,
 
         proposal_voting_period: msg.proposal_voting_period,
         proposal_effective_delay: msg.proposal_effective_delay,
@@ -52,57 +50,31 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     config_state(&mut deps.storage).save(&config)?;
 
     // initialize State
-    basecamp_state(&mut deps.storage).save(&Basecamp {
-        proposal_count: 0,
-        proposal_total_deposits: Uint128(0),
-    })?;
+    basecamp_state(&mut deps.storage).save(&Basecamp { proposal_count: 0 })?;
 
-    // Prepare response, should instantiate Mars and xMars
-    // and use the Register hook
+    // Prepare response, should instantiate Mars and use the Register hook
     Ok(InitResponse {
         log: vec![],
-        // TODO: Tokens are initialized here. Evaluate doing this outside of
-        // the contract
-        messages: vec![
-            CosmosMsg::Wasm(WasmMsg::Instantiate {
-                code_id: msg.cw20_code_id,
-                msg: to_binary(&cw20_token::msg::InitMsg {
-                    name: "Mars token".to_string(),
-                    symbol: "Mars".to_string(),
-                    decimals: 6,
-                    initial_balances: vec![],
-                    mint: Some(MinterResponse {
-                        minter: HumanAddr::from(env.contract.address.as_str()),
-                        cap: None,
-                    }),
-                    init_hook: Some(cw20_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 })?,
-                        contract_addr: env.contract.address.clone(),
-                    }),
-                })?,
-                send: vec![],
-                label: None,
-            }),
-            CosmosMsg::Wasm(WasmMsg::Instantiate {
-                code_id: msg.cw20_code_id,
-                msg: to_binary(&cw20_token::msg::InitMsg {
-                    name: "xMars token".to_string(),
-                    symbol: "xMars".to_string(),
-                    decimals: 6,
-                    initial_balances: vec![],
-                    mint: Some(MinterResponse {
-                        minter: HumanAddr::from(env.contract.address.as_str()),
-                        cap: None,
-                    }),
-                    init_hook: Some(cw20_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 1 })?,
-                        contract_addr: env.contract.address,
-                    }),
-                })?,
-                send: vec![],
-                label: None,
-            }),
-        ],
+        // TODO: Mars token is initialized here. Evaluate doing this outside of the contract
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
+            code_id: msg.cw20_code_id,
+            msg: to_binary(&cw20_token::msg::InitMsg {
+                name: "Mars token".to_string(),
+                symbol: "Mars".to_string(),
+                decimals: 6,
+                initial_balances: vec![],
+                mint: Some(MinterResponse {
+                    minter: HumanAddr::from(env.contract.address.as_str()),
+                    cap: None,
+                }),
+                init_hook: Some(cw20_token::msg::InitHook {
+                    msg: to_binary(&HandleMsg::InitTokenCallback {})?,
+                    contract_addr: env.contract.address,
+                }),
+            })?,
+            send: vec![],
+            label: None,
+        })],
     })
 }
 
@@ -115,11 +87,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitTokenCallback { token_id } => {
-            handle_init_token_callback(deps, env, token_id)
-        }
-
-        HandleMsg::Cooldown {} => handle_cooldown(deps, env),
+        HandleMsg::InitTokenCallback {} => handle_init_mars_callback(deps, env),
 
         HandleMsg::CastVote {
             proposal_id,
@@ -145,8 +113,6 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
-            ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
-            ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
             ReceiveMsg::SubmitProposal {
                 title,
                 description,
@@ -168,161 +134,8 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-/// Mint xMars tokens to staker
-pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    staker: HumanAddr,
-    stake_amount: Uint128,
-) -> StdResult<HandleResponse> {
-    // check stake is valid
-    let config = config_state_read(&deps.storage).load()?;
-    // Has to send Mars tokens
-    if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
-        return Err(StdError::unauthorized());
-    }
-    if stake_amount == Uint128(0) {
-        return Err(StdError::generic_err("Stake amount must be greater than 0"));
-    }
-
-    let total_mars_in_basecamp = cw20_get_balance(
-        deps,
-        deps.api.human_address(&config.mars_token_address)?,
-        env.contract.address,
-    )?;
-    // Mars amount needs to be before the stake transaction (which is already in the basecamp's
-    // balance so it needs to be deducted)
-    // Mars deposited for proposals is not taken into account
-    let basecamp = basecamp_state_read(&deps.storage).load()?;
-    let mars_to_deduct = basecamp.proposal_total_deposits + stake_amount;
-    let net_total_mars_in_basecamp = (total_mars_in_basecamp - mars_to_deduct)?;
-
-    let total_xmars_supply =
-        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
-
-    let mint_amount =
-        if net_total_mars_in_basecamp == Uint128(0) || total_xmars_supply == Uint128(0) {
-            stake_amount
-        } else {
-            stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_basecamp)
-        };
-
-    Ok(HandleResponse {
-        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&config.xmars_token_address)?,
-            send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: staker.clone(),
-                amount: mint_amount,
-            })?,
-        })],
-        log: vec![
-            log("action", "stake"),
-            log("user", staker),
-            log("mars_staked", stake_amount),
-            log("xmars_minted", mint_amount),
-        ],
-        data: None,
-    })
-}
-
-/// Burn xMars tokens and send corresponding Mars
-pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    staker: HumanAddr,
-    burn_amount: Uint128,
-) -> StdResult<HandleResponse> {
-    // check unstake is valid
-    let config = config_state_read(&deps.storage).load()?;
-    if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
-        return Err(StdError::unauthorized());
-    }
-    if burn_amount == Uint128(0) {
-        return Err(StdError::generic_err(
-            "Unstake amount must be greater than 0",
-        ));
-    }
-
-    // check valid cooldown
-    //
-    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
-    let staker_canonical_addr = deps.api.canonical_address(&staker)?;
-    match cooldowns_bucket.may_load(staker_canonical_addr.as_slice())? {
-        Some(mut cooldown) => {
-            if burn_amount > cooldown.amount {
-                return Err(StdError::generic_err(
-                    "Unstake amount must not be greater than cooldown amount",
-                ));
-            }
-            if env.block.time < cooldown.timestamp + config.cooldown_duration {
-                return Err(StdError::generic_err("Cooldown has not finished"));
-            }
-            if env.block.time
-                > cooldown.timestamp + config.cooldown_duration + config.unstake_window
-            {
-                return Err(StdError::generic_err("Cooldown has expired"));
-            }
-
-            if burn_amount == cooldown.amount {
-                cooldowns_bucket.remove(staker_canonical_addr.as_slice());
-            } else {
-                cooldown.amount = (cooldown.amount - burn_amount)?;
-                cooldowns_bucket.save(staker_canonical_addr.as_slice(), &cooldown)?;
-            }
-        }
-
-        None => {
-            return Err(StdError::generic_err(
-                "Address must have a valid cooldown to unstake",
-            ))
-        }
-    };
-
-    let total_mars_in_basecamp = cw20_get_balance(
-        deps,
-        deps.api.human_address(&config.mars_token_address)?,
-        env.contract.address,
-    )?;
-
-    // Mars from proposal deposits is not taken into account
-    let basecamp = basecamp_state_read(&deps.storage).load()?;
-    let net_total_mars_in_basecamp = (total_mars_in_basecamp - basecamp.proposal_total_deposits)?;
-
-    let total_xmars_supply =
-        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
-
-    let unstake_amount = burn_amount.multiply_ratio(net_total_mars_in_basecamp, total_xmars_supply);
-
-    Ok(HandleResponse {
-        messages: vec![
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps.api.human_address(&config.xmars_token_address)?,
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Burn {
-                    amount: burn_amount,
-                })?,
-            }),
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps.api.human_address(&config.mars_token_address)?,
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: staker.clone(),
-                    amount: unstake_amount,
-                })?,
-            }),
-        ],
-        log: vec![
-            log("action", "unstake"),
-            log("user", staker),
-            log("mars_unstaked", unstake_amount),
-            log("xmars_burned", burn_amount),
-        ],
-        data: None,
-    })
-}
-
 /// Submit new proposal
+
 pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -377,7 +190,6 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     let mut basecamp_singleton = basecamp_state(&mut deps.storage);
     let mut basecamp = basecamp_singleton.load()?;
     basecamp.proposal_count += 1;
-    basecamp.proposal_total_deposits += deposit_amount;
     basecamp_singleton.save(&basecamp)?;
 
     // Transform MsgExecuteCalls into ProposalExecuteCalls by canonicalizing the contract address
@@ -404,11 +216,11 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
         against_votes: Uint128::zero(),
         start_height: env.block.height,
         end_height: env.block.height + config.proposal_voting_period,
-        title: title,
-        description: description,
+        title,
+        description,
         link: option_link,
         execute_calls: option_proposal_execute_calls,
-        deposit_amount: deposit_amount,
+        deposit_amount,
     };
     proposals_state(&mut deps.storage)
         .save(&basecamp.proposal_count.to_be_bytes(), &new_proposal)?;
@@ -425,123 +237,29 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles token post initialization storing the addresses
-/// in config
-/// token is a byte: 0 = Mars, 1 = xMars, others are not authorized
-pub fn handle_init_token_callback<S: Storage, A: Api, Q: Querier>(
+/// Handles Mars post-initialization storing the address in config
+pub fn handle_init_mars_callback<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    token_id: u8,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
 
-    return match token_id {
-        // Mars
-        0 => {
-            if config.mars_token_address == CanonicalAddr::default() {
-                config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_mars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        // xMars
-        1 => {
-            if config.xmars_token_address == CanonicalAddr::default() {
-                config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
-                config_singleton.save(&config)?;
-                Ok(HandleResponse {
-                    messages: vec![],
-                    log: vec![
-                        log("action", "init_xmars_token"),
-                        log("token_address", &env.message.sender),
-                    ],
-                    data: None,
-                })
-            } else {
-                // Can do this only once
-                Err(StdError::unauthorized())
-            }
-        }
-        _ => Err(StdError::unauthorized()),
-    };
-}
-
-/// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
-/// If a cooldown exists and amount has changed it computes the weighted average
-/// for the cooldown
-pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
-
-    // get total mars in contract before the stake transaction
-    let xmars_balance = cw20_get_balance(
-        deps,
-        deps.api.human_address(&config.xmars_token_address)?,
-        env.message.sender.clone(),
-    )?;
-
-    if xmars_balance.is_zero() {
-        return Err(StdError::unauthorized());
+    if config.mars_token_address == CanonicalAddr::default() {
+        config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
+        config_singleton.save(&config)?;
+        Ok(HandleResponse {
+            messages: vec![],
+            log: vec![
+                log("action", "init_mars_token"),
+                log("token_address", &env.message.sender),
+            ],
+            data: None,
+        })
+    } else {
+        // Can do this only once
+        Err(StdError::unauthorized())
     }
-
-    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
-    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-
-    // compute new cooldown timestamp
-    let new_cooldown_timestamp =
-        match cooldowns_bucket.may_load(sender_canonical_address.as_slice())? {
-            Some(cooldown) => {
-                let minimal_valid_cooldown_timestamp =
-                    env.block.time - config.cooldown_duration - config.unstake_window;
-
-                if cooldown.timestamp < minimal_valid_cooldown_timestamp {
-                    env.block.time
-                } else {
-                    let mut extra_amount: u128 = 0;
-                    if xmars_balance > cooldown.amount {
-                        extra_amount = xmars_balance.u128() - cooldown.amount.u128();
-                    };
-
-                    (((cooldown.timestamp as u128) * cooldown.amount.u128()
-                        + (env.block.time as u128) * extra_amount)
-                        / (cooldown.amount.u128() + extra_amount)) as u64
-                }
-            }
-
-            None => env.block.time,
-        };
-
-    cooldowns_bucket.save(
-        &sender_canonical_address.as_slice(),
-        &Cooldown {
-            amount: xmars_balance,
-            timestamp: new_cooldown_timestamp,
-        },
-    )?;
-
-    Ok(HandleResponse {
-        log: vec![
-            log("action", "cooldown"),
-            log("user", env.message.sender),
-            log("cooldown_amount", xmars_balance),
-            log("cooldown_timestamp", new_cooldown_timestamp),
-        ],
-        data: None,
-        messages: vec![],
-    })
 }
 
 pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
@@ -660,7 +378,7 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     {
         new_proposal_status = ProposalStatus::Passed;
         log_proposal_result = "passed";
-        // refund deposit amount to sumbitter
+        // refund deposit amount to submitter
         handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&config.mars_token_address)?,
             send: vec![],
@@ -672,15 +390,17 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
             })?,
         }));
     }
-    // TODO: If staking gets separated from basecamp, a transfer needs to be sent to the
-    // contract that handles the staking
 
-    // Update deposit totals
-    basecamp_state(&mut deps.storage).update(|mut basecamp| {
-        basecamp.proposal_total_deposits =
-            (basecamp.proposal_total_deposits - proposal.deposit_amount)?;
-        Ok(basecamp)
-    })?;
+    if new_proposal_status == ProposalStatus::Rejected {
+        handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+            msg: to_binary(&Cw20HandleMsg::Transfer {
+                recipient: deps.api.human_address(&config.staking_contract_address)?,
+                amount: proposal.deposit_amount,
+            })?,
+            send: vec![],
+        }))
+    }
 
     // Update proposal status
     proposal.status = new_proposal_status;
@@ -749,7 +469,7 @@ pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
     };
 
     Ok(HandleResponse {
-        messages: messages,
+        messages,
         log: vec![
             log("action", "execute_proposal"),
             log("proposal_id", proposal_id),
@@ -827,10 +547,8 @@ mod tests {
         get_test_addresses, mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier,
     };
 
-    use crate::state::{basecamp_state_read, cooldowns_state_read, proposals_state_read};
+    use crate::state::{basecamp_state_read, proposals_state_read};
 
-    const TEST_COOLDOWN_DURATION: u64 = 1000;
-    const TEST_UNSTAKE_WINDOW: u64 = 100;
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
     const TEST_PROPOSAL_EFFECTIVE_DELAY: u64 = 200;
     const TEST_PROPOSAL_EXPIRATION_PERIOD: u64 = 300;
@@ -842,8 +560,8 @@ mod tests {
 
         let msg = InitMsg {
             cw20_code_id: 11,
-            cooldown_duration: 20,
-            unstake_window: 10,
+            xmars_token_address: HumanAddr::from("xmars_token"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
 
             proposal_voting_period: 1,
             proposal_effective_delay: 1,
@@ -856,48 +574,26 @@ mod tests {
 
         let res = init(&mut deps, env, msg).unwrap();
         assert_eq!(
-            vec![
-                CosmosMsg::Wasm(WasmMsg::Instantiate {
-                    code_id: 11,
-                    msg: to_binary(&cw20_token::msg::InitMsg {
-                        name: "Mars token".to_string(),
-                        symbol: "Mars".to_string(),
-                        decimals: 6,
-                        initial_balances: vec![],
-                        mint: Some(MinterResponse {
-                            minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                            cap: None,
-                        }),
-                        init_hook: Some(cw20_token::msg::InitHook {
-                            msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 0 }).unwrap(),
-                            contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                        }),
-                    })
-                    .unwrap(),
-                    send: vec![],
-                    label: None,
-                }),
-                CosmosMsg::Wasm(WasmMsg::Instantiate {
-                    code_id: 11,
-                    msg: to_binary(&cw20_token::msg::InitMsg {
-                        name: "xMars token".to_string(),
-                        symbol: "xMars".to_string(),
-                        decimals: 6,
-                        initial_balances: vec![],
-                        mint: Some(MinterResponse {
-                            minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                            cap: None,
-                        }),
-                        init_hook: Some(cw20_token::msg::InitHook {
-                            msg: to_binary(&HandleMsg::InitTokenCallback { token_id: 1 }).unwrap(),
-                            contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                        }),
-                    })
-                    .unwrap(),
-                    send: vec![],
-                    label: None,
+            vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
+                code_id: 11,
+                msg: to_binary(&cw20_token::msg::InitMsg {
+                    name: "Mars token".to_string(),
+                    symbol: "Mars".to_string(),
+                    decimals: 6,
+                    initial_balances: vec![],
+                    mint: Some(MinterResponse {
+                        minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        cap: None,
+                    }),
+                    init_hook: Some(cw20_token::msg::InitHook {
+                        msg: to_binary(&HandleMsg::InitTokenCallback {}).unwrap(),
+                        contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    }),
                 })
-            ],
+                .unwrap(),
+                send: vec![],
+                label: None,
+            }),],
             res.messages
         );
 
@@ -909,13 +605,12 @@ mod tests {
             config.owner
         );
         assert_eq!(CanonicalAddr::default(), config.mars_token_address);
-        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
         assert_eq!(basecamp.proposal_count, 0);
 
         // mars token init callback
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("mars_token", MockEnvParams::default());
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
@@ -932,10 +627,14 @@ mod tests {
                 .unwrap(),
             config.mars_token_address
         );
-        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
+        let xmars_token_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("xmars_token"))
+            .unwrap();
+        assert_eq!(xmars_token_address, config.xmars_token_address);
 
         // trying again fails
-        let msg = HandleMsg::InitTokenCallback { token_id: 0 };
+        let msg = HandleMsg::InitTokenCallback {};
         let env = mock_env("mars_token_again", MockEnvParams::default());
         let _res = handle(&mut deps, env, msg).unwrap_err();
         let config = config_state_read(&deps.storage).load().unwrap();
@@ -945,552 +644,12 @@ mod tests {
                 .unwrap(),
             config.mars_token_address
         );
-        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
-
-        // xmars token init callback
-        let msg = HandleMsg::InitTokenCallback { token_id: 1 };
-        let env = mock_env("xmars_token", MockEnvParams::default());
-        let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(
-            vec![
-                log("action", "init_xmars_token"),
-                log("token_address", HumanAddr::from("xmars_token")),
-            ],
-            res.log
-        );
-        let config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("mars_token"))
-                .unwrap(),
-            config.mars_token_address
-        );
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("xmars_token"))
-                .unwrap(),
-            config.xmars_token_address
-        );
-
-        // trying again fails
-        let msg = HandleMsg::InitTokenCallback { token_id: 1 };
-        let env = mock_env("xmars_token_again", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
-        let config = config_state_read(&deps.storage).load().unwrap();
-
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("mars_token"))
-                .unwrap(),
-            config.mars_token_address
-        );
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("xmars_token"))
-                .unwrap(),
-            config.xmars_token_address
-        );
 
         // query works now
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let config: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(HumanAddr::from("mars_token"), config.mars_token_address);
         assert_eq!(HumanAddr::from("xmars_token"), config.xmars_token_address);
-    }
-
-    #[test]
-    fn test_staking() {
-        let mut deps = th_setup(&[]);
-        let staker_canonical_addr = deps
-            .api
-            .canonical_address(&HumanAddr::from("staker"))
-            .unwrap();
-
-        let mut basecamp_singleton = basecamp_state(&mut deps.storage);
-        let mut basecamp = basecamp_singleton.load().unwrap();
-        let proposal_total_deposits = Uint128(200_000);
-        basecamp.proposal_total_deposits = proposal_total_deposits;
-        basecamp_singleton.save(&basecamp).unwrap();
-
-        // no Mars in pool (Except for a proposal deposit)
-        // stake X Mars -> should receive X xMars
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: Uint128(2_000_000),
-        });
-
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("mars_token"),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128(2_200_000))],
-        );
-
-        deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(0));
-
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        assert_eq!(
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("xmars_token"),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("staker"),
-                    amount: Uint128(2_000_000),
-                })
-                .unwrap(),
-            })],
-            res.messages
-        );
-        assert_eq!(
-            vec![
-                log("action", "stake"),
-                log("user", HumanAddr::from("staker")),
-                log("mars_staked", 2_000_000),
-                log("xmars_minted", 2_000_000),
-            ],
-            res.log
-        );
-
-        // Some Mars in pool and some xMars supply
-        // stake Mars -> should receive less xMars
-        let stake_amount = Uint128(2_000_000);
-        let mars_in_basecamp = Uint128(4_000_000);
-        let xmars_supply = Uint128(1_000_000);
-
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: stake_amount,
-        });
-
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("mars_token"),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), mars_in_basecamp)],
-        );
-
-        deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), xmars_supply);
-
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        let expected_minted_xmars = stake_amount.multiply_ratio(
-            xmars_supply,
-            (mars_in_basecamp - (proposal_total_deposits + stake_amount)).unwrap(),
-        );
-
-        assert_eq!(
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("xmars_token"),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("staker"),
-                    amount: expected_minted_xmars,
-                })
-                .unwrap(),
-            })],
-            res.messages
-        );
-        assert_eq!(
-            vec![
-                log("action", "stake"),
-                log("user", HumanAddr::from("staker")),
-                log("mars_staked", stake_amount),
-                log("xmars_minted", expected_minted_xmars),
-            ],
-            res.log
-        );
-
-        // stake other token -> Unauthorized
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: Uint128(2_000_000),
-        });
-
-        let env = mock_env("other_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
-
-        // setup variables for unstake
-        let unstake_amount = Uint128(1_000_000);
-        let unstake_mars_in_basecamp = Uint128(4_000_000);
-        let unstake_xmars_supply = Uint128(3_000_000);
-        let unstake_block_timestamp = 1_000_000_000;
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: unstake_amount,
-        });
-
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("mars_token"),
-            &[(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                unstake_mars_in_basecamp,
-            )],
-        );
-
-        deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), unstake_xmars_supply);
-
-        // unstake Mars no cooldown -> unauthorized
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
-
-        // unstake Mars expired cooldown -> unauthorized
-        cooldowns_state(&mut deps.storage)
-            .save(
-                staker_canonical_addr.as_slice(),
-                &Cooldown {
-                    amount: unstake_amount,
-                    timestamp: unstake_block_timestamp
-                        - TEST_COOLDOWN_DURATION
-                        - TEST_UNSTAKE_WINDOW
-                        - 1,
-                },
-            )
-            .unwrap();
-
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
-
-        // unstake Mars unfinished cooldown -> unauthorized
-        cooldowns_state(&mut deps.storage)
-            .save(
-                staker_canonical_addr.as_slice(),
-                &Cooldown {
-                    amount: unstake_amount,
-                    timestamp: unstake_block_timestamp - TEST_COOLDOWN_DURATION + 1,
-                },
-            )
-            .unwrap();
-
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
-
-        // unstake Mars cooldown with low amount -> unauthorized
-        cooldowns_state(&mut deps.storage)
-            .save(
-                staker_canonical_addr.as_slice(),
-                &Cooldown {
-                    amount: (unstake_amount - Uint128(1000)).unwrap(),
-                    timestamp: unstake_block_timestamp - TEST_COOLDOWN_DURATION,
-                },
-            )
-            .unwrap();
-
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, msg.clone()).unwrap_err();
-
-        // partial unstake Mars valid cooldown -> burn xMars, receive Mars back,
-        // deduct cooldown amount
-        let pending_cooldown_amount = Uint128(300_000);
-        let pending_cooldown_timestamp = unstake_block_timestamp - TEST_COOLDOWN_DURATION;
-
-        cooldowns_state(&mut deps.storage)
-            .save(
-                staker_canonical_addr.as_slice(),
-                &Cooldown {
-                    amount: unstake_amount + pending_cooldown_amount,
-                    timestamp: pending_cooldown_timestamp,
-                },
-            )
-            .unwrap();
-
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        let net_unstake_mars_in_basecamp =
-            (unstake_mars_in_basecamp - proposal_total_deposits).unwrap();
-        let expected_returned_mars =
-            unstake_amount.multiply_ratio(net_unstake_mars_in_basecamp, unstake_xmars_supply);
-
-        assert_eq!(
-            vec![
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("xmars_token"),
-                    send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
-                        amount: unstake_amount,
-                    })
-                    .unwrap(),
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("mars_token"),
-                    send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Transfer {
-                        recipient: HumanAddr::from("staker"),
-                        amount: expected_returned_mars,
-                    })
-                    .unwrap(),
-                }),
-            ],
-            res.messages
-        );
-        assert_eq!(
-            vec![
-                log("action", "unstake"),
-                log("user", HumanAddr::from("staker")),
-                log("mars_unstaked", expected_returned_mars),
-                log("xmars_burned", unstake_amount),
-            ],
-            res.log
-        );
-
-        let actual_cooldown = cooldowns_state_read(&deps.storage)
-            .load(staker_canonical_addr.as_slice())
-            .unwrap();
-
-        assert_eq!(actual_cooldown.amount, pending_cooldown_amount);
-        assert_eq!(actual_cooldown.timestamp, pending_cooldown_timestamp);
-
-        // unstake other token -> Unauthorized
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: pending_cooldown_amount,
-        });
-
-        let env = mock_env(
-            "other_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-
-        let _res = handle(&mut deps, env, msg).unwrap_err();
-
-        // unstake pending amount Mars -> cooldown is deleted
-        let env = mock_env(
-            "xmars_token",
-            MockEnvParams {
-                block_time: unstake_block_timestamp,
-                ..Default::default()
-            },
-        );
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
-            sender: HumanAddr::from("staker"),
-            amount: pending_cooldown_amount,
-        });
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        // NOTE: In reality the mars/xmars amounts would change but since they are being
-        // mocked it does not really matter here.
-        let expected_returned_mars = pending_cooldown_amount
-            .multiply_ratio(net_unstake_mars_in_basecamp, unstake_xmars_supply);
-
-        assert_eq!(
-            vec![
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("xmars_token"),
-                    send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
-                        amount: pending_cooldown_amount,
-                    })
-                    .unwrap(),
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("mars_token"),
-                    send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Transfer {
-                        recipient: HumanAddr::from("staker"),
-                        amount: expected_returned_mars,
-                    })
-                    .unwrap(),
-                }),
-            ],
-            res.messages
-        );
-        assert_eq!(
-            vec![
-                log("action", "unstake"),
-                log("user", HumanAddr::from("staker")),
-                log("mars_unstaked", expected_returned_mars),
-                log("xmars_burned", pending_cooldown_amount),
-            ],
-            res.log
-        );
-
-        let actual_cooldown = cooldowns_state_read(&deps.storage)
-            .may_load(staker_canonical_addr.as_slice())
-            .unwrap();
-
-        assert_eq!(actual_cooldown, None);
-    }
-
-    #[test]
-    fn test_cooldown() {
-        let mut deps = th_setup(&[]);
-
-        let initial_block_time = 1_600_000_000;
-        let ongoing_cooldown_block_time = initial_block_time + TEST_COOLDOWN_DURATION / 2;
-
-        // staker with no xmars is unauthorized
-        let msg = HandleMsg::Cooldown {};
-
-        let env = mock_env("staker", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
-
-        // staker with xmars gets a cooldown equal to the xmars balance
-        let initial_xmars_balance = Uint128(1_000_000);
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(HumanAddr::from("staker"), initial_xmars_balance)],
-        );
-
-        let env = mock_env(
-            "staker",
-            MockEnvParams {
-                block_time: initial_block_time,
-                ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
-
-        let cooldown = cooldowns_state_read(&deps.storage)
-            .load(
-                deps.api
-                    .canonical_address(&HumanAddr::from("staker"))
-                    .unwrap()
-                    .as_slice(),
-            )
-            .unwrap();
-
-        assert_eq!(cooldown.timestamp, initial_block_time);
-        assert_eq!(cooldown.amount, initial_xmars_balance);
-        assert_eq!(
-            vec![
-                log("action", "cooldown"),
-                log("user", "staker"),
-                log("cooldown_amount", initial_xmars_balance),
-                log("cooldown_timestamp", initial_block_time)
-            ],
-            res.log
-        );
-
-        // same amount does not alterate cooldown
-        let env = mock_env(
-            "staker",
-            MockEnvParams {
-                block_time: ongoing_cooldown_block_time,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
-
-        let cooldown = cooldowns_state_read(&deps.storage)
-            .load(
-                deps.api
-                    .canonical_address(&HumanAddr::from("staker"))
-                    .unwrap()
-                    .as_slice(),
-            )
-            .unwrap();
-
-        assert_eq!(cooldown.timestamp, initial_block_time);
-        assert_eq!(cooldown.amount, initial_xmars_balance);
-
-        // more amount gets a weighted average timestamp with the new amount
-        let additional_xmars_balance = Uint128(500_000);
-
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(
-                HumanAddr::from("staker"),
-                initial_xmars_balance + additional_xmars_balance,
-            )],
-        );
-        let env = mock_env(
-            "staker",
-            MockEnvParams {
-                block_time: ongoing_cooldown_block_time,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
-
-        let cooldown = cooldowns_state_read(&deps.storage)
-            .load(
-                deps.api
-                    .canonical_address(&HumanAddr::from("staker"))
-                    .unwrap()
-                    .as_slice(),
-            )
-            .unwrap();
-
-        let expected_cooldown_timestamp =
-            (((initial_block_time as u128) * initial_xmars_balance.u128()
-                + (ongoing_cooldown_block_time as u128) * additional_xmars_balance.u128())
-                / (initial_xmars_balance + additional_xmars_balance).u128()) as u64;
-        assert_eq!(cooldown.timestamp, expected_cooldown_timestamp);
-        assert_eq!(
-            cooldown.amount,
-            initial_xmars_balance + additional_xmars_balance
-        );
-
-        // expired cooldown with more amount gets a new timestamp (test lower and higher)
-        let expired_cooldown_block_time =
-            expected_cooldown_timestamp + TEST_COOLDOWN_DURATION + TEST_UNSTAKE_WINDOW + 1;
-        let expired_balance = initial_xmars_balance + additional_xmars_balance + Uint128(800_000);
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(HumanAddr::from("staker"), expired_balance)],
-        );
-
-        let env = mock_env(
-            "staker",
-            MockEnvParams {
-                block_time: expired_cooldown_block_time,
-                ..Default::default()
-            },
-        );
-        let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
-
-        let cooldown = cooldowns_state_read(&deps.storage)
-            .load(
-                deps.api
-                    .canonical_address(&HumanAddr::from("staker"))
-                    .unwrap()
-                    .as_slice(),
-            )
-            .unwrap();
-
-        assert_eq!(cooldown.timestamp, expired_cooldown_block_time);
-        assert_eq!(cooldown.amount, expired_balance);
     }
 
     #[test]
@@ -1708,10 +867,6 @@ mod tests {
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
         assert_eq!(basecamp.proposal_count, 1);
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            TEST_PROPOSAL_REQUIRED_DEPOSIT
-        );
 
         let proposal = proposals_state_read(&deps.storage)
             .load(&1_u64.to_be_bytes())
@@ -1770,10 +925,6 @@ mod tests {
 
         let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
         assert_eq!(basecamp.proposal_count, 2);
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            TEST_PROPOSAL_REQUIRED_DEPOSIT + TEST_PROPOSAL_REQUIRED_DEPOSIT
-        );
 
         let proposal = proposals_state_read(&deps.storage)
             .load(&2_u64.to_be_bytes())
@@ -1802,7 +953,7 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
-            &[(voter_address.clone(), Uint128(100))],
+            &[(voter_address, Uint128(100))],
         );
 
         let active_proposal_id = 1_u64;
@@ -1829,7 +980,7 @@ mod tests {
         );
 
         let msgs = vec![
-            // voting a non-existent proposal shold fail
+            // voting a non-existent proposal should fail
             (
                 HandleMsg::CastVote {
                     proposal_id: 3,
@@ -1871,7 +1022,7 @@ mod tests {
             let env = mock_env(
                 "voter",
                 MockEnvParams {
-                    block_height: block_height,
+                    block_height,
                     ..Default::default()
                 },
             );
@@ -1889,7 +1040,7 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("xmars_token"),
-            &[(voter_address.clone(), Uint128(100))],
+            &[(voter_address, Uint128(100))],
         );
 
         let active_proposal = th_build_mock_proposal(
@@ -2059,13 +1210,6 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
 
-        basecamp_state(&mut deps.storage)
-            .update(|mut basecamp| {
-                basecamp.proposal_total_deposits = Uint128(100_000);
-                Ok(basecamp)
-            })
-            .unwrap();
-
         th_build_mock_proposal(
             &mut deps,
             MockProposal {
@@ -2105,7 +1249,7 @@ mod tests {
             let env = mock_env(
                 "ender",
                 MockEnvParams {
-                    block_height: block_height,
+                    block_height,
                     ..Default::default()
                 },
             );
@@ -2119,14 +1263,6 @@ mod tests {
 
         deps.querier
             .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
-
-        let initial_proposal_deposits = Uint128(100_000);
-        basecamp_state(&mut deps.storage)
-            .update(|mut basecamp| {
-                basecamp.proposal_total_deposits = initial_proposal_deposits;
-                Ok(basecamp)
-            })
-            .unwrap();
 
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
         let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
@@ -2156,7 +1292,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 1 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -2191,13 +1327,6 @@ mod tests {
             .load(&1u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Passed);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (initial_proposal_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
 
         // end rejected proposal (no quorum)
         let initial_passed_proposal = th_build_mock_proposal(
@@ -2215,7 +1344,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 2 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -2233,19 +1362,23 @@ mod tests {
             ]
         );
 
-        assert_eq!(res.messages, vec![]);
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("mars_token"),
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: HumanAddr::from("staking_contract"),
+                    amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+                })
+                .unwrap(),
+                send: vec![],
+            })]
+        );
 
         let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&2u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
 
         // end rejected proposal (no threshold)
         let initial_passed_proposal = th_build_mock_proposal(
@@ -2263,7 +1396,7 @@ mod tests {
         let msg = HandleMsg::EndProposal { proposal_id: 3 };
 
         let env = mock_env(
-            "ender",
+            "sender",
             MockEnvParams {
                 block_height: initial_passed_proposal.end_height + 1,
                 ..Default::default()
@@ -2281,19 +1414,23 @@ mod tests {
             ]
         );
 
-        assert_eq!(res.messages, vec![]);
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("mars_token"),
+                msg: to_binary(&Cw20HandleMsg::Transfer {
+                    recipient: HumanAddr::from("staking_contract"),
+                    amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+                })
+                .unwrap(),
+                send: vec![],
+            })]
+        );
 
         let final_passed_proposal = proposals_state_read(&deps.storage)
             .load(&3u64.to_be_bytes())
             .unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
-        let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
-        let expected_proposal_total_deposits =
-            (expected_proposal_total_deposits - TEST_PROPOSAL_REQUIRED_DEPOSIT).unwrap();
-        assert_eq!(
-            basecamp.proposal_total_deposits,
-            expected_proposal_total_deposits
-        );
     }
 
     #[test]
@@ -2352,7 +1489,7 @@ mod tests {
             let env = mock_env(
                 "executer",
                 MockEnvParams {
-                    block_height: block_height,
+                    block_height,
                     ..Default::default()
                 },
             );
@@ -2390,7 +1527,7 @@ mod tests {
                     ProposalExecuteCall {
                         execution_order: 1,
                         msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
-                        target_contract_canonical_address: contract_canonical_address.clone(),
+                        target_contract_canonical_address: contract_canonical_address,
                     },
                 ]),
                 ..Default::default()
@@ -2432,7 +1569,7 @@ mod tests {
                     .unwrap(),
                 }),
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_address.clone(),
+                    contract_addr: contract_address,
                     send: vec![],
                     msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
                 }),
@@ -2453,8 +1590,8 @@ mod tests {
         // TODO: Do we actually need the init to happen on tests?
         let msg = InitMsg {
             cw20_code_id: 1,
-            cooldown_duration: TEST_COOLDOWN_DURATION,
-            unstake_window: TEST_UNSTAKE_WINDOW,
+            xmars_token_address: HumanAddr::from("xmars_token"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
 
             proposal_voting_period: TEST_PROPOSAL_VOTING_PERIOD,
             proposal_effective_delay: TEST_PROPOSAL_EFFECTIVE_DELAY,

@@ -35,6 +35,10 @@ pub struct Config {
     pub reserve_count: u32,
     // Maximum percentage of outstanding debt that can be covered by a liquidator
     pub close_factor: Decimal256,
+    // Percentage of fees that are sent to the insurance fund
+    pub insurance_fund_fee_share: Decimal256,
+    // Percentage of fees that are sent to the treasury
+    pub treasury_fee_share: Decimal256,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
@@ -66,6 +70,9 @@ pub struct Reserve {
     pub borrow_slope: Decimal256,
     /// Max percentage of collateral that can be borrowed
     pub loan_to_value: Decimal256,
+
+    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    pub reserve_factor: Decimal256,
 
     /// Timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,

@@ -304,7 +304,8 @@
         "borrow_slope",
         "liquidation_bonus",
         "liquidation_threshold",
-        "loan_to_value"
+        "loan_to_value",
+        "reserve_factor"
       ],
       "properties": {
         "borrow_slope": {
@@ -323,6 +324,14 @@
         },
         "loan_to_value": {
           "description": "Max percentage of collateral that can be borrowed",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "reserve_factor": {
+          "description": "Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards",
           "allOf": [
             {
               "$ref": "#/definitions/Decimal256"

@@ -34,6 +34,17 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
+    let insurance_fund_fee_share = msg.insurance_fund_fee_share;
+    let treasury_fee_share = msg.treasury_fee_share;
+    let combined_fee_share = insurance_fund_fee_share + treasury_fee_share;
+
+    // Combined fee shares cannot exceed one
+    if combined_fee_share > Decimal256::one() {
+        return Err(StdError::generic_err(
+            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+        ));
+    }
+
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         treasury_contract_address: deps.api.canonical_address(&msg.treasury_contract_address)?,
@@ -43,6 +54,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
         close_factor: msg.close_factor,
+        insurance_fund_fee_share,
+        treasury_fee_share,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -332,6 +345,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
                     loan_to_value: asset_params.loan_to_value,
 
+                    reserve_factor: asset_params.reserve_factor,
+
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
 
@@ -360,7 +375,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
     let symbol = match asset {
         Asset::Native { denom } => denom,
-        Asset::Cw20 { contract_addr } => cw20_get_symbol(deps, contract_addr.clone())?,
+        Asset::Cw20 { contract_addr } => cw20_get_symbol(deps, contract_addr)?,
     };
 
     // Prepare response, should instantiate an maToken
@@ -578,10 +593,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                     }
                 };
 
-                let mut debt = Uint256::zero();
-                let mut max_borrow = Decimal256::zero();
-
-                if user_is_using_as_collateral {
+                let max_borrow = if user_is_using_as_collateral {
                     // query asset balance (ma_token contract gives back a scaled value)
                     let asset_balance = cw20_get_balance(
                         deps,
@@ -589,17 +601,21 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                         deps.api.human_address(&borrower_canonical_addr)?,
                     )?;
                     let collateral = Uint256::from(asset_balance) * asset_reserve.liquidity_index;
-                    max_borrow = Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value;
-                }
+                    Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value
+                } else {
+                    Decimal256::zero()
+                };
 
-                if user_is_borrowing {
+                let debt = if user_is_borrowing {
                     // query debt
                     let debts_asset_bucket =
                         debts_asset_state(&mut deps.storage, asset_reference_vec.as_slice());
                     let borrower_debt: Debt =
                         debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
-                    debt = borrower_debt.amount_scaled * asset_reserve.borrow_index;
-                }
+                    borrower_debt.amount_scaled * asset_reserve.borrow_index
+                } else {
+                    Uint256::zero()
+                };
 
                 let asset_label = asset_get_label_and_add_price_to_query_list(
                     deps,
@@ -862,7 +878,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let user_collateral_balance = collateral_reserve.liquidity_index
         * Uint256::from(cw20_get_balance(
             deps,
-            collateral_ma_address.clone(),
+            collateral_ma_address,
             user_address.clone(),
         )?);
 
@@ -1224,6 +1240,8 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         insurance_fund_contract_address: deps
             .api
             .human_address(&config.insurance_fund_contract_address)?,
+        insurance_fund_fee_share: config.insurance_fund_fee_share,
+        treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
         reserve_count: config.reserve_count,
         close_factor: config.close_factor,
@@ -1470,10 +1488,11 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     }
     let available_liquidity = Decimal256::from_uint256(contract_current_balance - liquidity_taken);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
-    let mut utilization_rate = Decimal256::zero();
-    if total_debt > Decimal256::zero() {
-        utilization_rate = total_debt / (available_liquidity + total_debt);
-    }
+    let utilization_rate = if total_debt > Decimal256::zero() {
+        total_debt / (available_liquidity + total_debt)
+    } else {
+        Decimal256::zero()
+    };
 
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
     reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
@@ -1535,7 +1554,7 @@ fn build_send_asset_msg(
     asset: Asset,
     amount: Uint256,
 ) -> StdResult<CosmosMsg> {
-    return match asset {
+    match asset {
         Asset::Native { denom } => Ok(build_send_native_asset_msg(
             sender_address,
             recipient_address,
@@ -1545,7 +1564,7 @@ fn build_send_asset_msg(
         Asset::Cw20 { contract_addr } => {
             build_send_cw20_token_msg(recipient_address, contract_addr, amount)
         }
-    };
+    }
 }
 
 fn build_send_native_asset_msg(
@@ -1581,11 +1600,11 @@ fn build_send_cw20_token_msg(
 
 fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    assets_to_query: &Vec<String>,
+    assets_to_query: &[String],
 ) -> StdResult<Vec<(String, Decimal256)>> {
     let mut asset_prices: Vec<(String, Decimal256)> = vec![];
 
-    if assets_to_query.len() > 0 {
+    if !assets_to_query.is_empty() {
         let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
         let querier = TerraQuerier::new(&deps.querier);
         let asset_prices_in_uusd = querier
@@ -1601,7 +1620,7 @@ fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
 
 fn asset_get_price(
     asset_label: &str,
-    asset_prices: &Vec<(String, Decimal256)>,
+    asset_prices: &[(String, Decimal256)],
     asset_type: &AssetType,
 ) -> StdResult<Decimal256> {
     if asset_label == "uusd" || *asset_type == AssetType::Cw20 {
@@ -1685,13 +1704,34 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {
+        let mut insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
+        let mut treasury_fee_share = Decimal256::from_ratio(4, 10);
+        let exceeding_fees_msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share,
+            treasury_fee_share,
             ma_token_code_id: 10u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = init(&mut deps, env.clone(), exceeding_fees_msg.clone());
+        match res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        insurance_fund_fee_share = Decimal256::from_ratio(5, 10);
+        treasury_fee_share = Decimal256::from_ratio(3, 10);
+
+        let msg = InitMsg {
+            insurance_fund_fee_share,
+            treasury_fee_share,
+            ..exceeding_fees_msg
+        };
 
         // we can just call .unwrap() to assert this was a success
         let res = init(&mut deps, env, msg).unwrap();
@@ -1702,6 +1742,8 @@ mod tests {
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.reserve_count);
+        assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
+        assert_eq!(treasury_fee_share, value.treasury_fee_share);
     }
 
     #[test]
@@ -1711,6 +1753,8 @@ mod tests {
         let msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
+            treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 5u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -1721,34 +1765,26 @@ mod tests {
         // non owner is not authorized
         // *
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let asset_params = InitAssetParams {
+            borrow_slope: Decimal256::from_ratio(4, 100),
+            loan_to_value: Decimal256::from_ratio(8, 10),
+            reserve_factor: Decimal256::from_ratio(1, 100),
+            liquidation_threshold: Decimal256::one(),
+            liquidation_bonus: Decimal256::zero(),
+        };
         let msg = HandleMsg::InitAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: InitAssetParams {
-                borrow_slope: Decimal256::from_ratio(4, 100),
-                loan_to_value: Decimal256::from_ratio(8, 10),
-                liquidation_threshold: Decimal256::one(),
-                liquidation_bonus: Decimal256::zero(),
-            },
+            asset_params: asset_params.clone(),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
 
         // *
         // owner is authorized
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let msg = HandleMsg::InitAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: InitAssetParams {
-                borrow_slope: Decimal256::from_ratio(4, 100),
-                loan_to_value: Decimal256::from_ratio(8, 10),
-                liquidation_threshold: Decimal256::one(),
-                liquidation_bonus: Decimal256::zero(),
-            },
-        };
         let res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with Canonical default address
@@ -1832,7 +1868,8 @@ mod tests {
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
 
         // *
         // Initialize a cw20 asset
@@ -1846,12 +1883,7 @@ mod tests {
             asset: Asset::Cw20 {
                 contract_addr: cw20_addr.clone(),
             },
-            asset_params: InitAssetParams {
-                borrow_slope: Decimal256::from_ratio(4, 100),
-                loan_to_value: Decimal256::from_ratio(8, 10),
-                liquidation_threshold: Decimal256::one(),
-                liquidation_bonus: Decimal256::zero(),
-            },
+            asset_params,
         };
         let res = handle(&mut deps, env, msg).unwrap();
         let cw20_canonical_addr = deps.api.canonical_address(&cw20_addr).unwrap();
@@ -1914,7 +1946,8 @@ mod tests {
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_canonical_addr.as_slice()),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
     }
 
     #[test]
@@ -1925,7 +1958,11 @@ mod tests {
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "uluna".into(),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(
+            error_res,
+            StdError::not_found("liquidity_pool::state::Reserve")
+        );
     }
 
     #[test]
@@ -1960,13 +1997,11 @@ mod tests {
         };
         let res = handle(&mut deps, env.clone(), msg).unwrap();
 
-        // previous * (1 + rate * time / 31536000)
-        let expected_accumulated_interest = Decimal256::one()
-            + (Decimal256::from_ratio(10, 100) * Decimal256::from_uint256(100u64)
-                / Decimal256::from_uint256(SECONDS_PER_YEAR));
-
-        let expected_liquidity_index =
-            Decimal256::from_ratio(11, 10) * expected_accumulated_interest;
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
+            Decimal256::from_ratio(11, 10),
+            Decimal256::from_ratio(10, 100),
+            100u64,
+        );
         let expected_mint_amount =
             (Uint256::from(deposit_amount) / expected_liquidity_index).into();
 
@@ -2078,15 +2113,13 @@ mod tests {
 
         let res = handle(&mut deps, env.clone(), msg).unwrap();
 
-        // previous * (1 + rate * time / 31536000)
-        let expected_accumulated_interest = Decimal256::one()
-            + (Decimal256::from_ratio(10, 100) * Decimal256::from_uint256(100u64)
-                / Decimal256::from_uint256(SECONDS_PER_YEAR));
-
-        let expected_liquidity_index =
-            Decimal256::from_ratio(11, 10) * expected_accumulated_interest;
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
+            Decimal256::from_ratio(11, 10),
+            Decimal256::from_ratio(10, 100),
+            100u64,
+        );
         let expected_mint_amount: Uint256 =
-            (Uint256::from(deposit_amount) / expected_liquidity_index).into();
+            Uint256::from(deposit_amount) / expected_liquidity_index;
 
         let expected_params = th_get_expected_indices_and_rates(
             &reserve,
@@ -2172,7 +2205,7 @@ mod tests {
                     .canonical_address(&HumanAddr::from("matoken"))
                     .unwrap()
                     .as_slice(),
-                &"somecoin".as_bytes().to_vec(),
+                &(b"somecoin".to_vec()),
             )
             .unwrap();
 
@@ -2343,7 +2376,7 @@ mod tests {
             res.messages,
             vec![
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: ma_token_addr.clone(),
+                    contract_addr: ma_token_addr,
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Burn {
                         amount: Uint128(burn_amount),
@@ -2979,9 +3012,9 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_addr.clone(),
+                contract_addr: cw20_contract_addr,
                 msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: borrower_addr.clone(),
+                    recipient: borrower_addr,
                     amount: expected_refund_amount.into(),
                 })
                 .unwrap(),
@@ -3061,7 +3094,7 @@ mod tests {
         let deposit_coin_address = HumanAddr::from("matoken");
         deps.querier.set_cw20_balances(
             deposit_coin_address,
-            &[(borrower_addr.clone(), Uint128::from(deposit_amount))],
+            &[(borrower_addr, Uint128::from(deposit_amount))],
         );
 
         // borrow with insufficient collateral, should fail
@@ -3072,7 +3105,7 @@ mod tests {
             amount: Uint256::from(deposit_amount) * ltv + Uint256::from(1000u128),
         };
         let env = mars::testing::mock_env("borrower", MockEnvParams::default());
-        handle(&mut deps, env.clone(), msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
         let msg = HandleMsg::Borrow {
@@ -3208,18 +3241,12 @@ mod tests {
         let borrower_addr = HumanAddr(String::from("borrower"));
 
         // Set the querier to return a certain collateral balance
-        deps.querier.set_cw20_balances(
-            ma_token_address_1.clone(),
-            &[(borrower_addr.clone(), balance_1)],
-        );
-        deps.querier.set_cw20_balances(
-            ma_token_address_2.clone(),
-            &[(borrower_addr.clone(), balance_2)],
-        );
-        deps.querier.set_cw20_balances(
-            ma_token_address_3.clone(),
-            &[(borrower_addr.clone(), balance_3)],
-        );
+        deps.querier
+            .set_cw20_balances(ma_token_address_1, &[(borrower_addr.clone(), balance_1)]);
+        deps.querier
+            .set_cw20_balances(ma_token_address_2, &[(borrower_addr.clone(), balance_2)]);
+        deps.querier
+            .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3)]);
 
         let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
             * Uint256::from(balance_1)
@@ -3373,7 +3400,7 @@ mod tests {
         // Set the querier to return positive collateral balance
         let collateral_balance = Uint128(5_000_000);
         deps.querier.set_cw20_balances(
-            collateral_address.clone(),
+            collateral_address,
             &[(user_address.clone(), collateral_balance)],
         );
 
@@ -3673,7 +3700,7 @@ mod tests {
 
         // Set the querier to return a certain collateral balance
         deps.querier.set_cw20_balances(
-            collateral_address.clone(),
+            collateral_address,
             &[(
                 healthy_user_address.clone(),
                 healthy_user_collateral_balance,
@@ -3818,7 +3845,7 @@ mod tests {
                 to_address: borrower_addr.clone(),
                 amount: vec![Coin {
                     denom: String::from("somecoin"),
-                    amount: initial_borrow_amount.into(),
+                    amount: initial_borrow_amount,
                 }],
             })]
         );
@@ -3926,6 +3953,8 @@ mod tests {
         let msg = InitMsg {
             treasury_contract_address: HumanAddr::from("reserve_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
+            treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 1u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
@@ -3947,6 +3976,8 @@ mod tests {
         borrow_slope: Decimal256,
         loan_to_value: Decimal256,
 
+        reserve_factor: Decimal256,
+
         interests_last_updated: u64,
         debt_total_scaled: Uint256,
 
@@ -3966,6 +3997,7 @@ mod tests {
                 liquidity_rate: Default::default(),
                 borrow_slope: Default::default(),
                 loan_to_value: Default::default(),
+                reserve_factor: Default::default(),
                 interests_last_updated: 0,
                 debt_total_scaled: Default::default(),
                 asset_type: AssetType::Native,
@@ -4003,6 +4035,7 @@ mod tests {
             liquidity_rate: reserve.liquidity_rate,
             borrow_slope: reserve.borrow_slope,
             loan_to_value: reserve.loan_to_value,
+            reserve_factor: reserve.reserve_factor,
             interests_last_updated: reserve.interests_last_updated,
             debt_total_scaled: reserve.debt_total_scaled,
             asset_type: reserve.asset_type.clone(),
@@ -4051,29 +4084,31 @@ mod tests {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
 
         // market indices
-        let expected_accumulated_liquidity_interest = Decimal256::one()
-            + (reserve.liquidity_rate * Decimal256::from_uint256(seconds_elapsed)
-                / Decimal256::from_uint256(SECONDS_PER_YEAR));
-        let expected_liquidity_index =
-            reserve.liquidity_index * expected_accumulated_liquidity_interest;
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
+            reserve.liquidity_index,
+            reserve.liquidity_rate,
+            seconds_elapsed,
+        );
 
-        let expected_accumulated_borrow_interest = Decimal256::one()
-            + (reserve.borrow_rate * Decimal256::from_uint256(seconds_elapsed)
-                / Decimal256::from_uint256(SECONDS_PER_YEAR));
-        let expected_borrow_index = reserve.borrow_index * expected_accumulated_borrow_interest;
+        let expected_borrow_index = th_calculate_applied_linear_interest_rate(
+            reserve.borrow_index,
+            reserve.borrow_rate,
+            seconds_elapsed,
+        );
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
         // When repaying, new computed index is used for scaled amount
         let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_borrow_index;
-        let mut new_debt_total = Uint256::zero();
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         // TODO: Maybe split index and interest rate calculations and take the needed inputs
         // for each
-        if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
-            new_debt_total = reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled;
-        }
+        let new_debt_total = if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
+            reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled
+        } else {
+            Uint256::zero()
+        };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
         let dec_liquidity_total =
             Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
@@ -4089,5 +4124,15 @@ mod tests {
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
         }
+    }
+
+    fn th_calculate_applied_linear_interest_rate(
+        index: Decimal256,
+        rate: Decimal256,
+        time_elapsed: u64,
+    ) -> Decimal256 {
+        let rate_factor = rate * Decimal256::from_uint256(time_elapsed)
+            / Decimal256::from_uint256(SECONDS_PER_YEAR);
+        index * (Decimal256::one() + rate_factor)
     }
 }

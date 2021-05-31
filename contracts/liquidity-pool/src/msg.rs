@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct InitMsg {
     pub treasury_contract_address: HumanAddr,
     pub insurance_fund_contract_address: HumanAddr,
+    pub insurance_fund_fee_share: Decimal256,
+    pub treasury_fee_share: Decimal256,
     pub ma_token_code_id: u64,
     pub close_factor: Decimal256,
 }
@@ -102,6 +104,8 @@ pub struct ConfigResponse {
     pub owner: HumanAddr,
     pub treasury_contract_address: HumanAddr,
     pub insurance_fund_contract_address: HumanAddr,
+    pub insurance_fund_fee_share: Decimal256,
+    pub treasury_fee_share: Decimal256,
     pub ma_token_code_id: u64,
     pub reserve_count: u32,
     pub close_factor: Decimal256,
@@ -155,6 +159,8 @@ pub struct InitAssetParams {
     pub borrow_slope: Decimal256,
     /// Max percentage of collateral that can be borrowed
     pub loan_to_value: Decimal256,
+    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    pub reserve_factor: Decimal256,
     // Percentage at which the loan is defined as under-collateralized
     pub liquidation_threshold: Decimal256,
     // Bonus on the price of assets of the collateral when liquidators purchase it
