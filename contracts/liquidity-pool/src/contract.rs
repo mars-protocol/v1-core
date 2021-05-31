@@ -12,8 +12,9 @@ use terra_cosmwasm::TerraQuerier;
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol};
 use mars::liquidity_pool::msg::{
-    Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
-    MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
+    Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg,
+    InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse,
+    ReservesListResponse,
 };
 
 use crate::state::{
@@ -345,7 +346,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     asset: Asset,
-    asset_params: InitAssetParams,
+    asset_params: InitOrUpdateAssetParams,
 ) -> StdResult<HandleResponse> {
     // Get asset attributes
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
@@ -2022,7 +2023,7 @@ mod tests {
         // non owner is not authorized
         // *
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
-        let asset_params = InitAssetParams {
+        let asset_params = InitOrUpdateAssetParams {
             borrow_slope: Decimal256::from_ratio(4, 100),
             loan_to_value: Decimal256::from_ratio(8, 10),
             reserve_factor: Decimal256::from_ratio(1, 100),
