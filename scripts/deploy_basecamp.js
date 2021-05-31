@@ -19,18 +19,35 @@ async function main() {
     wallet = terra.wallets.test1;
   }
 
-  let cooldownDuration;
-  let unstakeWindow;
+  let basecampConfig;
 
   if (process.env.NETWORK === "testnet") {
-    cooldownDuration = 300;
-    unstakeWindow = 300;
+    basecampConfig = {
+      "cw20_code_id": undefined,
+      "cooldown_duration": 300,
+      "unstake_window": 300,
+      "proposal_voting_period": 1000,
+      "proposal_effective_delay": 150,
+      "proposal_expiration_period": 3000,
+      "proposal_required_deposit": "100000000",
+      "proposal_required_quorum": "10",
+      "proposal_required_threshold": "5"
+    };
   } else {
-    cooldownDuration = 1;
-    unstakeWindow = 30;
+    basecampConfig = {
+      "cw20_code_id": undefined,
+      "cooldown_duration": 1,
+      "unstake_window": 30,
+      "proposal_voting_period": 1000,
+      "proposal_effective_delay": 150,
+      "proposal_expiration_period": 3000,
+      "proposal_required_deposit": "100000000",
+      "proposal_required_quorum": "10",
+      "proposal_required_threshold": "5"
+    };
   }
 
-  await deployBasecampContract(terra, wallet, cooldownDuration, unstakeWindow);
+  await deployBasecampContract(terra, wallet, basecampConfig);
 }
 
 main().catch(console.log);
