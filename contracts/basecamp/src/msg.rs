@@ -105,6 +105,26 @@ pub struct ProposalInfo {
     pub deposit_amount: Uint128,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ProposalsListResponse {
+    pub proposals_list: Vec<ProposalInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ProposalInfo {
+    pub proposal_id: String,
+    pub status: ProposalStatus,
+    pub for_votes: Uint128,
+    pub against_votes: Uint128,
+    pub start_height: u64,
+    pub end_height: u64,
+    pub title: String,
+    pub description: String,
+    pub link: Option<String>,
+    pub execute_calls: Option<Vec<ProposalExecuteCall>>,
+    pub deposit_amount: Uint128,
+}
+
 /// We currently take no arguments for migrations
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
