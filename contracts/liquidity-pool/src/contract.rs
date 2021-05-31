@@ -1099,7 +1099,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
             let mut to_user = users_bucket
                 .may_load(&to_canonical_address.as_slice())?
                 .unwrap_or_default();
-            set_bit(&mut to_user.deposited_assets, reserve.index)?;
+            set_bit(&mut to_user.collateral_assets, reserve.index)?;
             users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
         }
     }
@@ -3189,7 +3189,7 @@ mod tests {
         // Set user as having the reserve_collateral deposited
         let deposit_amount = 110000u64;
         let mut user = User::default();
-        set_bit(&mut user.deposited_assets, reserve.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -3887,7 +3887,7 @@ mod tests {
 
         {
             let mut from_user = User::default();
-            set_bit(&mut from_user.deposited_assets, reserve.index).unwrap();
+            set_bit(&mut from_user.collateral_assets, reserve.index).unwrap();
             users_state(&mut deps.storage)
                 .save(from_canonical_address.as_slice(), &from_user)
                 .unwrap();
@@ -4262,7 +4262,7 @@ mod tests {
         );
 
         // Set second asset as collateral
-        let mut user = User::new();
+        let mut user = User::default();
         set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
