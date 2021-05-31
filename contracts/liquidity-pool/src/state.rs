@@ -105,18 +105,12 @@ pub struct User {
     pub collateral_assets: Uint128,
 }
 
-impl User {
-    pub fn new() -> Self {
+impl Default for User {
+    fn default() -> Self {
         User {
             borrowed_assets: Uint128::zero(),
             collateral_assets: Uint128::zero(),
         }
-    }
-}
-
-impl Default for User {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

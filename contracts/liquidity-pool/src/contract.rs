@@ -471,12 +471,9 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     }
 
     let depositor_canonical_addr = deps.api.canonical_address(&depositor_address)?;
-    let mut user: User =
-        match users_state_read(&deps.storage).may_load(depositor_canonical_addr.as_slice()) {
-            Ok(Some(user)) => user,
-            Ok(None) => User::new(),
-            Err(error) => return Err(error),
-        };
+    let mut user = users_state_read(&deps.storage)
+        .may_load(depositor_canonical_addr.as_slice())?
+        .unwrap_or_default();
 
     let has_deposited_asset = get_bit(user.collateral_assets, reserve.index)?;
     if !has_deposited_asset {
@@ -550,24 +547,20 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     let uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice());
-    let uncollateralized_loan_limit =
-        match uncollateralized_loan_limits_bucket.may_load(borrower_canonical_addr.as_slice()) {
-            Ok(Some(limit)) => limit,
-            Ok(None) => Uint128::zero(),
-            Err(error) => return Err(error),
-        };
+    let uncollateralized_loan_limit = uncollateralized_loan_limits_bucket
+            .may_load(borrower_canonical_addr.as_slice())?
+            .unwrap_or_else(|| Uint128::zero());
 
     let mut user: User =
-        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
-            Ok(Some(user)) => user,
-            Ok(None) => {
+        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice())? {
+            Some(user) => user,
+            None => {
                 if uncollateralized_loan_limit.is_zero() {
                     return Err(StdError::generic_err("address has no collateral deposited"));
                 }
                 // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
-                User::new()
+                User::default()
             }
-            Err(error) => return Err(error),
         };
 
     // TODO: Check the contract has enough funds to safely lend them
@@ -986,12 +979,9 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // Passing collateral from user to liquidator depending on whether they elect to receive ma_tokens or the underlying asset
     if receive_ma_token {
         let liquidator_canonical_addr = deps.api.canonical_address(&sender_address)?;
-        let mut liquidator: User =
-            match users_state_read(&deps.storage).may_load(liquidator_canonical_addr.as_slice()) {
-                Ok(Some(user)) => user,
-                Ok(None) => User::new(),
-                Err(error) => return Err(error),
-            };
+        let mut liquidator: User = users_state_read(&deps.storage)
+            .may_load(liquidator_canonical_addr.as_slice())?
+            .unwrap_or_default();
 
         // set liquidator's deposited bit to true if not already true
         let liquidator_is_using_as_collateral =
@@ -1108,8 +1098,8 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
             let mut users_bucket = users_state(&mut deps.storage);
             let mut to_user = users_bucket
                 .may_load(&to_canonical_address.as_slice())?
-                .unwrap_or_else(User::new);
-            set_bit(&mut to_user.collateral_assets, reserve.index)?;
+                .unwrap_or_default();
+            set_bit(&mut to_user.deposited_assets, reserve.index)?;
             users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
         }
     }
@@ -1344,11 +1334,9 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
     let reserves = reserves_state_read(&deps.storage);
     let debtor_address = deps.api.canonical_address(&address)?;
     let users_bucket = users_state_read(&deps.storage);
-    let user: User = match users_bucket.may_load(debtor_address.as_slice()) {
-        Ok(Some(user)) => user,
-        Ok(None) => User::new(),
-        Err(error) => return Err(error),
-    };
+    let user = users_bucket
+        .may_load(debtor_address.as_slice())?
+        .unwrap_or_default();
 
     let debts: StdResult<Vec<_>> = reserves
         .range(None, None, Order::Ascending)
@@ -1498,7 +1486,7 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
     logs.append(&mut interest_logs);
 }
 
-/// Goes thorugh assets user has a position in and returns a vec containing the scaled debt
+/// Goes through assets user has a position in and returns a vec containing the scaled debt
 /// (denominated in the asset), a result from a specified computation for the current collateral
 /// (denominated in asset) and some metadata to be used by the caller.
 /// Also adds the price to native_assets_prices_to_query in case the prices in uusd need to
@@ -1594,7 +1582,7 @@ fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
     user_canonical_address: &CanonicalAddr,
 ) -> StdResult<(UserHealthStatus, Vec<(String, Decimal256)>)> {
     let mut native_asset_prices_to_query: Vec<String> = vec![];
-    // Get debt and weighted_liquidation_thershold values for user's position
+    // Get debt and weighted_liquidation_threshold values for user's position
     // Vec<(reference, debt_amount, weighted_liquidation_threshold, asset_type)>
     let user_balances = user_get_balances(
         &deps,
@@ -2648,7 +2636,7 @@ mod tests {
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
 
         // Set user as having the reserve_collateral deposited
-        let mut user = User::new();
+        let mut user = User::default();
 
         set_bit(&mut user.collateral_assets, reserve_collateral.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
@@ -3200,8 +3188,8 @@ mod tests {
 
         // Set user as having the reserve_collateral deposited
         let deposit_amount = 110000u64;
-        let mut user = User::new();
-        set_bit(&mut user.collateral_assets, reserve.index).unwrap();
+        let mut user = User::default();
+        set_bit(&mut user.deposited_assets, reserve.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -3334,7 +3322,7 @@ mod tests {
             .unwrap();
 
         // Set user as having all the reserves as collateral
-        let mut user = User::new();
+        let mut user = User::default();
 
         set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
         set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
@@ -3468,7 +3456,7 @@ mod tests {
         let user_canonical_addr = deps.api.canonical_address(&user_address).unwrap();
 
         // Set user as having collateral and debt in respective reserves
-        let mut user = User::new();
+        let mut user = User::default();
 
         set_bit(
             &mut user.collateral_assets,
@@ -3791,7 +3779,7 @@ mod tests {
             deps.api.canonical_address(&healthy_user_address).unwrap();
 
         // Set user as having collateral and debt in respective reserves
-        let mut healthy_user = User::new();
+        let mut healthy_user = User::default();
 
         set_bit(
             &mut healthy_user.collateral_assets,
@@ -3898,8 +3886,8 @@ mod tests {
         );
 
         {
-            let mut from_user = User::new();
-            set_bit(&mut from_user.collateral_assets, reserve.index).unwrap();
+            let mut from_user = User::default();
+            set_bit(&mut from_user.deposited_assets, reserve.index).unwrap();
             users_state(&mut deps.storage)
                 .save(from_canonical_address.as_slice(), &from_user)
                 .unwrap();
