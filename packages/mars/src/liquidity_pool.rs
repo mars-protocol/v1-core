@@ -78,6 +78,13 @@ pub mod msg {
         },
         /// Update (enable / disable) asset as collateral
         UpdateUserCollateralAssetStatus { asset: Asset, enable: bool },
+        /// Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts
+        DistributeProtocolIncome {
+            /// Asset reserve fees to distribute
+            asset: Asset,
+            /// Amount to distribute to protocol contracts, defaults to full amount if not specified
+            amount: Option<Uint256>,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
