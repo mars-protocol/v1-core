@@ -24,7 +24,6 @@ async function main() {
   if (process.env.NETWORK === "testnet") {
     basecampConfig = {
       "cw20_code_id": undefined,
-      "cooldown_duration": 300,
       "unstake_window": 300,
       "proposal_voting_period": 1000,
       "proposal_effective_delay": 150,
@@ -36,7 +35,6 @@ async function main() {
   } else {
     basecampConfig = {
       "cw20_code_id": undefined,
-      "cooldown_duration": 1,
       "unstake_window": 30,
       "proposal_voting_period": 1000,
       "proposal_effective_delay": 150,
