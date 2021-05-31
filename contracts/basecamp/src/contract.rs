@@ -1,7 +1,7 @@
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Decimal, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Querier, StdError,
-    StdResult, Storage, Uint128, WasmMsg,
+    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
+    StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
@@ -9,7 +9,8 @@ use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
 
 use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, QueryMsg, ReceiveMsg,
+    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, ProposalInfo,
+    ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
     basecamp_state, config_state, config_state_read, proposal_votes_state,
@@ -511,6 +512,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Proposals {} => to_binary(&query_proposals(deps)?),
+        QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
     }
 }
 
@@ -521,6 +524,57 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     Ok(ConfigResponse {
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
         xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+    })
+}
+
+fn query_proposals<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<ProposalsListResponse> {
+    let proposals = proposals_state_read(&deps.storage);
+    let proposals_list: StdResult<Vec<_>> = proposals
+        .range(None, None, Order::Ascending)
+        .map(|item| {
+            let (k, v) = item?;
+
+            Ok(ProposalInfo {
+                proposal_id: String::from_utf8(k).unwrap(),
+                status: v.status,
+                for_votes: v.for_votes,
+                against_votes: v.against_votes,
+                start_height: v.start_height,
+                end_height: v.end_height,
+                title: v.title,
+                description: v.description,
+                link: v.link,
+                execute_calls: v.execute_calls,
+                deposit_amount: v.deposit_amount,
+            })
+        })
+        .collect();
+
+    Ok(ProposalsListResponse {
+        proposals_list: proposals_list?,
+    })
+}
+
+fn query_proposal<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    proposal_id: u64,
+) -> StdResult<ProposalInfo> {
+    let proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+
+    Ok(ProposalInfo {
+        proposal_id: proposal_id.to_string(),
+        status: proposal.status,
+        for_votes: proposal.for_votes,
+        against_votes: proposal.against_votes,
+        start_height: proposal.start_height,
+        end_height: proposal.end_height,
+        title: proposal.title,
+        description: proposal.description,
+        link: proposal.link,
+        execute_calls: proposal.execute_calls,
+        deposit_amount: proposal.deposit_amount,
     })
 }
 

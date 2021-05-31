@@ -1,4 +1,4 @@
-use crate::state::ProposalVoteOption;
+use crate::state::{ProposalExecuteCall, ProposalStatus, ProposalVoteOption};
 use cosmwasm_std::{Binary, Decimal, HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -73,6 +73,8 @@ pub struct MsgExecuteCall {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
+    Proposals {},
+    Proposal { proposal_id: u64 },
 }
 
 // We define a custom struct for each query response
@@ -80,6 +82,26 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ProposalsListResponse {
+    pub proposals_list: Vec<ProposalInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ProposalInfo {
+    pub proposal_id: String,
+    pub status: ProposalStatus,
+    pub for_votes: Uint128,
+    pub against_votes: Uint128,
+    pub start_height: u64,
+    pub end_height: u64,
+    pub title: String,
+    pub description: String,
+    pub link: Option<String>,
+    pub execute_calls: Option<Vec<ProposalExecuteCall>>,
+    pub deposit_amount: Uint128,
 }
 
 /// We currently take no arguments for migrations
