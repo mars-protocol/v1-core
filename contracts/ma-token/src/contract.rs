@@ -210,10 +210,8 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
     accounts.save(user_raw.as_slice(), &user_balance_new)?;
 
     // reduce total_supply
-    let mut new_total_supply = Uint128::zero();
     token_info(&mut deps.storage).update(|mut info| {
         info.total_supply = (info.total_supply - amount)?;
-        new_total_supply = info.total_supply;
         Ok(info)
     })?;
 
@@ -303,7 +301,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
 
     // If the send call is to the money market (to redeem), then
     // don't ask money market to finalize the transfer. The corresponding logic
-    // should be run syncronously with the redeem call.
+    // should be run synchronously with the redeem call.
     let money_market_address = state::load_config(&deps.storage)?.money_market_address;
 
     let mut messages = if money_market_address == deps.api.canonical_address(&contract)? {
@@ -835,10 +833,10 @@ mod tests {
                 contract_addr: HumanAddr::from("money_market"),
                 msg: to_binary(
                     &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        from_address: addr1.clone(),
-                        to_address: addr2.clone(),
-                        from_previous_balance: amount1,
-                        to_previous_balance: Uint128::zero(),
+                        sender_address: addr1.clone(),
+                        recipient_address: addr2.clone(),
+                        sender_previous_balance: amount1,
+                        recipient_previous_balance: Uint128::zero(),
                         amount: transfer,
                     }
                 )
@@ -1062,10 +1060,10 @@ mod tests {
                 contract_addr: HumanAddr::from("money_market"),
                 msg: to_binary(
                     &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        from_address: addr1.clone(),
-                        to_address: contract.clone(),
-                        from_previous_balance: amount1,
-                        to_previous_balance: Uint128::zero(),
+                        sender_address: addr1.clone(),
+                        recipient_address: contract.clone(),
+                        sender_previous_balance: amount1,
+                        recipient_previous_balance: Uint128::zero(),
                         amount: transfer,
                     }
                 )

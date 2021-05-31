@@ -126,18 +126,18 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             )
         }
         HandleMsg::FinalizeLiquidityTokenTransfer {
-            from_address,
-            to_address,
-            from_previous_balance,
-            to_previous_balance,
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
             amount,
         } => handle_finalize_liquidity_token_transfer(
             deps,
             env,
-            from_address,
-            to_address,
-            from_previous_balance,
-            to_previous_balance,
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
             amount,
         ),
         HandleMsg::UpdateUncollateralizedLoanLimit {
@@ -548,8 +548,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     let uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice());
     let uncollateralized_loan_limit = uncollateralized_loan_limits_bucket
-            .may_load(borrower_canonical_addr.as_slice())?
-            .unwrap_or_else(|| Uint128::zero());
+        .may_load(borrower_canonical_addr.as_slice())?
+        .unwrap_or_else(Uint128::zero);
 
     let mut user: User =
         match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice())? {
@@ -3875,48 +3875,50 @@ mod tests {
             ],
         );
 
-        let (from_address, from_canonical_address) =
+        let (sender_address, sender_canonical_address) =
             mars::testing::get_test_addresses(&deps.api, "fromaddr");
-        let (to_address, to_canonical_address) =
+        let (recipient_address, recipient_canonical_address) =
             mars::testing::get_test_addresses(&deps.api, "toaddr");
 
         deps.querier.set_cw20_balances(
             HumanAddr::from("masomecoin"),
-            &[(from_address.clone(), Uint128(500_000))],
+            &[(sender_address.clone(), Uint128(500_000))],
         );
 
         {
-            let mut from_user = User::default();
-            set_bit(&mut from_user.collateral_assets, reserve.index).unwrap();
+            let mut sender_user = User::default();
+            set_bit(&mut sender_user.collateral_assets, reserve.index).unwrap();
             users_state(&mut deps.storage)
-                .save(from_canonical_address.as_slice(), &from_user)
+                .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
         }
 
-        // Finalize transfer with from not borrowing passes
+        // Finalize transfer with sender not borrowing passes
         {
             let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
-                from_address: from_address.clone(),
-                to_address: to_address.clone(),
-                from_previous_balance: Uint128(1_000_000),
-                to_previous_balance: Uint128(0),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(1_000_000),
+                recipient_previous_balance: Uint128(0),
                 amount: Uint128(500_000),
             };
 
             handle(&mut deps, env_matoken.clone(), msg).unwrap();
 
             let users_bucket = users_state_read(&deps.storage);
-            let from_user = users_bucket
-                .load(from_canonical_address.as_slice())
+            let sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
                 .unwrap();
-            let to_user = users_bucket.load(to_canonical_address.as_slice()).unwrap();
+            let recipient_user = users_bucket
+                .load(recipient_canonical_address.as_slice())
+                .unwrap();
             assert_eq!(
-                get_bit(from_user.collateral_assets, reserve.index).unwrap(),
+                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
             // Should create user and set deposited to true as previous balance is 0
             assert_eq!(
-                get_bit(to_user.collateral_assets, reserve.index).unwrap(),
+                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
         }
@@ -3928,24 +3930,24 @@ mod tests {
                 amount_scaled: Uint256::from(500_000u128),
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
-                .save(from_canonical_address.as_slice(), &debt)
+                .save(sender_canonical_address.as_slice(), &debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
-            let mut from_user = users_bucket
-                .load(from_canonical_address.as_slice())
+            let mut sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
                 .unwrap();
-            set_bit(&mut from_user.borrowed_assets, debt_reserve.index).unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
             users_bucket
-                .save(from_canonical_address.as_slice(), &from_user)
+                .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
         }
 
         {
             let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
-                from_address: from_address.clone(),
-                to_address: to_address.clone(),
-                from_previous_balance: Uint128(1_000_000),
-                to_previous_balance: Uint128(0),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(1_000_000),
+                recipient_previous_balance: Uint128(0),
                 amount: Uint128(500_000),
             };
 
@@ -3965,41 +3967,43 @@ mod tests {
                 amount_scaled: Uint256::from(1_000u128),
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
-                .save(from_canonical_address.as_slice(), &debt)
+                .save(sender_canonical_address.as_slice(), &debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
-            let mut from_user = users_bucket
-                .load(from_canonical_address.as_slice())
+            let mut sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
                 .unwrap();
-            set_bit(&mut from_user.borrowed_assets, debt_reserve.index).unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
             users_bucket
-                .save(from_canonical_address.as_slice(), &from_user)
+                .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
         }
 
         {
             let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
-                from_address: from_address.clone(),
-                to_address: to_address.clone(),
-                from_previous_balance: Uint128(500_000),
-                to_previous_balance: Uint128(500_000),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(500_000),
+                recipient_previous_balance: Uint128(500_000),
                 amount: Uint128(500_000),
             };
 
             handle(&mut deps, env_matoken, msg).unwrap();
 
             let users_bucket = users_state_read(&deps.storage);
-            let from_user = users_bucket
-                .load(from_canonical_address.as_slice())
+            let sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
                 .unwrap();
-            let to_user = users_bucket.load(to_canonical_address.as_slice()).unwrap();
+            let recipient_user = users_bucket
+                .load(recipient_canonical_address.as_slice())
+                .unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
             assert_eq!(
-                get_bit(from_user.collateral_assets, reserve.index).unwrap(),
+                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
                 false
             );
             assert_eq!(
-                get_bit(to_user.collateral_assets, reserve.index).unwrap(),
+                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
                 true
             );
         }
@@ -4007,10 +4011,10 @@ mod tests {
         // Calling this with other token fails
         {
             let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
-                from_address,
-                to_address,
-                from_previous_balance: Uint128(500_000),
-                to_previous_balance: Uint128(500_000),
+                sender_address,
+                recipient_address,
+                sender_previous_balance: Uint128(500_000),
+                recipient_previous_balance: Uint128(500_000),
                 amount: Uint128(500_000),
             };
             let env = cosmwasm_std::testing::mock_env(HumanAddr::from("othertoken"), &[]);

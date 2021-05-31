@@ -3,6 +3,8 @@ use cw20::{Cw20CoinHuman, Expiration, MinterResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+const TOKEN_MAX_DECIMALS: u8 = 18;
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct InitMsg {
     pub name: String,
@@ -30,7 +32,7 @@ impl InitMsg {
                 "Ticker symbol is not in expected format [A-Z]{3,6}",
             ));
         }
-        if self.decimals > 18 {
+        if self.decimals > TOKEN_MAX_DECIMALS {
             return Err(StdError::generic_err("Decimals must not exceed 18"));
         }
         Ok(())
@@ -39,10 +41,7 @@ impl InitMsg {
 
 fn is_valid_name(name: &str) -> bool {
     let bytes = name.as_bytes();
-    if bytes.len() < 3 || bytes.len() > 30 {
-        return false;
-    }
-    true
+    !(bytes.len() < 3 || bytes.len() > 30)
 }
 
 fn is_valid_symbol(symbol: &str) -> bool {
