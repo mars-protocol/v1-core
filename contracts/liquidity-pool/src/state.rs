@@ -1,13 +1,13 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::msg::AssetType;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use mars::liquidity_pool::msg::AssetType;
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -102,7 +102,16 @@ pub struct User {
     /// bitmap representing borrowed asset. 1 on the corresponding bit means asset is
     /// being borrowed
     pub borrowed_assets: Uint128,
-    pub deposited_assets: Uint128,
+    pub collateral_assets: Uint128,
+}
+
+impl Default for User {
+    fn default() -> Self {
+        User {
+            borrowed_assets: Uint128::zero(),
+            collateral_assets: Uint128::zero(),
+        }
+    }
 }
 
 pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {

@@ -1,18 +1,21 @@
+use std::str;
+
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
     HandleResponse, HumanAddr, InitResponse, LogAttribute, MigrateResponse, MigrateResult, Order,
     Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
-
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
+use terra_cosmwasm::TerraQuerier;
+
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol};
-
-use crate::msg::{
+use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
     MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
 };
+
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read,
     reserve_ma_tokens_state, reserve_ma_tokens_state_read, reserve_references_state,
@@ -20,8 +23,6 @@ use crate::state::{
     uncollateralized_loan_limits, uncollateralized_loan_limits_read, users_state, users_state_read,
     Config, Debt, Reserve, ReserveReferences, User,
 };
-use std::str;
-use terra_cosmwasm::TerraQuerier;
 
 // CONSTANTS
 
@@ -124,11 +125,29 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 receive_ma_token,
             )
         }
+        HandleMsg::FinalizeLiquidityTokenTransfer {
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        } => handle_finalize_liquidity_token_transfer(
+            deps,
+            env,
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        ),
         HandleMsg::UpdateUncollateralizedLoanLimit {
             user_address,
             asset,
             new_limit,
         } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
+        HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
+            handle_update_user_collateral_asset_status(deps, env, asset, enable)
+        }
     }
 }
 
@@ -452,19 +471,13 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     }
 
     let depositor_canonical_addr = deps.api.canonical_address(&depositor_address)?;
-    let mut user: User =
-        match users_state_read(&deps.storage).may_load(depositor_canonical_addr.as_slice()) {
-            Ok(Some(user)) => user,
-            Ok(None) => User {
-                borrowed_assets: Uint128::zero(),
-                deposited_assets: Uint128::zero(),
-            },
-            Err(error) => return Err(error),
-        };
+    let mut user = users_state_read(&deps.storage)
+        .may_load(depositor_canonical_addr.as_slice())?
+        .unwrap_or_default();
 
-    let has_deposited_asset = get_bit(user.deposited_assets, reserve.index)?;
+    let has_deposited_asset = get_bit(user.collateral_assets, reserve.index)?;
     if !has_deposited_asset {
-        set_bit(&mut user.deposited_assets, reserve.index)?;
+        set_bit(&mut user.collateral_assets, reserve.index)?;
         users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
@@ -534,27 +547,20 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     let uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice());
-    let uncollateralized_loan_limit =
-        match uncollateralized_loan_limits_bucket.may_load(borrower_canonical_addr.as_slice()) {
-            Ok(Some(limit)) => limit,
-            Ok(None) => Uint128::zero(),
-            Err(error) => return Err(error),
-        };
+    let uncollateralized_loan_limit = uncollateralized_loan_limits_bucket
+        .may_load(borrower_canonical_addr.as_slice())?
+        .unwrap_or_else(Uint128::zero);
 
     let mut user: User =
-        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice()) {
-            Ok(Some(user)) => user,
-            Ok(None) => {
+        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice())? {
+            Some(user) => user,
+            None => {
                 if uncollateralized_loan_limit.is_zero() {
                     return Err(StdError::generic_err("address has no collateral deposited"));
                 }
                 // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
-                User {
-                    deposited_assets: Uint128::zero(),
-                    borrowed_assets: Uint128::zero(),
-                }
+                User::default()
             }
-            Err(error) => return Err(error),
         };
 
     // TODO: Check the contract has enough funds to safely lend them
@@ -565,71 +571,19 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             Asset::Native { .. } if asset_label != "uusd" => vec![asset_label.clone()],
             _ => vec![],
         };
-        let mut user_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (reference, debt_amount, max_borrow, asset_type)
-        for i in 0_u32..config.reserve_count {
-            let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
-            let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
-            if user_is_using_as_collateral || user_is_borrowing {
-                let asset_reference_vec =
-                    match reserve_references_state_read(&deps.storage).load(&i.to_be_bytes()) {
-                        Ok(asset_reference_vec) => asset_reference_vec,
-                        Err(_) => {
-                            return Err(StdError::generic_err(format!(
-                                "no reserve reference exists with index: {}",
-                                i
-                            )))
-                        }
-                    }
-                    .reference;
-                let asset_reserve = match reserves_state_read(&deps.storage)
-                    .load(&asset_reference_vec.as_slice())
-                {
-                    Ok(asset_reserve) => asset_reserve,
-                    Err(_) => {
-                        return Err(StdError::generic_err(format!(
-                            "no asset reserve exists with asset reference: {}",
-                            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
-                        )));
-                    }
-                };
 
-                let max_borrow = if user_is_using_as_collateral {
-                    // query asset balance (ma_token contract gives back a scaled value)
-                    let asset_balance = cw20_get_balance(
-                        deps,
-                        deps.api.human_address(&asset_reserve.ma_token_address)?,
-                        deps.api.human_address(&borrower_canonical_addr)?,
-                    )?;
-                    let collateral = Uint256::from(asset_balance) * asset_reserve.liquidity_index;
-                    Decimal256::from_uint256(collateral) * asset_reserve.loan_to_value
-                } else {
-                    Decimal256::zero()
-                };
+        // Get debt and ltv values for user's position
+        // Vec<(reference, debt_amount, max_borrow, asset_type)>
+        let user_balances = user_get_balances(
+            &deps,
+            &config,
+            &user,
+            &borrower_canonical_addr,
+            |collateral, reserve| collateral * reserve.loan_to_value,
+            &mut native_asset_prices_to_query,
+        )?;
 
-                let debt = if user_is_borrowing {
-                    // query debt
-                    let debts_asset_bucket =
-                        debts_asset_state(&mut deps.storage, asset_reference_vec.as_slice());
-                    let borrower_debt: Debt =
-                        debts_asset_bucket.load(borrower_canonical_addr.as_slice())?;
-                    borrower_debt.amount_scaled * asset_reserve.borrow_index
-                } else {
-                    Uint256::zero()
-                };
-
-                let asset_label = asset_get_label_and_add_price_to_query_list(
-                    deps,
-                    &asset_reserve,
-                    asset_reference_vec,
-                    &mut native_asset_prices_to_query,
-                )?;
-
-                user_balances.push((asset_label, debt, max_borrow, asset_reserve.asset_type));
-            }
-        }
-
-        // TODO: fetch cw20 prices from oracle and append to asset_prices
-        let asset_prices = get_native_asset_prices(deps, &native_asset_prices_to_query)?;
+        let asset_prices = get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
 
         let mut total_debt_in_uusd = Uint256::zero();
         let mut max_borrow_in_uusd = Decimal256::zero();
@@ -840,7 +794,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let user_canonical_address = deps.api.canonical_address(&user_address)?;
     let (debt_asset_label, debt_asset_reference, _) = asset_get_attributes(deps, &debt_asset)?;
 
-    // If user has a positive allowance then the user cannot be liquidated
+    // If user (contract) has a positive uncollateralized limit then the user
+    // cannot be liquidated
     let uncollateralized_loan_limits_bucket =
         uncollateralized_loan_limits_read(&deps.storage, debt_asset_reference.as_slice());
     let uncollateralized_loan_limit =
@@ -866,12 +821,11 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let (collateral_asset_label, collateral_asset_reference, _) =
         asset_get_attributes(deps, &collateral_asset)?;
 
-    // load collateral reserve
     let mut collateral_reserve =
         reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
     reserve_update_market_indices(&env, &mut collateral_reserve);
 
-    // get user's collateral balance
+    // check if user has available collateral in specified collateral asset to be liquidated
     let collateral_ma_address = deps
         .api
         .human_address(&collateral_reserve.ma_token_address)?;
@@ -881,106 +835,32 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             collateral_ma_address,
             user_address.clone(),
         )?);
-
-    // check if user has available collateral in specified collateral asset to be liquidated
     if user_collateral_balance == Uint256::zero() {
         return Err(StdError::generic_err(
             "user has no balance in specified collateral asset to be liquidated",
         ));
     }
 
-    let config = config_state_read(&deps.storage).load()?;
-
-    // compute user's collateral, debt, and average liquidation threshold
-    let user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
-
-    // if user has no debt in the deposited asset then the user cannot be liquidated
+    // check if user has outstanding debt in the deposited asset that needs to be repayed
     let debts_asset_bucket = debts_asset_state_read(&deps.storage, debt_asset_reference.as_slice());
     let user_debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
     if user_debt.amount_scaled.is_zero() {
         return Err(StdError::generic_err("User has no outstanding debt in the specified debt asset and thus cannot be liquidated"));
     }
 
-    let mut native_asset_prices_to_query: Vec<String> = vec![];
-    let mut user_asset_balances: Vec<(String, Uint256, Decimal256, AssetType)> = vec![]; // (asset_label, debt_amount_asset, liquidation_threshold_asset, asset_type)
+    let config = config_state_read(&deps.storage).load()?;
+    let user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
+    let (user_health_status, native_asset_prices) =
+        user_get_health_status(&deps, &config, &user, &user_canonical_address)?;
 
-    // List all prices to query and get asset debt/liquidation threshold
-    for i in 0_u32..config.reserve_count {
-        let user_is_using_as_collateral = get_bit(user.deposited_assets, i)?;
-        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
-        if !(user_is_using_as_collateral || user_is_borrowing) {
-            continue;
+    let health_factor = match user_health_status {
+        UserHealthStatus::NotBorrowing => {
+            return Err(StdError::generic_err(
+                "User has no outstanding debt and thus cannot be liquidated",
+            ))
         }
-
-        let asset_reference = reserve_references_state_read(&deps.storage)
-            .load(&i.to_be_bytes())?
-            .reference;
-        let reserve = reserves_state_read(&deps.storage).load(&asset_reference.as_slice())?;
-
-        let mut weighted_liquidation_threshold = Decimal256::zero();
-        let mut debt_amount = Uint256::zero();
-
-        if user_is_using_as_collateral {
-            // query asset balance (ma_token contract gives back a scaled value)
-            let asset_balance = cw20_get_balance(
-                deps,
-                deps.api.human_address(&reserve.ma_token_address)?,
-                deps.api.human_address(&user_canonical_address)?,
-            )?;
-            let collateral =
-                Decimal256::from_uint256(Uint256::from(asset_balance)) * reserve.liquidity_index;
-            weighted_liquidation_threshold = collateral * reserve.liquidation_threshold;
-        }
-
-        if user_is_borrowing {
-            // query debt
-            let debts_asset_bucket =
-                debts_asset_state_read(&deps.storage, asset_reference.as_slice());
-            let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
-            debt_amount = user_debt.amount_scaled * reserve.borrow_index;
-        }
-
-        let asset_label = asset_get_label_and_add_price_to_query_list(
-            deps,
-            &reserve,
-            asset_reference,
-            &mut native_asset_prices_to_query,
-        )?;
-        user_asset_balances.push((
-            asset_label,
-            debt_amount,
-            weighted_liquidation_threshold,
-            reserve.asset_type,
-        ));
-    }
-
-    let asset_prices = get_native_asset_prices(deps, &native_asset_prices_to_query)?;
-
-    let mut total_debt_in_uusd = Decimal256::zero();
-    let mut weighted_liquidation_threshold_sum = Decimal256::zero();
-
-    // calculate user's health factor
-    for (asset_label, debt_amount_in_asset, weighted_liquidation_threshold_in_asset, asset_type) in
-        user_asset_balances
-    {
-        let asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
-
-        let weighted_liquidation_threshold_in_uusd =
-            asset_price * weighted_liquidation_threshold_in_asset;
-        weighted_liquidation_threshold_sum += weighted_liquidation_threshold_in_uusd;
-
-        let debt_balance_in_uusd = asset_price * debt_amount_in_asset;
-        total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
-    }
-
-    // ensure user's total debt across all reserves is not zero
-    if total_debt_in_uusd.is_zero() {
-        return Err(StdError::generic_err(
-            "user has no outstanding debt and thus cannot be liquidated",
-        ));
-    }
-
-    let health_factor = weighted_liquidation_threshold_sum / total_debt_in_uusd;
+        UserHealthStatus::Borrowing(hf) => hf,
+    };
 
     // if health factor is not less than one the user cannot be liquidated
     if health_factor >= Decimal256::one() {
@@ -1005,12 +885,12 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let collateral_price = asset_get_price(
         collateral_asset_label.as_str(),
-        &asset_prices,
+        &native_asset_prices,
         &collateral_reserve.asset_type,
     )?;
     let debt_price = asset_get_price(
         debt_asset_label.as_str(),
-        &asset_prices,
+        &native_asset_prices,
         &debt_reserve.asset_type,
     )?;
 
@@ -1099,21 +979,15 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // Passing collateral from user to liquidator depending on whether they elect to receive ma_tokens or the underlying asset
     if receive_ma_token {
         let liquidator_canonical_addr = deps.api.canonical_address(&sender_address)?;
-        let mut liquidator: User =
-            match users_state_read(&deps.storage).may_load(liquidator_canonical_addr.as_slice()) {
-                Ok(Some(user)) => user,
-                Ok(None) => User {
-                    borrowed_assets: Uint128::zero(),
-                    deposited_assets: Uint128::zero(),
-                },
-                Err(error) => return Err(error),
-            };
+        let mut liquidator: User = users_state_read(&deps.storage)
+            .may_load(liquidator_canonical_addr.as_slice())?
+            .unwrap_or_default();
 
         // set liquidator's deposited bit to true if not already true
         let liquidator_is_using_as_collateral =
-            get_bit(liquidator.deposited_assets, collateral_reserve.index)?;
+            get_bit(liquidator.collateral_assets, collateral_reserve.index)?;
         if !liquidator_is_using_as_collateral {
-            set_bit(&mut liquidator.deposited_assets, collateral_reserve.index)?;
+            set_bit(&mut liquidator.collateral_assets, collateral_reserve.index)?;
             users_state(&mut deps.storage)
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
         }
@@ -1147,7 +1021,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // if max collateral to liquidate equals the user's balance then unset deposited bit
     if actual_collateral_amount_to_liquidate == user_collateral_balance {
         let mut user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
-        unset_bit(&mut user.deposited_assets, collateral_reserve.index)?;
+        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
         users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
     }
 
@@ -1181,6 +1055,59 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
+pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    from_address: HumanAddr,
+    to_address: HumanAddr,
+    from_previous_balance: Uint128,
+    to_previous_balance: Uint128,
+    amount: Uint128,
+) -> StdResult<HandleResponse> {
+    // Get liquidity token reserve
+    let reserve_reference = reserve_ma_tokens_state_read(&deps.storage)
+        .load(deps.api.canonical_address(&env.message.sender)?.as_slice())?;
+    let reserve = reserves_state_read(&deps.storage).load(&reserve_reference)?;
+
+    // Check user health factor is above 1
+    // TODO: this assumes new balances are already in state as this call will be made
+    // after a transfer call on an ma_asset. Double check this is the case when doing
+    // integration tests. If it's not we would need to pass the updated balances to
+    // the health factor somehow
+    let from_canonical_address = deps.api.canonical_address(&from_address)?;
+    let config = config_state_read(&deps.storage).load()?;
+    let mut from_user = users_state_read(&deps.storage).load(from_canonical_address.as_slice())?;
+    let (user_health_status, _) =
+        user_get_health_status(&deps, &config, &from_user, &from_canonical_address)?;
+    if let UserHealthStatus::Borrowing(health_factor) = user_health_status {
+        if health_factor < Decimal256::one() {
+            return Err(StdError::generic_err("Cannot make token transfer if it results in a helth factor lower than 1 for the sender"));
+        }
+    }
+
+    // Update users's positions
+    // TODO: Should this and all collateral positions changes be logged? how?
+    if from_address != to_address {
+        if (from_previous_balance - amount)? == Uint128::zero() {
+            unset_bit(&mut from_user.collateral_assets, reserve.index)?;
+            users_state(&mut deps.storage).save(from_canonical_address.as_slice(), &from_user)?;
+        }
+
+        if (to_previous_balance == Uint128::zero()) && (amount != Uint128::zero()) {
+            let to_canonical_address = deps.api.canonical_address(&to_address)?;
+            let mut users_bucket = users_state(&mut deps.storage);
+            let mut to_user = users_bucket
+                .may_load(&to_canonical_address.as_slice())?
+                .unwrap_or_default();
+            set_bit(&mut to_user.collateral_assets, reserve.index)?;
+            users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
+        }
+    }
+
+    Ok(HandleResponse::default())
+}
+
+/// Update uncollateralized loan limit by a given amount in uusd
 pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -1211,6 +1138,60 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
             log("user", user_address),
             log("asset", asset_label),
             log("new_allowance", new_limit),
+        ],
+        data: None,
+    })
+}
+
+/// Update (enable / disable) collateral asset for specific user
+pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    enable: bool,
+) -> StdResult<HandleResponse> {
+    let user_address = env.message.sender;
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let mut user = users_state_read(&deps.storage)
+        .may_load(user_canonical_address.as_slice())
+        .map(|u| u.unwrap_or_default())?;
+
+    let (collateral_asset_label, collateral_asset_reference, _) =
+        asset_get_attributes(deps, &asset)?;
+    let collateral_reserve =
+        reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
+    let has_collateral_asset = get_bit(user.collateral_assets, collateral_reserve.index)?;
+    if !has_collateral_asset && enable {
+        let collateral_ma_address = deps
+            .api
+            .human_address(&collateral_reserve.ma_token_address)?;
+        let user_collateral_balance =
+            cw20_get_balance(deps, collateral_ma_address, user_address.clone())?;
+        if user_collateral_balance > Uint128::zero() {
+            // enable collateral asset
+            set_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+            users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+        } else {
+            return Err(StdError::generic_err(format!(
+                "User address {} has no balance in specified collateral asset {}",
+                user_address.as_str(),
+                collateral_asset_label
+            )));
+        }
+    } else if has_collateral_asset && !enable {
+        // disable collateral asset
+        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+        users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+    }
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "update_user_collateral_asset_status"),
+            log("user", user_address),
+            log("asset", collateral_asset_label),
+            log("has_collateral", has_collateral_asset),
+            log("enable", enable),
         ],
         data: None,
     })
@@ -1353,14 +1334,9 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
     let reserves = reserves_state_read(&deps.storage);
     let debtor_address = deps.api.canonical_address(&address)?;
     let users_bucket = users_state_read(&deps.storage);
-    let user: User = match users_bucket.may_load(debtor_address.as_slice()) {
-        Ok(Some(user)) => user,
-        Ok(None) => User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        },
-        Err(error) => return Err(error),
-    };
+    let user = users_bucket
+        .may_load(debtor_address.as_slice())?
+        .unwrap_or_default();
 
     let debts: StdResult<Vec<_>> = reserves
         .range(None, None, Order::Ascending)
@@ -1510,6 +1486,144 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
     logs.append(&mut interest_logs);
 }
 
+/// Goes through assets user has a position in and returns a vec containing the scaled debt
+/// (denominated in the asset), a result from a specified computation for the current collateral
+/// (denominated in asset) and some metadata to be used by the caller.
+/// Also adds the price to native_assets_prices_to_query in case the prices in uusd need to
+/// be retrieved by the caller later
+fn user_get_balances<S, A, Q, F>(
+    deps: &Extern<S, A, Q>,
+    config: &Config,
+    user: &User,
+    user_canonical_address: &CanonicalAddr,
+    get_target_collateral_amount: F,
+    native_asset_prices_to_query: &mut Vec<String>,
+) -> StdResult<Vec<(String, Uint256, Decimal256, AssetType)>>
+where
+    S: Storage,
+    A: Api,
+    Q: Querier,
+    F: Fn(Decimal256, &Reserve) -> Decimal256,
+{
+    let mut ret: Vec<(String, Uint256, Decimal256, AssetType)> = vec![];
+
+    for i in 0_u32..config.reserve_count {
+        let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
+        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
+        if !(user_is_using_as_collateral || user_is_borrowing) {
+            continue;
+        }
+
+        let (asset_reference_vec, reserve) = reserve_get_from_index(&deps.storage, i)?;
+
+        let target_collateral_amount = if user_is_using_as_collateral {
+            // query asset balance (ma_token contract gives back a scaled value)
+            let asset_balance = cw20_get_balance(
+                deps,
+                deps.api.human_address(&reserve.ma_token_address)?,
+                deps.api.human_address(user_canonical_address)?,
+            )?;
+            let collateral =
+                Decimal256::from_uint256(Uint256::from(asset_balance)) * reserve.liquidity_index;
+            get_target_collateral_amount(collateral, &reserve)
+        } else {
+            Decimal256::zero()
+        };
+
+        let debt_amount = if user_is_borrowing {
+            // query debt
+            let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
+            let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+            user_debt.amount_scaled * reserve.borrow_index
+        } else {
+            Uint256::zero()
+        };
+
+        // get asset label
+        let asset_label = match reserve.asset_type {
+            AssetType::Native => match String::from_utf8(asset_reference_vec) {
+                Ok(res) => res,
+                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+            },
+            AssetType::Cw20 => String::from(
+                deps.api
+                    .human_address(&CanonicalAddr::from(asset_reference_vec.as_slice()))?
+                    .as_str(),
+            ),
+        };
+
+        // Add price to query list
+        if reserve.asset_type == AssetType::Native && asset_label != "uusd" {
+            native_asset_prices_to_query.push(asset_label.clone());
+        }
+
+        ret.push((
+            asset_label,
+            debt_amount,
+            target_collateral_amount,
+            reserve.asset_type,
+        ));
+    }
+
+    Ok(ret)
+}
+
+enum UserHealthStatus {
+    NotBorrowing,
+    Borrowing(Decimal256),
+}
+
+/// Computes user health status and returns it among the list of prices that were
+/// used during the computation
+fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    config: &Config,
+    user: &User,
+    user_canonical_address: &CanonicalAddr,
+) -> StdResult<(UserHealthStatus, Vec<(String, Decimal256)>)> {
+    let mut native_asset_prices_to_query: Vec<String> = vec![];
+    // Get debt and weighted_liquidation_threshold values for user's position
+    // Vec<(reference, debt_amount, weighted_liquidation_threshold, asset_type)>
+    let user_balances = user_get_balances(
+        &deps,
+        &config,
+        user,
+        user_canonical_address,
+        |collateral, reserve| collateral * reserve.liquidation_threshold,
+        &mut native_asset_prices_to_query,
+    )?;
+    let native_asset_prices =
+        get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
+
+    let mut total_debt_in_uusd = Decimal256::zero();
+    let mut weighted_liquidation_threshold_sum = Decimal256::zero();
+
+    // calculate user's health factor
+    for (asset_label, debt_amount_in_asset, weighted_liquidation_threshold_in_asset, asset_type) in
+        user_balances
+    {
+        let asset_price = asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+
+        let weighted_liquidation_threshold_in_uusd =
+            asset_price * weighted_liquidation_threshold_in_asset;
+        weighted_liquidation_threshold_sum += weighted_liquidation_threshold_in_uusd;
+
+        let debt_balance_in_uusd = asset_price * debt_amount_in_asset;
+        total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
+    }
+
+    // ensure user's total debt across all reserves is not zero
+    if total_debt_in_uusd.is_zero() {
+        return Ok((UserHealthStatus::NotBorrowing, native_asset_prices));
+    }
+
+    let health_factor = weighted_liquidation_threshold_sum / total_debt_in_uusd;
+    Ok((
+        UserHealthStatus::Borrowing(health_factor),
+        native_asset_prices,
+    ))
+}
+
 // HELPERS
 
 // native coins
@@ -1598,15 +1712,15 @@ fn build_send_cw20_token_msg(
     }))
 }
 
-fn get_native_asset_prices<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+fn get_native_asset_prices<Q: Querier>(
+    querier: &Q,
     assets_to_query: &[String],
 ) -> StdResult<Vec<(String, Decimal256)>> {
     let mut asset_prices: Vec<(String, Decimal256)> = vec![];
 
     if !assets_to_query.is_empty() {
         let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-        let querier = TerraQuerier::new(&deps.querier);
+        let querier = TerraQuerier::new(querier);
         let asset_prices_in_uusd = querier
             .query_exchange_rates("uusd", assets_to_query)?
             .exchange_rates;
@@ -1665,29 +1779,25 @@ fn asset_get_attributes<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn asset_get_label_and_add_price_to_query_list<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    asset_reserve: &Reserve,
-    asset_reference: Vec<u8>,
-    assets_to_query: &mut Vec<String>,
-) -> StdResult<String> {
-    let asset_label = match asset_reserve.asset_type {
-        AssetType::Native => match String::from_utf8(asset_reference.to_vec()) {
-            Ok(res) => res,
-            Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
-        },
-        AssetType::Cw20 => String::from(
-            deps.api
-                .human_address(&CanonicalAddr::from(asset_reference))?
-                .as_str(),
-        ),
-    };
-
-    if asset_reserve.asset_type == AssetType::Native && asset_label != "uusd" {
-        assets_to_query.push(asset_label.clone());
+fn reserve_get_from_index<S: Storage>(storage: &S, index: u32) -> StdResult<(Vec<u8>, Reserve)> {
+    let asset_reference_vec =
+        match reserve_references_state_read(storage).load(&index.to_be_bytes()) {
+            Ok(asset_reference_vec) => asset_reference_vec,
+            Err(_) => {
+                return Err(StdError::generic_err(format!(
+                    "no reserve reference exists with index: {}",
+                    index
+                )))
+            }
+        }
+        .reference;
+    match reserves_state_read(storage).load(&asset_reference_vec) {
+        Ok(asset_reserve) => Ok((asset_reference_vec, asset_reserve)),
+        Err(_) => Err(StdError::generic_err(format!(
+            "no asset reserve exists with asset reference: {}",
+            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
+        ))),
     }
-
-    Ok(asset_label)
 }
 
 // TESTS
@@ -2526,11 +2636,9 @@ mod tests {
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
 
         // Set user as having the reserve_collateral deposited
-        let mut user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
-        set_bit(&mut user.deposited_assets, reserve_collateral.index).unwrap();
+        let mut user = User::default();
+
+        set_bit(&mut user.collateral_assets, reserve_collateral.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -2799,7 +2907,7 @@ mod tests {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
-            amount: Uint256::from(10000 as u128),
+            amount: Uint256::from(10000_u128),
         };
         let _res = handle(&mut deps, env, msg).unwrap_err();
 
@@ -3046,9 +3154,9 @@ mod tests {
         let reserve_1_after_repay_1 = reserves_state_read(&deps.storage)
             .load(cw20_contract_addr_canonical.as_slice())
             .unwrap();
-        assert_eq!(Uint256::from(0 as u128), debt1.amount_scaled);
+        assert_eq!(Uint256::from(0_u128), debt1.amount_scaled);
         assert_eq!(
-            Uint256::from(0 as u128),
+            Uint256::from(0_u128),
             reserve_1_after_repay_1.debt_total_scaled
         );
     }
@@ -3080,11 +3188,8 @@ mod tests {
 
         // Set user as having the reserve_collateral deposited
         let deposit_amount = 110000u64;
-        let mut user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
-        set_bit(&mut user.deposited_assets, reserve.index).unwrap();
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, reserve.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -3217,13 +3322,11 @@ mod tests {
             .unwrap();
 
         // Set user as having all the reserves as collateral
-        let mut user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
-        set_bit(&mut user.deposited_assets, reserve_1_initial.index).unwrap();
-        set_bit(&mut user.deposited_assets, reserve_2_initial.index).unwrap();
-        set_bit(&mut user.deposited_assets, reserve_3_initial.index).unwrap();
+        let mut user = User::default();
+
+        set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_3_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
@@ -3259,10 +3362,10 @@ mod tests {
                 * Decimal256::from(exchange_rate_3));
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
             / Decimal256::from(exchange_rate_2))
-            + Uint256::from(100 as u64);
+            + Uint256::from(100_u64);
         let permissible_borrow_amount = (max_borrow_allowed_in_uusd
             / Decimal256::from(exchange_rate_2))
-            - Uint256::from(100 as u64);
+            - Uint256::from(100_u64);
 
         // borrow above the allowed amount given current collateral, should fail
         let borrow_msg = HandleMsg::Borrow {
@@ -3353,11 +3456,13 @@ mod tests {
         let user_canonical_addr = deps.api.canonical_address(&user_address).unwrap();
 
         // Set user as having collateral and debt in respective reserves
-        let mut user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
-        set_bit(&mut user.deposited_assets, collateral_reserve_initial.index).unwrap();
+        let mut user = User::default();
+
+        set_bit(
+            &mut user.collateral_assets,
+            collateral_reserve_initial.index,
+        )
+        .unwrap();
         set_bit(&mut user.borrowed_assets, debt_reserve_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
@@ -3592,7 +3697,7 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(false, get_bit(user.deposited_assets, 0).unwrap());
+        assert_eq!(false, get_bit(user.collateral_assets, 0).unwrap());
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
         // check user's debt decreased by the appropriate amount
@@ -3674,12 +3779,10 @@ mod tests {
             deps.api.canonical_address(&healthy_user_address).unwrap();
 
         // Set user as having collateral and debt in respective reserves
-        let mut healthy_user = User {
-            borrowed_assets: Uint128::zero(),
-            deposited_assets: Uint128::zero(),
-        };
+        let mut healthy_user = User::default();
+
         set_bit(
-            &mut healthy_user.deposited_assets,
+            &mut healthy_user.collateral_assets,
             collateral_reserve_initial.index,
         )
         .unwrap();
@@ -3738,6 +3841,186 @@ mod tests {
 
         let env = cosmwasm_std::testing::mock_env(debt_contract_addr, &[]);
         handle(&mut deps, env, liquidate_msg).unwrap_err();
+    }
+
+    #[test]
+    fn test_finalize_liquidity_token_transfer() {
+        // Setup
+        let mut deps = th_setup(&[]);
+        let env_matoken = cosmwasm_std::testing::mock_env(HumanAddr::from("masomecoin"), &[]);
+
+        let mock_reserve = MockReserve {
+            ma_token_address: "masomecoin",
+            liquidity_index: Decimal256::one(),
+            liquidation_threshold: Decimal256::from_ratio(5, 10),
+            ..Default::default()
+        };
+        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let debt_mock_reserve = MockReserve {
+            borrow_index: Decimal256::one(),
+            ..Default::default()
+        };
+        let debt_reserve = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"debtcoin",
+            &debt_mock_reserve,
+        );
+
+        deps.querier.set_native_exchange_rates(
+            "uusd".to_string(),
+            &[
+                ("somecoin".to_string(), Decimal::from_ratio(1u128, 2u128)),
+                ("debtcoin".to_string(), Decimal::from_ratio(2u128, 1u128)),
+            ],
+        );
+
+        let (sender_address, sender_canonical_address) =
+            mars::testing::get_test_addresses(&deps.api, "fromaddr");
+        let (recipient_address, recipient_canonical_address) =
+            mars::testing::get_test_addresses(&deps.api, "toaddr");
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("masomecoin"),
+            &[(sender_address.clone(), Uint128(500_000))],
+        );
+
+        {
+            let mut sender_user = User::default();
+            set_bit(&mut sender_user.collateral_assets, reserve.index).unwrap();
+            users_state(&mut deps.storage)
+                .save(sender_canonical_address.as_slice(), &sender_user)
+                .unwrap();
+        }
+
+        // Finalize transfer with sender not borrowing passes
+        {
+            let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(1_000_000),
+                recipient_previous_balance: Uint128(0),
+                amount: Uint128(500_000),
+            };
+
+            handle(&mut deps, env_matoken.clone(), msg).unwrap();
+
+            let users_bucket = users_state_read(&deps.storage);
+            let sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
+                .unwrap();
+            let recipient_user = users_bucket
+                .load(recipient_canonical_address.as_slice())
+                .unwrap();
+            assert_eq!(
+                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
+                true
+            );
+            // Should create user and set deposited to true as previous balance is 0
+            assert_eq!(
+                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
+                true
+            );
+        }
+
+        // Finalize transfer with health factor < 1 for sender doesn't go through
+        {
+            // set debt for user in order for health factor to be < 1
+            let debt = Debt {
+                amount_scaled: Uint256::from(500_000u128),
+            };
+            debts_asset_state(&mut deps.storage, b"debtcoin")
+                .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            let mut users_bucket = users_state(&mut deps.storage);
+            let mut sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
+                .unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
+            users_bucket
+                .save(sender_canonical_address.as_slice(), &sender_user)
+                .unwrap();
+        }
+
+        {
+            let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(1_000_000),
+                recipient_previous_balance: Uint128(0),
+                amount: Uint128(500_000),
+            };
+
+            let res = handle(&mut deps, env_matoken.clone(), msg);
+
+            match res.unwrap_err() {
+                StdError::GenericErr { msg, .. } =>
+                    assert_eq!("Cannot make token transfer if it results in a helth factor lower than 1 for the sender", msg),
+                e => panic!("Unexpected error: {}", e),
+            }
+        }
+
+        // Finalize transfer with health factor > 1 for goes through
+        {
+            // set debt for user in order for health factor to be > 1
+            let debt = Debt {
+                amount_scaled: Uint256::from(1_000u128),
+            };
+            debts_asset_state(&mut deps.storage, b"debtcoin")
+                .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            let mut users_bucket = users_state(&mut deps.storage);
+            let mut sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
+                .unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
+            users_bucket
+                .save(sender_canonical_address.as_slice(), &sender_user)
+                .unwrap();
+        }
+
+        {
+            let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
+                sender_previous_balance: Uint128(500_000),
+                recipient_previous_balance: Uint128(500_000),
+                amount: Uint128(500_000),
+            };
+
+            handle(&mut deps, env_matoken, msg).unwrap();
+
+            let users_bucket = users_state_read(&deps.storage);
+            let sender_user = users_bucket
+                .load(sender_canonical_address.as_slice())
+                .unwrap();
+            let recipient_user = users_bucket
+                .load(recipient_canonical_address.as_slice())
+                .unwrap();
+            // Should set deposited to false as: previous_balance - amount = 0
+            assert_eq!(
+                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
+                false
+            );
+            assert_eq!(
+                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
+                true
+            );
+        }
+
+        // Calling this with other token fails
+        {
+            let msg = HandleMsg::FinalizeLiquidityTokenTransfer {
+                sender_address,
+                recipient_address,
+                sender_previous_balance: Uint128(500_000),
+                recipient_previous_balance: Uint128(500_000),
+                amount: Uint128(500_000),
+            };
+            let env = cosmwasm_std::testing::mock_env(HumanAddr::from("othertoken"), &[]);
+
+            handle(&mut deps, env, msg).unwrap_err();
+        }
     }
 
     #[test]
@@ -3945,6 +4228,115 @@ mod tests {
         assert_eq!(allowance, Uint128::zero());
     }
 
+    #[test]
+    fn test_update_asset_collateral() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = HumanAddr(String::from("user"));
+        let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
+
+        let ma_token_address_1 = HumanAddr::from("matoken1");
+        let mock_reserve_1 = MockReserve {
+            ma_token_address: ma_token_address_1.as_str(),
+            asset_type: AssetType::Cw20,
+            ..Default::default()
+        };
+        let mock_reserve_2 = MockReserve {
+            ma_token_address: "matoken2",
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+
+        let cw20_contract_addr = HumanAddr::from("depositedcoin1");
+        let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
+
+        // Should get index 0
+        let reserve_1_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            cw20_contract_addr_canonical.as_slice(),
+            &mock_reserve_1,
+        );
+        // Should get index 1
+        let reserve_2_initial = th_init_reserve(
+            &deps.api,
+            &mut deps.storage,
+            b"depositedcoin2",
+            &mock_reserve_2,
+        );
+
+        // Set second asset as collateral
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Set the querier to return zero for the first asset
+        deps.querier.set_cw20_balances(
+            ma_token_address_1.clone(),
+            &[(user_addr.clone(), Uint128::zero())],
+        );
+
+        // Enable first reserve index which is currently disabled as collateral and ma-token balance is 0
+        let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
+            asset: Asset::Cw20 {
+                contract_addr: cw20_contract_addr.clone(),
+            },
+            enable: true,
+        };
+        let env = cosmwasm_std::testing::mock_env("user", &[]);
+        let res_error = handle(&mut deps, env.clone(), update_msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                format!(
+                    "User address {} has no balance in specified collateral asset {}",
+                    user_addr.as_str(),
+                    String::from(cw20_contract_addr.as_str())
+                )
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_1_collateral =
+            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        // Balance for first asset is zero so don't update bit
+        assert_eq!(reserve_1_collateral, false);
+
+        // Set the querier to return balance more than zero for the first asset
+        deps.querier
+            .set_cw20_balances(ma_token_address_1, &[(user_addr, Uint128(100_000))]);
+
+        // Enable first reserve index which is currently disabled as collateral and ma-token balance is more than 0
+        let _res = handle(&mut deps, env.clone(), update_msg).unwrap();
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_1_collateral =
+            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        // Balance for first asset is more than zero so update bit
+        assert_eq!(reserve_1_collateral, true);
+
+        // Disable second reserve index
+        let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
+            asset: Asset::Native {
+                denom: "depositedcoin2".to_string(),
+            },
+            enable: false,
+        };
+        let _res = handle(&mut deps, env, update_msg).unwrap();
+        let user = users_state(&mut deps.storage)
+            .load(user_canonical_addr.as_slice())
+            .unwrap();
+        let reserve_2_collateral =
+            get_bit(user.collateral_assets, reserve_2_initial.index).unwrap();
+        assert_eq!(reserve_2_collateral, false);
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
@@ -3990,7 +4382,7 @@ mod tests {
     impl Default for MockReserve<'_> {
         fn default() -> Self {
             MockReserve {
-                ma_token_address: "",
+                ma_token_address: "defaultmatoken",
                 liquidity_index: Default::default(),
                 borrow_index: Default::default(),
                 borrow_rate: Default::default(),
@@ -4023,11 +4415,13 @@ mod tests {
             })
             .unwrap();
 
+        let ma_token_canonical_address = api
+            .canonical_address(&HumanAddr::from(reserve.ma_token_address))
+            .unwrap();
+
         let mut reserve_bucket = reserves_state(storage);
         let new_reserve = Reserve {
-            ma_token_address: api
-                .canonical_address(&HumanAddr::from(reserve.ma_token_address))
-                .unwrap(),
+            ma_token_address: ma_token_canonical_address.clone(),
             index,
             borrow_index: reserve.borrow_index,
             liquidity_index: reserve.liquidity_index,
@@ -4052,6 +4446,10 @@ mod tests {
                     reference: key.to_vec(),
                 },
             )
+            .unwrap();
+
+        reserve_ma_tokens_state(storage)
+            .save(ma_token_canonical_address.as_slice(), &key.to_vec())
             .unwrap();
 
         new_reserve

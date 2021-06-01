@@ -24,6 +24,12 @@ export async function performTransaction(terra, wallet, msg) {
       `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
     );
   }
+
+  // Can't send txs too fast, tequila lcd is load balanced, 
+  // account sequence query may resolve an older state depending on which lcd you end up with,
+  // generally 1 sec is enough for all nodes to sync up.
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
   return result
 }
 
@@ -74,7 +80,7 @@ export async function deployLiquidityPool(terra, wallet, cache = {}) {
     console.log(`Instantiated liquidity_pool contract, code_id: ${lpCodeId}`);
   }
 
-  const lpInitMsg = {"ma_token_code_id": cw20CodeId};
+  const lpInitMsg = { "ma_token_code_id": cw20CodeId, close_factor: "0.5" };
   const lpAddress = await instantiateContract(terra, wallet, lpCodeId, lpInitMsg);
   console.log(`Instantiated liquidity_pool contract: address: ${lpAddress}`);
 
@@ -101,7 +107,9 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
           },
           "asset_params": {
             "borrow_slope": asset.borrow_slope,
-            "loan_to_value": asset.loan_to_value
+            "loan_to_value": asset.loan_to_value,
+            "liquidation_threshold": asset.liquidation_threshold,
+            "liquidation_bonus": asset.liquidation_bonus,
           },
         },
       };
@@ -117,7 +125,9 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
           },
           "asset_params": {
             "borrow_slope": asset.borrow_slope,
-            "loan_to_value": asset.loan_to_value
+            "loan_to_value": asset.loan_to_value,
+            "liquidation_threshold": asset.liquidation_threshold,
+            "liquidation_bonus": asset.liquidation_bonus,
           },
         },
       };
@@ -177,16 +187,15 @@ export function initialize(terra) {
   return terra.wallet(mk);
 }
 
-export async function deployBasecampContract(terra, wallet, cooldownDuration, unstakeWindow, codeId=undefined) {
-  if (!codeId) {
+export async function deployBasecampContract(terra, wallet, basecampConfig) {
+  if (!basecampConfig.cw20_code_id) {
     console.log("Uploading Cw20 Contract...");
-    codeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+    basecampConfig.cw20_code_id = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
   }
 
   console.log("Deploying Basecamp...");
-  let initMsg = {"cw20_code_id": codeId, "cooldown_duration": cooldownDuration, "unstake_window": unstakeWindow};
   let basecampCodeId = await uploadContract(terra, wallet, './artifacts/basecamp.wasm');
-  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, basecampCodeId, initMsg, undefined, true);
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, basecampCodeId, basecampConfig, undefined, true);
   let result = await performTransaction(terra, wallet, instantiateMsg);
 
   let basecampContractAddress = result.logs[0].eventsByType.from_contract.contract_address[0];

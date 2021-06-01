@@ -190,6 +190,42 @@
       }
     },
     {
+      "description": "Called by liquidity token. Validate liquidity token transfer is valid and update collateral status",
+      "type": "object",
+      "required": [
+        "finalize_liquidity_token_transfer"
+      ],
+      "properties": {
+        "finalize_liquidity_token_transfer": {
+          "type": "object",
+          "required": [
+            "amount",
+            "from_address",
+            "from_previous_balance",
+            "to_address",
+            "to_previous_balance"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "from_address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "from_previous_balance": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "to_address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "to_previous_balance": {
+              "$ref": "#/definitions/Uint128"
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Update uncollateralized loan limit",
       "type": "object",
       "required": [
@@ -212,6 +248,30 @@
             },
             "user_address": {
               "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Update (enable / disable) asset as collateral",
+      "type": "object",
+      "required": [
+        "update_user_collateral_asset_status"
+      ],
+      "properties": {
+        "update_user_collateral_asset_status": {
+          "type": "object",
+          "required": [
+            "asset",
+            "enable"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "enable": {
+              "type": "boolean"
             }
           }
         }

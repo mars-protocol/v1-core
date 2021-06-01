@@ -23,11 +23,12 @@ checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
 name = "backtrace"
-version = "0.3.56"
+version = "0.3.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d117600f438b1707d4e4ae15d3595657288f8235a0eb593e80ecc98ab34e1bc"
+checksum = "88fb5a785d6b44fd9d6700935608639af1b8356de1e55d5f7c2740f4faa15d82"
 dependencies = [
  "addr2line",
+ "cc",
  "cfg-if",
  "libc",
  "miniz_oxide",
@@ -42,54 +43,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
 
 [[package]]
-name = "basecamp"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
-name = "bigint"
-version = "4.4.3"
+name = "cc"
+version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0e8c8a600052b52482eff2cf4d810e462fdff1f656ac1ecb6232132a1ed7def"
-dependencies = [
- "byteorder",
- "crunchy",
-]
-
-[[package]]
-name = "byteorder"
-version = "1.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c189c53d098945499cdfa7ecc63567cf3886b3332b312a5b4585d8d3a6a610"
+checksum = "e3c69b077ad434294d3ce9f1f6143a2a4b89a8a2d54ef813d85003a4fd1137fd"
 
 [[package]]
 name = "cfg-if"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
-
-[[package]]
-name = "cosmwasm-bignumber"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef9f9dd6522baab191620bc7505f28992bb7cd3394635bca20301d93eed5af4f"
-dependencies = [
- "bigint",
- "cosmwasm-std",
- "schemars",
- "serde",
-]
 
 [[package]]
 name = "cosmwasm-schema"
@@ -123,12 +86,6 @@ dependencies = [
  "cosmwasm-std",
  "serde",
 ]
-
-[[package]]
-name = "crunchy"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2f4a431c5c9f662e1200b7c7f02c34e91361150e382089a8f2dec3ba680cbda"
 
 [[package]]
 name = "cw0"
@@ -168,30 +125,13 @@ dependencies = [
 [[package]]
 name = "cw20-base"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c09657718df5243810b10d49359a352eed197966f578366624198fe1740fb52"
 dependencies = [
+ "cosmwasm-schema",
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw0",
  "cw2",
  "cw20",
- "schemars",
- "serde",
- "snafu",
-]
-
-[[package]]
-name = "cw20-token"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw2",
- "cw20",
- "cw20-base",
- "mars",
  "schemars",
  "serde",
  "snafu",
@@ -210,22 +150,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f6503fe142514ca4799d4c26297c4248239fe8838d827db6bd6065c6ed29a6ce"
 
 [[package]]
-name = "insurance_fund"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
 name = "itoa"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -233,53 +157,9 @@ checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "libc"
-version = "0.2.87"
+version = "0.2.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "265d751d31d6780a3f956bb5b8022feba2d94eeee5a84ba64f4212eedca42213"
-
-[[package]]
-name = "liquidity-pool"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
-name = "ma-token"
-version = "0.2.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw0",
- "cw2",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
-]
-
-[[package]]
-name = "mars"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-std",
- "cw20",
- "schemars",
- "serde",
- "terra-cosmwasm",
-]
+checksum = "18794a8ad5b29321f790b55d93dfba91e125cb1a9edbd4f8e3150acc771c1a5e"
 
 [[package]]
 name = "miniz_oxide"
@@ -299,9 +179,9 @@ checksum = "a9a7ab5d64814df0fe4a4b5ead45ed6c5f181ee3ff04ba344313a6c80446c5d4"
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.24"
+version = "1.0.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e0704ee1a7e00d7bb417d0770ea303c1bccbabf0ef1667dae92b5967f5f8a71"
+checksum = "a152013215dca273577e18d2bf00fa862b89b24169fb78c4c95aeb07992c9cec"
 dependencies = [
  "unicode-xid",
 ]
@@ -352,9 +232,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.123"
+version = "1.0.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92d5161132722baa40d802cc70b15262b98258453e85e5d1d365c757c73869ae"
+checksum = "558dc50e1a5a5fa7112ca2ce4effcb321b0300c0d4ccf0776a9f60cd89031171"
 dependencies = [
  "serde_derive",
 ]
@@ -370,9 +250,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.123"
+version = "1.0.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9391c295d64fc0abb2c556bad848f33cb8296276b1ad2677d1ae1ace4f258f31"
+checksum = "b093b7a2bb58203b5da3056c05b4ec1fed827dcfdb37347a8841695263b3d06d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -424,26 +304,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "staking"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
 name = "syn"
-version = "1.0.61"
+version = "1.0.71"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed22b90a0e734a23a7610f4283ac9e5acfb96cbb30dfefa540d66f866f1c09c5"
+checksum = "ad184cc9470f9117b2ac6817bfe297307418819ba40552f9b3846f05c33d5373"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -451,50 +315,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "terra-cosmwasm"
-version = "1.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d7275aacd385e4f41647634c35692b1982085917b4dcfc1fdfa3984ee4ce45d"
-dependencies = [
- "cosmwasm-std",
- "schemars",
- "serde",
-]
-
-[[package]]
-name = "treasury"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
 name = "unicode-xid"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7fe0bb3479651439c9112f72b6c505038574c9fbb575ed1bf3b797fa39dd564"
-
-[[package]]
-name = "xmars-token"
-version = "0.2.0"
-dependencies = [
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw0",
- "cw2",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
-]
+checksum = "8ccb82d61f80a663efe1f787a51b16b5a51e3314d6ac365b08639f52387b33f3"
