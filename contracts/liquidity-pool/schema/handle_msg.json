@@ -254,6 +254,7 @@
       }
     },
     {
+<<<<<<< HEAD
       "description": "Update (enable / disable) asset as collateral",
       "type": "object",
       "required": [
@@ -272,6 +273,38 @@
             },
             "enable": {
               "type": "boolean"
+=======
+      "description": "Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts",
+      "type": "object",
+      "required": [
+        "distribute_protocol_income"
+      ],
+      "properties": {
+        "distribute_protocol_income": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Amount to distribute to protocol contracts, defaults to full amount if not specified",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "asset": {
+              "description": "Asset reserve fees to distribute",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
+>>>>>>> 78f6c3b (added testing)
             }
           }
         }
