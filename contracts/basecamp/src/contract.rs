@@ -13,7 +13,7 @@ use crate::msg::{
     ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
-    basecamp_state, config_state, config_state_read, proposal_votes_state,
+    basecamp_state, basecamp_state_read, config_state, config_state_read, proposal_votes_state,
     proposal_votes_state_read, proposals_state, proposals_state_read, Basecamp, Config, Proposal,
     ProposalExecuteCall, ProposalStatus, ProposalVote, ProposalVoteOption,
 };
@@ -582,6 +582,7 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ProposalsListResponse> {
+    let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
     let proposals = proposals_state_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
         .range(None, None, Order::Ascending)
@@ -605,7 +606,8 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
         .collect();
 
     Ok(ProposalsListResponse {
-        proposals_list: proposals_list?,
+        proposal_count: basecamp.proposal_count,
+        proposal_list: proposals_list?,
     })
 }
 

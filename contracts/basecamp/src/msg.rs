@@ -107,7 +107,8 @@ pub struct ProposalInfo {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalsListResponse {
-    pub proposals_list: Vec<ProposalInfo>,
+    pub proposal_count: u64,
+    pub proposal_list: Vec<ProposalInfo>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
