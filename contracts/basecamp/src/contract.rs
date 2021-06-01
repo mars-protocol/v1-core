@@ -531,57 +531,6 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ProposalsListResponse> {
-    let proposals = proposals_state_read(&deps.storage);
-    let proposals_list: StdResult<Vec<_>> = proposals
-        .range(None, None, Order::Ascending)
-        .map(|item| {
-            let (k, v) = item?;
-
-            Ok(ProposalInfo {
-                proposal_id: String::from_utf8(k).unwrap(),
-                status: v.status,
-                for_votes: v.for_votes,
-                against_votes: v.against_votes,
-                start_height: v.start_height,
-                end_height: v.end_height,
-                title: v.title,
-                description: v.description,
-                link: v.link,
-                execute_calls: v.execute_calls,
-                deposit_amount: v.deposit_amount,
-            })
-        })
-        .collect();
-
-    Ok(ProposalsListResponse {
-        proposals_list: proposals_list?,
-    })
-}
-
-fn query_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    proposal_id: u64,
-) -> StdResult<ProposalInfo> {
-    let proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
-
-    Ok(ProposalInfo {
-        proposal_id: proposal_id.to_string(),
-        status: proposal.status,
-        for_votes: proposal.for_votes,
-        against_votes: proposal.against_votes,
-        start_height: proposal.start_height,
-        end_height: proposal.end_height,
-        title: proposal.title,
-        description: proposal.description,
-        link: proposal.link,
-        execute_calls: proposal.execute_calls,
-        deposit_amount: proposal.deposit_amount,
-    })
-}
-
-fn query_proposals<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ProposalsListResponse> {
     let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
     let proposals = proposals_state_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
