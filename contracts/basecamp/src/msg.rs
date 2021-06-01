@@ -36,7 +36,6 @@ pub enum HandleMsg {
     CastVote {
         proposal_id: u64,
         vote: ProposalVoteOption,
-        voting_power: Uint128,
     },
 
     /// End proposal after voting period has passed
