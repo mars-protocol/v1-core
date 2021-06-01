@@ -173,31 +173,25 @@ impl XMarsQuerier {
             xmars_token::msg::QueryMsg::BalanceAt { address, block } => {
                 match self.balances_at.get(&(address.clone(), block)) {
                     Some(balance) => Ok(to_binary(&BalanceResponse { balance: *balance })),
-                    None => {
-                        Err(SystemError::InvalidRequest {
-                            error: format!(
-                                "[mock]: no balance at block {} for account address {}",
-                                block, &address
-                            ),
-                            request: Default::default(),
-                        })
-                    }
+                    None => Err(SystemError::InvalidRequest {
+                        error: format!(
+                            "[mock]: no balance at block {} for account address {}",
+                            block, &address
+                        ),
+                        request: Default::default(),
+                    }),
                 }
             }
 
             xmars_token::msg::QueryMsg::TotalSupplyAt { block } => {
                 match self.total_supplies_at.get(&block) {
-                    Some(balance) => {
-                        Ok(to_binary(&xmars_token::msg::TotalSupplyResponse {
-                            total_supply: *balance,
-                        }))
-                    }
-                    None => {
-                        Err(SystemError::InvalidRequest {
-                            error: format!("[mock]: no total supply at block {}", block),
-                            request: Default::default(),
-                        })
-                    }
+                    Some(balance) => Ok(to_binary(&xmars_token::msg::TotalSupplyResponse {
+                        total_supply: *balance,
+                    })),
+                    None => Err(SystemError::InvalidRequest {
+                        error: format!("[mock]: no total supply at block {}", block),
+                        request: Default::default(),
+                    }),
                 }
             }
 
