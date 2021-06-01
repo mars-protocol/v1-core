@@ -356,12 +356,6 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
 
-    // reserve_factor cannot be greater than 1
-    let reserve_factor = asset_params.reserve_factor;
-    if reserve_factor > Decimal256::one() {
-        return Err(StdError::generic_err("reserve factor cannot exceed one"));
-    }
-
     // create only if it doesn't exist
     let mut reserves = reserves_state(&mut deps.storage);
     match reserves.may_load(asset_reference.as_slice()) {
@@ -382,7 +376,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
                     loan_to_value: asset_params.loan_to_value,
 
-                    reserve_factor,
+                    reserve_factor: asset_params.reserve_factor,
 
                     interests_last_updated: env.block.time,
                     debt_total_scaled: Uint256::zero(),
@@ -843,7 +837,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let mut collateral_reserve =
         reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
-    reserve_update_market_indices(&env, &mut collateral_reserve);
 
     // check if user has available collateral in specified collateral asset to be liquidated
     let collateral_ma_address = deps
@@ -1245,7 +1238,9 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    reserve_update_market_indices(&env, &mut reserve);
+    reserve.protocol_income_to_be_distributed =
+        reserve.protocol_income_to_be_distributed - amount_to_distribute;
+    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &reserve)?;
 
     let mut messages = vec![];
 
@@ -1255,24 +1250,30 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
     let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
 
-    let insurance_fund_fee_share = amount_to_distribute * config.insurance_fund_fee_share;
-    let treasury_fund_fee_share = amount_to_distribute * config.treasury_fee_share;
-    let staking_rewards_fee_share =
-        amount_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
+    let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
+    let treasury_amount = amount_to_distribute * config.treasury_fee_share;
+    let amount_to_distribute_before_staking_rewards = insurance_fund_amount + treasury_amount;
+    if amount_to_distribute_before_staking_rewards > amount_to_distribute {
+        return Err(StdError::generic_err(format!(
+            "Decimal256 Underflow: will subtract {} from {} ",
+            amount_to_distribute_before_staking_rewards, amount_to_distribute
+        )));
+    }
+    let staking_amount = amount_to_distribute - (insurance_fund_amount + treasury_amount);
 
     // only build and add send message if fee is non-zero
-    if !insurance_fund_fee_share.is_zero() {
+    if !insurance_fund_amount.is_zero() {
         let insurance_fund_msg = build_send_asset_msg(
             env.contract.address.clone(),
             insurance_fund_address,
             asset.clone(),
-            insurance_fund_fee_share,
+            insurance_fund_amount,
         )?;
         messages.push(insurance_fund_msg);
     }
 
-    if !treasury_fund_fee_share.is_zero() {
-        let scaled_mint_amount = treasury_fund_fee_share / reserve.liquidity_index;
+    if !treasury_amount.is_zero() {
+        let scaled_mint_amount = treasury_amount / reserve.liquidity_index;
         let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
@@ -1284,38 +1285,23 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
         messages.push(treasury_fund_msg);
     }
 
-    if !staking_rewards_fee_share.is_zero() {
+    if !staking_amount.is_zero() {
         let staking_msg = build_send_asset_msg(
-            env.contract.address.clone(),
+            env.contract.address,
             staking_contract_address,
             asset,
-            staking_rewards_fee_share,
+            staking_amount,
         )?;
         messages.push(staking_msg);
     }
 
-    reserve.protocol_income_to_be_distributed =
-        reserve.protocol_income_to_be_distributed - amount_to_distribute;
-
-    reserve_update_interest_rates(
-        &deps,
-        &env,
-        asset_reference.as_slice(),
-        &mut reserve,
-        amount_to_distribute,
-    )?;
-    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &reserve)?;
-
-    let mut log = vec![
-        log("action", "distribute_protocol_income"),
-        log("asset", asset_label),
-        log("amount", amount_to_distribute),
-    ];
-    append_indices_and_rates_to_logs(&mut log, &reserve);
-
     Ok(HandleResponse {
         messages,
-        log,
+        log: vec![
+            log("action", "distribute_protocol_income"),
+            log("asset", asset_label),
+            log("amount", amount_to_distribute),
+        ],
         data: None,
     })
 }
@@ -1526,11 +1512,14 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 // INTEREST
 
-/// Updates reserve indices by applying current interest rates on the time between last interest update
-/// and current block. Note it does not save the reserve to the store (that is left to the caller)
+/// Updates reserve indices and protocol_income by applying current interest rates on the time between
+/// last interest update and current block.
+/// Note it does not save the reserve to the store (that is left to the caller)
 pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let current_timestamp = env.block.time;
-    // keep track of previous borrow index to later calculate total debt accrued
+    // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
+    // of the indices and subtracting them returns the accrued borrow interest for the period since
+    // when the indices were last updated and the current point in time.
     let previous_borrow_index = reserve.borrow_index;
 
     if reserve.interests_last_updated < current_timestamp {
@@ -1554,13 +1543,13 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let previous_debt_total_unscaled = reserve.debt_total_scaled * previous_borrow_index;
     let new_debt_total_unscaled = reserve.debt_total_scaled * reserve.borrow_index;
 
-    let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+    let interest_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
         new_debt_total_unscaled - previous_debt_total_unscaled
     } else {
         Uint256::zero()
     };
 
-    reserve.protocol_income_to_be_distributed += debt_accrued * reserve.reserve_factor;
+    reserve.protocol_income_to_be_distributed += interest_accrued * reserve.reserve_factor;
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1593,12 +1582,15 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     // amount sent by the user on deposits and repays(both for cw20 and native).
     // If it doesn't, we should include them on the available_liquidity
     let contract_current_balance = Uint256::from(contract_balance_amount);
-    if contract_current_balance < liquidity_taken {
+    if contract_current_balance < (liquidity_taken + reserve.protocol_income_to_be_distributed) {
         return Err(StdError::generic_err(
-            "Liquidity taken cannot be greater than available liquidity",
+            "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
         ));
     }
-    let available_liquidity = Decimal256::from_uint256(contract_current_balance - liquidity_taken);
+    let available_liquidity = Decimal256::from_uint256(
+        contract_current_balance - liquidity_taken - reserve.protocol_income_to_be_distributed,
+    );
+    println!("REAL available liquidity {}", available_liquidity);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
     let utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
@@ -1607,6 +1599,7 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     };
 
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
+    // This operation should not underflow as reserve_factor is checked to be <= 1
     reserve.liquidity_rate =
         reserve.borrow_rate * utilization_rate * (Decimal256::one() - reserve.reserve_factor);
 
@@ -4689,75 +4682,52 @@ mod tests {
             .load(b"somecoin")
             .unwrap();
 
-        let expected_insurance_fund_fee_share =
-            permissible_amount * config.insurance_fund_fee_share;
-        let expected_treasury_fund_fee_share = permissible_amount * config.treasury_fee_share;
-        let expected_staking_rewards_fee_share = permissible_amount
-            - (expected_insurance_fund_fee_share + expected_treasury_fund_fee_share);
+        let expected_insurance_fund_amount = permissible_amount * config.insurance_fund_fee_share;
+        let expected_treasury_amount = permissible_amount * config.treasury_fee_share;
+        let expected_staking_amount =
+            permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
 
-        let expected_params = th_get_expected_indices_and_rates(
-            &reserve_initial,
-            block_time,
-            available_liquidity,
-            TestUtilizationDeltas {
-                less_liquidity: permissible_amount.into(),
-                ..Default::default()
-            },
-        );
+        let scaled_mint_amount = expected_treasury_amount / reserve_initial.liquidity_index;
 
-        let mut expected_messages = vec![];
-
-        // only build and add send message if fee is non-zero
-        if !expected_insurance_fund_fee_share.is_zero() {
-            let insurance_fund_msg = build_send_asset_msg(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                HumanAddr::from("insurance_contract"),
-                asset.clone(),
-                expected_insurance_fund_fee_share,
-            )
-            .unwrap();
-            expected_messages.push(insurance_fund_msg);
-        }
-
-        if !expected_treasury_fund_fee_share.is_zero() {
-            let scaled_mint_amount =
-                expected_treasury_fund_fee_share / expected_params.liquidity_index;
-            let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps
-                    .api
-                    .human_address(&reserve_initial.ma_token_address)
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("insurance_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_insurance_fund_amount.into(),
+                    }],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: deps
+                        .api
+                        .human_address(&reserve_initial.ma_token_address)
+                        .unwrap(),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Mint {
+                        recipient: HumanAddr::from("treasury_contract"),
+                        amount: scaled_mint_amount.into(),
+                    })
                     .unwrap(),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("treasury_contract"),
-                    amount: scaled_mint_amount.into(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("staking_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_staking_amount.into(),
+                    }],
                 })
-                .unwrap(),
-            });
-            expected_messages.push(treasury_fund_msg);
-        }
-
-        if !expected_staking_rewards_fee_share.is_zero() {
-            let staking_msg = build_send_asset_msg(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                HumanAddr::from("staking_contract"),
-                asset.clone(),
-                expected_staking_rewards_fee_share,
-            )
-            .unwrap();
-            expected_messages.push(staking_msg);
-        }
-        assert_eq!(res.messages, expected_messages);
+            ]
+        );
         assert_eq!(
             res.log,
             vec![
                 log("action", "distribute_protocol_income"),
                 log("asset", "somecoin"),
                 log("amount", permissible_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -4785,83 +4755,61 @@ mod tests {
         let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
 
         // verify messages are correct and protocol_income_to_be_distributed field is now zero
-        let expected_insurance_fund_fee_share =
+        let expected_insurance_amount =
             expected_remaining_income_to_be_distributed * config.insurance_fund_fee_share;
-        let expected_treasury_fund_fee_share =
+        let expected_treasury_amount =
             expected_remaining_income_to_be_distributed * config.treasury_fee_share;
-        let expected_staking_rewards_fee_share = expected_remaining_income_to_be_distributed
-            - (expected_insurance_fund_fee_share + expected_treasury_fund_fee_share);
+        let expected_staking_amount = expected_remaining_income_to_be_distributed
+            - (expected_insurance_amount + expected_treasury_amount);
 
-        let expected_params = th_get_expected_indices_and_rates(
-            &reserve_after_distribution,
-            block_time,
-            available_liquidity,
-            TestUtilizationDeltas {
-                less_liquidity: permissible_amount.into(),
-                ..Default::default()
-            },
-        );
+        let scaled_mint_amount =
+            expected_treasury_amount / reserve_after_distribution.liquidity_index;
 
-        let mut expected_messages = vec![];
-
-        // only build and add send message if fee is non-zero
-        if !expected_insurance_fund_fee_share.is_zero() {
-            let insurance_fund_msg = build_send_asset_msg(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                HumanAddr::from("insurance_contract"),
-                asset.clone(),
-                expected_insurance_fund_fee_share,
-            )
-            .unwrap();
-            expected_messages.push(insurance_fund_msg);
-        }
-
-        if !expected_treasury_fund_fee_share.is_zero() {
-            let scaled_mint_amount =
-                expected_treasury_fund_fee_share / expected_params.liquidity_index;
-            let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps
-                    .api
-                    .human_address(&reserve_after_distribution.ma_token_address)
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("insurance_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_insurance_fund_amount.into(),
+                    }],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: deps
+                        .api
+                        .human_address(&reserve_initial.ma_token_address)
+                        .unwrap(),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Mint {
+                        recipient: HumanAddr::from("treasury_contract"),
+                        amount: scaled_mint_amount.into(),
+                    })
                     .unwrap(),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("treasury_contract"),
-                    amount: scaled_mint_amount.into(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("staking_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_staking_amount.into(),
+                    }],
                 })
-                .unwrap(),
-            });
-            expected_messages.push(treasury_fund_msg);
-        }
-
-        if !expected_staking_rewards_fee_share.is_zero() {
-            let staking_msg = build_send_asset_msg(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                HumanAddr::from("staking_contract"),
-                asset,
-                expected_staking_rewards_fee_share,
-            )
-            .unwrap();
-            expected_messages.push(staking_msg);
-        }
-
-        let reserve_after_second_distribution = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
-
-        assert_eq!(res.messages, expected_messages);
+            ]
+        );
         assert_eq!(
             res.log,
             vec![
                 log("action", "distribute_protocol_income"),
                 log("asset", "somecoin"),
                 log("amount", expected_remaining_income_to_be_distributed),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
+
+        let reserve_after_second_distribution = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
         assert_eq!(
             reserve_after_second_distribution.protocol_income_to_be_distributed,
             Uint256::zero()
@@ -5047,7 +4995,9 @@ mod tests {
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
         let dec_liquidity_total =
-            Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
+            Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity)
+                - Decimal256::from_uint256(reserve.protocol_income_to_be_distributed);
+        println!("dec liquidity total {}", dec_liquidity_total);
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // debt accrued to distribute
