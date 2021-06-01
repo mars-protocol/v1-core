@@ -66,8 +66,9 @@ mod tests {
     use cosmwasm_std::{coins, Uint128};
     use cw20::{Cw20CoinHuman, Expiration, TokenInfoResponse};
 
+    use mars::xmars_token::msg::{HandleMsg, InitMsg};
+
     use crate::contract::{handle, init, query_token_info};
-    use crate::msg::{HandleMsg, InitMsg};
 
     // this will set up the init for other tests
     fn do_init<S: Storage, A: Api, Q: Querier>(

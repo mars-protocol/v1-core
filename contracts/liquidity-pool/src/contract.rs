@@ -269,7 +269,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
                 .human_address(&CanonicalAddr::from(asset_reference))?;
             (
                 cw20_get_balance(
-                    deps,
+                    &deps.querier,
                     cw20_contract_addr.clone(),
                     env.contract.address.clone(),
                 )?,
@@ -394,7 +394,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
     let symbol = match asset {
         Asset::Native { denom } => denom,
-        Asset::Cw20 { contract_addr } => cw20_get_symbol(deps, contract_addr)?,
+        Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
     };
 
     // Prepare response, should instantiate an maToken
@@ -831,7 +831,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         .human_address(&collateral_reserve.ma_token_address)?;
     let user_collateral_balance = collateral_reserve.liquidity_index
         * Uint256::from(cw20_get_balance(
-            deps,
+            &deps.querier,
             collateral_ma_address,
             user_address.clone(),
         )?);
@@ -924,7 +924,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                 contract_addr: token_addr,
             } => {
                 Uint256::from(cw20_get_balance(
-                    deps,
+                    &deps.querier,
                     token_addr,
                     env.contract.address.clone(),
                 )?) * collateral_reserve.liquidity_index
@@ -1166,7 +1166,7 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
             .api
             .human_address(&collateral_reserve.ma_token_address)?;
         let user_collateral_balance =
-            cw20_get_balance(deps, collateral_ma_address, user_address.clone())?;
+            cw20_get_balance(&deps.querier, collateral_ma_address, user_address.clone())?;
         if user_collateral_balance > Uint128::zero() {
             // enable collateral asset
             set_bit(&mut user.collateral_assets, collateral_reserve.index)?;
@@ -1303,7 +1303,7 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
                             }
                         };
 
-                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
+                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
@@ -1361,7 +1361,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
                             }
                         };
 
-                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
+                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
@@ -1449,7 +1449,7 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
         }
         AssetType::Cw20 => {
             let cw20_human_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
-            cw20_get_balance(deps, cw20_human_addr, env.contract.address.clone())?
+            cw20_get_balance(&deps.querier, cw20_human_addr, env.contract.address.clone())?
         }
     };
 
@@ -1519,7 +1519,7 @@ where
         let target_collateral_amount = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance = cw20_get_balance(
-                deps,
+                &deps.querier,
                 deps.api.human_address(&reserve.ma_token_address)?,
                 deps.api.human_address(user_canonical_address)?,
             )?;
@@ -1808,7 +1808,7 @@ mod tests {
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, Extern};
-    use mars::testing::{mock_dependencies, MockEnvParams, WasmMockQuerier};
+    use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
@@ -4339,7 +4339,7 @@ mod tests {
 
     // TEST HELPERS
 
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
         let msg = InitMsg {
