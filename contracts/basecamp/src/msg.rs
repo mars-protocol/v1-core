@@ -93,7 +93,7 @@ pub struct ProposalsListResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalInfo {
-    pub proposal_id: String,
+    pub proposal_id: u64,
     pub status: ProposalStatus,
     pub for_votes: Uint128,
     pub against_votes: Uint128,

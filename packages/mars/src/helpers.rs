@@ -3,6 +3,7 @@ use cosmwasm_std::{
     WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
+use std::convert::TryInto;
 
 // CW20
 pub fn cw20_get_balance<S: Storage, A: Api, Q: Querier>(
@@ -42,4 +43,10 @@ pub fn cw20_get_symbol<S: Storage, A: Api, Q: Querier>(
     }))?;
 
     Ok(query.symbol)
+}
+
+pub fn read_be_u64(input: &mut &[u8]) -> u64 {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u64>());
+    *input = rest;
+    u64::from_be_bytes(int_bytes.try_into().unwrap())
 }
