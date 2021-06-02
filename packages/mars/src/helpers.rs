@@ -1,5 +1,6 @@
 use cosmwasm_std::{to_binary, HumanAddr, Querier, QueryRequest, StdResult, Uint128, WasmQuery};
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
+use std::convert::TryInto;
 
 // CW20
 pub fn cw20_get_balance<Q: Querier>(
@@ -36,4 +37,10 @@ pub fn cw20_get_symbol<Q: Querier>(querier: &Q, token_address: HumanAddr) -> Std
     }))?;
 
     Ok(query.symbol)
+}
+
+pub fn read_be_u64(input: &mut &[u8]) -> u64 {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u64>());
+    *input = rest;
+    u64::from_be_bytes(int_bytes.try_into().unwrap())
 }
