@@ -7,6 +7,7 @@ use cosmwasm_std::{
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::xmars_token;
+use mars::helpers::{read_be_u64};
 
 use crate::msg::{
     ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, ProposalInfo,
@@ -529,7 +530,7 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
             let (k, v) = item?;
 
             Ok(ProposalInfo {
-                proposal_id: String::from_utf8(k).unwrap(),
+                proposal_id: read_be_u64(&mut k.as_slice()),
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
@@ -557,7 +558,7 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
     let proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
 
     Ok(ProposalInfo {
-        proposal_id: proposal_id.to_string(),
+        proposal_id: proposal_id,
         status: proposal.status,
         for_votes: proposal.for_votes,
         against_votes: proposal.against_votes,
