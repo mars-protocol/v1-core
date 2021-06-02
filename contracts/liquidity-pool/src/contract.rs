@@ -10,7 +10,7 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, cw20_get_total_supply};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol};
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitAssetParams, InitMsg,
     MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse, ReservesListResponse,
@@ -149,6 +149,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
         HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
             handle_update_user_collateral_asset_status(deps, env, asset, enable)
+        }
 
         HandleMsg::DistributeProtocolIncome { asset, amount } => {
             handle_distribute_protocol_income(deps, env, asset, amount)
@@ -1208,6 +1209,7 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
             log("asset", collateral_asset_label),
             log("has_collateral", has_collateral_asset),
             log("enable", enable),
+        ],
         data: None,
     })
 }
@@ -1764,75 +1766,6 @@ fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
         UserHealthStatus::Borrowing(health_factor),
         native_asset_prices,
     ))
-
-fn send_debt_accrued_to_distribute_to_contracts<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    messages: &mut Vec<CosmosMsg>,
-    debt_accrued_to_distribute: Uint256,
-    asset: Asset,
-) -> StdResult<()> {
-    let config = config_state_read(&deps.storage).load()?;
-
-    let insurance_fund_address = deps
-        .api
-        .human_address(&config.insurance_fund_contract_address)?;
-    let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
-    let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
-
-    let insurance_fund_fee_share = debt_accrued_to_distribute * config.insurance_fund_fee_share;
-    let treasury_fund_fee_share = debt_accrued_to_distribute * config.treasury_fee_share;
-    let staking_rewards_fee_share =
-        debt_accrued_to_distribute - (insurance_fund_fee_share + treasury_fund_fee_share);
-
-    // only build and add send message if fee is non-zero
-    if !insurance_fund_fee_share.is_zero() {
-        let insurance_fund_msg = build_send_asset_msg(
-            env.contract.address.clone(),
-            insurance_fund_address,
-            asset.clone(),
-            insurance_fund_fee_share,
-        )?;
-        messages.push(insurance_fund_msg);
-    }
-
-    if !treasury_fund_fee_share.is_zero() {
-        let treasury_fund_msg = build_send_asset_msg(
-            env.contract.address.clone(),
-            treasury_fund_address,
-            asset.clone(),
-            treasury_fund_fee_share,
-        )?;
-        messages.push(treasury_fund_msg);
-    }
-
-    if !staking_rewards_fee_share.is_zero() {
-        let staking_msg = build_send_asset_msg(
-            env.contract.address,
-            staking_contract_address,
-            asset,
-            staking_rewards_fee_share,
-        )?;
-        messages.push(staking_msg);
-    }
-
-    Ok(())
-}
-
-fn calculate_debt_accrued_to_distribute(
-    previous_borrow_index: Decimal256,
-    reserve: &Reserve,
-) -> Uint256 {
-    let previous_debt_total_unscaled = reserve.debt_total_scaled * previous_borrow_index;
-    let new_debt_total_unscaled = reserve.debt_total_scaled * reserve.borrow_index;
-
-    let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
-        new_debt_total_unscaled - previous_debt_total_unscaled
-    } else {
-        Uint256::zero()
-    };
-
-    debt_accrued * reserve.reserve_factor
 }
 
 // HELPERS
@@ -4545,6 +4478,8 @@ mod tests {
         };
         let mock_reserve_2 = MockReserve {
             ma_token_address: "matoken2",
+            ..Default::default()
+        };
         let cw20_contract_addr = HumanAddr::from("depositedcoin1");
         let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
 
@@ -4635,6 +4570,7 @@ mod tests {
         assert_eq!(reserve_2_collateral, false);
     }
 
+    #[test]
     fn test_distribute_protocol_income() {
         // initialize contract with liquidity
         let available_liquidity = 2000000000u128;
