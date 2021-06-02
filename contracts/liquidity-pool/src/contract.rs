@@ -255,7 +255,8 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
+    let index = reserve.liquidity_index;
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount * index)?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Redeem amount is computed after interest rates so that the updated index is used
@@ -1259,7 +1260,7 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
             amount_to_distribute_before_staking_rewards, amount_to_distribute
         )));
     }
-    let staking_amount = amount_to_distribute - (insurance_fund_amount + treasury_amount);
+    let staking_amount = amount_to_distribute - (amount_to_distribute_before_staking_rewards);
 
     // only build and add send message if fee is non-zero
     if !insurance_fund_amount.is_zero() {
@@ -5013,10 +5014,15 @@ mod tests {
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
         let config = config_state_read(&deps.storage).load().unwrap();
+        let dec_treasury_amount =
+            (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
+        //println!("initial_liquidiy {}", contract_cb);
+        let contract_cb = Uint256::from(initial_liquidity);
+        let liq_taken = Uint256::from(deltas.less_liquidity);
         let dec_liquidity_total =
-            Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity)
-                - (Decimal256::one() - config.treasury_fee_share)
-                    * Decimal256::from_uint256(reserve.protocol_income_to_be_distributed);
+            Decimal256::from_uint256(contract_cb - liq_taken - dec_treasury_amount);
+        println!("initial_liquidiy {}", contract_cb);
+        println!("liquidity_taken {}", liq_taken);
         println!("dec liquidity total {}", dec_liquidity_total);
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
