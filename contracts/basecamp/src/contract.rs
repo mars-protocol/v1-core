@@ -558,7 +558,7 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
     let proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
 
     Ok(ProposalInfo {
-        proposal_id: proposal_id,
+        proposal_id,
         status: proposal.status,
         for_votes: proposal.for_votes,
         against_votes: proposal.against_votes,
