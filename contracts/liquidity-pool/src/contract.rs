@@ -255,9 +255,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
-    println!("Beore: {}", reserve.protocol_income_to_be_distributed);
     reserve_update_market_indices(&env, &mut reserve);
-    println!("After: {}", reserve.protocol_income_to_be_distributed);
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
