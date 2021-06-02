@@ -254,7 +254,9 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     if deps.api.canonical_address(&env.message.sender)? != reserve.ma_token_address {
         return Err(StdError::unauthorized());
     }
+    println!("Beore: {}", reserve.protocol_income_to_be_distributed);
     reserve_update_market_indices(&env, &mut reserve);
+    println!("After: {}", reserve.protocol_income_to_be_distributed);
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
@@ -1583,18 +1585,24 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     // amount sent by the user on deposits and repays(both for cw20 and native).
     // If it doesn't, we should include them on the available_liquidity
     let contract_current_balance = Uint256::from(contract_balance_amount);
-    if contract_current_balance < (liquidity_taken + reserve.protocol_income_to_be_distributed) {
+
+    // Get protocol income to be deducted from liquidity (doesn't belong to the money market
+    // anymore)
+    let config = config_state_read(&deps.storage).load()?;
+    // No check for underflow because this is done on config validations
+    let protocol_income_minus_treasury_amount =
+        (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
+    let liquidity_to_deduct_from_current_balance =
+        liquidity_taken + protocol_income_minus_treasury_amount;
+
+    if contract_current_balance < liquidity_to_deduct_from_current_balance {
         return Err(StdError::generic_err(
             "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
         ));
     }
-    let config = config_state_read(&deps.storage).load()?;
-    let protocol_income_minus_treasury_amount =
-        (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
     let available_liquidity = Decimal256::from_uint256(
-        contract_current_balance - liquidity_taken - protocol_income_minus_treasury_amount,
+        contract_current_balance - liquidity_to_deduct_from_current_balance,
     );
-    println!("REAL available liquidity {}", available_liquidity);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
     let utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
@@ -4773,7 +4781,7 @@ mod tests {
             },
         );
         let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
-            asset: asset.clone(),
+            asset,
             amount: None,
         };
         let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
@@ -5019,33 +5027,26 @@ mod tests {
             Uint256::zero()
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
-        let config = config_state_read(&deps.storage).load().unwrap();
-        let dec_treasury_amount = (Decimal256::one() - config.treasury_fee_share)
-            * reserve.protocol_income_to_be_distributed;
-        let contract_current_balance = Uint256::from(initial_liquidity);
-        let liquidity_taken = Uint256::from(deltas.less_liquidity);
-        let dec_liquidity_total = Decimal256::from_uint256(
-            contract_current_balance - liquidity_taken - dec_treasury_amount,
-        );
-        println!("dec liquidity total {}", dec_liquidity_total);
-        let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
-        // debt accrued to distribute
-        println!("new debt total {}", new_debt_total);
-        println!("previous borrow index {}", previous_borrow_index);
-        println!("expected borrow index {}", expected_borrow_index);
+        // Compute protocol income to be distributed
         let previous_debt_total_unscaled = new_debt_total * previous_borrow_index;
         let new_debt_total_unscaled = new_debt_total * expected_borrow_index;
-
         let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
             new_debt_total_unscaled - previous_debt_total_unscaled
         } else {
             Uint256::zero()
         };
+        let expected_protocol_income_to_be_distributed = debt_accrued * reserve.reserve_factor;
 
-        println!("debt accrued {}", debt_accrued);
-        println!("reserve factor {}", reserve.reserve_factor);
-        let expected_protocol_income_to_distribute = debt_accrued * reserve.reserve_factor;
+        let config = config_state_read(&deps.storage).load().unwrap();
+        let dec_treasury_amount = (Decimal256::one() - config.treasury_fee_share)
+            * expected_protocol_income_to_be_distributed;
+        let contract_current_balance = Uint256::from(initial_liquidity);
+        let liquidity_taken = Uint256::from(deltas.less_liquidity);
+        let dec_liquidity_total = Decimal256::from_uint256(
+            contract_current_balance - liquidity_taken - dec_treasury_amount,
+        );
+        let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
@@ -5058,7 +5059,7 @@ mod tests {
             liquidity_index: expected_liquidity_index,
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
-            protocol_income_to_distribute: expected_protocol_income_to_distribute,
+            protocol_income_to_distribute: expected_protocol_income_to_be_distributed,
         }
     }
 
