@@ -1587,8 +1587,11 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
             "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
         ));
     }
+    let config = config_state_read(&deps.storage).load()?;
+    let protocol_income_minus_treasury_amount =
+        (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
     let available_liquidity = Decimal256::from_uint256(
-        contract_current_balance - liquidity_taken - reserve.protocol_income_to_be_distributed,
+        contract_current_balance - liquidity_taken - protocol_income_minus_treasury_amount,
     );
     println!("REAL available liquidity {}", available_liquidity);
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
@@ -2322,6 +2325,7 @@ mod tests {
             (Uint256::from(deposit_amount) / expected_liquidity_index).into();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             env.block.time,
             initial_liquidity,
@@ -2443,6 +2447,7 @@ mod tests {
             Uint256::from(deposit_amount) / expected_liquidity_index;
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             env.block.time,
             initial_liquidity,
@@ -2556,6 +2561,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
@@ -2695,6 +2701,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
@@ -2909,6 +2916,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_initial,
             block_time,
             available_liquidity_cw20,
@@ -3007,6 +3015,7 @@ mod tests {
         assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_after_borrow,
             block_time,
             available_liquidity_cw20,
@@ -3071,6 +3080,7 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_initial,
             block_time,
             available_liquidity_native,
@@ -3177,6 +3187,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_after_borrow_2,
             block_time,
             available_liquidity_native,
@@ -3238,6 +3249,7 @@ mod tests {
         let block_time = reserve_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_after_repay_some_2,
             block_time,
             available_liquidity_native,
@@ -3316,6 +3328,7 @@ mod tests {
         let repay_amount = 4800u128;
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_after_borrow_again,
             block_time,
             available_liquidity_cw20,
@@ -3461,6 +3474,7 @@ mod tests {
         handle(&mut deps, env, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             block_time,
             initial_liquidity,
@@ -3890,6 +3904,7 @@ mod tests {
         let block_time = collateral_reserve_initial.interests_last_updated + 5000u64;
 
         let expected_collateral_rates = th_get_expected_indices_and_rates(
+            &deps,
             &collateral_reserve_initial,
             block_time,
             available_liquidity_collateral,
@@ -3898,6 +3913,7 @@ mod tests {
             },
         );
         let expected_debt_rates = th_get_expected_indices_and_rates(
+            &deps,
             &debt_reserve_initial,
             block_time,
             available_liquidity_debt,
@@ -4381,6 +4397,7 @@ mod tests {
         let res = handle(&mut deps, borrow_env, borrow_msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_initial,
             block_time,
             available_liquidity,
@@ -4958,7 +4975,8 @@ mod tests {
 
     /// Takes a reserve before an action (ie: a borrow) among some test parameters
     /// used in that action and computes the expected indices and rates after that action.
-    fn th_get_expected_indices_and_rates(
+    fn th_get_expected_indices_and_rates<S: Storage, A: Api, Q: Querier>(
+        deps: &Extern<S, A, Q>,
         reserve: &Reserve,
         block_time: u64,
         initial_liquidity: u128,
@@ -4994,9 +5012,11 @@ mod tests {
             Uint256::zero()
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
+        let config = config_state_read(&deps.storage).load().unwrap();
         let dec_liquidity_total =
             Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity)
-                - Decimal256::from_uint256(reserve.protocol_income_to_be_distributed);
+                - (Decimal256::one() - config.treasury_fee_share)
+                    * Decimal256::from_uint256(reserve.protocol_income_to_be_distributed);
         println!("dec liquidity total {}", dec_liquidity_total);
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
