@@ -255,12 +255,12 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
     reserve_update_market_indices(&env, &mut reserve);
-    let index = reserve.liquidity_index;
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount * index)?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
+
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, redeem_amount)?;
+    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Check contract has sufficient balance to send back
     let (balance, asset_label) = match reserve.asset_type {
@@ -2534,7 +2534,8 @@ mod tests {
         let burn_amount = 20000u128;
         let seconds_elapsed = 2000u64;
 
-        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let reserve_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
         reserve_ma_tokens_state(&mut deps.storage)
             .save(
                 deps.api
@@ -2561,13 +2562,19 @@ mod tests {
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
+        let unscaled_burn_amount: Uint128 =
+            (Uint256::from(burn_amount) * reserve.liquidity_index).into();
+
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve,
+            &reserve_initial,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
-                less_liquidity: burn_amount,
+                less_liquidity: unscaled_burn_amount.into(),
                 ..Default::default()
             },
         );
@@ -2610,10 +2617,6 @@ mod tests {
                 log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
-
-        let reserve = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
 
         // BR = U * Bslope = 0.5 * 0.01 = 0.05
         assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
@@ -2668,7 +2671,7 @@ mod tests {
         let burn_amount = 20000u128;
         let seconds_elapsed = 2000u64;
 
-        let reserve = th_init_reserve(
+        let reserve_initial = th_init_reserve(
             &deps.api,
             &mut deps.storage,
             cw20_contract_canonical_addr.as_slice(),
@@ -2701,13 +2704,20 @@ mod tests {
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let reserve = reserves_state_read(&deps.storage)
+            .load(cw20_contract_canonical_addr.as_slice())
+            .unwrap();
+
+        let unscaled_burn_amount: Uint128 =
+            (Uint256::from(burn_amount) * reserve.liquidity_index).into();
+
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve,
+            &reserve_initial,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
-                less_liquidity: burn_amount,
+                less_liquidity: unscaled_burn_amount.into(),
                 ..Default::default()
             },
         );
@@ -2751,10 +2761,6 @@ mod tests {
                 log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
-
-        let reserve = reserves_state_read(&deps.storage)
-            .load(cw20_contract_canonical_addr.as_slice())
-            .unwrap();
 
         // BR = U * Bslope
         assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
@@ -5014,19 +5020,20 @@ mod tests {
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
         let config = config_state_read(&deps.storage).load().unwrap();
-        let dec_treasury_amount =
-            (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
-        //println!("initial_liquidiy {}", contract_cb);
-        let contract_cb = Uint256::from(initial_liquidity);
-        let liq_taken = Uint256::from(deltas.less_liquidity);
-        let dec_liquidity_total =
-            Decimal256::from_uint256(contract_cb - liq_taken - dec_treasury_amount);
-        println!("initial_liquidiy {}", contract_cb);
-        println!("liquidity_taken {}", liq_taken);
+        let dec_treasury_amount = (Decimal256::one() - config.treasury_fee_share)
+            * reserve.protocol_income_to_be_distributed;
+        let contract_current_balance = Uint256::from(initial_liquidity);
+        let liquidity_taken = Uint256::from(deltas.less_liquidity);
+        let dec_liquidity_total = Decimal256::from_uint256(
+            contract_current_balance - liquidity_taken - dec_treasury_amount,
+        );
         println!("dec liquidity total {}", dec_liquidity_total);
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // debt accrued to distribute
+        println!("new debt total {}", new_debt_total);
+        println!("previous borrow index {}", previous_borrow_index);
+        println!("expected borrow index {}", expected_borrow_index);
         let previous_debt_total_unscaled = new_debt_total * previous_borrow_index;
         let new_debt_total_unscaled = new_debt_total * expected_borrow_index;
 
@@ -5036,6 +5043,8 @@ mod tests {
             Uint256::zero()
         };
 
+        println!("debt accrued {}", debt_accrued);
+        println!("reserve factor {}", reserve.reserve_factor);
         let expected_protocol_income_to_distribute = debt_accrued * reserve.reserve_factor;
 
         // interest rates
