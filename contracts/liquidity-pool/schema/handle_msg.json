@@ -200,25 +200,25 @@
           "type": "object",
           "required": [
             "amount",
-            "from_address",
-            "from_previous_balance",
-            "to_address",
-            "to_previous_balance"
+            "recipient_address",
+            "recipient_previous_balance",
+            "sender_address",
+            "sender_previous_balance"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint128"
             },
-            "from_address": {
+            "recipient_address": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "from_previous_balance": {
+            "recipient_previous_balance": {
               "$ref": "#/definitions/Uint128"
             },
-            "to_address": {
+            "sender_address": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "to_previous_balance": {
+            "sender_previous_balance": {
               "$ref": "#/definitions/Uint128"
             }
           }
@@ -254,7 +254,6 @@
       }
     },
     {
-<<<<<<< HEAD
       "description": "Update (enable / disable) asset as collateral",
       "type": "object",
       "required": [
@@ -273,7 +272,12 @@
             },
             "enable": {
               "type": "boolean"
-=======
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts",
       "type": "object",
       "required": [
@@ -304,7 +308,6 @@
                   "$ref": "#/definitions/Asset"
                 }
               ]
->>>>>>> 78f6c3b (added testing)
             }
           }
         }
