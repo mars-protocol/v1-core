@@ -200,25 +200,25 @@
           "type": "object",
           "required": [
             "amount",
-            "from_address",
-            "from_previous_balance",
-            "to_address",
-            "to_previous_balance"
+            "recipient_address",
+            "recipient_previous_balance",
+            "sender_address",
+            "sender_previous_balance"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint128"
             },
-            "from_address": {
+            "recipient_address": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "from_previous_balance": {
+            "recipient_previous_balance": {
               "$ref": "#/definitions/Uint128"
             },
-            "to_address": {
+            "sender_address": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "to_previous_balance": {
+            "sender_previous_balance": {
               "$ref": "#/definitions/Uint128"
             }
           }
@@ -272,6 +272,42 @@
             },
             "enable": {
               "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts",
+      "type": "object",
+      "required": [
+        "distribute_protocol_income"
+      ],
+      "properties": {
+        "distribute_protocol_income": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Amount to distribute to protocol contracts, defaults to full amount if not specified",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint256"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "asset": {
+              "description": "Asset reserve fees to distribute",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             }
           }
         }

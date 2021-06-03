@@ -1,12 +1,13 @@
 use cosmwasm_std::{
     from_binary, log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Decimal, Env, Extern,
     HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
-    StdError, StdResult, Storage, Uint128, WasmMsg,
+    QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_total_supply, read_be_u64};
+use mars::helpers::read_be_u64;
+use mars::xmars_token;
 
 use crate::msg::{
     ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, ProposalInfo,
@@ -90,16 +91,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitTokenCallback {} => handle_init_mars_callback(deps, env),
 
-        HandleMsg::CastVote {
-            proposal_id,
-            vote,
-            voting_power,
-        } => handle_cast_vote(deps, env, proposal_id, vote, voting_power),
+        HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
 
         HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
         HandleMsg::ExecuteProposal { proposal_id } => {
             handle_execute_proposal(deps, env, proposal_id)
         }
+
         HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()), //TODO
 
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
@@ -268,7 +266,6 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     env: Env,
     proposal_id: u64,
     vote_option: ProposalVoteOption,
-    voting_power: Uint128,
 ) -> StdResult<HandleResponse> {
     let mut proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
     if proposal.status != ProposalStatus::Active {
@@ -291,19 +288,12 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
 
     let config = config_state_read(&deps.storage).load()?;
 
-    // TODO: this should get the balance at the proposal start block once the custom xMars
-    // when snapshot balances is implemented
-    let max_voting_power = cw20_get_balance(
-        deps,
+    let voting_power = xmars_get_balance_at(
+        &deps.querier,
         deps.api.human_address(&config.xmars_token_address)?,
         env.message.sender.clone(),
+        proposal.start_height - 1,
     )?;
-
-    if voting_power > max_voting_power {
-        return Err(StdError::generic_err(
-            "User does not have enough voting power",
-        ));
-    }
 
     match vote_option {
         ProposalVoteOption::For => proposal.for_votes += voting_power,
@@ -355,10 +345,11 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     let for_votes = proposal.for_votes;
     let against_votes = proposal.against_votes;
     let total_votes = for_votes + against_votes;
-    // TODO: When implementing balance snapshots, this should get the total xmars supply
-    // at the start of the proposal
-    let total_voting_power =
-        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
+    let total_voting_power = xmars_get_total_supply_at(
+        &deps.querier,
+        deps.api.human_address(&config.xmars_token_address)?,
+        proposal.start_height - 1,
+    )?;
 
     let mut proposal_quorum: Decimal = Decimal::zero();
     let mut proposal_threshold: Decimal = Decimal::zero();
@@ -599,6 +590,39 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
     Ok(MigrateResponse::default())
 }
 
+// HELPERS
+//
+fn xmars_get_total_supply_at<Q: Querier>(
+    querier: &Q,
+    xmars_address: HumanAddr,
+    block: u64,
+) -> StdResult<Uint128> {
+    let query: xmars_token::msg::TotalSupplyResponse =
+        querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: xmars_address,
+            msg: to_binary(&xmars_token::msg::QueryMsg::TotalSupplyAt { block })?,
+        }))?;
+
+    Ok(query.total_supply)
+}
+
+fn xmars_get_balance_at<Q: Querier>(
+    querier: &Q,
+    xmars_address: HumanAddr,
+    user_address: HumanAddr,
+    block: u64,
+) -> StdResult<Uint128> {
+    let query: cw20::BalanceResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: xmars_address,
+        msg: to_binary(&xmars_token::msg::QueryMsg::BalanceAt {
+            address: user_address,
+            block,
+        })?,
+    }))?;
+
+    Ok(query.balance)
+}
+
 // TESTS
 
 #[cfg(test)]
@@ -607,7 +631,7 @@ mod tests {
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
     use mars::testing::{
-        get_test_addresses, mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier,
+        get_test_addresses, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
     };
 
     use crate::state::{basecamp_state_read, proposals_state_read};
@@ -1048,7 +1072,6 @@ mod tests {
                 HandleMsg::CastVote {
                     proposal_id: 3,
                     vote: ProposalVoteOption::For,
-                    voting_power: Uint128(100),
                 },
                 100_001,
             ),
@@ -1057,7 +1080,6 @@ mod tests {
                 HandleMsg::CastVote {
                     proposal_id: executed_proposal_id,
                     vote: ProposalVoteOption::For,
-                    voting_power: Uint128(100),
                 },
                 100_001,
             ),
@@ -1066,18 +1088,8 @@ mod tests {
                 HandleMsg::CastVote {
                     proposal_id: active_proposal_id,
                     vote: ProposalVoteOption::For,
-                    voting_power: Uint128(100),
                 },
                 100_200,
-            ),
-            // voting with more power than available should fail
-            (
-                HandleMsg::CastVote {
-                    proposal_id: active_proposal_id,
-                    vote: ProposalVoteOption::For,
-                    voting_power: Uint128(101),
-                },
-                100_001,
             ),
         ];
 
@@ -1101,10 +1113,10 @@ mod tests {
 
         let active_proposal_id = 1_u64;
 
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(voter_address, Uint128(100))],
-        );
+        deps.querier
+            .set_xmars_address(HumanAddr::from("xmars_token"));
+        deps.querier
+            .set_xmars_balance_at(voter_address, 99_999, Uint128(100));
 
         let active_proposal = th_build_mock_proposal(
             &mut deps,
@@ -1127,7 +1139,7 @@ mod tests {
                 voter_canonical_address.as_slice(),
                 &ProposalVote {
                     option: ProposalVoteOption::Against,
-                    power: Uint128(2),
+                    power: Uint128(100),
                 },
             )
             .unwrap();
@@ -1136,7 +1148,6 @@ mod tests {
         let msg = HandleMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::For,
-            voting_power: Uint128(100),
         };
 
         let env = mock_env(
@@ -1176,7 +1187,6 @@ mod tests {
         let msg = HandleMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::For,
-            voting_power: Uint128(100),
         };
 
         let env = mock_env(
@@ -1192,12 +1202,12 @@ mod tests {
         let msg = HandleMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::Against,
-            voting_power: Uint128(200),
         };
 
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(HumanAddr::from("voter2"), Uint128(300))], // more balance just to check less can be used
+        deps.querier.set_xmars_balance_at(
+            HumanAddr::from("voter2"),
+            active_proposal.start_height - 1,
+            Uint128(200),
         );
 
         let env = mock_env(
@@ -1220,18 +1230,21 @@ mod tests {
         );
 
         // Extra for and against votes to check aggregates are computed correctly
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[
-                (HumanAddr::from("voter3"), Uint128(300)),
-                (HumanAddr::from("voter4"), Uint128(400)),
-            ],
+        deps.querier.set_xmars_balance_at(
+            HumanAddr::from("voter3"),
+            active_proposal.start_height - 1,
+            Uint128(300),
+        );
+
+        deps.querier.set_xmars_balance_at(
+            HumanAddr::from("voter4"),
+            active_proposal.start_height - 1,
+            Uint128(400),
         );
 
         let msg = HandleMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::For,
-            voting_power: Uint128(300),
         };
         let env = mock_env(
             "voter3",
@@ -1245,7 +1258,6 @@ mod tests {
         let msg = HandleMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::Against,
-            voting_power: Uint128(400),
         };
         let env = mock_env(
             "voter4",
@@ -1271,7 +1283,8 @@ mod tests {
         let executed_proposal_id = 2_u64;
 
         deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
+            .set_xmars_address(HumanAddr::from("xmars_token"));
+        deps.querier.set_xmars_total_supply_at(99_999, Uint128(100));
 
         th_build_mock_proposal(
             &mut deps,
@@ -1325,8 +1338,9 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         deps.querier
-            .set_cw20_total_supply(HumanAddr::from("xmars_token"), Uint128(100_000));
-
+            .set_xmars_address(HumanAddr::from("xmars_token"));
+        deps.querier
+            .set_xmars_total_supply_at(89_999, Uint128(100_000));
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
         let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
         let proposal_end_height = 100_000u64;
@@ -1347,6 +1361,7 @@ mod tests {
                 status: ProposalStatus::Active,
                 for_votes: Uint128(11_000),
                 against_votes: Uint128(10_000),
+                start_height: 90_000,
                 end_height: proposal_end_height + 1,
                 ..Default::default()
             },
@@ -1400,6 +1415,7 @@ mod tests {
                 for_votes: Uint128(11),
                 against_votes: Uint128(10),
                 end_height: proposal_end_height + 1,
+                start_height: 90_000,
                 ..Default::default()
             },
         );
@@ -1451,6 +1467,7 @@ mod tests {
                 status: ProposalStatus::Active,
                 for_votes: Uint128(10_000),
                 against_votes: Uint128(11_000),
+                start_height: 90_000,
                 end_height: proposal_end_height + 1,
                 ..Default::default()
             },
@@ -1647,7 +1664,7 @@ mod tests {
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
@@ -1707,7 +1724,7 @@ mod tests {
     }
 
     fn th_build_mock_proposal(
-        deps: &mut Extern<MockStorage, MockApi, WasmMockQuerier>,
+        deps: &mut Extern<MockStorage, MockApi, MarsMockQuerier>,
         mock_proposal: MockProposal,
     ) -> Proposal {
         let (_, canonical_address) = get_test_addresses(&deps.api, "submitter");

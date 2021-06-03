@@ -10,6 +10,7 @@
     "ma_token_code_id",
     "owner",
     "reserve_count",
+    "staking_contract_address",
     "treasury_contract_address",
     "treasury_fee_share"
   ],
@@ -47,6 +48,14 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
+    },
+    "staking_contract_address": {
+      "description": "Protocol staking contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
     },
     "treasury_contract_address": {
       "description": "Protocol treasury contract address",

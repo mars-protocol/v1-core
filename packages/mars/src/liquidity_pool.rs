@@ -9,6 +9,7 @@ pub mod msg {
     pub struct InitMsg {
         pub treasury_contract_address: HumanAddr,
         pub insurance_fund_contract_address: HumanAddr,
+        pub staking_contract_address: HumanAddr,
         pub insurance_fund_fee_share: Decimal256,
         pub treasury_fee_share: Decimal256,
         pub ma_token_code_id: u64,
@@ -77,6 +78,13 @@ pub mod msg {
         },
         /// Update (enable / disable) asset as collateral
         UpdateUserCollateralAssetStatus { asset: Asset, enable: bool },
+        /// Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts
+        DistributeProtocolIncome {
+            /// Asset reserve fees to distribute
+            asset: Asset,
+            /// Amount to distribute to protocol contracts, defaults to full amount if not specified
+            amount: Option<Uint256>,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

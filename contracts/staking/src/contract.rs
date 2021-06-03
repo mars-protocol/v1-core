@@ -104,7 +104,7 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     }
 
     let total_mars_in_staking_contract = cw20_get_balance(
-        deps,
+        &deps.querier,
         deps.api.human_address(&config.mars_token_address)?,
         env.contract.address,
     )?;
@@ -112,8 +112,10 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     // balance so it needs to be deducted)
     let net_total_mars_in_staking_contract = (total_mars_in_staking_contract - stake_amount)?;
 
-    let total_xmars_supply =
-        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
+    let total_xmars_supply = cw20_get_total_supply(
+        &deps.querier,
+        deps.api.human_address(&config.xmars_token_address)?,
+    )?;
 
     let mint_amount =
         if net_total_mars_in_staking_contract == Uint128(0) || total_xmars_supply == Uint128(0) {
@@ -194,13 +196,15 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     };
 
     let total_mars_in_staking_contract = cw20_get_balance(
-        deps,
+        &deps.querier,
         deps.api.human_address(&config.mars_token_address)?,
         env.contract.address,
     )?;
 
-    let total_xmars_supply =
-        cw20_get_total_supply(deps, deps.api.human_address(&config.xmars_token_address)?)?;
+    let total_xmars_supply = cw20_get_total_supply(
+        &deps.querier,
+        deps.api.human_address(&config.xmars_token_address)?,
+    )?;
 
     let unstake_amount =
         burn_amount.multiply_ratio(total_mars_in_staking_contract, total_xmars_supply);
@@ -269,7 +273,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
 
     // get total xMars in contract before the stake transaction
     let xmars_balance = cw20_get_balance(
-        deps,
+        &deps.querier,
         deps.api.human_address(&config.xmars_token_address)?,
         env.message.sender.clone(),
     )?;
@@ -363,7 +367,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::{Coin, CosmosMsg, HumanAddr};
-    use mars::testing::{mock_dependencies, mock_env, MockEnvParams, WasmMockQuerier};
+    use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     use crate::state::{config_state_read, cooldowns_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
@@ -946,7 +950,7 @@ mod tests {
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?

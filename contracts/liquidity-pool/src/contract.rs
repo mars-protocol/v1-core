@@ -52,6 +52,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         insurance_fund_contract_address: deps
             .api
             .canonical_address(&msg.insurance_fund_contract_address)?,
+        staking_contract_address: deps.api.canonical_address(&msg.staking_contract_address)?,
         ma_token_code_id: msg.ma_token_code_id,
         reserve_count: 0,
         close_factor: msg.close_factor,
@@ -82,10 +83,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         }
         HandleMsg::DepositNative { denom } => {
             let deposit_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
+            let depositor_address = env.message.sender.clone();
             handle_deposit(
                 deps,
-                &env,
-                env.message.sender.clone(),
+                env,
+                depositor_address,
                 denom.as_bytes(),
                 denom.as_str(),
                 deposit_amount,
@@ -148,6 +150,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
             handle_update_user_collateral_asset_status(deps, env, asset, enable)
         }
+
+        HandleMsg::DistributeProtocolIncome { asset, amount } => {
+            handle_distribute_protocol_income(deps, env, asset, amount)
+        }
     }
 }
 
@@ -176,23 +182,30 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
                     Uint256::from(cw20_msg.amount),
                 )
             }
-            ReceiveMsg::DepositCw20 {} => handle_deposit(
-                deps,
-                &env,
-                cw20_msg.sender,
-                deps.api.canonical_address(&env.message.sender)?.as_slice(),
-                env.message.sender.as_str(),
-                Uint256::from(cw20_msg.amount),
-            ),
+            ReceiveMsg::DepositCw20 {} => {
+                let token_contract_address = env.message.sender.clone();
+                handle_deposit(
+                    deps,
+                    env,
+                    cw20_msg.sender,
+                    deps.api
+                        .canonical_address(&token_contract_address)?
+                        .as_slice(),
+                    token_contract_address.as_str(),
+                    Uint256::from(cw20_msg.amount),
+                )
+            }
             ReceiveMsg::RepayCw20 {} => {
-                let token_contract_addr = env.message.sender.clone();
+                let token_contract_address = env.message.sender.clone();
 
                 handle_repay(
                     deps,
                     env,
                     cw20_msg.sender,
-                    deps.api.canonical_address(&token_contract_addr)?.as_slice(),
-                    token_contract_addr.as_str(),
+                    deps.api
+                        .canonical_address(&token_contract_address)?
+                        .as_slice(),
+                    token_contract_address.as_str(),
                     Uint256::from(cw20_msg.amount),
                     AssetType::Cw20,
                 )
@@ -243,11 +256,12 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
     reserve_update_market_indices(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, burn_amount)?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Redeem amount is computed after interest rates so that the updated index is used
     let redeem_amount = burn_amount * reserve.liquidity_index;
+
+    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, redeem_amount)?;
+    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
 
     // Check contract has sufficient balance to send back
     let (balance, asset_label) = match reserve.asset_type {
@@ -269,7 +283,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
                 .human_address(&CanonicalAddr::from(asset_reference))?;
             (
                 cw20_get_balance(
-                    deps,
+                    &deps.querier,
                     cw20_contract_addr.clone(),
                     env.contract.address.clone(),
                 )?,
@@ -373,6 +387,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
                     liquidation_threshold: asset_params.liquidation_threshold,
                     liquidation_bonus: asset_params.liquidation_bonus,
+
+                    protocol_income_to_be_distributed: Uint256::zero(),
                 },
             )?;
 
@@ -394,7 +410,7 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
     let symbol = match asset {
         Asset::Native { denom } => denom,
-        Asset::Cw20 { contract_addr } => cw20_get_symbol(deps, contract_addr)?,
+        Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
     };
 
     // Prepare response, should instantiate an maToken
@@ -454,7 +470,7 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
 /// Handle deposits and mint corresponding debt tokens
 pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: &Env,
+    env: Env,
     depositor_address: HumanAddr,
     asset_reference: &[u8],
     asset_label: &str,
@@ -718,7 +734,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
 
     let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
 
-    let mut messages = vec![];
+    let mut messages: Vec<CosmosMsg> = vec![];
     let mut refund_amount = Uint256::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
@@ -823,7 +839,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let mut collateral_reserve =
         reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
-    reserve_update_market_indices(&env, &mut collateral_reserve);
 
     // check if user has available collateral in specified collateral asset to be liquidated
     let collateral_ma_address = deps
@@ -831,7 +846,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         .human_address(&collateral_reserve.ma_token_address)?;
     let user_collateral_balance = collateral_reserve.liquidity_index
         * Uint256::from(cw20_get_balance(
-            deps,
+            &deps.querier,
             collateral_ma_address,
             user_address.clone(),
         )?);
@@ -924,7 +939,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                 contract_addr: token_addr,
             } => {
                 Uint256::from(cw20_get_balance(
-                    deps,
+                    &deps.querier,
                     token_addr,
                     env.contract.address.clone(),
                 )?) * collateral_reserve.liquidity_index
@@ -1166,7 +1181,7 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
             .api
             .human_address(&collateral_reserve.ma_token_address)?;
         let user_collateral_balance =
-            cw20_get_balance(deps, collateral_ma_address, user_address.clone())?;
+            cw20_get_balance(&deps.querier, collateral_ma_address, user_address.clone())?;
         if user_collateral_balance > Uint128::zero() {
             // enable collateral asset
             set_bit(&mut user.collateral_assets, collateral_reserve.index)?;
@@ -1192,6 +1207,103 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
             log("asset", collateral_asset_label),
             log("has_collateral", has_collateral_asset),
             log("enable", enable),
+        ],
+        data: None,
+    })
+}
+
+/// Send accumulated asset income to protocol contracts
+pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    amount: Option<Uint256>,
+) -> StdResult<HandleResponse> {
+    // Get config
+    let config = config_state_read(&deps.storage).load()?;
+
+    // Only owner can do this
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+
+    let amount_to_distribute = match amount {
+        Some(amount) => amount,
+        None => reserve.protocol_income_to_be_distributed,
+    };
+
+    if amount_to_distribute > reserve.protocol_income_to_be_distributed {
+        return Err(StdError::generic_err(
+            "amount specified exceeds reserve's income to be distributed",
+        ));
+    }
+
+    reserve.protocol_income_to_be_distributed =
+        reserve.protocol_income_to_be_distributed - amount_to_distribute;
+    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &reserve)?;
+
+    let mut messages = vec![];
+
+    let insurance_fund_address = deps
+        .api
+        .human_address(&config.insurance_fund_contract_address)?;
+    let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
+    let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
+
+    let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
+    let treasury_amount = amount_to_distribute * config.treasury_fee_share;
+    let amount_to_distribute_before_staking_rewards = insurance_fund_amount + treasury_amount;
+    if amount_to_distribute_before_staking_rewards > amount_to_distribute {
+        return Err(StdError::generic_err(format!(
+            "Decimal256 Underflow: will subtract {} from {} ",
+            amount_to_distribute_before_staking_rewards, amount_to_distribute
+        )));
+    }
+    let staking_amount = amount_to_distribute - (amount_to_distribute_before_staking_rewards);
+
+    // only build and add send message if fee is non-zero
+    if !insurance_fund_amount.is_zero() {
+        let insurance_fund_msg = build_send_asset_msg(
+            env.contract.address.clone(),
+            insurance_fund_address,
+            asset.clone(),
+            insurance_fund_amount,
+        )?;
+        messages.push(insurance_fund_msg);
+    }
+
+    if !treasury_amount.is_zero() {
+        let scaled_mint_amount = treasury_amount / reserve.liquidity_index;
+        let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            send: vec![],
+            msg: to_binary(&Cw20HandleMsg::Mint {
+                recipient: treasury_fund_address,
+                amount: scaled_mint_amount.into(),
+            })?,
+        });
+        messages.push(treasury_fund_msg);
+    }
+
+    if !staking_amount.is_zero() {
+        let staking_msg = build_send_asset_msg(
+            env.contract.address,
+            staking_contract_address,
+            asset,
+            staking_amount,
+        )?;
+        messages.push(staking_msg);
+    }
+
+    Ok(HandleResponse {
+        messages,
+        log: vec![
+            log("action", "distribute_protocol_income"),
+            log("asset", asset_label),
+            log("amount", amount_to_distribute),
         ],
         data: None,
     })
@@ -1303,7 +1415,7 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
                             }
                         };
 
-                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
+                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
@@ -1361,7 +1473,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
                             }
                         };
 
-                    match cw20_get_symbol(deps, cw20_contract_address.clone()) {
+                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                         Ok(symbol) => symbol,
                         Err(_) => {
                             return Err(StdError::generic_err(format!(
@@ -1403,10 +1515,15 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 // INTEREST
 
-/// Updates reserve indices by applying current interest rates on the time between last interest update
-/// and current block. Note it does not save the reserve to the store (that is left to the caller)
+/// Updates reserve indices and protocol_income by applying current interest rates on the time between
+/// last interest update and current block.
+/// Note it does not save the reserve to the store (that is left to the caller)
 pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
     let current_timestamp = env.block.time;
+    // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
+    // of the indices and subtracting them returns the accrued borrow interest for the period since
+    // when the indices were last updated and the current point in time.
+    let previous_borrow_index = reserve.borrow_index;
 
     if reserve.interests_last_updated < current_timestamp {
         let time_elapsed =
@@ -1425,6 +1542,17 @@ pub fn reserve_update_market_indices(env: &Env, reserve: &mut Reserve) {
         }
         reserve.interests_last_updated = current_timestamp;
     }
+
+    let previous_debt_total_unscaled = reserve.debt_total_scaled * previous_borrow_index;
+    let new_debt_total_unscaled = reserve.debt_total_scaled * reserve.borrow_index;
+
+    let interest_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+        new_debt_total_unscaled - previous_debt_total_unscaled
+    } else {
+        Uint256::zero()
+    };
+
+    reserve.protocol_income_to_be_distributed += interest_accrued * reserve.reserve_factor;
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1449,7 +1577,7 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
         }
         AssetType::Cw20 => {
             let cw20_human_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
-            cw20_get_balance(deps, cw20_human_addr, env.contract.address.clone())?
+            cw20_get_balance(&deps.querier, cw20_human_addr, env.contract.address.clone())?
         }
     };
 
@@ -1457,12 +1585,24 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     // amount sent by the user on deposits and repays(both for cw20 and native).
     // If it doesn't, we should include them on the available_liquidity
     let contract_current_balance = Uint256::from(contract_balance_amount);
-    if contract_current_balance < liquidity_taken {
+
+    // Get protocol income to be deducted from liquidity (doesn't belong to the money market
+    // anymore)
+    let config = config_state_read(&deps.storage).load()?;
+    // No check for underflow because this is done on config validations
+    let protocol_income_minus_treasury_amount =
+        (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_be_distributed;
+    let liquidity_to_deduct_from_current_balance =
+        liquidity_taken + protocol_income_minus_treasury_amount;
+
+    if contract_current_balance < liquidity_to_deduct_from_current_balance {
         return Err(StdError::generic_err(
-            "Liquidity taken cannot be greater than available liquidity",
+            "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
         ));
     }
-    let available_liquidity = Decimal256::from_uint256(contract_current_balance - liquidity_taken);
+    let available_liquidity = Decimal256::from_uint256(
+        contract_current_balance - liquidity_to_deduct_from_current_balance,
+    );
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
     let utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
@@ -1471,7 +1611,9 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     };
 
     reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
-    reserve.liquidity_rate = reserve.borrow_rate * utilization_rate;
+    // This operation should not underflow as reserve_factor is checked to be <= 1
+    reserve.liquidity_rate =
+        reserve.borrow_rate * utilization_rate * (Decimal256::one() - reserve.reserve_factor);
 
     Ok(())
 }
@@ -1519,7 +1661,7 @@ where
         let target_collateral_amount = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance = cw20_get_balance(
-                deps,
+                &deps.querier,
                 deps.api.human_address(&reserve.ma_token_address)?,
                 deps.api.human_address(user_canonical_address)?,
             )?;
@@ -1808,7 +1950,7 @@ mod tests {
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, Extern};
-    use mars::testing::{mock_dependencies, MockEnvParams, WasmMockQuerier};
+    use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
@@ -1817,8 +1959,9 @@ mod tests {
         let mut insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
         let mut treasury_fee_share = Decimal256::from_ratio(4, 10);
         let exceeding_fees_msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share,
             treasury_fee_share,
             ma_token_code_id: 10u64,
@@ -1838,6 +1981,9 @@ mod tests {
         treasury_fee_share = Decimal256::from_ratio(3, 10);
 
         let msg = InitMsg {
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share,
             treasury_fee_share,
             ..exceeding_fees_msg
@@ -1861,15 +2007,16 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
             insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
             treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 5u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        init(&mut deps, env, msg).unwrap();
 
         // *
         // non owner is not authorized
@@ -1957,7 +2104,7 @@ mod tests {
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
         };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage)
@@ -2035,7 +2182,7 @@ mod tests {
         let msg = HandleMsg::InitAssetTokenCallback {
             reference: Vec::from(cw20_canonical_addr.as_slice()),
         };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with contract address
         let reserve = reserves_state_read(&deps.storage)
@@ -2079,6 +2226,7 @@ mod tests {
     fn test_deposit_native_asset() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
+        let reserve_factor = Decimal256::from_ratio(1, 10);
 
         let mock_reserve = MockReserve {
             ma_token_address: "matoken",
@@ -2087,6 +2235,7 @@ mod tests {
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_slope: Decimal256::from_ratio(1, 10),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor,
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             ..Default::default()
@@ -2095,7 +2244,7 @@ mod tests {
 
         let deposit_amount = 110000;
         let env = mars::testing::mock_env(
-            "depositer",
+            "depositor",
             MockEnvParams {
                 sent_funds: &[coin(deposit_amount, "somecoin")],
                 block_time: 10000100,
@@ -2116,6 +2265,7 @@ mod tests {
             (Uint256::from(deposit_amount) / expected_liquidity_index).into();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             env.block.time,
             initial_liquidity,
@@ -2129,18 +2279,18 @@ mod tests {
                 contract_addr: HumanAddr::from("matoken"),
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("depositer"),
+                    recipient: HumanAddr::from("depositor"),
                     amount: expected_mint_amount,
                 })
                 .unwrap(),
-            }),]
+            })]
         );
         assert_eq!(
             res.log,
             vec![
                 log("action", "deposit"),
                 log("reserve", "somecoin"),
-                log("user", "depositer"),
+                log("user", "depositor"),
                 log("amount", deposit_amount),
                 log("borrow_index", expected_params.borrow_index),
                 log("liquidity_index", expected_params.liquidity_index),
@@ -2154,17 +2304,21 @@ mod tests {
             .unwrap();
         // BR = U * Bslope = 0.5 * 0.01 = 0.05
         assert_eq!(reserve.borrow_rate, Decimal256::from_ratio(5, 100));
-        // LR = BR * U = 0.05 * 0.5 = 0.025
-        assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(25, 1000));
+        // LR = BR * U = 0.05 * 0.5 * (1 - reserve_factor)= 0.025 * .9 = .0225
+        assert_eq!(reserve.liquidity_rate, Decimal256::from_ratio(225, 10000));
         assert_eq!(reserve.liquidity_index, expected_liquidity_index);
         assert_eq!(reserve.borrow_index, Decimal256::from_ratio(1, 1));
+        assert_eq!(
+            reserve.protocol_income_to_be_distributed,
+            expected_params.protocol_income_to_distribute
+        );
 
         // empty deposit fails
-        let env = cosmwasm_std::testing::mock_env("depositer", &[]);
+        let env = cosmwasm_std::testing::mock_env("depositor", &[]);
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
@@ -2182,6 +2336,7 @@ mod tests {
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_slope: Decimal256::from_ratio(1, 10),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(4, 100),
             debt_total_scaled: Uint256::from(10_000_000u128),
             interests_last_updated: 10_000_000,
             asset_type: AssetType::Cw20,
@@ -2209,7 +2364,7 @@ mod tests {
         let deposit_amount = 110000u128;
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
-            sender: HumanAddr::from("depositer"),
+            sender: HumanAddr::from("depositor"),
             amount: Uint128(deposit_amount),
         });
         let env = mars::testing::mock_env(
@@ -2232,11 +2387,16 @@ mod tests {
             Uint256::from(deposit_amount) / expected_liquidity_index;
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve,
             env.block.time,
             initial_liquidity,
             Default::default(),
         );
+
+        let reserve = reserves_state_read(&deps.storage)
+            .load(contract_addr_raw.as_slice())
+            .unwrap();
 
         assert_eq!(
             res.messages,
@@ -2244,7 +2404,7 @@ mod tests {
                 contract_addr: HumanAddr::from("matoken"),
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("depositer"),
+                    recipient: HumanAddr::from("depositor"),
                     amount: expected_mint_amount.into(),
                 })
                 .unwrap(),
@@ -2256,7 +2416,7 @@ mod tests {
             vec![
                 log("action", "deposit"),
                 log("reserve", cw20_addr),
-                log("user", "depositer"),
+                log("user", "depositor"),
                 log("amount", deposit_amount),
                 log("borrow_index", expected_params.borrow_index),
                 log("liquidity_index", expected_params.liquidity_index),
@@ -2264,15 +2424,19 @@ mod tests {
                 log("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
+        assert_eq!(
+            reserve.protocol_income_to_be_distributed,
+            expected_params.protocol_income_to_distribute
+        );
 
         // empty deposit fails
-        let env = cosmwasm_std::testing::mock_env("depositer", &[]);
+        let env = cosmwasm_std::testing::mock_env("depositor", &[]);
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
-            sender: HumanAddr::from("depositer"),
+            sender: HumanAddr::from("depositor"),
             amount: Uint128(deposit_amount),
         });
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
@@ -2283,7 +2447,7 @@ mod tests {
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
@@ -2300,6 +2464,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
@@ -2308,7 +2473,8 @@ mod tests {
         let burn_amount = 20000u128;
         let seconds_elapsed = 2000u64;
 
-        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let reserve_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
         reserve_ma_tokens_state(&mut deps.storage)
             .save(
                 deps.api
@@ -2335,12 +2501,19 @@ mod tests {
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
+        let unscaled_burn_amount: Uint128 =
+            (Uint256::from(burn_amount) * reserve.liquidity_index).into();
+
         let expected_params = th_get_expected_indices_and_rates(
-            &reserve,
+            &deps,
+            &reserve_initial,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
-                less_liquidity: burn_amount,
+                less_liquidity: unscaled_burn_amount.into(),
                 ..Default::default()
             },
         );
@@ -2365,7 +2538,7 @@ mod tests {
                     amount: vec![Coin {
                         denom: String::from("somecoin"),
                         amount: expected_asset_amount,
-                    },],
+                    }],
                 }),
             ]
         );
@@ -2384,15 +2557,15 @@ mod tests {
             ]
         );
 
-        let reserve = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
-
         // BR = U * Bslope = 0.5 * 0.01 = 0.05
         assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
         assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
         assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(
+            reserve.protocol_income_to_be_distributed,
+            expected_params.protocol_income_to_distribute
+        );
     }
 
     #[test]
@@ -2428,6 +2601,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(2, 100),
             debt_total_scaled: Uint256::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
@@ -2436,7 +2610,7 @@ mod tests {
         let burn_amount = 20000u128;
         let seconds_elapsed = 2000u64;
 
-        let reserve = th_init_reserve(
+        let reserve_initial = th_init_reserve(
             &deps.api,
             &mut deps.storage,
             cw20_contract_canonical_addr.as_slice(),
@@ -2469,12 +2643,20 @@ mod tests {
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
+        let reserve = reserves_state_read(&deps.storage)
+            .load(cw20_contract_canonical_addr.as_slice())
+            .unwrap();
+
+        let unscaled_burn_amount: Uint128 =
+            (Uint256::from(burn_amount) * reserve.liquidity_index).into();
+
         let expected_params = th_get_expected_indices_and_rates(
-            &reserve,
+            &deps,
+            &reserve_initial,
             mock_reserve.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
-                less_liquidity: burn_amount,
+                less_liquidity: unscaled_burn_amount.into(),
                 ..Default::default()
             },
         );
@@ -2519,15 +2701,15 @@ mod tests {
             ]
         );
 
-        let reserve = reserves_state_read(&deps.storage)
-            .load(cw20_contract_canonical_addr.as_slice())
-            .unwrap();
-
-        // BR = U * Bslope = 0.5 * 0.01 = 0.05
+        // BR = U * Bslope
         assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
         assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
         assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(
+            reserve.protocol_income_to_be_distributed,
+            expected_params.protocol_income_to_distribute
+        );
     }
 
     #[test]
@@ -2549,7 +2731,7 @@ mod tests {
         });
 
         let env = cosmwasm_std::testing::mock_env("matoken", &[]);
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
     }
 
     #[test]
@@ -2584,6 +2766,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 100),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
@@ -2603,6 +2786,7 @@ mod tests {
             loan_to_value: Decimal256::from_ratio(7, 10),
             borrow_slope: Decimal256::from_ratio(4, 10),
             borrow_rate: Decimal256::from_ratio(30, 100),
+            reserve_factor: Decimal256::from_ratio(3, 100),
             liquidity_rate: Decimal256::from_ratio(20, 100),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
@@ -2678,6 +2862,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_initial,
             block_time,
             available_liquidity_cw20,
@@ -2767,7 +2952,7 @@ mod tests {
             },
         );
 
-        let _res = handle(&mut deps, env, msg).unwrap();
+        handle(&mut deps, env, msg).unwrap();
 
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
@@ -2776,6 +2961,7 @@ mod tests {
         assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_after_borrow,
             block_time,
             available_liquidity_cw20,
@@ -2840,6 +3026,7 @@ mod tests {
         assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_initial,
             block_time,
             available_liquidity_native,
@@ -2909,7 +3096,7 @@ mod tests {
             },
             amount: Uint256::from(10000_u128),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         // *
         // Repay zero native debt(should fail)
@@ -2925,7 +3112,7 @@ mod tests {
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         // *
         // Repay some native debt
@@ -2946,6 +3133,7 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
 
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_after_borrow_2,
             block_time,
             available_liquidity_native,
@@ -2955,7 +3143,7 @@ mod tests {
             },
         );
 
-        assert_eq!(res.messages, vec![],);
+        assert_eq!(res.messages, vec![]);
         assert_eq!(
             res.log,
             vec![
@@ -3007,6 +3195,7 @@ mod tests {
         let block_time = reserve_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
         let expected_params_native = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_2_after_repay_some_2,
             block_time,
             available_liquidity_native,
@@ -3034,7 +3223,8 @@ mod tests {
             denom: String::from("borrowedcoinnative"),
         };
         let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(res.messages, vec![],);
+
+        assert_eq!(res.messages, vec![]);
         assert_eq!(
             res.log,
             vec![
@@ -3075,7 +3265,7 @@ mod tests {
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        handle(&mut deps, env, msg).unwrap_err();
 
         // *
         // Repay all cw20 debt (and then some)
@@ -3084,6 +3274,7 @@ mod tests {
         let repay_amount = 4800u128;
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_1_after_borrow_again,
             block_time,
             available_liquidity_cw20,
@@ -3127,7 +3318,7 @@ mod tests {
                 })
                 .unwrap(),
                 send: vec![],
-            })],
+            })]
         );
         assert_eq!(
             res.log,
@@ -3228,6 +3419,20 @@ mod tests {
         );
         handle(&mut deps, env, msg).unwrap();
 
+        let expected_params = th_get_expected_indices_and_rates(
+            &deps,
+            &reserve,
+            block_time,
+            initial_liquidity,
+            TestUtilizationDeltas {
+                less_liquidity: valid_amount.into(),
+                more_debt: valid_amount.into(),
+                ..Default::default()
+            },
+        );
+
+        let reserve_after_borrow = reserves_state_read(&deps.storage).load(b"uusd").unwrap();
+
         let user = users_state_read(&deps.storage)
             .load(borrower_canonical_addr.as_slice())
             .unwrap();
@@ -3238,6 +3443,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(valid_amount, debt.amount_scaled);
+        assert_eq!(
+            reserve_after_borrow.protocol_income_to_be_distributed,
+            expected_params.protocol_income_to_distribute
+        );
     }
 
     #[test]
@@ -3375,7 +3584,7 @@ mod tests {
             amount: exceeding_borrow_amount,
         };
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
-        let _res = handle(&mut deps, env, borrow_msg).unwrap_err();
+        handle(&mut deps, env, borrow_msg).unwrap_err();
 
         // borrow permissible amount given current collateral, should succeed
         let borrow_msg = HandleMsg::Borrow {
@@ -3385,7 +3594,7 @@ mod tests {
             amount: permissible_borrow_amount,
         };
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
-        let _res = handle(&mut deps, env, borrow_msg).unwrap();
+        handle(&mut deps, env, borrow_msg).unwrap();
     }
 
     #[test]
@@ -3423,6 +3632,8 @@ mod tests {
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
+            borrow_slope: Decimal256::from_ratio(1, 2),
+            reserve_factor: Decimal256::from_ratio(2, 100),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3432,6 +3643,8 @@ mod tests {
             debt_total_scaled: Uint256::from(20_000_000u64),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
+            borrow_slope: Decimal256::from_ratio(1, 3),
+            reserve_factor: Decimal256::from_ratio(3, 100),
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
@@ -3633,6 +3846,37 @@ mod tests {
 
         let expected_refund_amount = debt_to_cover - expected_actual_debt_amount_to_liquidate;
 
+        // get expected indices and rates for collateral and debt reserves
+        let block_time = collateral_reserve_initial.interests_last_updated + 5000u64;
+
+        let expected_collateral_rates = th_get_expected_indices_and_rates(
+            &deps,
+            &collateral_reserve_initial,
+            block_time,
+            available_liquidity_collateral,
+            TestUtilizationDeltas {
+                ..Default::default()
+            },
+        );
+        let expected_debt_rates = th_get_expected_indices_and_rates(
+            &deps,
+            &debt_reserve_initial,
+            block_time,
+            available_liquidity_debt,
+            TestUtilizationDeltas {
+                less_debt: expected_actual_debt_amount_to_liquidate.into(),
+                less_liquidity: expected_refund_amount.into(),
+                ..Default::default()
+            },
+        );
+
+        let collateral_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            .load(b"collateral")
+            .unwrap();
+        let debt_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            .load(debt_contract_addr_canonical.as_slice())
+            .unwrap();
+
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -3644,28 +3888,6 @@ mod tests {
                 .unwrap(),
                 send: vec![],
             })]
-        );
-
-        // get expected indices and rates for collateral and debt reserves
-        let block_time = collateral_reserve_initial.interests_last_updated + 5000u64;
-
-        let expected_collateral_rates = th_get_expected_indices_and_rates(
-            &collateral_reserve_initial,
-            block_time,
-            available_liquidity_collateral,
-            TestUtilizationDeltas {
-                ..Default::default()
-            },
-        );
-        let expected_debt_rates = th_get_expected_indices_and_rates(
-            &collateral_reserve_initial,
-            block_time,
-            available_liquidity_debt,
-            TestUtilizationDeltas {
-                less_debt: expected_actual_debt_amount_to_liquidate.into(),
-                less_liquidity: expected_refund_amount.into(),
-                ..Default::default()
-            },
         );
 
         assert_eq!(
@@ -3708,6 +3930,15 @@ mod tests {
         assert_eq!(
             user_debt_initial.amount_scaled - expected_actual_debt_amount_to_liquidate,
             debt.amount_scaled
+        );
+
+        assert_eq!(
+            expected_collateral_rates.protocol_income_to_distribute,
+            collateral_reserve_after_liquidation.protocol_income_to_be_distributed
+        );
+        assert_eq!(
+            expected_debt_rates.protocol_income_to_distribute,
+            debt_reserve_after_liquidation.protocol_income_to_be_distributed
         );
     }
 
@@ -4035,6 +4266,7 @@ mod tests {
             borrow_slope: Decimal256::from_ratio(1, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
             debt_total_scaled: Uint256::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
@@ -4111,6 +4343,7 @@ mod tests {
         let res = handle(&mut deps, borrow_env, borrow_msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
+            &deps,
             &reserve_initial,
             block_time,
             available_liquidity,
@@ -4243,10 +4476,8 @@ mod tests {
         };
         let mock_reserve_2 = MockReserve {
             ma_token_address: "matoken2",
-            asset_type: AssetType::Native,
             ..Default::default()
         };
-
         let cw20_contract_addr = HumanAddr::from("depositedcoin1");
         let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
 
@@ -4337,21 +4568,236 @@ mod tests {
         assert_eq!(reserve_2_collateral, false);
     }
 
+    #[test]
+    fn test_distribute_protocol_income() {
+        // initialize contract with liquidity
+        let available_liquidity = 2000000000u128;
+        let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
+
+        let asset = Asset::Native {
+            denom: String::from("somecoin"),
+        };
+        let protocol_income_to_be_distributed = Uint256::from(1_000_000_u64);
+
+        // initialize reserve with non-zero amount of protocol_income_to_be_distributed
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            borrow_index: Decimal256::from_ratio(12, 10),
+            liquidity_index: Decimal256::from_ratio(8, 10),
+            borrow_slope: Decimal256::from_ratio(1, 10),
+            borrow_rate: Decimal256::from_ratio(20, 100),
+            liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
+            debt_total_scaled: Uint256::zero(),
+            interests_last_updated: 10000000,
+            asset_type: AssetType::Native,
+            protocol_income_to_be_distributed,
+            ..Default::default()
+        };
+        // should get index 0
+        let reserve_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+
+        let mut block_time = mock_reserve.interests_last_updated + 10000u64;
+
+        // call function as non-owner
+        let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
+            asset: asset.clone(),
+            amount: None,
+        };
+
+        let random_env = mars::testing::mock_env(
+            "random",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, random_env, distribute_income_msg).unwrap_err();
+
+        // call function providing amount exceeding protocol_income_to_be_distributed, should fail
+        let exceeding_amount = protocol_income_to_be_distributed + Uint256::from(1_000_u64);
+        let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: Some(exceeding_amount),
+        };
+        let owner_env = mars::testing::mock_env(
+            "owner",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time,
+                ..Default::default()
+            },
+        );
+
+        handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap_err();
+
+        // call function providing amount less than protocol_income_to_be_distributed
+        let permissible_amount = Decimal256::from_ratio(1, 2) * protocol_income_to_be_distributed;
+        let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
+            asset: asset.clone(),
+            amount: Some(permissible_amount),
+        };
+        let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
+
+        let config = config_state_read(&deps.storage).load().unwrap();
+        let reserve_after_distribution = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
+
+        let expected_insurance_fund_amount = permissible_amount * config.insurance_fund_fee_share;
+        let expected_treasury_amount = permissible_amount * config.treasury_fee_share;
+        let expected_staking_amount =
+            permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
+
+        let scaled_mint_amount = expected_treasury_amount / reserve_initial.liquidity_index;
+
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("insurance_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_insurance_fund_amount.into(),
+                    }],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: deps
+                        .api
+                        .human_address(&reserve_initial.ma_token_address)
+                        .unwrap(),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Mint {
+                        recipient: HumanAddr::from("treasury_contract"),
+                        amount: scaled_mint_amount.into(),
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("staking_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_staking_amount.into(),
+                    }],
+                })
+            ]
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "distribute_protocol_income"),
+                log("asset", "somecoin"),
+                log("amount", permissible_amount),
+            ]
+        );
+
+        let expected_remaining_income_to_be_distributed =
+            protocol_income_to_be_distributed - permissible_amount;
+        assert_eq!(
+            reserve_after_distribution.protocol_income_to_be_distributed,
+            expected_remaining_income_to_be_distributed
+        );
+
+        // call function without providing an amount, should send full remaining amount to contracts
+        block_time += 1000;
+        let owner_env = mars::testing::mock_env(
+            "owner",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time,
+                ..Default::default()
+            },
+        );
+        let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
+            asset,
+            amount: None,
+        };
+        let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
+
+        // verify messages are correct and protocol_income_to_be_distributed field is now zero
+        let expected_insurance_amount =
+            expected_remaining_income_to_be_distributed * config.insurance_fund_fee_share;
+        let expected_treasury_amount =
+            expected_remaining_income_to_be_distributed * config.treasury_fee_share;
+        let expected_staking_amount = expected_remaining_income_to_be_distributed
+            - (expected_insurance_amount + expected_treasury_amount);
+
+        let scaled_mint_amount =
+            expected_treasury_amount / reserve_after_distribution.liquidity_index;
+
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("insurance_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_insurance_fund_amount.into(),
+                    }],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: deps
+                        .api
+                        .human_address(&reserve_initial.ma_token_address)
+                        .unwrap(),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Mint {
+                        recipient: HumanAddr::from("treasury_contract"),
+                        amount: scaled_mint_amount.into(),
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("staking_contract"),
+                    amount: vec![Coin {
+                        denom: "somecoin".to_string(),
+                        amount: expected_staking_amount.into(),
+                    }],
+                })
+            ]
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "distribute_protocol_income"),
+                log("asset", "somecoin"),
+                log("amount", expected_remaining_income_to_be_distributed),
+            ]
+        );
+
+        let reserve_after_second_distribution = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
+        assert_eq!(
+            reserve_after_second_distribution.protocol_income_to_be_distributed,
+            Uint256::zero()
+        );
+    }
+
     // TEST HELPERS
 
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, WasmMockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
         let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("reserve_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
             insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
             treasury_fee_share: Decimal256::from_ratio(3, 10),
             ma_token_code_id: 1u64,
             close_factor: Decimal256::from_ratio(1, 2),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        init(&mut deps, env, msg).unwrap();
 
         deps
     }
@@ -4377,6 +4823,8 @@ mod tests {
 
         liquidation_threshold: Decimal256,
         liquidation_bonus: Decimal256,
+
+        protocol_income_to_be_distributed: Uint256,
     }
 
     impl Default for MockReserve<'_> {
@@ -4395,6 +4843,7 @@ mod tests {
                 asset_type: AssetType::Native,
                 liquidation_threshold: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
+                protocol_income_to_be_distributed: Uint256::zero(),
             }
         }
     }
@@ -4435,6 +4884,7 @@ mod tests {
             asset_type: reserve.asset_type.clone(),
             liquidation_threshold: reserve.liquidation_threshold,
             liquidation_bonus: reserve.liquidation_bonus,
+            protocol_income_to_be_distributed: reserve.protocol_income_to_be_distributed,
         };
 
         reserve_bucket.save(key, &new_reserve).unwrap();
@@ -4461,6 +4911,7 @@ mod tests {
         liquidity_index: Decimal256,
         borrow_rate: Decimal256,
         liquidity_rate: Decimal256,
+        protocol_income_to_distribute: Uint256,
     }
 
     /// Deltas to be using in expected indices/rates results
@@ -4473,13 +4924,15 @@ mod tests {
 
     /// Takes a reserve before an action (ie: a borrow) among some test parameters
     /// used in that action and computes the expected indices and rates after that action.
-    fn th_get_expected_indices_and_rates(
+    fn th_get_expected_indices_and_rates<S: Storage, A: Api, Q: Querier>(
+        deps: &Extern<S, A, Q>,
         reserve: &Reserve,
         block_time: u64,
         initial_liquidity: u128,
         deltas: TestUtilizationDeltas,
     ) -> TestInterestResults {
         let seconds_elapsed = block_time - reserve.interests_last_updated;
+        let previous_borrow_index = reserve.borrow_index;
 
         // market indices
         let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
@@ -4508,19 +4961,39 @@ mod tests {
             Uint256::zero()
         };
         let dec_debt_total = Decimal256::from_uint256(new_debt_total) * expected_borrow_index;
-        let dec_liquidity_total =
-            Decimal256::from_uint256(initial_liquidity - deltas.less_liquidity);
+
+        // Compute protocol income to be distributed
+        let previous_debt_total_unscaled = new_debt_total * previous_borrow_index;
+        let new_debt_total_unscaled = new_debt_total * expected_borrow_index;
+        let debt_accrued = if new_debt_total_unscaled > previous_debt_total_unscaled {
+            new_debt_total_unscaled - previous_debt_total_unscaled
+        } else {
+            Uint256::zero()
+        };
+        let expected_protocol_income_to_be_distributed = debt_accrued * reserve.reserve_factor;
+
+        let config = config_state_read(&deps.storage).load().unwrap();
+        let dec_treasury_amount = (Decimal256::one() - config.treasury_fee_share)
+            * expected_protocol_income_to_be_distributed;
+        let contract_current_balance = Uint256::from(initial_liquidity);
+        let liquidity_taken = Uint256::from(deltas.less_liquidity);
+        let dec_liquidity_total = Decimal256::from_uint256(
+            contract_current_balance - liquidity_taken - dec_treasury_amount,
+        );
         let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
 
         // interest rates
         let expected_borrow_rate = expected_utilization_rate * reserve.borrow_slope;
-        let expected_liquidity_rate = expected_borrow_rate * expected_utilization_rate;
+        let expected_liquidity_rate = expected_borrow_rate
+            * expected_utilization_rate
+            * (Decimal256::one() - reserve.reserve_factor);
 
         TestInterestResults {
             borrow_index: expected_borrow_index,
             liquidity_index: expected_liquidity_index,
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
+            protocol_income_to_distribute: expected_protocol_income_to_be_distributed,
         }
     }
 

@@ -250,7 +250,7 @@ mod tests {
     use crate::contract::{
         handle, init, query_balance, query_balance_at, query_token_info, query_total_supply_at,
     };
-    use crate::msg::{HandleMsg, InitMsg};
+    use mars::xmars_token::msg::{HandleMsg, InitMsg};
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
         deps: &Extern<S, A, Q>,

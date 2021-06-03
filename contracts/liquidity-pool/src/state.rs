@@ -29,6 +29,8 @@ pub struct Config {
     pub treasury_contract_address: CanonicalAddr,
     /// Protocol insurance fund contract address
     pub insurance_fund_contract_address: CanonicalAddr,
+    /// Protocol staking contract address
+    pub staking_contract_address: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
     /// Reserve count
@@ -86,6 +88,9 @@ pub struct Reserve {
     pub liquidation_threshold: Decimal256,
     // Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Decimal256,
+
+    // Protocol income to be distributed to other contracts
+    pub protocol_income_to_be_distributed: Uint256,
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
