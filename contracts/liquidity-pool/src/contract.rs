@@ -2037,9 +2037,92 @@ mod tests {
         assert_eq!(error_res, StdError::unauthorized());
 
         // *
+        // init asset with empty params
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let empty_asset_params = InitOrUpdateAssetParams {
+            loan_to_value: None,
+            liquidation_threshold: None,
+            liquidation_bonus: None,
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: empty_asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => {
+                assert_eq!(msg, "All params should be available during initialization",)
+            }
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // init asset with some params greater than 1
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            loan_to_value: Some(Decimal256::from_ratio(110, 10)),
+            reserve_factor: Some(Decimal256::from_ratio(120, 100)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
+                Invalid params: [loan_to_value, reserve_factor]",
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // init asset where LTV >= liquidity threshold
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            loan_to_value: Some(Decimal256::from_ratio(5, 10)),
+            liquidation_threshold: Some(Decimal256::from_ratio(5, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "liquidation_threshold should be greater than loan_to_value. \
+                    old_liquidation_threshold: 0, \
+                    old_loan_to_value: 0, \
+                    new_liquidation_threshold: 0.5, \
+                    new_loan_to_value: 0.5",
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
         // owner is authorized
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
         let res = handle(&mut deps, env, msg).unwrap();
 
         // should have asset reserve with Canonical default address
@@ -2203,6 +2286,221 @@ mod tests {
         };
         let error_res = handle(&mut deps, env, msg).unwrap_err();
         assert_eq!(error_res, StdError::unauthorized());
+    }
+
+    #[test]
+    fn test_update_asset() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        let msg = InitMsg {
+            treasury_contract_address: HumanAddr::from("treasury_contract"),
+            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
+            staking_contract_address: HumanAddr::from("staking_contract"),
+            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
+            treasury_fee_share: Decimal256::from_ratio(3, 10),
+            ma_token_code_id: 5u64,
+            close_factor: Decimal256::from_ratio(1, 2),
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        init(&mut deps, env, msg).unwrap();
+
+        // *
+        // non owner is not authorized
+        // *
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let asset_params = InitOrUpdateAssetParams {
+            borrow_slope: Some(Decimal256::from_ratio(4, 100)),
+            loan_to_value: Some(Decimal256::from_ratio(50, 100)),
+            reserve_factor: Some(Decimal256::from_ratio(1, 100)),
+            liquidation_threshold: Some(Decimal256::from_ratio(80, 100)),
+            liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
+        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // owner is authorized and can init asset
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        // *
+        // update asset with some params greater than 1
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            liquidation_threshold: Some(Decimal256::from_ratio(110, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
+                Invalid params: [liquidation_threshold]",
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // update asset where LTV >= liquidity threshold
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            loan_to_value: Some(Decimal256::from_ratio(6, 10)),
+            liquidation_threshold: Some(Decimal256::from_ratio(5, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg.clone());
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "liquidation_threshold should be greater than loan_to_value. \
+                    old_liquidation_threshold: 0.8, \
+                    old_loan_to_value: 0.5, \
+                    new_liquidation_threshold: 0.5, \
+                    new_loan_to_value: 0.6",
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // reserve and config should be not touched if params are invalid
+        // *
+        let old_reserve = reserves_state_read(&deps.storage)
+            .load(b"someasset")
+            .unwrap();
+        assert_eq!(0, old_reserve.index);
+
+        let old_reserve_reference = reserve_references_state_read(&deps.storage)
+            .load(&0_u32.to_be_bytes())
+            .unwrap();
+        assert_eq!(b"someasset", old_reserve_reference.reference.as_slice());
+
+        let old_config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(old_config.reserve_count, 1);
+
+        // *
+        // update asset with new params
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let asset_params = InitOrUpdateAssetParams {
+            borrow_slope: Some(Decimal256::from_ratio(40, 100)),
+            loan_to_value: Some(Decimal256::from_ratio(60, 100)),
+            reserve_factor: Some(Decimal256::from_ratio(10, 100)),
+            liquidation_threshold: Some(Decimal256::from_ratio(90, 100)),
+            liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
+        let res = handle(&mut deps, env, msg.clone()).unwrap();
+
+        let new_reserve = reserves_state_read(&deps.storage)
+            .load(b"someasset")
+            .unwrap();
+        assert_eq!(0, new_reserve.index);
+        assert_eq!(asset_params.borrow_slope.unwrap(), new_reserve.borrow_slope);
+        assert_eq!(
+            asset_params.loan_to_value.unwrap(),
+            new_reserve.loan_to_value
+        );
+        assert_eq!(
+            asset_params.reserve_factor.unwrap(),
+            new_reserve.reserve_factor
+        );
+        assert_eq!(
+            asset_params.liquidation_threshold.unwrap(),
+            new_reserve.liquidation_threshold
+        );
+        assert_eq!(
+            asset_params.liquidation_bonus.unwrap(),
+            new_reserve.liquidation_bonus
+        );
+
+        let new_reserve_reference = reserve_references_state_read(&deps.storage)
+            .load(&0_u32.to_be_bytes())
+            .unwrap();
+        assert_eq!(b"someasset", new_reserve_reference.reference.as_slice());
+
+        let new_config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(new_config.reserve_count, 1);
+
+        assert_eq!(res.messages, vec![],);
+
+        assert_eq!(
+            res.log,
+            vec![log("action", "update_asset"), log("asset", "someasset"),],
+        );
+
+        // *
+        // update asset with empty params
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let empty_asset_params = InitOrUpdateAssetParams {
+            borrow_slope: None,
+            loan_to_value: None,
+            reserve_factor: None,
+            liquidation_threshold: None,
+            liquidation_bonus: None,
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: empty_asset_params.clone(),
+        };
+        let res = handle(&mut deps, env, msg.clone()).unwrap();
+
+        let new_reserve = reserves_state_read(&deps.storage)
+            .load(b"someasset")
+            .unwrap();
+        assert_eq!(0, new_reserve.index);
+        // should keep old params
+        assert_eq!(asset_params.borrow_slope.unwrap(), new_reserve.borrow_slope);
+        assert_eq!(
+            asset_params.loan_to_value.unwrap(),
+            new_reserve.loan_to_value
+        );
+        assert_eq!(
+            asset_params.reserve_factor.unwrap(),
+            new_reserve.reserve_factor
+        );
+        assert_eq!(
+            asset_params.liquidation_threshold.unwrap(),
+            new_reserve.liquidation_threshold
+        );
+        assert_eq!(
+            asset_params.liquidation_bonus.unwrap(),
+            new_reserve.liquidation_bonus
+        );
     }
 
     #[test]
