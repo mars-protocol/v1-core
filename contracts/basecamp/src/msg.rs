@@ -72,8 +72,13 @@ pub struct MsgExecuteCall {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    Proposals {},
-    Proposal { proposal_id: u64 },
+    Proposals {
+        start: Option<u64>,
+        limit: Option<u32>,
+    },
+    Proposal {
+        proposal_id: u64,
+    },
 }
 
 // We define a custom struct for each query response
