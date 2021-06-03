@@ -2033,7 +2033,7 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
         assert_eq!(error_res, StdError::unauthorized());
 
         // *
@@ -2050,9 +2050,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: empty_asset_params.clone(),
+            asset_params: empty_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg.clone());
+        let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "All params should be available during initialization",)
@@ -2073,9 +2073,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: invalid_asset_params.clone(),
+            asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg.clone());
+        let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
@@ -2098,9 +2098,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: invalid_asset_params.clone(),
+            asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg.clone());
+        let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
@@ -2321,7 +2321,7 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
         assert_eq!(error_res, StdError::unauthorized());
 
         // *
@@ -2334,7 +2334,7 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let _res = handle(&mut deps, env, msg).unwrap();
 
         // *
         // update asset with some params greater than 1
@@ -2348,9 +2348,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: invalid_asset_params.clone(),
+            asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg.clone());
+        let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
@@ -2373,9 +2373,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: invalid_asset_params.clone(),
+            asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg.clone());
+        let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
@@ -2421,7 +2421,7 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let res = handle(&mut deps, env, msg.clone()).unwrap();
+        let res = handle(&mut deps, env, msg).unwrap();
 
         let new_reserve = reserves_state_read(&deps.storage)
             .load(b"someasset")
@@ -2475,9 +2475,9 @@ mod tests {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
-            asset_params: empty_asset_params.clone(),
+            asset_params: empty_asset_params,
         };
-        let res = handle(&mut deps, env, msg.clone()).unwrap();
+        let _res = handle(&mut deps, env, msg).unwrap();
 
         let new_reserve = reserves_state_read(&deps.storage)
             .load(b"someasset")
