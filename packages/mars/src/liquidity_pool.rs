@@ -216,25 +216,72 @@ pub mod msg {
             }
         }
 
-        /// Validate params used during initialization and update.
-        pub fn validate_params(&self) -> StdResult<()> {
+        /// Validate params used during initialization.
+        pub fn validate_for_initialization(&self) -> StdResult<()> {
+            self.validate(Decimal256::zero(), Decimal256::zero())
+        }
+
+        /// Validate params used during update.
+        pub fn validate_for_update(
+            &self,
+            old_ltv: Decimal256,
+            old_liquidation_threshold: Decimal256,
+        ) -> StdResult<()> {
+            self.validate(old_ltv, old_liquidation_threshold)
+        }
+
+        fn validate(
+            &self,
+            old_ltv: Decimal256,
+            old_liquidation_threshold: Decimal256,
+        ) -> StdResult<()> {
             // Destructuring a struct’s fields into separate variables in order to force
             // compile error if we add more params
             let InitOrUpdateAssetParams {
-                borrow_slope,
+                borrow_slope: _,
                 loan_to_value,
                 reserve_factor,
                 liquidation_threshold,
                 liquidation_bonus,
             } = self;
 
-            let less_than_one = Self::less_than_one(loan_to_value)
-                && Self::less_than_one(reserve_factor)
-                && Self::less_than_one(liquidation_threshold)
-                && Self::less_than_one(liquidation_bonus);
+            // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
+            let conditions_and_names = vec![
+                (Self::less_than_one(loan_to_value), "loan_to_value"),
+                (Self::less_than_one(reserve_factor), "reserve_factor"),
+                (
+                    Self::less_than_one(liquidation_threshold),
+                    "liquidation_threshold",
+                ),
+                (Self::less_than_one(liquidation_bonus), "liquidation_bonus"),
+            ];
+            // Filter params which don't meet criteria
+            let invalid_params: Vec<_> = conditions_and_names
+                .into_iter()
+                .filter(|elem| !elem.0)
+                .map(|elem| elem.1)
+                .collect();
+            if !invalid_params.is_empty() {
+                return Err(StdError::generic_err(format!(
+                    "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
+                    Invalid params: [{}]",
+                    invalid_params.join(", ")
+                )));
+            }
 
-            if !less_than_one {
-                return Err(StdError::generic_err("loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1"));
+            // liquidation_threshold should be greater than loan_to_value
+            let new_ltv = loan_to_value.unwrap_or(old_ltv);
+            let new_liquidation_threshold =
+                liquidation_threshold.unwrap_or(old_liquidation_threshold);
+            if new_liquidation_threshold <= new_ltv {
+                return Err(StdError::generic_err(format!(
+                    "liquidation_threshold should be greater than loan_to_value. \
+                    old_liquidation_threshold: {}, \
+                    old_loan_to_value: {}, \
+                    new_liquidation_threshold: {}, \
+                    new_loan_to_value: {}",
+                    old_liquidation_threshold, old_ltv, new_liquidation_threshold, new_ltv
+                )));
             }
 
             Ok(())

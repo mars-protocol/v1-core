@@ -78,7 +78,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitAsset {
             asset,
             asset_params,
-        } => handle_init_asset(deps, env, asset, asset_params),
+        } => handle_init_or_update_asset(deps, env, asset, asset_params),
         HandleMsg::InitAssetTokenCallback { reference } => {
             init_asset_token_callback(deps, env, reference)
         }
@@ -340,87 +340,84 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Initialize asset so it can be deposited and borrowed.
-/// A new maToken should be created which callbacks this contract in order to be registered
-pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
+/// Initialize asset if not exist, otherwise update with new params.
+/// Initialization requires that all params are provided and there is no asset in state.
+pub fn handle_init_or_update_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     asset: Asset,
     asset_params: InitOrUpdateAssetParams,
 ) -> StdResult<HandleResponse> {
-    // Get asset attributes
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
-
-    // Get config
     let mut config = config_state_read(&deps.storage).load()?;
 
-    // Only owner can do this
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    if sender_canonical_address != config.owner {
         return Err(StdError::unauthorized());
     }
 
-    // create only if it doesn't exist
+    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
     let mut reserves = reserves_state(&mut deps.storage);
-    match reserves.may_load(asset_reference.as_slice()) {
-        Ok(None) => {
-            // create asset reserve
-            reserves.save(
-                asset_reference.as_slice(),
-                &Reserve {
-                    index: config.reserve_count,
-                    ma_token_address: CanonicalAddr::default(),
+    let reserve_option = reserves.may_load(asset_reference.as_slice())?;
+    match reserve_option {
+        None => {
+            let reserve_idx = config.reserve_count;
+            let new_reserve =
+                Reserve::create(env.block.time, reserve_idx, asset_type, asset_params)?;
 
-                    borrow_index: Decimal256::one(),
-                    liquidity_index: Decimal256::one(),
-                    borrow_rate: Decimal256::zero(),
-                    liquidity_rate: Decimal256::zero(),
+            // Save new reserve
+            reserves.save(asset_reference.as_slice(), &new_reserve)?;
 
-                    borrow_slope: asset_params.borrow_slope,
-
-                    loan_to_value: asset_params.loan_to_value,
-
-                    reserve_factor: asset_params.reserve_factor,
-
-                    interests_last_updated: env.block.time,
-                    debt_total_scaled: Uint256::zero(),
-
-                    asset_type,
-
-                    liquidation_threshold: asset_params.liquidation_threshold,
-                    liquidation_bonus: asset_params.liquidation_bonus,
-
-                    protocol_income_to_be_distributed: Uint256::zero(),
-                },
-            )?;
-
-            // save index to reference mapping
+            // Save index to reference mapping
             reserve_references_state(&mut deps.storage).save(
-                &config.reserve_count.to_be_bytes(),
+                &reserve_idx.to_be_bytes(),
                 &ReserveReferences {
                     reference: asset_reference.to_vec(),
                 },
             )?;
 
-            // increment reserve count
+            // Increment reserve count
             config.reserve_count += 1;
             config_state(&mut deps.storage).save(&config)?;
+
+            // Prepare response for init asset
+            prepare_init_asset_response(deps, env, asset, config.ma_token_code_id)
         }
-        Ok(Some(_)) => return Err(StdError::generic_err("Asset already initialized")),
-        Err(err) => return Err(err),
+        Some(reserve) => {
+            let updated_reserve = reserve.update_with(asset_params)?;
+
+            // Save updated reserve
+            reserves.save(asset_reference.as_slice(), &updated_reserve)?;
+
+            Ok(HandleResponse {
+                log: vec![log("action", "update_asset"), log("asset", asset_label)],
+                data: None,
+                messages: vec![],
+            })
+        }
     }
+}
+
+/// Prepare response, should instantiate an maToken
+/// and use the Register hook.
+/// A new maToken should be created which callbacks this contract in order to be registered.
+fn prepare_init_asset_response<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    ma_token_code_id: u64,
+) -> StdResult<HandleResponse> {
+    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(deps, &asset)?;
 
     let symbol = match asset {
         Asset::Native { denom } => denom,
         Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
     };
 
-    // Prepare response, should instantiate an maToken
-    // and use the Register hook
     Ok(HandleResponse {
         log: vec![log("action", "init_asset"), log("asset", asset_label)],
         data: None,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-            code_id: config.ma_token_code_id,
+            code_id: ma_token_code_id,
             msg: to_binary(&cw20_token::msg::InitMsg {
                 name: format!("mars {} debt token", symbol),
                 symbol: format!("ma{}", symbol),
@@ -2024,11 +2021,11 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
         let asset_params = InitOrUpdateAssetParams {
-            borrow_slope: Decimal256::from_ratio(4, 100),
-            loan_to_value: Decimal256::from_ratio(8, 10),
-            reserve_factor: Decimal256::from_ratio(1, 100),
-            liquidation_threshold: Decimal256::one(),
-            liquidation_bonus: Decimal256::zero(),
+            borrow_slope: Some(Decimal256::from_ratio(4, 100)),
+            loan_to_value: Some(Decimal256::from_ratio(8, 10)),
+            reserve_factor: Some(Decimal256::from_ratio(1, 100)),
+            liquidation_threshold: Some(Decimal256::one()),
+            liquidation_bonus: Some(Decimal256::zero()),
         };
         let msg = HandleMsg::InitAsset {
             asset: Asset::Native {
