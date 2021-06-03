@@ -344,7 +344,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Initialize asset if not exist, otherwise update with new params.
+/// Initialize asset if not exist.
 /// Initialization requires that all params are provided and there is no asset in state.
 pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
