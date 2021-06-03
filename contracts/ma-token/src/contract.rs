@@ -10,11 +10,11 @@ use crate::allowances::{
 };
 use crate::core;
 use crate::enumerable::{query_all_accounts, query_all_allowances};
-use crate::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state;
 use crate::state::{
     balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo,
 };
+use mars::ma_token::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
