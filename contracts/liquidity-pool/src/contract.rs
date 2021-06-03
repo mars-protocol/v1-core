@@ -78,7 +78,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::InitAsset {
             asset,
             asset_params,
-        } => handle_init_or_update_asset(deps, env, asset, asset_params),
+        } => handle_init_asset(deps, env, asset, asset_params),
+        HandleMsg::UpdateAsset {
+            asset,
+            asset_params,
+        } => handle_update_asset(deps, env, asset, asset_params),
         HandleMsg::InitAssetTokenCallback { reference } => {
             init_asset_token_callback(deps, env, reference)
         }
@@ -342,7 +346,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
 
 /// Initialize asset if not exist, otherwise update with new params.
 /// Initialization requires that all params are provided and there is no asset in state.
-pub fn handle_init_or_update_asset<S: Storage, A: Api, Q: Querier>(
+pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     asset: Asset,
@@ -379,9 +383,62 @@ pub fn handle_init_or_update_asset<S: Storage, A: Api, Q: Querier>(
             config.reserve_count += 1;
             config_state(&mut deps.storage).save(&config)?;
 
-            // Prepare response for init asset
-            prepare_init_asset_response(deps, env, asset, config.ma_token_code_id)
+            let symbol = match asset {
+                Asset::Native { denom } => denom,
+                Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
+            };
+
+            // Prepare response, should instantiate an maToken
+            // and use the Register hook.
+            // A new maToken should be created which callbacks this contract in order to be registered.
+            Ok(HandleResponse {
+                log: vec![log("action", "init_asset"), log("asset", asset_label)],
+                data: None,
+                messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
+                    code_id: config.ma_token_code_id,
+                    msg: to_binary(&cw20_token::msg::InitMsg {
+                        name: format!("mars {} debt token", symbol),
+                        symbol: format!("ma{}", symbol),
+                        decimals: 6,
+                        initial_balances: vec![],
+                        mint: Some(MinterResponse {
+                            minter: HumanAddr::from(env.contract.address.as_str()),
+                            cap: None,
+                        }),
+                        init_hook: Some(cw20_token::msg::InitHook {
+                            msg: to_binary(&HandleMsg::InitAssetTokenCallback {
+                                reference: asset_reference,
+                            })?,
+                            contract_addr: env.contract.address,
+                        }),
+                    })?,
+                    send: vec![],
+                    label: None,
+                })],
+            })
         }
+        Some(_) => Err(StdError::generic_err("Asset already initialized")),
+    }
+}
+
+/// Update asset with new params.
+pub fn handle_update_asset<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    asset: Asset,
+    asset_params: InitOrUpdateAssetParams,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    if sender_canonical_address != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(deps, &asset)?;
+    let mut reserves = reserves_state(&mut deps.storage);
+    let reserve_option = reserves.may_load(asset_reference.as_slice())?;
+    match reserve_option {
         Some(reserve) => {
             let updated_reserve = reserve.update_with(asset_params)?;
 
@@ -394,50 +451,8 @@ pub fn handle_init_or_update_asset<S: Storage, A: Api, Q: Querier>(
                 messages: vec![],
             })
         }
+        None => Err(StdError::generic_err("Asset not initialized")),
     }
-}
-
-/// Prepare response, should instantiate an maToken
-/// and use the Register hook.
-/// A new maToken should be created which callbacks this contract in order to be registered.
-fn prepare_init_asset_response<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    asset: Asset,
-    ma_token_code_id: u64,
-) -> StdResult<HandleResponse> {
-    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(deps, &asset)?;
-
-    let symbol = match asset {
-        Asset::Native { denom } => denom,
-        Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
-    };
-
-    Ok(HandleResponse {
-        log: vec![log("action", "init_asset"), log("asset", asset_label)],
-        data: None,
-        messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-            code_id: ma_token_code_id,
-            msg: to_binary(&cw20_token::msg::InitMsg {
-                name: format!("mars {} debt token", symbol),
-                symbol: format!("ma{}", symbol),
-                decimals: 6,
-                initial_balances: vec![],
-                mint: Some(MinterResponse {
-                    minter: HumanAddr::from(env.contract.address.as_str()),
-                    cap: None,
-                }),
-                init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitAssetTokenCallback {
-                        reference: asset_reference,
-                    })?,
-                    contract_addr: env.contract.address,
-                }),
-            })?,
-            send: vec![],
-            label: None,
-        })],
-    })
 }
 
 pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
@@ -2179,6 +2194,22 @@ mod tests {
         );
 
         // *
+        // can't init more than once
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset already initialized",),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
         // callback comes back with created token
         // *
         let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
@@ -2315,7 +2346,7 @@ mod tests {
             liquidation_threshold: Some(Decimal256::from_ratio(80, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
         };
-        let msg = HandleMsg::InitAsset {
+        let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
@@ -2325,7 +2356,23 @@ mod tests {
         assert_eq!(error_res, StdError::unauthorized());
 
         // *
-        // owner is authorized and can init asset
+        // owner is authorized but can't update asset if not initialize firstly
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let msg = HandleMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params.clone(),
+        };
+        let res_error = handle(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset not initialized",),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // initialize asset
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
@@ -2344,7 +2391,7 @@ mod tests {
             liquidation_threshold: Some(Decimal256::from_ratio(110, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::InitAsset {
+        let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
@@ -2369,7 +2416,7 @@ mod tests {
             liquidation_threshold: Some(Decimal256::from_ratio(5, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::InitAsset {
+        let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
@@ -2389,22 +2436,6 @@ mod tests {
         }
 
         // *
-        // reserve and config should be not touched if params are invalid
-        // *
-        let old_reserve = reserves_state_read(&deps.storage)
-            .load(b"someasset")
-            .unwrap();
-        assert_eq!(0, old_reserve.index);
-
-        let old_reserve_reference = reserve_references_state_read(&deps.storage)
-            .load(&0_u32.to_be_bytes())
-            .unwrap();
-        assert_eq!(b"someasset", old_reserve_reference.reference.as_slice());
-
-        let old_config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(old_config.reserve_count, 1);
-
-        // *
         // update asset with new params
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -2415,7 +2446,7 @@ mod tests {
             liquidation_threshold: Some(Decimal256::from_ratio(90, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
         };
-        let msg = HandleMsg::InitAsset {
+        let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
@@ -2471,7 +2502,7 @@ mod tests {
             liquidation_threshold: None,
             liquidation_bonus: None,
         };
-        let msg = HandleMsg::InitAsset {
+        let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },

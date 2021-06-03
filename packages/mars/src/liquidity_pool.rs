@@ -29,6 +29,13 @@ pub mod msg {
             /// Asset parameters
             asset_params: InitOrUpdateAssetParams,
         },
+        /// Update an asset on the money market
+        UpdateAsset {
+            /// Asset related info
+            asset: Asset,
+            /// Asset parameters
+            asset_params: InitOrUpdateAssetParams,
+        },
         /// Callback sent from maToken contract after instantiated
         InitAssetTokenCallback {
             /// Either the denom for a terra native asset or address for a cw20 token
