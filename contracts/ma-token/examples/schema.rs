@@ -7,7 +7,7 @@ use cw20::{
     AllAccountsResponse, AllAllowancesResponse, AllowanceResponse, BalanceResponse,
     TokenInfoResponse,
 };
-use ma_token::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
+use mars::ma_token::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 
 fn main() {
     let mut out_dir = current_dir().unwrap();

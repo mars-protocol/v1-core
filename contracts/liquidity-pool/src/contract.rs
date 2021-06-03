@@ -341,7 +341,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     }
     reserve_update_market_indices(&env, &mut reserve);
 
-    // Redeem amount is computed after interest rates so that the updated index is used
+    // Redeem amount is computed with the updated index
     let redeem_amount = burn_amount * reserve.liquidity_index;
 
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, redeem_amount)?;
