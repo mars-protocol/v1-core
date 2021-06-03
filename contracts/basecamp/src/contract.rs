@@ -512,7 +512,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Proposals {} => to_binary(&query_proposals(deps)?),
+        QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
     }
 }
@@ -530,11 +530,19 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
+    start: Option<u64>,
+    limit: Option<u32>,
 ) -> StdResult<ProposalsListResponse> {
+    const DEFAULT_START: u64 = 1;
+    const MAX_LIMIT: u32 = 30;
+    const DEFAULT_LIMIT: u32 = 10;
     let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
+    let start = start.unwrap_or(DEFAULT_START).to_be_bytes();
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let proposals = proposals_state_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
-        .range(None, None, Order::Ascending)
+        .range(Option::from(&start[..]), None, Order::Ascending)
+        .take(limit)
         .map(|item| {
             let (k, v) = item?;
 
