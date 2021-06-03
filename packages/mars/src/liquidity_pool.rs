@@ -254,13 +254,16 @@ pub mod msg {
 
             // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
             let conditions_and_names = vec![
-                (Self::less_than_one(loan_to_value), "loan_to_value"),
-                (Self::less_than_one(reserve_factor), "reserve_factor"),
+                (Self::less_or_equal_one(loan_to_value), "loan_to_value"),
+                (Self::less_or_equal_one(reserve_factor), "reserve_factor"),
                 (
-                    Self::less_than_one(liquidation_threshold),
+                    Self::less_or_equal_one(liquidation_threshold),
                     "liquidation_threshold",
                 ),
-                (Self::less_than_one(liquidation_bonus), "liquidation_bonus"),
+                (
+                    Self::less_or_equal_one(liquidation_bonus),
+                    "liquidation_bonus",
+                ),
             ];
             // Filter params which don't meet criteria
             let invalid_params: Vec<_> = conditions_and_names
@@ -294,7 +297,7 @@ pub mod msg {
             Ok(())
         }
 
-        fn less_than_one(value: &Option<Decimal256>) -> bool {
+        fn less_or_equal_one(value: &Option<Decimal256>) -> bool {
             value.unwrap_or(Decimal256::zero()).le(&Decimal256::one())
         }
     }
