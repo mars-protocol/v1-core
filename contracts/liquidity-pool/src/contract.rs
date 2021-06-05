@@ -12,9 +12,9 @@ use terra_cosmwasm::TerraQuerier;
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol};
 use mars::liquidity_pool::msg::{
-    Asset, AssetType, ConfigResponse, DebtInfo, DebtResponse, HandleMsg, InitMsg,
-    InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo, ReserveResponse,
-    ReservesListResponse,
+    Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
+    InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
+    ReserveResponse, ReservesListResponse,
 };
 
 use crate::state::{
@@ -36,30 +36,51 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
-    let insurance_fund_fee_share = msg.insurance_fund_fee_share;
-    let treasury_fee_share = msg.treasury_fee_share;
-    let combined_fee_share = insurance_fund_fee_share + treasury_fee_share;
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        treasury_contract_address,
+        insurance_fund_contract_address,
+        staking_contract_address,
+        insurance_fund_fee_share,
+        treasury_fee_share,
+        ma_token_code_id,
+        close_factor,
+    } = msg.config;
 
-    // Combined fee shares cannot exceed one
-    if combined_fee_share > Decimal256::one() {
+    // All fields should be available
+    let available = treasury_contract_address.is_some()
+        && insurance_fund_contract_address.is_some()
+        && staking_contract_address.is_some()
+        && insurance_fund_fee_share.is_some()
+        && treasury_fee_share.is_some()
+        && ma_token_code_id.is_some()
+        && close_factor.is_some();
+
+    if !available {
         return Err(StdError::generic_err(
-            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+            "All params should be available during initialization",
         ));
-    }
+    };
 
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
-        treasury_contract_address: deps.api.canonical_address(&msg.treasury_contract_address)?,
+        treasury_contract_address: deps
+            .api
+            .canonical_address(&treasury_contract_address.unwrap())?,
         insurance_fund_contract_address: deps
             .api
-            .canonical_address(&msg.insurance_fund_contract_address)?,
-        staking_contract_address: deps.api.canonical_address(&msg.staking_contract_address)?,
-        ma_token_code_id: msg.ma_token_code_id,
+            .canonical_address(&insurance_fund_contract_address.unwrap())?,
+        staking_contract_address: deps
+            .api
+            .canonical_address(&staking_contract_address.unwrap())?,
+        ma_token_code_id: ma_token_code_id.unwrap(),
         reserve_count: 0,
-        close_factor: msg.close_factor,
-        insurance_fund_fee_share,
-        treasury_fee_share,
+        close_factor: close_factor.unwrap(),
+        insurance_fund_fee_share: insurance_fund_fee_share.unwrap(),
+        treasury_fee_share: treasury_fee_share.unwrap(),
     };
+    config.validate()?;
 
     config_state(&mut deps.storage).save(&config)?;
 
@@ -74,6 +95,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::UpdateConfig { owner, config } => handle_update_config(deps, env, owner, config),
         HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitAsset {
             asset,
@@ -159,6 +181,73 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::DistributeProtocolIncome { asset, amount } => {
             handle_distribute_protocol_income(deps, env, asset, amount)
         }
+    }
+}
+
+/// Update config
+pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    owner: Option<HumanAddr>,
+    new_config: CreateOrUpdateConfig,
+) -> StdResult<HandleResponse> {
+    let mut config = config_state_read(&deps.storage).load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        treasury_contract_address,
+        insurance_fund_contract_address,
+        staking_contract_address,
+        insurance_fund_fee_share,
+        treasury_fee_share,
+        ma_token_code_id,
+        close_factor,
+    } = new_config;
+
+    // Update config
+    config.owner = unwrap_or(deps.api, owner, config.owner)?;
+    config.treasury_contract_address = unwrap_or(
+        deps.api,
+        treasury_contract_address,
+        config.treasury_contract_address,
+    )?;
+    config.insurance_fund_contract_address = unwrap_or(
+        deps.api,
+        insurance_fund_contract_address,
+        config.insurance_fund_contract_address,
+    )?;
+    config.staking_contract_address = unwrap_or(
+        deps.api,
+        staking_contract_address,
+        config.staking_contract_address,
+    )?;
+    config.ma_token_code_id = ma_token_code_id.unwrap_or(config.ma_token_code_id);
+    config.close_factor = close_factor.unwrap_or(config.close_factor);
+    config.insurance_fund_fee_share =
+        insurance_fund_fee_share.unwrap_or(config.insurance_fund_fee_share);
+    config.treasury_fee_share = treasury_fee_share.unwrap_or(config.treasury_fee_share);
+
+    // Validate config
+    config.validate()?;
+
+    config_state(&mut deps.storage).save(&config)?;
+
+    Ok(HandleResponse::default())
+}
+
+fn unwrap_or<A: Api>(
+    api: A,
+    human_addr: Option<HumanAddr>,
+    default: CanonicalAddr,
+) -> StdResult<CanonicalAddr> {
+    match human_addr {
+        Some(human_addr) => api.canonical_address(&human_addr),
+        None => Ok(default),
     }
 }
 
@@ -1963,25 +2052,87 @@ mod tests {
     use crate::state::{debts_asset_state_read, users_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, Extern};
+    use mars::liquidity_pool::msg::HandleMsg::UpdateConfig;
     use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let mut insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
-        let mut treasury_fee_share = Decimal256::from_ratio(4, 10);
-        let exceeding_fees_msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("treasury_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
-            insurance_fund_fee_share,
-            treasury_fee_share,
-            ma_token_code_id: 10u64,
-            close_factor: Decimal256::from_ratio(1, 2),
+        // Config with base params valid (just update the rest)
+        let base_config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            ma_token_code_id: Some(10u64),
+            insurance_fund_fee_share: None,
+            treasury_fee_share: None,
+            close_factor: None,
+        };
+
+        // *
+        // init config with empty params
+        // *
+        let empty_config = CreateOrUpdateConfig {
+            treasury_contract_address: None,
+            insurance_fund_contract_address: None,
+            staking_contract_address: None,
+            insurance_fund_fee_share: None,
+            treasury_fee_share: None,
+            ma_token_code_id: None,
+            close_factor: None,
+        };
+        let msg = InitMsg {
+            config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = init(&mut deps, env.clone(), exceeding_fees_msg.clone());
+        let res_error = init(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => {
+                assert_eq!(msg, "All params should be available during initialization")
+            }
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // *
+        let mut insurance_fund_fee_share = Decimal256::from_ratio(11, 10);
+        let mut treasury_fee_share = Decimal256::from_ratio(12, 10);
+        let mut close_factor = Decimal256::from_ratio(13, 10);
+        let config = CreateOrUpdateConfig {
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+            ..base_config.clone()
+        };
+        let msg = InitMsg { config };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = init(&mut deps, env, msg);
+        match res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
+                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // init config with invalid fee share amounts
+        // *
+        insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
+        treasury_fee_share = Decimal256::from_ratio(4, 10);
+        close_factor = Decimal256::from_ratio(1, 2);
+        let config = CreateOrUpdateConfig {
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+            ..base_config.clone()
+        };
+        let exceeding_fees_msg = InitMsg { config };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = init(&mut deps, env.clone(), exceeding_fees_msg);
         match res {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
@@ -1990,17 +2141,19 @@ mod tests {
             _ => panic!("DO NOT ENTER HERE"),
         }
 
+        // *
+        // init config with valid params
+        // *
         insurance_fund_fee_share = Decimal256::from_ratio(5, 10);
         treasury_fee_share = Decimal256::from_ratio(3, 10);
-
-        let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("treasury_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
-            insurance_fund_fee_share,
-            treasury_fee_share,
-            ..exceeding_fees_msg
+        close_factor = Decimal256::from_ratio(1, 2);
+        let config = CreateOrUpdateConfig {
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+            ..base_config
         };
+        let msg = InitMsg { config };
 
         // we can just call .unwrap() to assert this was a success
         let res = init(&mut deps, env, msg).unwrap();
@@ -2016,18 +2169,172 @@ mod tests {
     }
 
     #[test]
+    fn test_update_config() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        // *
+        // init config with valid params
+        // *
+        let mut insurance_fund_fee_share = Decimal256::from_ratio(1, 10);
+        let mut treasury_fee_share = Decimal256::from_ratio(3, 10);
+        let mut close_factor = Decimal256::from_ratio(1, 4);
+        let init_config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            ma_token_code_id: Some(20u64),
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+        };
+        let msg = InitMsg {
+            config: init_config.clone(),
+        };
+        // we can just call .unwrap() to assert this was a success
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        // *
+        // non owner is not authorized
+        // *
+        let msg = UpdateConfig {
+            owner: None,
+            config: init_config.clone(),
+        };
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // update config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // *
+        insurance_fund_fee_share = Decimal256::from_ratio(11, 10);
+        treasury_fee_share = Decimal256::from_ratio(12, 10);
+        close_factor = Decimal256::from_ratio(13, 10);
+        let config = CreateOrUpdateConfig {
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+            ..init_config.clone()
+        };
+        let msg = UpdateConfig {
+            owner: None,
+            config,
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = handle(&mut deps, env, msg);
+        match res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
+                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // update config with invalid fee share amounts
+        // *
+        insurance_fund_fee_share = Decimal256::from_ratio(10, 10);
+        let config = CreateOrUpdateConfig {
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: None,
+            ..init_config
+        };
+        let exceeding_fees_msg = UpdateConfig {
+            owner: None,
+            config,
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = handle(&mut deps, env.clone(), exceeding_fees_msg);
+        match res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
+            ),
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        // *
+        // update config with all new params
+        // *
+        insurance_fund_fee_share = Decimal256::from_ratio(5, 100);
+        treasury_fee_share = Decimal256::from_ratio(3, 100);
+        close_factor = Decimal256::from_ratio(1, 20);
+        let config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_addr")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_addr")),
+            staking_contract_address: Some(HumanAddr::from("staking_addr")),
+            ma_token_code_id: Some(40u64),
+            insurance_fund_fee_share: Some(insurance_fund_fee_share),
+            treasury_fee_share: Some(treasury_fee_share),
+            close_factor: Some(close_factor),
+        };
+        let msg = UpdateConfig {
+            owner: Some(HumanAddr::from("new_owner")),
+            config: config.clone(),
+        };
+
+        // we can just call .unwrap() to assert this was a success
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // Read config from state
+        let new_config = config_state_read(&deps.storage).load().unwrap();
+
+        assert_eq!(
+            new_config.owner,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_owner"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.treasury_contract_address,
+            deps.api
+                .canonical_address(&config.treasury_contract_address.unwrap())
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.insurance_fund_contract_address,
+            deps.api
+                .canonical_address(&config.insurance_fund_contract_address.unwrap())
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.staking_contract_address,
+            deps.api
+                .canonical_address(&config.staking_contract_address.unwrap())
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.ma_token_code_id,
+            config.ma_token_code_id.unwrap()
+        );
+        assert_eq!(
+            new_config.insurance_fund_fee_share,
+            config.insurance_fund_fee_share.unwrap()
+        );
+        assert_eq!(
+            new_config.treasury_fee_share,
+            config.treasury_fee_share.unwrap()
+        );
+        assert_eq!(new_config.close_factor, config.close_factor.unwrap());
+    }
+
+    #[test]
     fn test_init_asset() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("treasury_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
-            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
-            treasury_fee_share: Decimal256::from_ratio(3, 10),
-            ma_token_code_id: 5u64,
-            close_factor: Decimal256::from_ratio(1, 2),
+        let config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_fund")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
+            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            ma_token_code_id: Some(5u64),
+            close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -2323,15 +2630,16 @@ mod tests {
     fn test_update_asset() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("treasury_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_fund"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
-            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
-            treasury_fee_share: Decimal256::from_ratio(3, 10),
-            ma_token_code_id: 5u64,
-            close_factor: Decimal256::from_ratio(1, 2),
+        let config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_fund")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
+            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            ma_token_code_id: Some(5u64),
+            close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -5114,15 +5422,16 @@ mod tests {
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(20, contract_balances);
 
-        let msg = InitMsg {
-            treasury_contract_address: HumanAddr::from("treasury_contract"),
-            insurance_fund_contract_address: HumanAddr::from("insurance_contract"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
-            insurance_fund_fee_share: Decimal256::from_ratio(5, 10),
-            treasury_fee_share: Decimal256::from_ratio(3, 10),
-            ma_token_code_id: 1u64,
-            close_factor: Decimal256::from_ratio(1, 2),
+        let config = CreateOrUpdateConfig {
+            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
+            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
+            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            ma_token_code_id: Some(1u64),
+            close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 

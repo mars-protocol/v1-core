@@ -1,39 +1,28 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
-  "description": "Lending pool global configuration",
+  "description": "Basecamp global configuration",
   "type": "object",
   "required": [
-    "close_factor",
-    "insurance_fund_contract_address",
-    "insurance_fund_fee_share",
-    "ma_token_code_id",
+    "mars_token_address",
     "owner",
-    "reserve_count",
+    "proposal_effective_delay",
+    "proposal_expiration_period",
+    "proposal_required_deposit",
+    "proposal_required_quorum",
+    "proposal_required_threshold",
+    "proposal_voting_period",
     "staking_contract_address",
-    "treasury_contract_address",
-    "treasury_fee_share"
+    "xmars_token_address"
   ],
   "properties": {
-    "close_factor": {
-      "$ref": "#/definitions/Decimal256"
-    },
-    "insurance_fund_contract_address": {
-      "description": "Protocol insurance fund contract address",
+    "mars_token_address": {
+      "description": "Mars token address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
-    },
-    "insurance_fund_fee_share": {
-      "$ref": "#/definitions/Decimal256"
-    },
-    "ma_token_code_id": {
-      "description": "maToken code id used to instantiate new tokens",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
     },
     "owner": {
       "description": "Contract owner",
@@ -43,30 +32,63 @@
         }
       ]
     },
-    "reserve_count": {
-      "description": "Reserve count",
+    "proposal_effective_delay": {
+      "description": "Blocks that need to pass since a proposal succeeds in order for it to be available to be executed",
       "type": "integer",
-      "format": "uint32",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "proposal_expiration_period": {
+      "description": "Blocks after the effective_delay during which a successful proposal can be activated before it expires",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "proposal_required_deposit": {
+      "description": "Number of Mars needed to make a proposal. Will be returned if successful. Will be distributed between stakers if proposal is not executed.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
+    "proposal_required_quorum": {
+      "description": "% of total voting power required to participate in the proposal in order to consider it successfull",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
+    },
+    "proposal_required_threshold": {
+      "description": "% of for votes required in order to consider the proposal successful",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
+    },
+    "proposal_voting_period": {
+      "description": "Blocks during which a proposal is active since being submitted",
+      "type": "integer",
+      "format": "uint64",
       "minimum": 0.0
     },
     "staking_contract_address": {
-      "description": "Protocol staking contract address",
+      "description": "Staking contract address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
     },
-    "treasury_contract_address": {
-      "description": "Protocol treasury contract address",
+    "xmars_token_address": {
+      "description": "xMars token address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
-    },
-    "treasury_fee_share": {
-      "$ref": "#/definitions/Decimal256"
     }
   },
   "definitions": {
@@ -77,8 +99,11 @@
     "CanonicalAddr": {
       "$ref": "#/definitions/Binary"
     },
-    "Decimal256": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
+    "Decimal": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
+      "type": "string"
+    },
+    "Uint128": {
       "type": "string"
     }
   }
