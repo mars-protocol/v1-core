@@ -69,8 +69,8 @@ pub mod msg {
         },
         /// Forced transfer called by the money market when an account is being liquidated
         TransferOnLiquidation {
-            from: HumanAddr,
-            to: HumanAddr,
+            sender: HumanAddr,
+            recipient: HumanAddr,
             amount: Uint128,
         },
         /// Burns tokens from user. Only money market can call this.

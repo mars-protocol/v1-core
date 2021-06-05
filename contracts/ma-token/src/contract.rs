@@ -87,8 +87,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
-        HandleMsg::TransferOnLiquidation { from, to, amount } => {
-            handle_transfer_on_liquidation(deps, env, from, to, amount)
+        HandleMsg::TransferOnLiquidation { sender, recipient, amount } => {
+            handle_transfer_on_liquidation(deps, env, sender, recipient, amount)
         }
         HandleMsg::Burn { user, amount } => handle_burn(deps, env, user, amount),
         HandleMsg::Send {
@@ -154,8 +154,8 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
 pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    from: HumanAddr,
-    to: HumanAddr,
+    sender: HumanAddr,
+    recipient: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
     // only money market can call
@@ -167,17 +167,17 @@ pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
-    let from_raw = deps.api.canonical_address(&from)?;
-    let to_raw = deps.api.canonical_address(&to)?;
+    let sender_raw = deps.api.canonical_address(&sender)?;
+    let recipient_raw = deps.api.canonical_address(&recipient)?;
 
-    core::transfer(deps, &from_raw, &to_raw, amount)?;
+    core::transfer(deps, &sender_raw, &recipient_raw, amount)?;
 
     let res = HandleResponse {
         messages: vec![],
         log: vec![
             log("action", "transfer_on_liquidation"),
-            log("from", from),
-            log("to", to),
+            log("from", sender),
+            log("to", recipient),
             log("amount", amount),
         ],
         data: None,
@@ -867,8 +867,8 @@ mod tests {
         {
             let env = mock_env(money_market.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
-                from: addr1.clone(),
-                to: addr2.clone(),
+                sender: addr1.clone(),
+                recipient: addr2.clone(),
                 amount: Uint128::zero(),
             };
             let res = handle(&mut deps, env, msg);
@@ -882,8 +882,8 @@ mod tests {
         {
             let env = mock_env(money_market.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
-                from: addr1.clone(),
-                to: addr2.clone(),
+                sender: addr1.clone(),
+                recipient: addr2.clone(),
                 amount: too_much,
             };
             let res = handle(&mut deps, env, msg);
@@ -897,8 +897,8 @@ mod tests {
         {
             let env = mock_env(money_market.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
-                from: addr2.clone(),
-                to: addr1.clone(),
+                sender: addr2.clone(),
+                recipient: addr1.clone(),
                 amount: transfer,
             };
             let res = handle(&mut deps, env, msg);
@@ -912,8 +912,8 @@ mod tests {
         {
             let env = mock_env(addr1.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
-                from: addr1.clone(),
-                to: addr2.clone(),
+                sender: addr1.clone(),
+                recipient: addr2.clone(),
                 amount: transfer,
             };
             let res = handle(&mut deps, env, msg);
@@ -927,8 +927,8 @@ mod tests {
         {
             let env = mock_env(money_market, &[]);
             let msg = HandleMsg::TransferOnLiquidation {
-                from: addr1.clone(),
-                to: addr2.clone(),
+                sender: addr1.clone(),
+                recipient: addr2.clone(),
                 amount: transfer,
             };
             let res = handle(&mut deps, env, msg).unwrap();

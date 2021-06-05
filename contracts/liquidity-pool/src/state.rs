@@ -135,8 +135,8 @@ pub struct Reserve {
     // Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Decimal256,
 
-    // Protocol income to be distributed to other contracts
-    pub protocol_income_to_be_distributed: Uint256,
+    // Income to be distributed to other protocol contracts
+    pub protocol_income_to_distribute: Uint256,
 }
 
 impl Reserve {
