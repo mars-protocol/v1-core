@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{CanonicalAddr, StdResult, Storage, Uint128};
+use cosmwasm_std::{CanonicalAddr, StdError, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -41,6 +41,51 @@ pub struct Config {
     pub insurance_fund_fee_share: Decimal256,
     // Percentage of fees that are sent to the treasury
     pub treasury_fee_share: Decimal256,
+}
+
+impl Config {
+    pub fn validate(&self) -> StdResult<()> {
+        let conditions_and_names = vec![
+            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
+            (
+                Self::less_or_equal_one(&self.insurance_fund_fee_share),
+                "insurance_fund_fee_share",
+            ),
+            (
+                Self::less_or_equal_one(&self.treasury_fee_share),
+                "treasury_fee_share",
+            ),
+        ];
+        // All params which should meet criteria
+        let param_names: Vec<_> = conditions_and_names.iter().map(|elem| elem.1).collect();
+        // Filter params which don't meet criteria
+        let invalid_params: Vec<_> = conditions_and_names
+            .into_iter()
+            .filter(|elem| !elem.0)
+            .map(|elem| elem.1)
+            .collect();
+        if !invalid_params.is_empty() {
+            return Err(StdError::generic_err(format!(
+                "[{}] should be less or equal 1. Invalid params: [{}]",
+                param_names.join(", "),
+                invalid_params.join(", ")
+            )));
+        }
+
+        let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
+        // Combined fee shares cannot exceed one
+        if combined_fee_share > Decimal256::one() {
+            return Err(StdError::generic_err(
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn less_or_equal_one(value: &Decimal256) -> bool {
+        value.le(&Decimal256::one())
+    }
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
