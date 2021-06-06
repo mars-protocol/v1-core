@@ -1,21 +1,22 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
-  "description": "Basecamp global configuration",
+  "description": "Treasury global configuration",
   "type": "object",
   "required": [
+    "cooldown_duration",
     "mars_token_address",
     "owner",
-    "proposal_effective_delay",
-    "proposal_expiration_period",
-    "proposal_required_deposit",
-    "proposal_required_quorum",
-    "proposal_required_threshold",
-    "proposal_voting_period",
-    "staking_contract_address",
+    "unstake_window",
     "xmars_token_address"
   ],
   "properties": {
+    "cooldown_duration": {
+      "description": "Cooldown duration in seconds",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "mars_token_address": {
       "description": "Mars token address",
       "allOf": [
@@ -32,55 +33,11 @@
         }
       ]
     },
-    "proposal_effective_delay": {
-      "description": "Blocks that need to pass since a proposal succeeds in order for it to be available to be executed",
+    "unstake_window": {
+      "description": "Time in seconds after the cooldown ends during which the unstaking of the associated amount is allowed",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
-    },
-    "proposal_expiration_period": {
-      "description": "Blocks after the effective_delay during which a successful proposal can be activated before it expires",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "proposal_required_deposit": {
-      "description": "Number of Mars needed to make a proposal. Will be returned if successful. Will be distributed between stakers if proposal is not executed.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Uint128"
-        }
-      ]
-    },
-    "proposal_required_quorum": {
-      "description": "% of total voting power required to participate in the proposal in order to consider it successfull",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Decimal"
-        }
-      ]
-    },
-    "proposal_required_threshold": {
-      "description": "% of for votes required in order to consider the proposal successful",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Decimal"
-        }
-      ]
-    },
-    "proposal_voting_period": {
-      "description": "Blocks during which a proposal is active since being submitted",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "staking_contract_address": {
-      "description": "Staking contract address",
-      "allOf": [
-        {
-          "$ref": "#/definitions/CanonicalAddr"
-        }
-      ]
     },
     "xmars_token_address": {
       "description": "xMars token address",
@@ -98,13 +55,6 @@
     },
     "CanonicalAddr": {
       "$ref": "#/definitions/Binary"
-    },
-    "Decimal": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
-    },
-    "Uint128": {
-      "type": "string"
     }
   }
 }

@@ -1,5 +1,6 @@
 use cosmwasm_std::{
-    to_binary, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
+    to_binary, Api, CanonicalAddr, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128,
+    WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
@@ -58,5 +59,16 @@ pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
             "Error converting slice to array: {}",
             err
         ))),
+    }
+}
+
+pub fn unwrap_or<A: Api>(
+    api: A,
+    human_addr: Option<HumanAddr>,
+    default: CanonicalAddr,
+) -> StdResult<CanonicalAddr> {
+    match human_addr {
+        Some(human_addr) => api.canonical_address(&human_addr),
+        None => Ok(default),
     }
 }

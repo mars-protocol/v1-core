@@ -4,10 +4,14 @@
   "type": "object",
   "required": [
     "mars_token_address",
+    "owner",
     "xmars_token_address"
   ],
   "properties": {
     "mars_token_address": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "owner": {
       "$ref": "#/definitions/HumanAddr"
     },
     "xmars_token_address": {
