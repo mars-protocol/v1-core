@@ -4,11 +4,13 @@ use cosmwasm_std::{
     StdResult, Storage, Uint128, WasmMsg,
 };
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg};
+use crate::msg::{
+    ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
+};
 use crate::state::{config_state, config_state_read, cooldowns_state, Config, Cooldown};
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
+use mars::helpers::{cw20_get_balance, cw20_get_total_supply, unwrap_or};
 
 // INIT
 
@@ -17,13 +19,31 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        mars_token_address,
+        cooldown_duration,
+        unstake_window,
+    } = msg.config;
+
+    // All fields should be available
+    let available =
+        mars_token_address.is_some() && cooldown_duration.is_some() && unstake_window.is_some();
+
+    if !available {
+        return Err(StdError::generic_err(
+            "All params should be available during initialization",
+        ));
+    };
+
     // Initialize config
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
-        mars_token_address: deps.api.canonical_address(&msg.mars_token_address)?,
+        mars_token_address: deps.api.canonical_address(&mars_token_address.unwrap())?,
         xmars_token_address: CanonicalAddr::default(),
-        cooldown_duration: msg.cooldown_duration,
-        unstake_window: msg.unstake_window,
+        cooldown_duration: cooldown_duration.unwrap(),
+        unstake_window: unstake_window.unwrap(),
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -64,10 +84,50 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
+        HandleMsg::UpdateConfig {
+            owner,
+            xmars_token_address,
+            config,
+        } => handle_update_config(deps, env, owner, xmars_token_address, config),
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitTokenCallback {} => handle_init_xmars_token_callback(deps, env),
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
     }
+}
+
+/// Update config
+pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    owner: Option<HumanAddr>,
+    xmars_token_address: Option<HumanAddr>,
+    new_config: CreateOrUpdateConfig,
+) -> StdResult<HandleResponse> {
+    let mut config = config_state_read(&deps.storage).load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        mars_token_address,
+        cooldown_duration,
+        unstake_window,
+    } = new_config;
+
+    // Update config
+    config.owner = unwrap_or(deps.api, owner, config.owner)?;
+    config.xmars_token_address =
+        unwrap_or(deps.api, xmars_token_address, config.xmars_token_address)?;
+    config.mars_token_address = unwrap_or(deps.api, mars_token_address, config.mars_token_address)?;
+    config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
+    config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
+
+    config_state(&mut deps.storage).save(&config)?;
+
+    Ok(HandleResponse::default())
 }
 
 /// cw20 receive implementation
@@ -369,6 +429,7 @@ mod tests {
     use cosmwasm_std::{Coin, CosmosMsg, HumanAddr};
     use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
+    use crate::msg::HandleMsg::UpdateConfig;
     use crate::state::{config_state_read, cooldowns_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
 
@@ -379,11 +440,35 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
+        // *
+        // init config with empty params
+        // *
+        let empty_config = CreateOrUpdateConfig {
+            mars_token_address: None,
+            cooldown_duration: None,
+            unstake_window: None,
+        };
         let msg = InitMsg {
-            mars_token_address: HumanAddr::from("mars_token"),
             cw20_code_id: 11,
-            cooldown_duration: 20,
-            unstake_window: 10,
+            config: empty_config,
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res_error = init(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => {
+                assert_eq!(msg, "All params should be available during initialization")
+            }
+            _ => panic!("DO NOT ENTER HERE"),
+        }
+
+        let config = CreateOrUpdateConfig {
+            mars_token_address: Some(HumanAddr::from("mars_token")),
+            cooldown_duration: Some(20),
+            unstake_window: Some(10),
+        };
+        let msg = InitMsg {
+            cw20_code_id: 11,
+            config,
         };
         let env = mock_env("owner", MockEnvParams::default());
 
@@ -462,6 +547,83 @@ mod tests {
         let config: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(HumanAddr::from("mars_token"), config.mars_token_address);
         assert_eq!(HumanAddr::from("xmars_token"), config.xmars_token_address);
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        // *
+        // init config with valid params
+        // *
+        let init_config = CreateOrUpdateConfig {
+            mars_token_address: Some(HumanAddr::from("mars_token")),
+            cooldown_duration: Some(20),
+            unstake_window: Some(10),
+        };
+        let msg = InitMsg {
+            cw20_code_id: 11,
+            config: init_config.clone(),
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        // *
+        // non owner is not authorized
+        // *
+        let msg = UpdateConfig {
+            owner: None,
+            xmars_token_address: None,
+            config: init_config,
+        };
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // update config with all new params
+        // *
+        let config = CreateOrUpdateConfig {
+            mars_token_address: Some(HumanAddr::from("new_mars_addr")),
+            cooldown_duration: Some(200),
+            unstake_window: Some(100),
+        };
+        let msg = UpdateConfig {
+            owner: Some(HumanAddr::from("new_owner")),
+            xmars_token_address: Some(HumanAddr::from("new_xmars_addr")),
+            config: config.clone(),
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        // we can just call .unwrap() to assert this was a success
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // Read config from state
+        let new_config = config_state_read(&deps.storage).load().unwrap();
+
+        assert_eq!(
+            new_config.owner,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_owner"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.xmars_token_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_xmars_addr"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.mars_token_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_mars_addr"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.cooldown_duration,
+            config.cooldown_duration.unwrap()
+        );
+        assert_eq!(new_config.unstake_window, config.unstake_window.unwrap());
     }
 
     #[test]
@@ -954,11 +1116,14 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
+        let config = CreateOrUpdateConfig {
+            mars_token_address: Some(HumanAddr::from("mars_token")),
+            cooldown_duration: Some(TEST_COOLDOWN_DURATION),
+            unstake_window: Some(TEST_UNSTAKE_WINDOW),
+        };
         let msg = InitMsg {
-            mars_token_address: HumanAddr::from("mars_token"),
             cw20_code_id: 1,
-            cooldown_duration: TEST_COOLDOWN_DURATION,
-            unstake_window: TEST_UNSTAKE_WINDOW,
+            config,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();

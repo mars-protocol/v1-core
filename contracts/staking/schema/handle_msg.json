@@ -3,6 +3,66 @@
   "title": "HandleMsg",
   "anyOf": [
     {
+      "description": "Update staking config",
+      "type": "object",
+      "required": [
+        "update_config"
+      ],
+      "properties": {
+        "update_config": {
+          "type": "object",
+          "properties": {
+            "cooldown_duration": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "mars_token_address": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "owner": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "unstake_window": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "xmars_token_address": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Implementation cw20 receive msg",
       "type": "object",
       "required": [
@@ -15,123 +75,25 @@
       }
     },
     {
-      "description": "Callback to initialize Mars token",
+      "description": "Initialize or refresh cooldown",
+      "type": "object",
+      "required": [
+        "cooldown"
+      ],
+      "properties": {
+        "cooldown": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Callback to initialize xMars token",
       "type": "object",
       "required": [
         "init_token_callback"
       ],
       "properties": {
         "init_token_callback": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Mint Mars tokens to receiver (Temp action for Testing)",
-      "type": "object",
-      "required": [
-        "mint_mars"
-      ],
-      "properties": {
-        "mint_mars": {
-          "type": "object",
-          "required": [
-            "amount",
-            "recipient"
-          ],
-          "properties": {
-            "amount": {
-              "$ref": "#/definitions/Uint128"
-            },
-            "recipient": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Vote for a proposal",
-      "type": "object",
-      "required": [
-        "cast_vote"
-      ],
-      "properties": {
-        "cast_vote": {
-          "type": "object",
-          "required": [
-            "proposal_id",
-            "vote",
-            "voting_power"
-          ],
-          "properties": {
-            "proposal_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            },
-            "vote": {
-              "$ref": "#/definitions/ProposalVoteOption"
-            },
-            "voting_power": {
-              "$ref": "#/definitions/Uint128"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "End proposal after voting period has passed",
-      "type": "object",
-      "required": [
-        "end_proposal"
-      ],
-      "properties": {
-        "end_proposal": {
-          "type": "object",
-          "required": [
-            "proposal_id"
-          ],
-          "properties": {
-            "proposal_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Execute a successful proposal",
-      "type": "object",
-      "required": [
-        "execute_proposal"
-      ],
-      "properties": {
-        "execute_proposal": {
-          "type": "object",
-          "required": [
-            "proposal_id"
-          ],
-          "properties": {
-            "proposal_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Update basecamp config",
-      "type": "object",
-      "required": [
-        "update_config"
-      ],
-      "properties": {
-        "update_config": {
           "type": "object"
         }
       }
@@ -170,13 +132,6 @@
     },
     "HumanAddr": {
       "type": "string"
-    },
-    "ProposalVoteOption": {
-      "type": "string",
-      "enum": [
-        "for",
-        "against"
-      ]
     },
     "Uint128": {
       "type": "string"

@@ -10,7 +10,7 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, unwrap_or};
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
     InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
@@ -238,17 +238,6 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     config_state(&mut deps.storage).save(&config)?;
 
     Ok(HandleResponse::default())
-}
-
-fn unwrap_or<A: Api>(
-    api: A,
-    human_addr: Option<HumanAddr>,
-    default: CanonicalAddr,
-) -> StdResult<CanonicalAddr> {
-    match human_addr {
-        Some(human_addr) => api.canonical_address(&human_addr),
-        None => Ok(default),
-    }
 }
 
 /// cw20 receive implementation
