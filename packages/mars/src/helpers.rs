@@ -72,3 +72,24 @@ pub fn unwrap_or<A: Api>(
         None => Ok(default),
     }
 }
+
+/// Verify if all conditions are met. If not return list of invalid params.
+pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> StdResult<()> {
+    // All params which should meet criteria
+    let param_names: Vec<_> = conditions_and_names.iter().map(|elem| elem.1).collect();
+    // Filter params which don't meet criteria
+    let invalid_params: Vec<_> = conditions_and_names
+        .into_iter()
+        .filter(|elem| !elem.0)
+        .map(|elem| elem.1)
+        .collect();
+    if !invalid_params.is_empty() {
+        return Err(StdError::generic_err(format!(
+            "[{}] should be less or equal 1. Invalid params: [{}]",
+            param_names.join(", "),
+            invalid_params.join(", ")
+        )));
+    }
+
+    Ok(())
+}

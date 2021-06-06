@@ -1,11 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, CanonicalAddr, Decimal, Storage, Uint128};
+use cosmwasm_std::{Binary, CanonicalAddr, Decimal, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use mars::helpers::all_conditions_valid;
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -41,6 +42,26 @@ pub struct Config {
     pub proposal_required_quorum: Decimal,
     /// % of for votes required in order to consider the proposal successful
     pub proposal_required_threshold: Decimal,
+}
+
+impl Config {
+    pub fn validate(&self) -> StdResult<()> {
+        let conditions_and_names = vec![
+            (
+                Self::less_or_equal_one(&self.proposal_required_quorum),
+                "proposal_required_quorum",
+            ),
+            (
+                Self::less_or_equal_one(&self.proposal_required_threshold),
+                "proposal_required_threshold",
+            ),
+        ];
+        all_conditions_valid(conditions_and_names)
+    }
+
+    fn less_or_equal_one(value: &Decimal) -> bool {
+        value.le(&Decimal::one())
+    }
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {

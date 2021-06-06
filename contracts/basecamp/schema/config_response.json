@@ -4,11 +4,15 @@
   "type": "object",
   "required": [
     "mars_token_address",
+    "proposal_required_deposit",
     "xmars_token_address"
   ],
   "properties": {
     "mars_token_address": {
       "$ref": "#/definitions/HumanAddr"
+    },
+    "proposal_required_deposit": {
+      "$ref": "#/definitions/Uint128"
     },
     "xmars_token_address": {
       "$ref": "#/definitions/HumanAddr"
@@ -16,6 +20,9 @@
   },
   "definitions": {
     "HumanAddr": {
+      "type": "string"
+    },
+    "Uint128": {
       "type": "string"
     }
   }

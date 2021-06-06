@@ -1,4 +1,5 @@
 pub mod msg {
+    use crate::helpers::all_conditions_valid;
     use cosmwasm_bignumber::{Decimal256, Uint256};
     use cosmwasm_std::{HumanAddr, StdError, StdResult, Uint128};
     use cw20::Cw20ReceiveMsg;
@@ -278,19 +279,7 @@ pub mod msg {
                     "liquidation_bonus",
                 ),
             ];
-            // Filter params which don't meet criteria
-            let invalid_params: Vec<_> = conditions_and_names
-                .into_iter()
-                .filter(|elem| !elem.0)
-                .map(|elem| elem.1)
-                .collect();
-            if !invalid_params.is_empty() {
-                return Err(StdError::generic_err(format!(
-                    "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
-                    Invalid params: [{}]",
-                    invalid_params.join(", ")
-                )));
-            }
+            all_conditions_valid(conditions_and_names)?;
 
             // liquidation_threshold should be greater than loan_to_value
             let new_ltv = loan_to_value.unwrap_or(old_ltv);

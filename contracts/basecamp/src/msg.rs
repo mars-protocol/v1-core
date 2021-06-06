@@ -7,15 +7,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
-    pub xmars_token_address: HumanAddr,
-    pub staking_contract_address: HumanAddr,
+    #[serde(flatten)]
+    pub config: CreateOrUpdateConfig,
+}
 
-    pub proposal_voting_period: u64,
-    pub proposal_effective_delay: u64,
-    pub proposal_expiration_period: u64,
-    pub proposal_required_deposit: Uint128,
-    pub proposal_required_quorum: Decimal,
-    pub proposal_required_threshold: Decimal,
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct CreateOrUpdateConfig {
+    pub xmars_token_address: Option<HumanAddr>,
+    pub staking_contract_address: Option<HumanAddr>,
+
+    pub proposal_voting_period: Option<u64>,
+    pub proposal_effective_delay: Option<u64>,
+    pub proposal_expiration_period: Option<u64>,
+    pub proposal_required_deposit: Option<Uint128>,
+    pub proposal_required_quorum: Option<Decimal>,
+    pub proposal_required_threshold: Option<Decimal>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -44,7 +50,12 @@ pub enum HandleMsg {
     ExecuteProposal { proposal_id: u64 },
 
     /// Update basecamp config
-    UpdateConfig {},
+    UpdateConfig {
+        mars_token_address: Option<HumanAddr>,
+        // TODO cause unreachable code during test
+        // #[serde(flatten)]
+        config: CreateOrUpdateConfig,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

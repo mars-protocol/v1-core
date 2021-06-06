@@ -7,6 +7,7 @@ use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use mars::helpers::all_conditions_valid;
 use mars::liquidity_pool::msg::{AssetType, InitOrUpdateAssetParams};
 
 // keys (for singleton)
@@ -56,21 +57,7 @@ impl Config {
                 "treasury_fee_share",
             ),
         ];
-        // All params which should meet criteria
-        let param_names: Vec<_> = conditions_and_names.iter().map(|elem| elem.1).collect();
-        // Filter params which don't meet criteria
-        let invalid_params: Vec<_> = conditions_and_names
-            .into_iter()
-            .filter(|elem| !elem.0)
-            .map(|elem| elem.1)
-            .collect();
-        if !invalid_params.is_empty() {
-            return Err(StdError::generic_err(format!(
-                "[{}] should be less or equal 1. Invalid params: [{}]",
-                param_names.join(", "),
-                invalid_params.join(", ")
-            )));
-        }
+        all_conditions_valid(conditions_and_names)?;
 
         let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
         // Combined fee shares cannot exceed one
