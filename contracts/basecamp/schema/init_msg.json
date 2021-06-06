@@ -3,15 +3,7 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "cw20_code_id",
-    "proposal_effective_delay",
-    "proposal_expiration_period",
-    "proposal_required_deposit",
-    "proposal_required_quorum",
-    "proposal_required_threshold",
-    "proposal_voting_period",
-    "staking_contract_address",
-    "xmars_token_address"
+    "cw20_code_id"
   ],
   "properties": {
     "cw20_code_id": {
@@ -20,34 +12,78 @@
       "minimum": 0.0
     },
     "proposal_effective_delay": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "format": "uint64",
       "minimum": 0.0
     },
     "proposal_expiration_period": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "format": "uint64",
       "minimum": 0.0
     },
     "proposal_required_deposit": {
-      "$ref": "#/definitions/Uint128"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "proposal_required_quorum": {
-      "$ref": "#/definitions/Decimal"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "proposal_required_threshold": {
-      "$ref": "#/definitions/Decimal"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "proposal_voting_period": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "format": "uint64",
       "minimum": 0.0
     },
     "staking_contract_address": {
-      "$ref": "#/definitions/HumanAddr"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "xmars_token_address": {
-      "$ref": "#/definitions/HumanAddr"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "definitions": {

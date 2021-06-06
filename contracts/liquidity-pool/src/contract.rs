@@ -2390,7 +2390,7 @@ mod tests {
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
-                "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
+                "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
                 Invalid params: [loan_to_value, reserve_factor]",
             ),
             _ => panic!("DO NOT ENTER HERE"),
@@ -2698,7 +2698,7 @@ mod tests {
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(
                 msg,
-                "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
+                "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
                 Invalid params: [liquidation_threshold]",
             ),
             _ => panic!("DO NOT ENTER HERE"),

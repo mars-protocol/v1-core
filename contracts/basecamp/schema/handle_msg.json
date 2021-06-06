@@ -15,24 +15,14 @@
       }
     },
     {
-      "description": "Callback to initialize Mars and xMars tokens",
+      "description": "Callback to initialize Mars token",
       "type": "object",
       "required": [
         "init_token_callback"
       ],
       "properties": {
         "init_token_callback": {
-          "type": "object",
-          "required": [
-            "token_id"
-          ],
-          "properties": {
-            "token_id": {
-              "type": "integer",
-              "format": "uint8",
-              "minimum": 0.0
-            }
-          }
+          "type": "object"
         }
       }
     },
@@ -71,8 +61,7 @@
           "type": "object",
           "required": [
             "proposal_id",
-            "vote",
-            "voting_power"
+            "vote"
           ],
           "properties": {
             "proposal_id": {
@@ -82,9 +71,6 @@
             },
             "vote": {
               "$ref": "#/definitions/ProposalVoteOption"
-            },
-            "voting_power": {
-              "$ref": "#/definitions/Uint128"
             }
           }
         }
@@ -142,7 +128,25 @@
       ],
       "properties": {
         "update_config": {
-          "type": "object"
+          "type": "object",
+          "required": [
+            "config"
+          ],
+          "properties": {
+            "config": {
+              "$ref": "#/definitions/CreateOrUpdateConfig"
+            },
+            "mars_token_address": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       }
     }
@@ -151,6 +155,85 @@
     "Binary": {
       "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
       "type": "string"
+    },
+    "CreateOrUpdateConfig": {
+      "type": "object",
+      "properties": {
+        "proposal_effective_delay": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "proposal_expiration_period": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "proposal_required_deposit": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal_required_quorum": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal_required_threshold": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal_voting_period": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "staking_contract_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "xmars_token_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     },
     "Cw20ReceiveMsg": {
       "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a HandleMsg",
@@ -177,6 +260,10 @@
           "$ref": "#/definitions/HumanAddr"
         }
       }
+    },
+    "Decimal": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
+      "type": "string"
     },
     "HumanAddr": {
       "type": "string"
