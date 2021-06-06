@@ -79,6 +79,7 @@ pub enum QueryMsg {
     Proposal {
         proposal_id: u64,
     },
+    Latest {},
 }
 
 // We define a custom struct for each query response
