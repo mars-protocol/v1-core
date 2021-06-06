@@ -588,34 +588,29 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .filter(|proposal| {
             let (_, v) = proposal.as_ref().unwrap();
-            return v.status == ProposalStatus::Executed;
+            v.status == ProposalStatus::Executed
         })
         .last();
 
-    return match latest_execute_proposal {
+    match latest_execute_proposal {
         Some(proposal) => {
-            match proposal {
-                Ok(p) => {
-                    let (k, v) = p;
-                    return Ok(ProposalInfo {
-                        proposal_id: read_be_u64(&mut k.as_slice()),
-                        status: v.status,
-                        for_votes: v.for_votes,
-                        against_votes: v.against_votes,
-                        start_height: v.start_height,
-                        end_height: v.end_height,
-                        title: v.title,
-                        description: v.description,
-                        link: v.link,
-                        execute_calls: v.execute_calls,
-                        deposit_amount: v.deposit_amount,
-                    });
-                }
-                Err(e) => return Err(e),
-            };
+            let (k, v) = proposal?;
+            Ok(ProposalInfo {
+                proposal_id: read_be_u64(&mut k.as_slice()),
+                status: v.status,
+                for_votes: v.for_votes,
+                against_votes: v.against_votes,
+                start_height: v.start_height,
+                end_height: v.end_height,
+                title: v.title,
+                description: v.description,
+                link: v.link,
+                execute_calls: v.execute_calls,
+                deposit_amount: v.deposit_amount,
+            })
         }
         None => Result::Err(StdError::generic_err("No executed proposals found")),
-    };
+    }
 }
 
 // MIGRATION
