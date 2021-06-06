@@ -2,12 +2,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
+use cosmwasm_std::{CanonicalAddr, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
-use mars::liquidity_pool::msg::AssetType;
+use mars::liquidity_pool::msg::{AssetType, InitOrUpdateAssetParams};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -91,6 +91,78 @@ pub struct Reserve {
 
     // Protocol income to be distributed to other contracts
     pub protocol_income_to_be_distributed: Uint256,
+}
+
+impl Reserve {
+    /// Initialize new reserve
+    pub fn create(
+        block_time: u64,
+        index: u32,
+        asset_type: AssetType,
+        params: InitOrUpdateAssetParams,
+    ) -> StdResult<Self> {
+        // Verify if there are all params
+        params.validate_availability_of_all_params()?;
+
+        // Verify correctness of params
+        params.validate_for_initialization()?;
+
+        // Destructuring a struct’s fields into separate variables in order to force
+        // compile error if we add more params
+        let InitOrUpdateAssetParams {
+            borrow_slope,
+            loan_to_value,
+            reserve_factor,
+            liquidation_threshold,
+            liquidation_bonus,
+        } = params;
+
+        // Unwraps on params are save (validated with `validate_availability_of_all_params`)
+        let new_reserve = Reserve {
+            index,
+            asset_type,
+            ma_token_address: CanonicalAddr::default(),
+            borrow_index: Decimal256::one(),
+            liquidity_index: Decimal256::one(),
+            borrow_rate: Decimal256::zero(),
+            liquidity_rate: Decimal256::zero(),
+            borrow_slope: borrow_slope.unwrap(),
+            loan_to_value: loan_to_value.unwrap(),
+            reserve_factor: reserve_factor.unwrap(),
+            interests_last_updated: block_time,
+            debt_total_scaled: Uint256::zero(),
+            liquidation_threshold: liquidation_threshold.unwrap(),
+            liquidation_bonus: liquidation_bonus.unwrap(),
+            protocol_income_to_be_distributed: Uint256::zero(),
+        };
+        Ok(new_reserve)
+    }
+
+    /// Update reserve based on new params
+    pub fn update_with(self, params: InitOrUpdateAssetParams) -> StdResult<Self> {
+        // Verify correctness of params
+        params.validate_for_update(self.loan_to_value, self.liquidation_threshold)?;
+
+        // Destructuring a struct’s fields into separate variables in order to force
+        // compile error if we add more params
+        let InitOrUpdateAssetParams {
+            borrow_slope,
+            loan_to_value,
+            reserve_factor,
+            liquidation_threshold,
+            liquidation_bonus,
+        } = params;
+
+        let updated_reserve = Reserve {
+            borrow_slope: borrow_slope.unwrap_or(self.borrow_slope),
+            loan_to_value: loan_to_value.unwrap_or(self.loan_to_value),
+            reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
+            liquidation_threshold: liquidation_threshold.unwrap_or(self.liquidation_threshold),
+            liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
+            ..self
+        };
+        Ok(updated_reserve)
+    }
 }
 
 pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
