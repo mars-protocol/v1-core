@@ -2086,7 +2086,7 @@ mod tests {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "All params should be available during initialization")
             }
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2110,7 +2110,7 @@ mod tests {
                 "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
                 Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2133,7 +2133,7 @@ mod tests {
                 msg,
                 "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2224,7 +2224,7 @@ mod tests {
                 "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
                 Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2247,7 +2247,7 @@ mod tests {
                 msg,
                 "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2374,7 +2374,7 @@ mod tests {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "All params should be available during initialization",)
             }
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2399,7 +2399,7 @@ mod tests {
                 "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
                 Invalid params: [loan_to_value, reserve_factor]",
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2427,7 +2427,7 @@ mod tests {
                     new_liquidation_threshold: 0.5, \
                     new_loan_to_value: 0.5",
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2508,7 +2508,7 @@ mod tests {
         let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset already initialized",),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2671,7 +2671,7 @@ mod tests {
         let res_error = handle(&mut deps, env, msg);
         match res_error {
             Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset not initialized",),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2707,7 +2707,7 @@ mod tests {
                 "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
                 Invalid params: [liquidation_threshold]",
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -2735,7 +2735,7 @@ mod tests {
                     new_liquidation_threshold: 0.5, \
                     new_loan_to_value: 0.6",
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -5158,7 +5158,7 @@ mod tests {
                     String::from(cw20_contract_addr.as_str())
                 )
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
         let user = users_state(&mut deps.storage)
             .load(user_canonical_addr.as_slice())
