@@ -52,8 +52,6 @@ pub enum HandleMsg {
     /// Update basecamp config
     UpdateConfig {
         mars_token_address: Option<HumanAddr>,
-        // TODO cause unreachable code during test
-        // #[serde(flatten)]
         config: CreateOrUpdateConfig,
     },
 }
