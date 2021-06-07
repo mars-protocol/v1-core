@@ -529,9 +529,6 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
     start: Option<u64>,
     limit: Option<u32>,
 ) -> StdResult<ProposalsListResponse> {
-    const DEFAULT_START: u64 = 1;
-    const MAX_LIMIT: u32 = 30;
-    const DEFAULT_LIMIT: u32 = 10;
     let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
     let start = start.unwrap_or(DEFAULT_START).to_be_bytes();
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
@@ -600,8 +597,10 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
     match latest_execute_proposal {
         Some(proposal) => {
             let (k, v) = proposal?;
+            let proposal_id = read_be_u64(k.as_slice())?;
+
             Ok(ProposalInfo {
-                proposal_id: read_be_u64(&mut k.as_slice()),
+                proposal_id,
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
