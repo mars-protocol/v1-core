@@ -18,11 +18,11 @@ use mars::liquidity_pool::msg::{
 };
 
 use crate::state::{
-    config_state, config_state_read, debts_asset_state, debts_asset_state_read,
-    reserve_ma_tokens_state, reserve_ma_tokens_state_read, reserve_references_state,
-    reserve_references_state_read, reserves_state, reserves_state_read,
+    config_state, config_state_read, debts_asset_state, debts_asset_state_read, money_market_state,
+    money_market_state_read, reserve_ma_tokens_state, reserve_ma_tokens_state_read,
+    reserve_references_state, reserve_references_state_read, reserves_state, reserves_state_read,
     uncollateralized_loan_limits, uncollateralized_loan_limits_read, users_state, users_state_read,
-    Config, Debt, Reserve, ReserveReferences, User,
+    Config, Debt, MoneyMarket, Reserve, ReserveReferences, User,
 };
 
 // CONSTANTS
@@ -75,7 +75,6 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
             .api
             .canonical_address(&staking_contract_address.unwrap())?,
         ma_token_code_id: ma_token_code_id.unwrap(),
-        reserve_count: 0,
         close_factor: close_factor.unwrap(),
         insurance_fund_fee_share: insurance_fund_fee_share.unwrap(),
         treasury_fee_share: treasury_fee_share.unwrap(),
@@ -83,6 +82,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     config.validate()?;
 
     config_state(&mut deps.storage).save(&config)?;
+
+    money_market_state(&mut deps.storage).save(&MoneyMarket { reserve_count: 0 })?;
 
     Ok(InitResponse::default())
 }
@@ -430,19 +431,21 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     asset: Asset,
     asset_params: InitOrUpdateAssetParams,
 ) -> StdResult<HandleResponse> {
-    let mut config = config_state_read(&deps.storage).load()?;
+    let config = config_state_read(&deps.storage).load()?;
 
     let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
     if sender_canonical_address != config.owner {
         return Err(StdError::unauthorized());
     }
 
+    let mut money_market = money_market_state_read(&deps.storage).load()?;
+
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
     let mut reserves = reserves_state(&mut deps.storage);
     let reserve_option = reserves.may_load(asset_reference.as_slice())?;
     match reserve_option {
         None => {
-            let reserve_idx = config.reserve_count;
+            let reserve_idx = money_market.reserve_count;
             let new_reserve =
                 Reserve::create(env.block.time, reserve_idx, asset_type, asset_params)?;
 
@@ -458,8 +461,8 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
             )?;
 
             // Increment reserve count
-            config.reserve_count += 1;
-            config_state(&mut deps.storage).save(&config)?;
+            money_market.reserve_count += 1;
+            money_market_state(&mut deps.storage).save(&money_market)?;
 
             let symbol = match asset {
                 Asset::Native { denom } => denom,
@@ -639,7 +642,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
-    let config = config_state_read(&deps.storage).load()?;
+    let money_market = money_market_state_read(&deps.storage).load()?;
     let mut borrow_reserve =
         match reserves_state_read(&deps.storage).load(asset_reference.as_slice()) {
             Ok(borrow_reserve) => borrow_reserve,
@@ -683,7 +686,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         // Vec<(reference, debt_amount, max_borrow, asset_type)>
         let user_balances = user_get_balances(
             &deps,
-            &config,
+            &money_market,
             &user,
             &borrower_canonical_addr,
             |collateral, reserve| collateral * reserve.loan_to_value,
@@ -955,9 +958,10 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = config_state_read(&deps.storage).load()?;
+    let money_market = money_market_state_read(&deps.storage).load()?;
     let user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
     let (user_health_status, native_asset_prices) =
-        user_get_health_status(&deps, &config, &user, &user_canonical_address)?;
+        user_get_health_status(&deps, &money_market, &user, &user_canonical_address)?;
 
     let health_factor = match user_health_status {
         UserHealthStatus::NotBorrowing => {
@@ -1181,10 +1185,10 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     // integration tests. If it's not we would need to pass the updated balances to
     // the health factor somehow
     let from_canonical_address = deps.api.canonical_address(&from_address)?;
-    let config = config_state_read(&deps.storage).load()?;
+    let money_market = money_market_state_read(&deps.storage).load()?;
     let mut from_user = users_state_read(&deps.storage).load(from_canonical_address.as_slice())?;
     let (user_health_status, _) =
-        user_get_health_status(&deps, &config, &from_user, &from_canonical_address)?;
+        user_get_health_status(&deps, &money_market, &from_user, &from_canonical_address)?;
     if let UserHealthStatus::Borrowing(health_factor) = user_health_status {
         if health_factor < Decimal256::one() {
             return Err(StdError::generic_err("Cannot make token transfer if it results in a helth factor lower than 1 for the sender"));
@@ -1418,6 +1422,7 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ConfigResponse> {
     let config = config_state_read(&deps.storage).load()?;
+    let money_market = money_market_state_read(&deps.storage).load()?;
     Ok(ConfigResponse {
         owner: deps.api.human_address(&config.owner)?,
         treasury_contract_address: deps.api.human_address(&config.treasury_contract_address)?,
@@ -1427,7 +1432,8 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
-        reserve_count: config.reserve_count,
+        // TODO do we need this in ConfigResponse?
+        reserve_count: money_market.reserve_count,
         close_factor: config.close_factor,
     })
 }
@@ -1726,7 +1732,7 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
 /// be retrieved by the caller later
 fn user_get_balances<S, A, Q, F>(
     deps: &Extern<S, A, Q>,
-    config: &Config,
+    money_market: &MoneyMarket,
     user: &User,
     user_canonical_address: &CanonicalAddr,
     get_target_collateral_amount: F,
@@ -1740,7 +1746,7 @@ where
 {
     let mut ret: Vec<(String, Uint256, Decimal256, AssetType)> = vec![];
 
-    for i in 0_u32..config.reserve_count {
+    for i in 0_u32..money_market.reserve_count {
         let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if !(user_is_using_as_collateral || user_is_borrowing) {
@@ -1810,7 +1816,7 @@ enum UserHealthStatus {
 /// used during the computation
 fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    config: &Config,
+    money_market: &MoneyMarket,
     user: &User,
     user_canonical_address: &CanonicalAddr,
 ) -> StdResult<(UserHealthStatus, Vec<(String, Decimal256)>)> {
@@ -1819,7 +1825,7 @@ fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
     // Vec<(reference, debt_amount, weighted_liquidation_threshold, asset_type)>
     let user_balances = user_get_balances(
         &deps,
-        &config,
+        &money_market,
         user,
         user_canonical_address,
         |collateral, reserve| collateral * reserve.liquidation_threshold,
@@ -2453,8 +2459,8 @@ mod tests {
         assert_eq!(b"someasset", reserve_reference.reference.as_slice());
 
         // Should have reserve count of 1
-        let config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(config.reserve_count, 1);
+        let money_market = money_market_state_read(&deps.storage).load().unwrap();
+        assert_eq!(money_market.reserve_count, 1);
 
         // should instantiate a debt token
         assert_eq!(
@@ -2576,8 +2582,8 @@ mod tests {
         assert_eq!(AssetType::Cw20, reserve.asset_type);
 
         // Should have reserve count of 2
-        let config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(2, config.reserve_count);
+        let money_market = money_market_state_read(&deps.storage).load().unwrap();
+        assert_eq!(2, money_market.reserve_count);
 
         assert_eq!(
             res.log,
@@ -2778,8 +2784,8 @@ mod tests {
             .unwrap();
         assert_eq!(b"someasset", new_reserve_reference.reference.as_slice());
 
-        let new_config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(new_config.reserve_count, 1);
+        let new_money_market = money_market_state_read(&deps.storage).load().unwrap();
+        assert_eq!(new_money_market.reserve_count, 1);
 
         assert_eq!(res.messages, vec![],);
 
@@ -5481,11 +5487,11 @@ mod tests {
     ) -> Reserve {
         let mut index = 0;
 
-        config_state(storage)
-            .update(|mut c: Config| -> StdResult<Config> {
-                index = c.reserve_count;
-                c.reserve_count += 1;
-                Ok(c)
+        money_market_state(storage)
+            .update(|mut mm: MoneyMarket| -> StdResult<MoneyMarket> {
+                index = mm.reserve_count;
+                mm.reserve_count += 1;
+                Ok(mm)
             })
             .unwrap();
 
