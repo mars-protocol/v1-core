@@ -37,8 +37,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
-        xmars_token_address: deps.api.canonical_address(&msg.xmars_token_address)?,
-        staking_contract_address: deps.api.canonical_address(&msg.staking_contract_address)?,
+        xmars_token_address: CanonicalAddr::default(),
+        staking_contract_address: CanonicalAddr::default(),
 
         proposal_voting_period: msg.proposal_voting_period,
         proposal_effective_delay: msg.proposal_effective_delay,
@@ -88,11 +88,18 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
+
         HandleMsg::InitTokenCallback {} => handle_init_mars_callback(deps, env),
+
+        HandleMsg::SetTokenAddresses {
+            xmars_token_address,
+            staking_contract_address,
+        } => handle_set_token_addresses(deps, env, xmars_token_address, staking_contract_address),
 
         HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
 
         HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
+
         HandleMsg::ExecuteProposal { proposal_id } => {
             handle_execute_proposal(deps, env, proposal_id)
         }
@@ -260,6 +267,34 @@ pub fn handle_init_mars_callback<S: Storage, A: Api, Q: Querier>(
     }
 }
 
+pub fn handle_set_token_addresses<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    xmars_token_address: HumanAddr,
+    staking_contract_address: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let mut config_singleton = config_state(&mut deps.storage);
+    let mut config = config_singleton.load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    };
+
+    config.xmars_token_address = deps.api.canonical_address(&xmars_token_address)?;
+    config.staking_contract_address = deps.api.canonical_address(&staking_contract_address)?;
+    config_singleton.save(&config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "set_token_addresses"),
+            log("xmars_token_address", &xmars_token_address),
+            log("staking_contract_address", &staking_contract_address),
+        ],
+        data: None,
+    })
+}
+
 pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -286,6 +321,12 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = config_state_read(&deps.storage).load()?;
+
+    if config.xmars_token_address == CanonicalAddr::default() {
+        return Err(StdError::generic_err(
+            "Basecamp config not setup correctly, requires xmars_token_address",
+        ));
+    };
 
     let voting_power = xmars_get_balance_at(
         &deps.querier,
@@ -328,6 +369,18 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     proposal_id: u64,
 ) -> StdResult<HandleResponse> {
     let config = config_state_read(&deps.storage).load()?;
+
+    if config.xmars_token_address == CanonicalAddr::default() {
+        return Err(StdError::generic_err(
+            "Basecamp config not setup correctly, requires xmars_token_address",
+        ));
+    };
+
+    if config.staking_contract_address == CanonicalAddr::default() {
+        return Err(StdError::generic_err(
+            "Basecamp config not setup correctly, requires staking_contract_address",
+        ));
+    };
 
     let proposals_bucket = proposals_state(&mut deps.storage);
     let mut proposal = proposals_bucket.load(&proposal_id.to_be_bytes())?;
@@ -511,9 +564,23 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ConfigResponse> {
     let config = config_state_read(&deps.storage).load()?;
+
+    let xmars_token_address = if config.xmars_token_address != CanonicalAddr::default() {
+        deps.api.human_address(&config.xmars_token_address)?
+    } else {
+        HumanAddr::default()
+    };
+
+    let staking_contract_address = if config.staking_contract_address != CanonicalAddr::default() {
+        deps.api.human_address(&config.staking_contract_address)?
+    } else {
+        HumanAddr::default()
+    };
+
     Ok(ConfigResponse {
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
-        xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+        xmars_token_address: xmars_token_address,
+        staking_contract_address: staking_contract_address,
         proposal_required_deposit: config.proposal_required_deposit,
     })
 }
@@ -638,8 +705,6 @@ mod tests {
 
         let msg = InitMsg {
             cw20_code_id: 11,
-            xmars_token_address: HumanAddr::from("xmars_token"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
 
             proposal_voting_period: 1,
             proposal_effective_delay: 1,
@@ -1661,8 +1726,6 @@ mod tests {
         // TODO: Do we actually need the init to happen on tests?
         let msg = InitMsg {
             cw20_code_id: 1,
-            xmars_token_address: HumanAddr::from("xmars_token"),
-            staking_contract_address: HumanAddr::from("staking_contract"),
 
             proposal_voting_period: TEST_PROPOSAL_VOTING_PERIOD,
             proposal_effective_delay: TEST_PROPOSAL_EFFECTIVE_DELAY,

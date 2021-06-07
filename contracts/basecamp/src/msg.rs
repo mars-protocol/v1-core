@@ -7,9 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
-    pub xmars_token_address: HumanAddr,
-    pub staking_contract_address: HumanAddr,
-
     pub proposal_voting_period: u64,
     pub proposal_effective_delay: u64,
     pub proposal_expiration_period: u64,
@@ -23,6 +20,13 @@ pub struct InitMsg {
 pub enum HandleMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
+
+    /// Sets the xMars and Staking contract addresses
+    SetTokenAddresses {
+        xmars_token_address: HumanAddr,
+        staking_contract_address: HumanAddr,
+    },
+
     /// Callback to initialize Mars token
     InitTokenCallback {},
 
@@ -81,6 +85,7 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
+    pub staking_contract_address: HumanAddr,
     pub proposal_required_deposit: Uint128,
 }
 
