@@ -517,7 +517,9 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let mut config = config_state_read(&deps.storage).load()?;
 
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+    // In basecamp, config can be updated only by itself (through an approved proposal)
+    // instead of by it's owner
+    if env.message.sender != env.contract.address {
         return Err(StdError::unauthorized());
     }
 
