@@ -458,7 +458,7 @@ mod tests {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "All params should be available during initialization")
             }
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         let config = CreateOrUpdateConfig {

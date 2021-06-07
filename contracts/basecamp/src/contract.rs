@@ -765,7 +765,7 @@ mod tests {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "All params should be available during initialization")
             }
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
@@ -794,7 +794,7 @@ mod tests {
                 "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
                 Invalid params: [proposal_required_quorum, proposal_required_threshold]"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         let config = CreateOrUpdateConfig {
@@ -938,7 +938,7 @@ mod tests {
                 "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
                 Invalid params: [proposal_required_quorum, proposal_required_threshold]"
             ),
-            _ => panic!("DO NOT ENTER HERE"),
+            other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
         // *
