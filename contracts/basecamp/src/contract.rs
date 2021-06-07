@@ -6,8 +6,8 @@ use cosmwasm_std::{
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
+use mars::helpers::read_be_u64;
 use mars::xmars_token;
-use mars::helpers::{read_be_u64};
 
 use crate::msg::{
     ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, ProposalInfo,
