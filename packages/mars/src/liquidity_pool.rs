@@ -29,7 +29,6 @@ pub mod msg {
         /// Update LP config
         UpdateConfig {
             owner: Option<HumanAddr>,
-            #[serde(flatten)]
             config: CreateOrUpdateConfig,
         },
 

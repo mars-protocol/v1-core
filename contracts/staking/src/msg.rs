@@ -24,7 +24,6 @@ pub enum HandleMsg {
     UpdateConfig {
         owner: Option<HumanAddr>,
         xmars_token_address: Option<HumanAddr>,
-        #[serde(flatten)]
         config: CreateOrUpdateConfig,
     },
     /// Implementation cw20 receive msg
