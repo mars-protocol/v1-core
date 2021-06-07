@@ -43,9 +43,9 @@ pub fn cw20_get_symbol<Q: Querier>(querier: &Q, token_address: HumanAddr) -> Std
 
 pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
     let num_of_bytes = std::mem::size_of::<u64>();
-    if input.len() < num_of_bytes {
+    if input.len() != num_of_bytes {
         return Err(StdError::generic_err(format!(
-            "Expected slice length to be at least {}, received length of {}",
+            "Expected slice length to be {}, received length of {}",
             num_of_bytes,
             input.len()
         )));
