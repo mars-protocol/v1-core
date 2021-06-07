@@ -520,6 +520,10 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+const DEFAULT_START: u64 = 1;
+const MAX_LIMIT: u32 = 30;
+const DEFAULT_LIMIT: u32 = 10;
+
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     start: Option<u64>,
@@ -537,9 +541,10 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
         .take(limit)
         .map(|item| {
             let (k, v) = item?;
+            let proposal_id = read_be_u64(k.as_slice())?;
 
             Ok(ProposalInfo {
-                proposal_id: read_be_u64(&mut k.as_slice()),
+                proposal_id,
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,

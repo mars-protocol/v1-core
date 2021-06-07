@@ -1,4 +1,6 @@
-use cosmwasm_std::{to_binary, HumanAddr, Querier, QueryRequest, StdResult, Uint128, WasmQuery};
+use cosmwasm_std::{
+    to_binary, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
+};
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
 
@@ -39,8 +41,22 @@ pub fn cw20_get_symbol<Q: Querier>(querier: &Q, token_address: HumanAddr) -> Std
     Ok(query.symbol)
 }
 
-pub fn read_be_u64(input: &mut &[u8]) -> u64 {
-    let (int_bytes, rest) = input.split_at(std::mem::size_of::<u64>());
-    *input = rest;
-    u64::from_be_bytes(int_bytes.try_into().unwrap())
+pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
+    let num_of_bytes = std::mem::size_of::<u64>();
+    if input.len() != num_of_bytes {
+        return Err(StdError::generic_err(format!(
+            "Expected slice length to be {}, received length of {}",
+            num_of_bytes,
+            input.len()
+        )));
+    };
+    let slice_to_array_result = input[0..num_of_bytes].try_into();
+
+    match slice_to_array_result {
+        Ok(array) => Ok(u64::from_be_bytes(array)),
+        Err(err) => Err(StdError::generic_err(format!(
+            "Error converting slice to array: {}",
+            err
+        ))),
+    }
 }
