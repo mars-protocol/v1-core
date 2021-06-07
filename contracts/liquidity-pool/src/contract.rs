@@ -986,18 +986,6 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         reserves_state_read(&deps.storage).load(debt_asset_reference.as_slice())?;
 
     // 3. Compute debt to repay and collateral to liquidate
-    // Debt: Only up to a fraction of the total debt (determined by the close factor) can be
-    // repayed.
-    let max_repayable_debt =
-        config.close_factor * user_debt.amount_scaled * debt_reserve.borrow_index;
-    let mut debt_amount_to_repay = if sent_debt_asset_amount > max_repayable_debt {
-        max_repayable_debt
-    } else {
-        sent_debt_asset_amount
-    };
-
-    // Collateral: debt to repay in uusd times plus the liquidation
-    // bonus
     let collateral_price = asset_get_price(
         collateral_asset_label.as_str(),
         &native_asset_prices,
@@ -1008,23 +996,25 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         &native_asset_prices,
         &debt_reserve.asset_type,
     )?;
-    let liquidation_bonus = collateral_reserve.liquidation_bonus;
 
-    let mut collateral_amount_to_liquidate =
-        debt_amount_to_repay * (Decimal256::one() + liquidation_bonus) * debt_price
-            / collateral_price;
+    reserve_apply_accumulated_interests(&env, &mut debt_reserve);
 
-    // If collateral amount to liquidate is higher than user_collateral_balance,
-    // liquidate the full balance and adjust the debt amount to repay accordingly
-    if collateral_amount_to_liquidate > user_collateral_balance {
-        collateral_amount_to_liquidate = user_collateral_balance;
-        debt_amount_to_repay = collateral_price * collateral_amount_to_liquidate
-            / debt_price
-            / (Decimal256::one() + liquidation_bonus);
-    }
+    let user_debt_asset_total_debt =
+        user_debt.amount_scaled * debt_reserve.borrow_index;
+
+    let (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount) = 
+        liquidation_compute_amounts(
+            collateral_price,
+            debt_price,
+            config.close_factor,
+            user_collateral_balance,
+            collateral_reserve.liquidation_bonus,
+            user_debt_asset_total_debt,
+            sent_debt_asset_amount
+        );
 
     let mut messages: Vec<CosmosMsg> = vec![];
-    // 4. Update collateral positions and reserve depending on whether the liqudator elects to
+    // 4. Update collateral positions and reserve depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
         // Transfer ma tokens from user to liquidator
@@ -1120,8 +1110,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
     }
 
-    // 5. Update debt positions and reserve
-    reserve_apply_accumulated_interests(&env, &mut debt_reserve);
+    // 5. Update debt reserve and positions
 
     let debt_amount_to_repay_scaled = debt_amount_to_repay / debt_reserve.borrow_index;
 
@@ -1132,20 +1121,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
     debt.amount_scaled = debt.amount_scaled - debt_amount_to_repay_scaled;
     debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
-
-    debt_reserve.debt_total_scaled = debt_reserve.debt_total_scaled - debt_amount_to_repay_scaled;
-
-    // refund sent amount in excess of actual debt amount to liquidate
-    let refund_amount = sent_debt_asset_amount - debt_amount_to_repay;
-    if refund_amount > Uint256::zero() {
-        let refund_msg = build_send_asset_msg(
-            env.contract.address.clone(),
-            liquidator_address.clone(),
-            debt_asset,
-            refund_amount,
-        )?;
-        messages.push(refund_msg);
-    }
+    debt_reserve.debt_total_scaled =
+        debt_reserve.debt_total_scaled - debt_amount_to_repay_scaled;
 
     reserve_update_interest_rates(
         deps,
@@ -1155,11 +1132,22 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         refund_amount,
     )?;
 
-    // 6. Build response
     // save reserves
     reserves_state(&mut deps.storage).save(&debt_asset_reference.as_slice(), &debt_reserve)?;
     reserves_state(&mut deps.storage)
         .save(&collateral_asset_reference.as_slice(), &collateral_reserve)?;
+
+    // 6. Build response
+    // refund sent amount in excess of actual debt amount to liquidate
+    if refund_amount > Uint256::zero() {
+        let refund_msg = build_send_asset_msg(
+            env.contract.address.clone(),
+            liquidator_address.clone(),
+            debt_asset,
+            refund_amount,
+        )?;
+        messages.push(refund_msg);
+    }
 
     let mut log = vec![
         log("action", "liquidate"),
@@ -1186,6 +1174,49 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         log,
         messages,
     })
+}
+
+/// Computes debt to repay (in debt asset),
+/// collateral to liquidate (in collateral asset) and
+/// amount to refund the liquidator (in debt asset)
+fn liquidation_compute_amounts(
+    collateral_price: Decimal256,
+    debt_price: Decimal256,
+    close_factor: Decimal256,
+    user_collateral_balance: Uint256,
+    liquidation_bonus: Decimal256,
+    user_debt_asset_total_debt: Uint256,
+    sent_debt_asset_amount: Uint256,
+) -> (Uint256, Uint256, Uint256) {
+    // Debt: Only up to a fraction of the total debt (determined by the close factor) can be
+    // repayed.
+    let max_repayable_debt =
+        close_factor * user_debt_asset_total_debt;
+
+    let mut debt_amount_to_repay = if sent_debt_asset_amount > max_repayable_debt {
+        max_repayable_debt
+    } else {
+        sent_debt_asset_amount
+    };
+
+    // Collateral: debt to repay in uusd times plus the liquidation
+    // bonus
+    let mut collateral_amount_to_liquidate =
+        debt_amount_to_repay * (Decimal256::one() + liquidation_bonus) * debt_price
+            / collateral_price;
+
+    // If collateral amount to liquidate is higher than user_collateral_balance,
+    // liquidate the full balance and adjust the debt amount to repay accordingly
+    if collateral_amount_to_liquidate > user_collateral_balance {
+        collateral_amount_to_liquidate = user_collateral_balance;
+        debt_amount_to_repay = collateral_price * collateral_amount_to_liquidate
+            / debt_price
+            / (Decimal256::one() + liquidation_bonus);
+    }
+
+    let refund_amount = sent_debt_asset_amount - debt_amount_to_repay;
+
+    (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount)
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
@@ -4277,7 +4308,14 @@ mod tests {
         let user_debt = Uint256::from(3_000_000_u64); // ltv = 0.75
         let close_factor = Decimal256::from_ratio(1, 2);
 
-        let debt_to_repay = Uint256::from(400_000_u64);
+        let first_debt_to_repay = Uint256::from(400_000_u64);
+        let first_block_time = 15_000_000;
+
+        let second_debt_to_repay = Uint256::from(10_000_000_u64);
+        let second_block_time = 16_000_000;
+
+        // Global debt for the debt reserve
+        let mut expected_global_debt_scaled = Uint256::from(1_800_000_000_u64);
 
         config_state(&mut deps.storage)
             .update(|mut config| {
@@ -4300,6 +4338,7 @@ mod tests {
             &[("collateral".to_string(), collateral_price)],
         );
 
+
         let collateral_reserve = MockReserve {
             ma_token_address: "ma_collateral",
             loan_to_value: collateral_max_ltv,
@@ -4316,9 +4355,10 @@ mod tests {
             interests_last_updated: 0,
             ..Default::default()
         };
+
         let debt_reserve = MockReserve {
             loan_to_value: Decimal256::from_ratio(6, 10),
-            debt_total_scaled: Uint256::from(1_800_000_000_u64),
+            debt_total_scaled: expected_global_debt_scaled,
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
             borrow_slope: Decimal256::from_ratio(1, 3),
@@ -4344,7 +4384,7 @@ mod tests {
             &debt_reserve,
         );
 
-        let user_debt_scaled = user_debt / debt_reserve_initial.liquidity_index;
+        let mut expected_user_debt_scaled = user_debt / debt_reserve_initial.liquidity_index;
 
         // Set user as having collateral and debt in respective reserves
         {
@@ -4381,7 +4421,7 @@ mod tests {
                     .unwrap(),
                 ),
                 sender: liquidator_address.clone(),
-                amount: debt_to_repay.into(),
+                amount: first_debt_to_repay.into(),
             });
 
             let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
@@ -4416,7 +4456,7 @@ mod tests {
                     .unwrap(),
                 ),
                 sender: liquidator_address.clone(),
-                amount: debt_to_repay.into(),
+                amount: first_debt_to_repay.into(),
             });
 
             let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
@@ -4426,7 +4466,7 @@ mod tests {
         // set user to have positive debt amount in debt asset
         {
             let debt = Debt {
-                amount_scaled: user_debt_scaled,
+                amount_scaled: expected_user_debt_scaled,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
@@ -4455,7 +4495,7 @@ mod tests {
             handle(&mut deps, env, liquidate_msg).unwrap_err();
         }
 
-        // Perform successful liquidation (receive ma_token)
+        // Perform first successful liquidation receiving ma_token in return
         {
             let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
                 msg: Some(
@@ -4470,10 +4510,17 @@ mod tests {
                     .unwrap(),
                 ),
                 sender: liquidator_address.clone(),
-                amount: debt_to_repay.into(),
+                amount: first_debt_to_repay.into(),
             });
 
-            let block_time = 150_000_000u64;
+            let collateral_reserve_before = reserves_state_read(&deps.storage)
+                .load(b"collateral")
+                .unwrap();
+            let debt_reserve_before = reserves_state_read(&deps.storage)
+                .load(debt_contract_addr_canonical.as_slice())
+                .unwrap();
+
+            let block_time = first_block_time;
             let env = mars::testing::mock_env(
                 "debt",
                 MockEnvParams {
@@ -4490,19 +4537,19 @@ mod tests {
                 block_time,
                 available_liquidity_debt,
                 TestUtilizationDeltas {
-                    less_debt: debt_to_repay.into(),
+                    less_debt: first_debt_to_repay.into(),
                     ..Default::default()
                 },
             );
 
-            let collateral_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            let collateral_reserve_after = reserves_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            let debt_reserve_after = reserves_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
-            let expected_liquidated_collateral_amount = debt_to_repay
+            let expected_liquidated_collateral_amount = first_debt_to_repay
                 * (Decimal256::one() + collateral_liquidation_bonus)
                 / Decimal256::from(collateral_price);
 
@@ -4532,7 +4579,152 @@ mod tests {
                         "collateral_amount_liquidated",
                         expected_liquidated_collateral_amount
                     ),
-                    log("debt_amount_repaid", debt_to_repay),
+                    log("debt_amount_repaid", first_debt_to_repay),
+                    log("refund_amount", 0),
+                    log("borrow_index", expected_debt_rates.borrow_index),
+                    log("liquidity_index", expected_debt_rates.liquidity_index),
+                    log("borrow_rate", expected_debt_rates.borrow_rate),
+                    log("liquidity_rate", expected_debt_rates.liquidity_rate),
+                ]
+            );
+
+            // check user still has deposited collateral asset and
+            // still has outstanding debt in debt asset
+            let user = users_state_read(&deps.storage)
+                .load(user_canonical_addr.as_slice())
+                .unwrap();
+            assert_eq!(
+                true,
+                get_bit(user.collateral_assets, collateral_reserve_before.index).unwrap()
+            );
+            assert_eq!(
+                true,
+                get_bit(user.borrowed_assets, debt_reserve_before.index).unwrap()
+            );
+
+            // check user's debt decreased by the appropriate amount
+            let debt =
+                debts_asset_state_read(&deps.storage, debt_contract_addr_canonical.as_slice())
+                    .load(&user_canonical_addr.as_slice())
+                    .unwrap();
+
+            expected_user_debt_scaled =
+                expected_user_debt_scaled -
+                (first_debt_to_repay / expected_debt_rates.borrow_index);
+
+            assert_eq!(
+                expected_user_debt_scaled,
+                debt.amount_scaled
+            );
+
+            assert_eq!(
+                Uint256::zero(),
+                collateral_reserve_after.protocol_income_to_distribute
+            );
+            assert_eq!(
+                debt_reserve_initial.protocol_income_to_distribute
+                    + expected_debt_rates.protocol_income_to_distribute,
+                debt_reserve_after.protocol_income_to_distribute
+            );
+        }
+
+        // Perform second successful liquidation sending an excess amount (should refund)
+        // and receive underlying collateral
+        {
+            let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
+                msg: Some(
+                    to_binary(&ReceiveMsg::LiquidateCw20 {
+                        collateral_asset: Asset::Native {
+                            denom: "collateral".to_string(),
+                        },
+                        debt_asset_address: debt_contract_addr.clone(),
+                        user_address: user_address.clone(),
+                        receive_ma_token: false,
+                    })
+                    .unwrap(),
+                ),
+                sender: liquidator_address.clone(),
+                amount: second_debt_to_repay.into(),
+            });
+
+            let collateral_reserve_before = reserves_state_read(&deps.storage)
+                .load(b"collateral")
+                .unwrap();
+            let debt_reserve_before = reserves_state_read(&deps.storage)
+                .load(debt_contract_addr_canonical.as_slice())
+                .unwrap();
+
+            let block_time = second_block_time;
+            let env = mars::testing::mock_env(
+                "debt",
+                MockEnvParams {
+                    block_time,
+                    ..Default::default()
+                },
+            );
+            let res = handle(&mut deps, env, liquidate_msg).unwrap();
+
+            // get expected indices and rates for debt and collateral reserves
+            let expected_debt_rates = th_get_expected_indices_and_rates(
+                &deps,
+                &debt_reserve_before,
+                block_time,
+                available_liquidity_debt, //this is the same as before as it comes from mocks
+                TestUtilizationDeltas {
+                    less_debt: second_debt_to_repay.into(),
+                    ..Default::default()
+                },
+            );
+            // TODO: How do I compute less debt here???
+            let expected_collateral_rates = th_get_expected_indices_and_rates(
+                &deps,
+                &collateral_reserve_before,
+                block_time,
+                available_liquidity_collateral, //this is the same as before as it comes from mocks
+                TestUtilizationDeltas {
+                    less_debt: second_debt_to_repay.into(),
+                    ..Default::default()
+                },
+            );
+
+            let collateral_reserve_after_liquidation = reserves_state_read(&deps.storage)
+                .load(b"collateral")
+                .unwrap();
+            let debt_reserve_after_liquidation = reserves_state_read(&deps.storage)
+                .load(debt_contract_addr_canonical.as_slice())
+                .unwrap();
+
+            let expected_liquidated_collateral_amount = second_debt_to_repay
+                * (Decimal256::one() + collateral_liquidation_bonus)
+                / Decimal256::from(collateral_price);
+
+            assert_eq!(
+                res.messages,
+                vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("ma_collateral"),
+                    msg: to_binary(&mars::ma_token::msg::HandleMsg::TransferOnLiquidation {
+                        sender: user_address.clone(),
+                        recipient: liquidator_address.clone(),
+                        amount: expected_liquidated_collateral_amount.into(),
+                    })
+                    .unwrap(),
+                    send: vec![],
+                }),]
+            );
+
+            assert_eq!(
+                res.log,
+                vec![
+                    log("action", "liquidate"),
+                    log("collateral_reserve", "collateral"),
+                    log("debt_reserve", debt_contract_addr.as_str()),
+                    log("user", user_address.as_str()),
+                    log("liquidator", liquidator_address.as_str()),
+                    log(
+                        "collateral_amount_liquidated",
+                        expected_liquidated_collateral_amount
+                    ),
+                    log("debt_amount_repaid", second_debt_to_repay),
                     log("refund_amount", 0),
                     log("borrow_index", expected_debt_rates.borrow_index),
                     log("liquidity_index", expected_debt_rates.liquidity_index),
@@ -4562,7 +4754,7 @@ mod tests {
                     .unwrap();
 
             assert_eq!(
-                user_debt_scaled - (debt_to_repay / expected_debt_rates.borrow_index),
+                expected_user_debt_scaled,
                 debt.amount_scaled
             );
 
