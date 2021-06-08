@@ -94,7 +94,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::SetContractAddresses {
             xmars_token_address,
             staking_contract_address,
-        } => handle_set_token_addresses(deps, env, xmars_token_address, staking_contract_address),
+        } => {
+            handle_set_contract_addresses(deps, env, xmars_token_address, staking_contract_address)
+        }
 
         HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
 
@@ -267,7 +269,7 @@ pub fn handle_init_mars_callback<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-pub fn handle_set_token_addresses<S: Storage, A: Api, Q: Querier>(
+pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     xmars_token_address: HumanAddr,
