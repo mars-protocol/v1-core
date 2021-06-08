@@ -16,29 +16,10 @@
     {
       "type": "object",
       "required": [
-        "reserve"
+        "proposals"
       ],
       "properties": {
-        "reserve": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            }
-          }
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "reserves_list"
-      ],
-      "properties": {
-        "reserves_list": {
+        "proposals": {
           "type": "object"
         }
       }
@@ -46,68 +27,23 @@
     {
       "type": "object",
       "required": [
-        "debt"
+        "proposal"
       ],
       "properties": {
-        "debt": {
+        "proposal": {
           "type": "object",
           "required": [
-            "address"
+            "proposal_id"
           ],
           "properties": {
-            "address": {
-              "$ref": "#/definitions/HumanAddr"
+            "proposal_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         }
       }
     }
-  ],
-  "definitions": {
-    "Asset": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "cw20"
-          ],
-          "properties": {
-            "cw20": {
-              "type": "object",
-              "required": [
-                "contract_addr"
-              ],
-              "properties": {
-                "contract_addr": {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "native"
-          ],
-          "properties": {
-            "native": {
-              "type": "object",
-              "required": [
-                "denom"
-              ],
-              "properties": {
-                "denom": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
-    "HumanAddr": {
-      "type": "string"
-    }
-  }
+  ]
 }

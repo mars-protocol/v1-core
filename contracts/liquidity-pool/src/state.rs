@@ -2,15 +2,17 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{CanonicalAddr, StdResult, Storage, Uint128};
+use cosmwasm_std::{CanonicalAddr, StdError, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
 };
+use mars::helpers::all_conditions_valid;
 use mars::liquidity_pool::msg::{AssetType, InitOrUpdateAssetParams};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
+pub static MONEY_MARKET_KEY: &[u8] = b"money_market";
 
 // namespaces (for buckets)
 pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
@@ -33,8 +35,6 @@ pub struct Config {
     pub staking_contract_address: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
-    /// Reserve count
-    pub reserve_count: u32,
     // Maximum percentage of outstanding debt that can be covered by a liquidator
     pub close_factor: Decimal256,
     // Percentage of fees that are sent to the insurance fund
@@ -43,12 +43,58 @@ pub struct Config {
     pub treasury_fee_share: Decimal256,
 }
 
+impl Config {
+    pub fn validate(&self) -> StdResult<()> {
+        let conditions_and_names = vec![
+            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
+            (
+                Self::less_or_equal_one(&self.insurance_fund_fee_share),
+                "insurance_fund_fee_share",
+            ),
+            (
+                Self::less_or_equal_one(&self.treasury_fee_share),
+                "treasury_fee_share",
+            ),
+        ];
+        all_conditions_valid(conditions_and_names)?;
+
+        let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
+        // Combined fee shares cannot exceed one
+        if combined_fee_share > Decimal256::one() {
+            return Err(StdError::generic_err(
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn less_or_equal_one(value: &Decimal256) -> bool {
+        value.le(&Decimal256::one())
+    }
+}
+
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
     singleton(storage, CONFIG_KEY)
 }
 
 pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
     singleton_read(storage, CONFIG_KEY)
+}
+
+/// MoneyMarket global state
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MoneyMarket {
+    /// Reserve count
+    pub reserve_count: u32,
+}
+
+pub fn money_market_state<S: Storage>(storage: &mut S) -> Singleton<S, MoneyMarket> {
+    singleton(storage, MONEY_MARKET_KEY)
+}
+
+pub fn money_market_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, MoneyMarket> {
+    singleton_read(storage, MONEY_MARKET_KEY)
 }
 
 /// Asset reserves

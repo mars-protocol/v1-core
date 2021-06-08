@@ -1,4 +1,5 @@
 pub mod msg {
+    use crate::helpers::all_conditions_valid;
     use cosmwasm_bignumber::{Decimal256, Uint256};
     use cosmwasm_std::{HumanAddr, StdError, StdResult, Uint128};
     use cw20::Cw20ReceiveMsg;
@@ -7,18 +8,30 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
-        pub treasury_contract_address: HumanAddr,
-        pub insurance_fund_contract_address: HumanAddr,
-        pub staking_contract_address: HumanAddr,
-        pub insurance_fund_fee_share: Decimal256,
-        pub treasury_fee_share: Decimal256,
-        pub ma_token_code_id: u64,
-        pub close_factor: Decimal256,
+        #[serde(flatten)]
+        pub config: CreateOrUpdateConfig,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct CreateOrUpdateConfig {
+        pub treasury_contract_address: Option<HumanAddr>,
+        pub insurance_fund_contract_address: Option<HumanAddr>,
+        pub staking_contract_address: Option<HumanAddr>,
+        pub insurance_fund_fee_share: Option<Decimal256>,
+        pub treasury_fee_share: Option<Decimal256>,
+        pub ma_token_code_id: Option<u64>,
+        pub close_factor: Option<Decimal256>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
+        /// Update LP config
+        UpdateConfig {
+            owner: Option<HumanAddr>,
+            config: CreateOrUpdateConfig,
+        },
+
         /// Implementation of cw20 receive msg
         Receive(Cw20ReceiveMsg),
 
@@ -265,19 +278,7 @@ pub mod msg {
                     "liquidation_bonus",
                 ),
             ];
-            // Filter params which don't meet criteria
-            let invalid_params: Vec<_> = conditions_and_names
-                .into_iter()
-                .filter(|elem| !elem.0)
-                .map(|elem| elem.1)
-                .collect();
-            if !invalid_params.is_empty() {
-                return Err(StdError::generic_err(format!(
-                    "loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1. \
-                    Invalid params: [{}]",
-                    invalid_params.join(", ")
-                )));
-            }
+            all_conditions_valid(conditions_and_names)?;
 
             // liquidation_threshold should be greater than loan_to_value
             let new_ltv = loan_to_value.unwrap_or(old_ltv);

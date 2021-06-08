@@ -7,12 +7,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
-    pub proposal_voting_period: u64,
-    pub proposal_effective_delay: u64,
-    pub proposal_expiration_period: u64,
-    pub proposal_required_deposit: Uint128,
-    pub proposal_required_quorum: Decimal,
-    pub proposal_required_threshold: Decimal,
+    #[serde(flatten)]
+    pub config: CreateOrUpdateConfig,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct CreateOrUpdateConfig {
+    pub xmars_token_address: Option<HumanAddr>,
+    pub staking_contract_address: Option<HumanAddr>,
+
+    pub proposal_voting_period: Option<u64>,
+    pub proposal_effective_delay: Option<u64>,
+    pub proposal_expiration_period: Option<u64>,
+    pub proposal_required_deposit: Option<Uint128>,
+    pub proposal_required_quorum: Option<Decimal>,
+    pub proposal_required_threshold: Option<Decimal>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -48,7 +57,10 @@ pub enum HandleMsg {
     ExecuteProposal { proposal_id: u64 },
 
     /// Update basecamp config
-    UpdateConfig {},
+    UpdateConfig {
+        mars_token_address: Option<HumanAddr>,
+        config: CreateOrUpdateConfig,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -76,8 +88,14 @@ pub struct MsgExecuteCall {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    Proposals {},
-    Proposal { proposal_id: u64 },
+    Proposals {
+        start: Option<u64>,
+        limit: Option<u32>,
+    },
+    Proposal {
+        proposal_id: u64,
+    },
+    LatestExecutedProposal {},
 }
 
 // We define a custom struct for each query response
@@ -97,7 +115,7 @@ pub struct ProposalsListResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalInfo {
-    pub proposal_id: String,
+    pub proposal_id: u64,
     pub status: ProposalStatus,
     pub for_votes: Uint128,
     pub against_votes: Uint128,

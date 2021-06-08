@@ -6,17 +6,19 @@ use cosmwasm_std::{
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
+use mars::helpers::read_be_u64;
 use mars::xmars_token;
 
 use crate::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall, ProposalInfo,
-    ProposalsListResponse, QueryMsg, ReceiveMsg,
+    ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
+    ProposalInfo, ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
     basecamp_state, basecamp_state_read, config_state, config_state_read, proposal_votes_state,
     proposal_votes_state_read, proposals_state, proposals_state_read, Basecamp, Config, Proposal,
     ProposalExecuteCall, ProposalStatus, ProposalVote, ProposalVoteOption,
 };
+use mars::helpers::unwrap_or;
 
 // CONSTANTS
 const MIN_TITLE_LENGTH: usize = 4;
@@ -33,20 +35,54 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        xmars_token_address,
+        staking_contract_address,
+        proposal_voting_period,
+        proposal_effective_delay,
+        proposal_expiration_period,
+        proposal_required_deposit,
+        proposal_required_quorum,
+        proposal_required_threshold,
+    } = msg.config;
+
+    // All fields should be available
+    let available = xmars_token_address.is_some()
+        && staking_contract_address.is_some()
+        && proposal_voting_period.is_some()
+        && proposal_effective_delay.is_some()
+        && proposal_expiration_period.is_some()
+        && proposal_required_deposit.is_some()
+        && proposal_required_quorum.is_some()
+        && proposal_required_threshold.is_some();
+
+    if !available {
+        return Err(StdError::generic_err(
+            "All params should be available during initialization",
+        ));
+    };
+
     // initialize Config
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
-        xmars_token_address: CanonicalAddr::default(),
-        staking_contract_address: CanonicalAddr::default(),
+        xmars_token_address: deps.api.canonical_address(&xmars_token_address.unwrap())?,
+        staking_contract_address: deps
+            .api
+            .canonical_address(&staking_contract_address.unwrap())?,
 
-        proposal_voting_period: msg.proposal_voting_period,
-        proposal_effective_delay: msg.proposal_effective_delay,
-        proposal_expiration_period: msg.proposal_expiration_period,
-        proposal_required_deposit: msg.proposal_required_deposit,
-        proposal_required_quorum: msg.proposal_required_quorum,
-        proposal_required_threshold: msg.proposal_required_threshold,
+        proposal_voting_period: proposal_voting_period.unwrap(),
+        proposal_effective_delay: proposal_effective_delay.unwrap(),
+        proposal_expiration_period: proposal_expiration_period.unwrap(),
+        proposal_required_deposit: proposal_required_deposit.unwrap(),
+        proposal_required_quorum: proposal_required_quorum.unwrap(),
+        proposal_required_threshold: proposal_required_threshold.unwrap(),
     };
+
+    // Validate config
+    config.validate()?;
 
     config_state(&mut deps.storage).save(&config)?;
 
@@ -106,7 +142,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             handle_execute_proposal(deps, env, proposal_id)
         }
 
-        HandleMsg::UpdateConfig {} => Ok(HandleResponse::default()), //TODO
+        HandleMsg::UpdateConfig {
+            mars_token_address,
+            config,
+        } => handle_update_config(deps, env, mars_token_address, config),
 
         HandleMsg::MintMars { recipient, amount } => handle_mint_mars(deps, env, recipient, amount),
     }
@@ -528,6 +567,63 @@ pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Update config
+pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    mars_token_address: Option<HumanAddr>,
+    new_config: CreateOrUpdateConfig,
+) -> StdResult<HandleResponse> {
+    let mut config = config_state_read(&deps.storage).load()?;
+
+    // In basecamp, config can be updated only by itself (through an approved proposal)
+    // instead of by it's owner
+    if env.message.sender != env.contract.address {
+        return Err(StdError::unauthorized());
+    }
+
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let CreateOrUpdateConfig {
+        xmars_token_address,
+        staking_contract_address,
+        proposal_voting_period,
+        proposal_effective_delay,
+        proposal_expiration_period,
+        proposal_required_deposit,
+        proposal_required_quorum,
+        proposal_required_threshold,
+    } = new_config;
+
+    // Update config
+    config.mars_token_address = unwrap_or(deps.api, mars_token_address, config.mars_token_address)?;
+    config.xmars_token_address =
+        unwrap_or(deps.api, xmars_token_address, config.xmars_token_address)?;
+    config.staking_contract_address = unwrap_or(
+        deps.api,
+        staking_contract_address,
+        config.staking_contract_address,
+    )?;
+    config.proposal_voting_period = proposal_voting_period.unwrap_or(config.proposal_voting_period);
+    config.proposal_effective_delay =
+        proposal_effective_delay.unwrap_or(config.proposal_effective_delay);
+    config.proposal_expiration_period =
+        proposal_expiration_period.unwrap_or(config.proposal_expiration_period);
+    config.proposal_required_deposit =
+        proposal_required_deposit.unwrap_or(config.proposal_required_deposit);
+    config.proposal_required_quorum =
+        proposal_required_quorum.unwrap_or(config.proposal_required_quorum);
+    config.proposal_required_threshold =
+        proposal_required_threshold.unwrap_or(config.proposal_required_threshold);
+
+    // Validate config
+    config.validate()?;
+
+    config_state(&mut deps.storage).save(&config)?;
+
+    Ok(HandleResponse::default())
+}
+
 /// Mints Mars token to receiver (Temp action for testing)
 pub fn handle_mint_mars<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -561,8 +657,9 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Proposals {} => to_binary(&query_proposals(deps)?),
+        QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
+        QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
     }
 }
 
@@ -591,18 +688,28 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+const DEFAULT_START: u64 = 1;
+const MAX_LIMIT: u32 = 30;
+const DEFAULT_LIMIT: u32 = 10;
+
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
+    start: Option<u64>,
+    limit: Option<u32>,
 ) -> StdResult<ProposalsListResponse> {
     let basecamp = basecamp_state_read(&deps.storage).load().unwrap();
+    let start = start.unwrap_or(DEFAULT_START).to_be_bytes();
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let proposals = proposals_state_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
-        .range(None, None, Order::Ascending)
+        .range(Option::from(&start[..]), None, Order::Ascending)
+        .take(limit)
         .map(|item| {
             let (k, v) = item?;
+            let proposal_id = read_be_u64(k.as_slice())?;
 
             Ok(ProposalInfo {
-                proposal_id: String::from_utf8(k).unwrap(),
+                proposal_id,
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
@@ -630,7 +737,7 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
     let proposal = proposals_state_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
 
     Ok(ProposalInfo {
-        proposal_id: proposal_id.to_string(),
+        proposal_id,
         status: proposal.status,
         for_votes: proposal.for_votes,
         against_votes: proposal.against_votes,
@@ -642,6 +749,40 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
         execute_calls: proposal.execute_calls,
         deposit_amount: proposal.deposit_amount,
     })
+}
+
+fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<ProposalInfo> {
+    let latest_execute_proposal = proposals_state_read(&deps.storage)
+        .range(None, None, Order::Ascending)
+        .filter(|proposal| {
+            let (_, v) = proposal.as_ref().unwrap();
+            v.status == ProposalStatus::Executed
+        })
+        .last();
+
+    match latest_execute_proposal {
+        Some(proposal) => {
+            let (k, v) = proposal?;
+            let proposal_id = read_be_u64(k.as_slice())?;
+
+            Ok(ProposalInfo {
+                proposal_id,
+                status: v.status,
+                for_votes: v.for_votes,
+                against_votes: v.against_votes,
+                start_height: v.start_height,
+                end_height: v.end_height,
+                title: v.title,
+                description: v.description,
+                link: v.link,
+                execute_calls: v.execute_calls,
+                deposit_amount: v.deposit_amount,
+            })
+        }
+        None => Result::Err(StdError::generic_err("No executed proposals found")),
+    }
 }
 
 // MIGRATION
@@ -698,6 +839,7 @@ mod tests {
         get_test_addresses, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
     };
 
+    use crate::msg::HandleMsg::UpdateConfig;
     use crate::state::{basecamp_state_read, proposals_state_read};
 
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
@@ -709,15 +851,76 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
+        // *
+        // init config with empty params
+        // *
+        let empty_config = CreateOrUpdateConfig {
+            xmars_token_address: None,
+            staking_contract_address: None,
+
+            proposal_voting_period: None,
+            proposal_effective_delay: None,
+            proposal_expiration_period: None,
+            proposal_required_deposit: None,
+            proposal_required_threshold: None,
+            proposal_required_quorum: None,
+        };
         let msg = InitMsg {
             cw20_code_id: 11,
+            config: empty_config,
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res_error = init(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => {
+                assert_eq!(msg, "All params should be available during initialization")
+            }
+            other_err => panic!("Unexpected error: {:?}", other_err),
+        }
 
-            proposal_voting_period: 1,
-            proposal_effective_delay: 1,
-            proposal_expiration_period: 1,
-            proposal_required_deposit: Uint128(1),
-            proposal_required_threshold: Decimal::one(),
-            proposal_required_quorum: Decimal::one(),
+        // *
+        // init with proposal_required_quorum, proposal_required_threshold greater than 1
+        // *
+        let config = CreateOrUpdateConfig {
+            xmars_token_address: Some(HumanAddr::from("xmars_token")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+
+            proposal_voting_period: Some(1),
+            proposal_effective_delay: Some(1),
+            proposal_expiration_period: Some(1),
+            proposal_required_deposit: Some(Uint128(1)),
+            proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
+            proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+        };
+        let msg = InitMsg {
+            cw20_code_id: 12,
+            config,
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res_error = init(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                Invalid params: [proposal_required_quorum, proposal_required_threshold]"
+            ),
+            other_err => panic!("Unexpected error: {:?}", other_err),
+        }
+
+        let config = CreateOrUpdateConfig {
+            xmars_token_address: Some(HumanAddr::from("xmars_token")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+
+            proposal_voting_period: Some(1),
+            proposal_effective_delay: Some(1),
+            proposal_expiration_period: Some(1),
+            proposal_required_deposit: Some(Uint128(1)),
+            proposal_required_threshold: Some(Decimal::one()),
+            proposal_required_quorum: Some(Decimal::one()),
+        };
+        let msg = InitMsg {
+            cw20_code_id: 11,
+            config,
         };
         let env = mock_env("owner", MockEnvParams::default());
 
@@ -864,6 +1067,134 @@ mod tests {
                 .canonical_address(&staking_contract_address)
                 .unwrap(),
             config.staking_contract_address
+        );
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        // *
+        // init config with valid params
+        // *
+        let init_config = CreateOrUpdateConfig {
+            xmars_token_address: Some(HumanAddr::from("xmars_token")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            proposal_voting_period: Some(10),
+            proposal_effective_delay: Some(11),
+            proposal_expiration_period: Some(12),
+            proposal_required_deposit: Some(Uint128(111)),
+            proposal_required_threshold: Some(Decimal::one()),
+            proposal_required_quorum: Some(Decimal::one()),
+        };
+        let msg = InitMsg {
+            cw20_code_id: 40,
+            config: init_config.clone(),
+        };
+        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        // *
+        // update config with proposal_required_quorum, proposal_required_threshold greater than 1
+        // *
+        let config = CreateOrUpdateConfig {
+            proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
+            proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+            ..init_config.clone()
+        };
+        let msg = UpdateConfig {
+            mars_token_address: Some(HumanAddr::from("mars_addr")),
+            config,
+        };
+        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
+        let res_error = handle(&mut deps, env, msg);
+        match res_error {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                Invalid params: [proposal_required_quorum, proposal_required_threshold]"
+            ),
+            other_err => panic!("Unexpected error: {:?}", other_err),
+        }
+
+        // *
+        // non owner is not authorized
+        // *
+        let msg = UpdateConfig {
+            mars_token_address: None,
+            config: init_config,
+        };
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // update config with all new params
+        // *
+        let config = CreateOrUpdateConfig {
+            xmars_token_address: Some(HumanAddr::from("new_xmars_addr")),
+            staking_contract_address: Some(HumanAddr::from("new_staking_addr")),
+            proposal_voting_period: Some(101),
+            proposal_effective_delay: Some(111),
+            proposal_expiration_period: Some(121),
+            proposal_required_deposit: Some(Uint128(1111)),
+            proposal_required_threshold: Some(Decimal::from_ratio(4u128, 5u128)),
+            proposal_required_quorum: Some(Decimal::from_ratio(1u128, 5u128)),
+        };
+        let msg = UpdateConfig {
+            mars_token_address: Some(HumanAddr::from("new_mars_addr")),
+            config: config.clone(),
+        };
+        // sender as contract address
+        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
+        // we can just call .unwrap() to assert this was a success
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // Read config from state
+        let new_config = config_state_read(&deps.storage).load().unwrap();
+
+        assert_eq!(
+            new_config.xmars_token_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_xmars_addr"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.mars_token_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_mars_addr"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.staking_contract_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_staking_addr"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_voting_period,
+            config.proposal_voting_period.unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_effective_delay,
+            config.proposal_effective_delay.unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_expiration_period,
+            config.proposal_expiration_period.unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_required_deposit,
+            config.proposal_required_deposit.unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_required_threshold,
+            config.proposal_required_threshold.unwrap()
+        );
+        assert_eq!(
+            new_config.proposal_required_quorum,
+            config.proposal_required_quorum.unwrap()
         );
     }
 
@@ -1111,7 +1442,11 @@ mod tests {
                     execute_calls: Some(vec![MsgExecuteCall {
                         execution_order: 0,
                         target_contract_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                        msg: to_binary(&HandleMsg::UpdateConfig {
+                            mars_token_address: None,
+                            config: CreateOrUpdateConfig::default(),
+                        })
+                        .unwrap(),
                     }]),
                 })
                 .unwrap(),
@@ -1156,7 +1491,11 @@ mod tests {
                     .api
                     .canonical_address(&HumanAddr::from(MOCK_CONTRACT_ADDR))
                     .unwrap(),
-                msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                msg: to_binary(&HandleMsg::UpdateConfig {
+                    mars_token_address: None,
+                    config: CreateOrUpdateConfig::default()
+                })
+                .unwrap(),
             }])
         );
     }
@@ -1729,12 +2068,20 @@ mod tests {
                     },
                     ProposalExecuteCall {
                         execution_order: 3,
-                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                        msg: to_binary(&HandleMsg::UpdateConfig {
+                            mars_token_address: None,
+                            config: CreateOrUpdateConfig::default(),
+                        })
+                        .unwrap(),
                         target_contract_canonical_address: contract_canonical_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 1,
-                        msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                        msg: to_binary(&HandleMsg::UpdateConfig {
+                            mars_token_address: None,
+                            config: CreateOrUpdateConfig::default(),
+                        })
+                        .unwrap(),
                         target_contract_canonical_address: contract_canonical_address,
                     },
                 ]),
@@ -1765,7 +2112,11 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_address.clone(),
                     send: vec![],
-                    msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                    msg: to_binary(&HandleMsg::UpdateConfig {
+                        mars_token_address: None,
+                        config: CreateOrUpdateConfig::default()
+                    })
+                    .unwrap(),
                 }),
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_address.clone(),
@@ -1779,7 +2130,11 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract_address,
                     send: vec![],
-                    msg: to_binary(&HandleMsg::UpdateConfig {}).unwrap(),
+                    msg: to_binary(&HandleMsg::UpdateConfig {
+                        mars_token_address: None,
+                        config: CreateOrUpdateConfig::default()
+                    })
+                    .unwrap(),
                 }),
             ]
         );
@@ -1796,15 +2151,20 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
+        let config = CreateOrUpdateConfig {
+            xmars_token_address: Some(HumanAddr::from("xmars_token")),
+            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+
+            proposal_voting_period: Some(TEST_PROPOSAL_VOTING_PERIOD),
+            proposal_effective_delay: Some(TEST_PROPOSAL_EFFECTIVE_DELAY),
+            proposal_expiration_period: Some(TEST_PROPOSAL_EXPIRATION_PERIOD),
+            proposal_required_deposit: Some(TEST_PROPOSAL_REQUIRED_DEPOSIT),
+            proposal_required_quorum: Some(Decimal::one()),
+            proposal_required_threshold: Some(Decimal::one()),
+        };
         let msg = InitMsg {
             cw20_code_id: 1,
-
-            proposal_voting_period: TEST_PROPOSAL_VOTING_PERIOD,
-            proposal_effective_delay: TEST_PROPOSAL_EFFECTIVE_DELAY,
-            proposal_expiration_period: TEST_PROPOSAL_EXPIRATION_PERIOD,
-            proposal_required_deposit: TEST_PROPOSAL_REQUIRED_DEPOSIT,
-            proposal_required_quorum: Decimal::one(),
-            proposal_required_threshold: Decimal::one(),
+            config,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
