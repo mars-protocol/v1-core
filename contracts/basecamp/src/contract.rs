@@ -600,6 +600,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
+        QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
     }
 }
 
@@ -675,6 +676,40 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
         execute_calls: proposal.execute_calls,
         deposit_amount: proposal.deposit_amount,
     })
+}
+
+fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+) -> StdResult<ProposalInfo> {
+    let latest_execute_proposal = proposals_state_read(&deps.storage)
+        .range(None, None, Order::Ascending)
+        .filter(|proposal| {
+            let (_, v) = proposal.as_ref().unwrap();
+            v.status == ProposalStatus::Executed
+        })
+        .last();
+
+    match latest_execute_proposal {
+        Some(proposal) => {
+            let (k, v) = proposal?;
+            let proposal_id = read_be_u64(k.as_slice())?;
+
+            Ok(ProposalInfo {
+                proposal_id,
+                status: v.status,
+                for_votes: v.for_votes,
+                against_votes: v.against_votes,
+                start_height: v.start_height,
+                end_height: v.end_height,
+                title: v.title,
+                description: v.description,
+                link: v.link,
+                execute_calls: v.execute_calls,
+                deposit_amount: v.deposit_amount,
+            })
+        }
+        None => Result::Err(StdError::generic_err("No executed proposals found")),
+    }
 }
 
 // MIGRATION
