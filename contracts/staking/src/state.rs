@@ -22,6 +22,10 @@ pub struct Config {
     pub mars_token_address: CanonicalAddr,
     /// xMars token address
     pub xmars_token_address: CanonicalAddr,
+    /// Terraswap factory contract address
+    pub terraswap_factory_address: CanonicalAddr,
+    /// Terraswap pair contract address
+    pub terraswap_pair_address: CanonicalAddr,
     /// Cooldown duration in seconds
     pub cooldown_duration: u64,
     /// Time in seconds after the cooldown ends during which the unstaking of

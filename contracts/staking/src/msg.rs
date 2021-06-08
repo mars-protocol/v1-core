@@ -1,6 +1,7 @@
 use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
 
 use cw20::Cw20ReceiveMsg;
+use mars::liquidity_pool::msg::Asset;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,8 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct CreateOrUpdateConfig {
     pub mars_token_address: Option<HumanAddr>,
+    pub terraswap_factory_address: Option<HumanAddr>,
+    pub terraswap_pair_address: Option<HumanAddr>,
     pub cooldown_duration: Option<u64>,
     pub unstake_window: Option<u64>,
 }
@@ -34,6 +37,8 @@ pub enum HandleMsg {
     InitTokenCallback {},
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
+    /// Swap contract reserves of specified asset into Mars
+    Swap { asset: Asset },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
