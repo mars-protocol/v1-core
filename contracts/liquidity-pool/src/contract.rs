@@ -1140,7 +1140,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // refund sent amount in excess of actual debt amount to liquidate
     if refund_amount > Uint256::zero() {
         let refund_msg = build_send_asset_msg(
-            env.contract.address.clone(),
+            env.contract.address,
             liquidator_address.clone(),
             debt_asset,
             refund_amount,
@@ -4406,7 +4406,7 @@ mod tests {
         // trying to liquidate user with zero collateral balance should fail
         {
             deps.querier.set_cw20_balances(
-                collateral_address.clone(),
+                collateral_address,
                 &[(user_address.clone(), Uint128::zero())],
             );
 
