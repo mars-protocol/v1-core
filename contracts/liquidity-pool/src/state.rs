@@ -179,7 +179,7 @@ impl Reserve {
             debt_total_scaled: Uint256::zero(),
             liquidation_threshold: liquidation_threshold.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
-            protocol_income_to_be_distributed: Uint256::zero(),
+            protocol_income_to_distribute: Uint256::zero(),
         };
         Ok(new_reserve)
     }
