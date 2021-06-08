@@ -1197,7 +1197,7 @@ fn liquidation_compute_amounts(
         sent_debt_asset_amount
     };
 
-    // Collateral: debt to repay in uusd times plus the liquidation
+    // Collateral: debt to repay in uusd times the liquidation
     // bonus
     let mut collateral_amount_to_liquidate =
         debt_amount_to_repay * (Decimal256::one() + liquidation_bonus) * debt_price
