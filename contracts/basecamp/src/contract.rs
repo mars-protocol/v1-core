@@ -776,11 +776,8 @@ mod tests {
                 .unwrap(),
             config.mars_token_address
         );
-        let xmars_token_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("xmars_token"))
-            .unwrap();
-        assert_eq!(xmars_token_address, config.xmars_token_address);
+        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
+        assert_eq!(CanonicalAddr::default(), config.staking_contract_address);
 
         // trying again fails
         let msg = HandleMsg::InitTokenCallback {};
@@ -797,8 +794,8 @@ mod tests {
         // query works now
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let config: ConfigResponse = from_binary(&res).unwrap();
+
         assert_eq!(HumanAddr::from("mars_token"), config.mars_token_address);
-        assert_eq!(HumanAddr::from("xmars_token"), config.xmars_token_address);
     }
 
     #[test]
@@ -1752,6 +1749,10 @@ mod tests {
         config.xmars_token_address = deps
             .api
             .canonical_address(&HumanAddr::from("xmars_token"))
+            .unwrap();
+        config.staking_contract_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("staking_contract"))
             .unwrap();
         config_singleton.save(&config).unwrap();
 
