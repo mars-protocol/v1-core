@@ -4571,7 +4571,7 @@ mod tests {
                 }),]
             );
 
-            assert_eq!(
+            mars::testing::assert_eq_vec(
                 res.log,
                 vec![
                     log("action", "liquidate"),
@@ -4581,7 +4581,7 @@ mod tests {
                     log("liquidator", liquidator_address.as_str()),
                     log(
                         "collateral_amount_liquidated",
-                        expected_liquidated_collateral_amount
+                        expected_liquidated_collateral_amount,
                     ),
                     log("debt_amount_repaid", first_debt_to_repay),
                     log("refund_amount", 0),
@@ -4589,7 +4589,7 @@ mod tests {
                     log("liquidity_index", expected_debt_rates.liquidity_index),
                     log("borrow_rate", expected_debt_rates.borrow_rate),
                     log("liquidity_rate", expected_debt_rates.liquidity_rate),
-                ]
+                ],
             );
 
             // check user still has deposited collateral asset and
@@ -4612,11 +4612,21 @@ mod tests {
                     .load(&user_canonical_addr.as_slice())
                     .unwrap();
 
-            expected_user_debt_scaled = expected_user_debt_scaled
-                - (first_debt_to_repay / expected_debt_rates.borrow_index);
+            let expected_less_debt_scaled = first_debt_to_repay / expected_debt_rates.borrow_index;
+
+            expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             assert_eq!(expected_user_debt_scaled, debt.amount_scaled);
 
+            // check global debt decreased by the appropriate amount
+            expected_global_debt_scaled = expected_global_debt_scaled - expected_less_debt_scaled;
+
+            assert_eq!(
+                expected_global_debt_scaled,
+                debt_reserve_after.debt_total_scaled
+            );
+
+            // check correct accumulated protocol income to distribute
             assert_eq!(
                 Uint256::zero(),
                 collateral_reserve_after.protocol_income_to_distribute
@@ -4702,10 +4712,10 @@ mod tests {
                 },
             );
 
-            let collateral_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            let collateral_reserve_after = reserves_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_after_liquidation = reserves_state_read(&deps.storage)
+            let debt_reserve_after = reserves_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -4784,8 +4794,8 @@ mod tests {
             );
 
             // check user's debt decreased by the appropriate amount
-            expected_user_debt_scaled =
-                expected_user_debt_scaled - (expected_less_debt / expected_debt_rates.borrow_index);
+            let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
+            expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             let debt =
                 debts_asset_state_read(&deps.storage, debt_contract_addr_canonical.as_slice())
@@ -4794,15 +4804,22 @@ mod tests {
 
             assert_eq!(expected_user_debt_scaled, debt.amount_scaled);
 
+            // check global debt decreased by the appropriate amount
+            expected_global_debt_scaled = expected_global_debt_scaled - expected_less_debt_scaled;
+            assert_eq!(
+                expected_global_debt_scaled,
+                debt_reserve_after.debt_total_scaled
+            );
+
+            // check correct accumulated protocol income to distribute
             assert_eq!(
                 debt_reserve_before.protocol_income_to_distribute
                     + expected_debt_rates.protocol_income_to_distribute,
-                debt_reserve_after_liquidation.protocol_income_to_distribute
+                debt_reserve_after.protocol_income_to_distribute
             );
-
             assert_eq!(
                 expected_collateral_rates.protocol_income_to_distribute,
-                collateral_reserve_after_liquidation.protocol_income_to_distribute
+                collateral_reserve_after.protocol_income_to_distribute
             );
         }
     }
