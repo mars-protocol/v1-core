@@ -404,3 +404,13 @@ pub fn get_test_addresses(api: &MockApi, address: &str) -> (HumanAddr, Canonical
     let canonical_address = api.canonical_address(&human_address).unwrap();
     (human_address, canonical_address)
 }
+
+/// Assert elements in vecs one by one in order to get a more meaningful error
+/// when debugging tests
+pub fn assert_eq_vec<T: std::fmt::Debug + PartialEq>(expected: Vec<T>, actual: Vec<T>) {
+    assert_eq!(expected.len(), actual.len());
+
+    for (i, element) in expected.iter().enumerate() {
+        assert_eq!(*element, actual[i]);
+    }
+}
