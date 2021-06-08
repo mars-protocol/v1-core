@@ -505,7 +505,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
-        QueryMsg::Latest {} => to_binary(&query_latest_executed_proposal(deps)?),
+        QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
     }
 }
 
