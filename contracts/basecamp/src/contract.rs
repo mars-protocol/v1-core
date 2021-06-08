@@ -6,7 +6,7 @@ use cosmwasm_std::{
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::read_be_u64;
+use mars::helpers::{read_be_u64, unwrap_or};
 use mars::xmars_token;
 
 use crate::msg::{
@@ -18,7 +18,6 @@ use crate::state::{
     proposal_votes_state_read, proposals_state, proposals_state_read, Basecamp, Config, Proposal,
     ProposalExecuteCall, ProposalStatus, ProposalVote, ProposalVoteOption,
 };
-use mars::helpers::unwrap_or;
 
 // CONSTANTS
 const MIN_TITLE_LENGTH: usize = 4;
@@ -48,9 +47,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         proposal_required_threshold,
     } = msg.config;
 
-    // All fields should be available
-    let available = xmars_token_address.is_some()
-        && staking_contract_address.is_some()
+    // Check required fields are available
+    let available = xmars_token_address.is_none()
+        && staking_contract_address.is_none()
         && proposal_voting_period.is_some()
         && proposal_effective_delay.is_some()
         && proposal_expiration_period.is_some()
@@ -68,10 +67,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
         mars_token_address: CanonicalAddr::default(),
-        xmars_token_address: deps.api.canonical_address(&xmars_token_address.unwrap())?,
-        staking_contract_address: deps
-            .api
-            .canonical_address(&staking_contract_address.unwrap())?,
+        xmars_token_address: CanonicalAddr::default(),
+        staking_contract_address: CanonicalAddr::default(),
 
         proposal_voting_period: proposal_voting_period.unwrap(),
         proposal_effective_delay: proposal_effective_delay.unwrap(),
@@ -878,8 +875,8 @@ mod tests {
         // init with proposal_required_quorum, proposal_required_threshold greater than 1
         // *
         let config = CreateOrUpdateConfig {
-            xmars_token_address: Some(HumanAddr::from("xmars_token")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            xmars_token_address: None,
+            staking_contract_address: None,
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -904,8 +901,8 @@ mod tests {
         }
 
         let config = CreateOrUpdateConfig {
-            xmars_token_address: Some(HumanAddr::from("xmars_token")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            xmars_token_address: None,
+            staking_contract_address: None,
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -1001,15 +998,20 @@ mod tests {
     fn test_set_contract_addresses() {
         let mut deps = mock_dependencies(20, &[]);
 
+        let config = CreateOrUpdateConfig {
+            xmars_token_address: None,
+            staking_contract_address: None,
+
+            proposal_voting_period: Some(1),
+            proposal_effective_delay: Some(1),
+            proposal_expiration_period: Some(1),
+            proposal_required_deposit: Some(Uint128(1)),
+            proposal_required_threshold: Some(Decimal::one()),
+            proposal_required_quorum: Some(Decimal::one()),
+        };
         let msg = InitMsg {
             cw20_code_id: 11,
-
-            proposal_voting_period: 1,
-            proposal_effective_delay: 1,
-            proposal_expiration_period: 1,
-            proposal_required_deposit: Uint128(1),
-            proposal_required_threshold: Decimal::one(),
-            proposal_required_quorum: Decimal::one(),
+            config,
         };
         let env = mock_env("owner", MockEnvParams::default());
         init(&mut deps, env, msg).unwrap();
@@ -1021,10 +1023,8 @@ mod tests {
 
         let xmars_token_address = HumanAddr::from("xmars_token");
         let staking_contract_address = HumanAddr::from("staking_contract");
-        let env = mock_env("owner", MockEnvParams::default());
         handle_set_contract_addresses(
             &mut deps,
-            env,
             xmars_token_address.clone(),
             staking_contract_address.clone(),
         )
@@ -1043,10 +1043,8 @@ mod tests {
             config.staking_contract_address
         );
 
-        let env = mock_env("owner", MockEnvParams::default());
         handle_set_contract_addresses(
             &mut deps,
-            env,
             HumanAddr::from("different_xmars_token"),
             HumanAddr::from("different_staking_contract"),
         )
@@ -1074,8 +1072,8 @@ mod tests {
         // init config with valid params
         // *
         let init_config = CreateOrUpdateConfig {
-            xmars_token_address: Some(HumanAddr::from("xmars_token")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            xmars_token_address: None,
+            staking_contract_address: None,
             proposal_voting_period: Some(10),
             proposal_effective_delay: Some(11),
             proposal_expiration_period: Some(12),
@@ -2148,8 +2146,8 @@ mod tests {
 
         // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
-            xmars_token_address: Some(HumanAddr::from("xmars_token")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            xmars_token_address: None,
+            staking_contract_address: None,
 
             proposal_voting_period: Some(TEST_PROPOSAL_VOTING_PERIOD),
             proposal_effective_delay: Some(TEST_PROPOSAL_EFFECTIVE_DELAY),
