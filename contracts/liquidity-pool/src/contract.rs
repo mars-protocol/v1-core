@@ -999,10 +999,9 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     reserve_apply_accumulated_interests(&env, &mut debt_reserve);
 
-    let user_debt_asset_total_debt =
-        user_debt.amount_scaled * debt_reserve.borrow_index;
+    let user_debt_asset_total_debt = user_debt.amount_scaled * debt_reserve.borrow_index;
 
-    let (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount) = 
+    let (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount) =
         liquidation_compute_amounts(
             collateral_price,
             debt_price,
@@ -1010,7 +1009,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             user_collateral_balance,
             collateral_reserve.liquidation_bonus,
             user_debt_asset_total_debt,
-            sent_debt_asset_amount
+            sent_debt_asset_amount,
         );
 
     let mut messages: Vec<CosmosMsg> = vec![];
@@ -1100,7 +1099,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             collateral_asset,
             collateral_amount_to_liquidate,
         )?;
-        messages.append(&mut vec![burn_ma_tokens_msg, send_underlying_asset_msg]);
+        messages.push(burn_ma_tokens_msg);
+        messages.push(send_underlying_asset_msg);
     }
 
     // if max collateral to liquidate equals the user's balance then unset collateral bit
@@ -1121,8 +1121,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
     debt.amount_scaled = debt.amount_scaled - debt_amount_to_repay_scaled;
     debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
-    debt_reserve.debt_total_scaled =
-        debt_reserve.debt_total_scaled - debt_amount_to_repay_scaled;
+    debt_reserve.debt_total_scaled = debt_reserve.debt_total_scaled - debt_amount_to_repay_scaled;
 
     reserve_update_interest_rates(
         deps,
@@ -1190,8 +1189,7 @@ fn liquidation_compute_amounts(
 ) -> (Uint256, Uint256, Uint256) {
     // Debt: Only up to a fraction of the total debt (determined by the close factor) can be
     // repayed.
-    let max_repayable_debt =
-        close_factor * user_debt_asset_total_debt;
+    let max_repayable_debt = close_factor * user_debt_asset_total_debt;
 
     let mut debt_amount_to_repay = if sent_debt_asset_amount > max_repayable_debt {
         max_repayable_debt
@@ -1216,7 +1214,11 @@ fn liquidation_compute_amounts(
 
     let refund_amount = sent_debt_asset_amount - debt_amount_to_repay;
 
-    (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount)
+    (
+        debt_amount_to_repay,
+        collateral_amount_to_liquidate,
+        refund_amount,
+    )
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
@@ -1705,7 +1707,8 @@ pub fn reserve_apply_accumulated_interests(env: &Env, reserve: &mut Reserve) {
         Uint256::zero()
     };
 
-    reserve.protocol_income_to_distribute += interest_accrued * reserve.reserve_factor;
+    let new_protocol_income_to_distribute = interest_accrued * reserve.reserve_factor;
+    reserve.protocol_income_to_distribute += new_protocol_income_to_distribute;
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -4338,7 +4341,6 @@ mod tests {
             &[("collateral".to_string(), collateral_price)],
         );
 
-
         let collateral_reserve = MockReserve {
             ma_token_address: "ma_collateral",
             loan_to_value: collateral_max_ltv,
@@ -4549,6 +4551,8 @@ mod tests {
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
+            // TODO: not multiplying by collateral because it is a cw20 and Decimal::one
+            // is the default price. Set a different price when implementing the oracle
             let expected_liquidated_collateral_amount = first_debt_to_repay
                 * (Decimal256::one() + collateral_liquidation_bonus)
                 / Decimal256::from(collateral_price);
@@ -4608,21 +4612,17 @@ mod tests {
                     .load(&user_canonical_addr.as_slice())
                     .unwrap();
 
-            expected_user_debt_scaled =
-                expected_user_debt_scaled -
-                (first_debt_to_repay / expected_debt_rates.borrow_index);
+            expected_user_debt_scaled = expected_user_debt_scaled
+                - (first_debt_to_repay / expected_debt_rates.borrow_index);
 
-            assert_eq!(
-                expected_user_debt_scaled,
-                debt.amount_scaled
-            );
+            assert_eq!(expected_user_debt_scaled, debt.amount_scaled);
 
             assert_eq!(
                 Uint256::zero(),
                 collateral_reserve_after.protocol_income_to_distribute
             );
             assert_eq!(
-                debt_reserve_initial.protocol_income_to_distribute
+                debt_reserve_before.protocol_income_to_distribute
                     + expected_debt_rates.protocol_income_to_distribute,
                 debt_reserve_after.protocol_income_to_distribute
             );
@@ -4665,24 +4665,39 @@ mod tests {
             let res = handle(&mut deps, env, liquidate_msg).unwrap();
 
             // get expected indices and rates for debt and collateral reserves
+            let expected_debt_indices = th_get_expected_indices(&debt_reserve_before, block_time);
+            let user_debt_asset_total_debt =
+                expected_user_debt_scaled * expected_debt_indices.borrow;
+            // Since debt is being over_repayed, we expect to max out the liquidatable debt
+            let expected_less_debt = user_debt_asset_total_debt * close_factor;
+
+            let expected_refund_amount = second_debt_to_repay - expected_less_debt;
+
             let expected_debt_rates = th_get_expected_indices_and_rates(
                 &deps,
                 &debt_reserve_before,
                 block_time,
                 available_liquidity_debt, //this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
-                    less_debt: second_debt_to_repay.into(),
+                    less_debt: expected_less_debt.into(),
+                    less_liquidity: expected_refund_amount.into(),
                     ..Default::default()
                 },
             );
-            // TODO: How do I compute less debt here???
+
+            // TODO: not multiplying by collateral because it is a cw20 and Decimal::one
+            // is the default price. Set a different price when implementing the oracle
+            let expected_liquidated_collateral_amount = expected_less_debt
+                * (Decimal256::one() + collateral_liquidation_bonus)
+                / Decimal256::from(collateral_price);
+
             let expected_collateral_rates = th_get_expected_indices_and_rates(
                 &deps,
                 &collateral_reserve_before,
                 block_time,
                 available_liquidity_collateral, //this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
-                    less_debt: second_debt_to_repay.into(),
+                    less_liquidity: expected_liquidated_collateral_amount.into(),
                     ..Default::default()
                 },
             );
@@ -4694,26 +4709,42 @@ mod tests {
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
-            let expected_liquidated_collateral_amount = second_debt_to_repay
-                * (Decimal256::one() + collateral_liquidation_bonus)
-                / Decimal256::from(collateral_price);
+            let expected_liquidated_collateral_amount_scaled =
+                expected_liquidated_collateral_amount / expected_collateral_rates.liquidity_index;
 
             assert_eq!(
                 res.messages,
-                vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("ma_collateral"),
-                    msg: to_binary(&mars::ma_token::msg::HandleMsg::TransferOnLiquidation {
-                        sender: user_address.clone(),
-                        recipient: liquidator_address.clone(),
-                        amount: expected_liquidated_collateral_amount.into(),
-                    })
-                    .unwrap(),
-                    send: vec![],
-                }),]
+                vec![
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: HumanAddr::from("ma_collateral"),
+                        msg: to_binary(&mars::ma_token::msg::HandleMsg::Burn {
+                            user: user_address.clone(),
+                            amount: expected_liquidated_collateral_amount_scaled.into(),
+                        })
+                        .unwrap(),
+                        send: vec![],
+                    }),
+                    CosmosMsg::Bank(BankMsg::Send {
+                        from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        to_address: liquidator_address.clone(),
+                        amount: vec![Coin {
+                            denom: String::from("collateral"),
+                            amount: expected_liquidated_collateral_amount.into(),
+                        }],
+                    }),
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: HumanAddr::from("debt"),
+                        msg: to_binary(&Cw20HandleMsg::Transfer {
+                            recipient: liquidator_address.clone(),
+                            amount: expected_refund_amount.into(),
+                        })
+                        .unwrap(),
+                        send: vec![],
+                    }),
+                ]
             );
 
-            assert_eq!(
-                res.log,
+            mars::testing::assert_eq_vec(
                 vec![
                     log("action", "liquidate"),
                     log("collateral_reserve", "collateral"),
@@ -4722,15 +4753,20 @@ mod tests {
                     log("liquidator", liquidator_address.as_str()),
                     log(
                         "collateral_amount_liquidated",
-                        expected_liquidated_collateral_amount
+                        expected_liquidated_collateral_amount,
                     ),
-                    log("debt_amount_repaid", second_debt_to_repay),
-                    log("refund_amount", 0),
+                    log("debt_amount_repaid", expected_less_debt),
+                    log("refund_amount", expected_refund_amount),
                     log("borrow_index", expected_debt_rates.borrow_index),
                     log("liquidity_index", expected_debt_rates.liquidity_index),
                     log("borrow_rate", expected_debt_rates.borrow_rate),
                     log("liquidity_rate", expected_debt_rates.liquidity_rate),
-                ]
+                    log("borrow_index", expected_collateral_rates.borrow_index),
+                    log("liquidity_index", expected_collateral_rates.liquidity_index),
+                    log("borrow_rate", expected_collateral_rates.borrow_rate),
+                    log("liquidity_rate", expected_collateral_rates.liquidity_rate),
+                ],
+                res.log,
             );
 
             // check user still has deposited collateral asset and
@@ -4748,24 +4784,25 @@ mod tests {
             );
 
             // check user's debt decreased by the appropriate amount
+            expected_user_debt_scaled =
+                expected_user_debt_scaled - (expected_less_debt / expected_debt_rates.borrow_index);
+
             let debt =
                 debts_asset_state_read(&deps.storage, debt_contract_addr_canonical.as_slice())
                     .load(&user_canonical_addr.as_slice())
                     .unwrap();
 
+            assert_eq!(expected_user_debt_scaled, debt.amount_scaled);
+
             assert_eq!(
-                expected_user_debt_scaled,
-                debt.amount_scaled
+                debt_reserve_before.protocol_income_to_distribute
+                    + expected_debt_rates.protocol_income_to_distribute,
+                debt_reserve_after_liquidation.protocol_income_to_distribute
             );
 
             assert_eq!(
-                Uint256::zero(),
+                expected_collateral_rates.protocol_income_to_distribute,
                 collateral_reserve_after_liquidation.protocol_income_to_distribute
-            );
-            assert_eq!(
-                debt_reserve_initial.protocol_income_to_distribute
-                    + expected_debt_rates.protocol_income_to_distribute,
-                debt_reserve_after_liquidation.protocol_income_to_distribute
             );
         }
     }
@@ -5760,40 +5797,26 @@ mod tests {
         initial_liquidity: u128,
         deltas: TestUtilizationDeltas,
     ) -> TestInterestResults {
-        let seconds_elapsed = block_time - reserve.interests_last_updated;
-        let previous_borrow_index = reserve.borrow_index;
-
-        // market indices
-        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
-            reserve.liquidity_index,
-            reserve.liquidity_rate,
-            seconds_elapsed,
-        );
-
-        let expected_borrow_index = th_calculate_applied_linear_interest_rate(
-            reserve.borrow_index,
-            reserve.borrow_rate,
-            seconds_elapsed,
-        );
+        let expected_indices = th_get_expected_indices(reserve, block_time);
 
         // Compute protocol income to be distributed (using values up to the instant
         // before the contract call is made)
+        let previous_borrow_index = reserve.borrow_index;
         let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
-        let current_debt_total = reserve.debt_total_scaled * expected_borrow_index;
+        let current_debt_total = reserve.debt_total_scaled * expected_indices.borrow;
         let interest_accrued = if current_debt_total > previous_debt_total {
             current_debt_total - previous_debt_total
         } else {
             Uint256::zero()
         };
+        let expected_protocol_income_to_distribute = interest_accrued * reserve.reserve_factor;
 
         // When borrowing, new computed index is used for scaled amount
-        let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_borrow_index;
+        let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_indices.borrow;
         // When repaying, new computed index is used for scaled amount
-        let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_borrow_index;
+        let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_indices.borrow;
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
-        // TODO: Maybe split index and interest rate calculations and take the needed inputs
-        // for each
         let new_debt_total_scaled =
             if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
                 reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled
@@ -5801,8 +5824,7 @@ mod tests {
                 Uint256::zero()
             };
         let dec_debt_total =
-            Decimal256::from_uint256(new_debt_total_scaled) * expected_borrow_index;
-        let expected_protocol_income_to_distribute = interest_accrued * reserve.reserve_factor;
+            Decimal256::from_uint256(new_debt_total_scaled) * expected_indices.borrow;
         let total_protocol_income_to_distribute =
             reserve.protocol_income_to_distribute + expected_protocol_income_to_distribute;
 
@@ -5824,11 +5846,38 @@ mod tests {
             * (Decimal256::one() - reserve.reserve_factor);
 
         TestInterestResults {
-            borrow_index: expected_borrow_index,
-            liquidity_index: expected_liquidity_index,
+            borrow_index: expected_indices.borrow,
+            liquidity_index: expected_indices.liquidity,
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
             protocol_income_to_distribute: expected_protocol_income_to_distribute,
+        }
+    }
+
+    /// Expected results for applying accumulated interest
+    struct TestExpectedIndices {
+        liquidity: Decimal256,
+        borrow: Decimal256,
+    }
+
+    fn th_get_expected_indices(reserve: &Reserve, block_time: u64) -> TestExpectedIndices {
+        let seconds_elapsed = block_time - reserve.interests_last_updated;
+        // market indices
+        let expected_liquidity_index = th_calculate_applied_linear_interest_rate(
+            reserve.liquidity_index,
+            reserve.liquidity_rate,
+            seconds_elapsed,
+        );
+
+        let expected_borrow_index = th_calculate_applied_linear_interest_rate(
+            reserve.borrow_index,
+            reserve.borrow_rate,
+            seconds_elapsed,
+        );
+
+        TestExpectedIndices {
+            liquidity: expected_liquidity_index,
+            borrow: expected_borrow_index,
         }
     }
 

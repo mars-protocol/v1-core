@@ -87,9 +87,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
-        HandleMsg::TransferOnLiquidation { sender, recipient, amount } => {
-            handle_transfer_on_liquidation(deps, env, sender, recipient, amount)
-        }
+        HandleMsg::TransferOnLiquidation {
+            sender,
+            recipient,
+            amount,
+        } => handle_transfer_on_liquidation(deps, env, sender, recipient, amount),
         HandleMsg::Burn { user, amount } => handle_burn(deps, env, user, amount),
         HandleMsg::Send {
             contract,
