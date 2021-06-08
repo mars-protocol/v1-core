@@ -22,7 +22,7 @@ pub enum HandleMsg {
     Receive(Cw20ReceiveMsg),
 
     /// Sets the xMars and Staking contract addresses
-    SetTokenAddresses {
+    SetContractAddresses {
         xmars_token_address: HumanAddr,
         staking_contract_address: HumanAddr,
     },

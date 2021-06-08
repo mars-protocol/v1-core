@@ -91,7 +91,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 
         HandleMsg::InitTokenCallback {} => handle_init_mars_callback(deps, env),
 
-        HandleMsg::SetTokenAddresses {
+        HandleMsg::SetContractAddresses {
             xmars_token_address,
             staking_contract_address,
         } => handle_set_token_addresses(deps, env, xmars_token_address, staking_contract_address),
