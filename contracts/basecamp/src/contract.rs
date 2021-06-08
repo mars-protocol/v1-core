@@ -799,6 +799,75 @@ mod tests {
     }
 
     #[test]
+    fn test_set_contract_addresses() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        let msg = InitMsg {
+            cw20_code_id: 11,
+
+            proposal_voting_period: 1,
+            proposal_effective_delay: 1,
+            proposal_expiration_period: 1,
+            proposal_required_deposit: Uint128(1),
+            proposal_required_threshold: Decimal::one(),
+            proposal_required_quorum: Decimal::one(),
+        };
+        let env = mock_env("owner", MockEnvParams::default());
+        init(&mut deps, env, msg).unwrap();
+
+        // Assert initally contract addresses are not set
+        let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
+        assert_eq!(CanonicalAddr::default(), config.staking_contract_address);
+
+        let xmars_token_address = HumanAddr::from("xmars_token");
+        let staking_contract_address = HumanAddr::from("staking_contract");
+        let env = mock_env("owner", MockEnvParams::default());
+        handle_set_contract_addresses(
+            &mut deps,
+            env,
+            xmars_token_address.clone(),
+            staking_contract_address.clone(),
+        )
+        .unwrap();
+
+        // Assert config address can be correctly set once
+        let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(
+            deps.api.canonical_address(&xmars_token_address).unwrap(),
+            config.xmars_token_address
+        );
+        assert_eq!(
+            deps.api
+                .canonical_address(&staking_contract_address)
+                .unwrap(),
+            config.staking_contract_address
+        );
+
+        let env = mock_env("owner", MockEnvParams::default());
+        handle_set_contract_addresses(
+            &mut deps,
+            env,
+            HumanAddr::from("different_xmars_token"),
+            HumanAddr::from("different_staking_contract"),
+        )
+        .unwrap_err();
+
+        // Assert config address cannot be set more than once
+        let config = config_state_read(&deps.storage).load().unwrap();
+        assert_eq!(
+            deps.api.canonical_address(&xmars_token_address).unwrap(),
+            config.xmars_token_address
+        );
+        assert_eq!(
+            deps.api
+                .canonical_address(&staking_contract_address)
+                .unwrap(),
+            config.staking_contract_address
+        );
+    }
+
+    #[test]
     fn test_mint_mars() {
         let mut deps = th_setup(&[]);
 
