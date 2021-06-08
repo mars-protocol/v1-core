@@ -276,7 +276,11 @@ pub fn handle_set_token_addresses<S: Storage, A: Api, Q: Querier>(
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
 
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+    if deps.api.canonical_address(&env.message.sender)? != config.owner
+        || config.xmars_token_address != CanonicalAddr::default()
+        || config.staking_contract_address != CanonicalAddr::default()
+    {
+        // Can do this only once
         return Err(StdError::unauthorized());
     };
 
