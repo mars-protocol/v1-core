@@ -92,6 +92,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
         HandleMsg::InitTokenCallback {} => handle_init_xmars_token_callback(deps, env),
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
+        HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
 }
 
@@ -389,6 +390,28 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+/// Execute Cosmos message
+pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    msg: CosmosMsg,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    }
+
+    Ok(HandleResponse {
+        messages: vec![msg.clone()],
+        log: vec![
+            log("action", "execute_cosmos_msg"),
+            log("message", format!("{:?}", msg)),
+        ],
+        data: None,
+    })
+}
+
 // QUERIES
 
 pub fn query<S: Storage, A: Api, Q: Querier>(
@@ -426,7 +449,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{Coin, CosmosMsg, HumanAddr};
+    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, HumanAddr};
     use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     use crate::msg::HandleMsg::UpdateConfig;
@@ -1109,6 +1132,42 @@ mod tests {
 
         assert_eq!(cooldown.timestamp, expired_cooldown_block_time);
         assert_eq!(cooldown.amount, expired_balance);
+    }
+
+    #[test]
+    fn test_execute_cosmos_msg() {
+        let mut deps = th_setup(&[]);
+
+        let bank = BankMsg::Send {
+            from_address: HumanAddr("source".to_string()),
+            to_address: HumanAddr("destination".to_string()),
+            amount: vec![Coin {
+                denom: "uluna".to_string(),
+                amount: Uint128(123456u128),
+            }],
+        };
+        let cosmos_msg = CosmosMsg::Bank(bank);
+        let msg = HandleMsg::ExecuteCosmosMsg(cosmos_msg.clone());
+
+        // *
+        // non owner is not authorized
+        // *
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // can execute Cosmos msg
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let res = handle(&mut deps, env, msg).unwrap();
+        let expected_msg = vec![cosmos_msg.clone()];
+        assert_eq!(res.messages, expected_msg);
+        let expected_log = vec![
+            log("action", "execute_cosmos_msg"),
+            log("message", format!("{:?}", cosmos_msg)),
+        ];
+        assert_eq!(res.log, expected_log);
     }
 
     // TEST HELPERS

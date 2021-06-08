@@ -1,4 +1,4 @@
-use cosmwasm_std::HumanAddr;
+use cosmwasm_std::{CosmosMsg, HumanAddr};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,8 @@ pub enum HandleMsg {
     Cooldown {},
     /// Callback to initialize xMars token
     InitTokenCallback {},
+    /// Execute Cosmos msg
+    ExecuteCosmosMsg(CosmosMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
