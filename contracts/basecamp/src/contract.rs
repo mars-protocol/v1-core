@@ -325,7 +325,7 @@ pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![
-            log("action", "set_token_addresses"),
+            log("action", "set_contract_addresses"),
             log("xmars_token_address", &xmars_token_address),
             log("staking_contract_address", &staking_contract_address),
         ],
