@@ -37,8 +37,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        xmars_token_address,
-        staking_contract_address,
+        xmars_token_address: _,
+        staking_contract_address: _,
         proposal_voting_period,
         proposal_effective_delay,
         proposal_expiration_period,
@@ -48,9 +48,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     } = msg.config;
 
     // Check required fields are available
-    let available = xmars_token_address.is_none()
-        && staking_contract_address.is_none()
-        && proposal_voting_period.is_some()
+    let available = proposal_voting_period.is_some()
         && proposal_effective_delay.is_some()
         && proposal_expiration_period.is_some()
         && proposal_required_deposit.is_some()
@@ -1043,12 +1041,13 @@ mod tests {
             config.staking_contract_address
         );
 
-        handle_set_contract_addresses(
+        let error_res = handle_set_contract_addresses(
             &mut deps,
             HumanAddr::from("different_xmars_token"),
             HumanAddr::from("different_staking_contract"),
         )
         .unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
 
         // Assert config address cannot be set more than once
         let config = config_state_read(&deps.storage).load().unwrap();
