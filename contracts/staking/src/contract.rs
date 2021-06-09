@@ -403,11 +403,8 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     }
 
     Ok(HandleResponse {
-        messages: vec![msg.clone()],
-        log: vec![
-            log("action", "execute_cosmos_msg"),
-            log("message", format!("{:?}", msg)),
-        ],
+        messages: vec![msg],
+        log: vec![log("action", "execute_cosmos_msg")],
         data: None,
     })
 }
@@ -1161,12 +1158,8 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let res = handle(&mut deps, env, msg).unwrap();
-        let expected_msg = vec![cosmos_msg.clone()];
-        assert_eq!(res.messages, expected_msg);
-        let expected_log = vec![
-            log("action", "execute_cosmos_msg"),
-            log("message", format!("{:?}", cosmos_msg)),
-        ];
+        assert_eq!(res.messages, vec![cosmos_msg]);
+        let expected_log = vec![log("action", "execute_cosmos_msg")];
         assert_eq!(res.log, expected_log);
     }
 
