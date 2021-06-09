@@ -3,119 +3,23 @@
   "title": "QueryMsg",
   "anyOf": [
     {
-      "description": "Returns the current balance of the given address, 0 if unset. Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "balance"
+        "config"
       ],
       "properties": {
-        "balance": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
-      "type": "object",
-      "required": [
-        "token_info"
-      ],
-      "properties": {
-        "token_info": {
+        "config": {
           "type": "object"
         }
       }
     },
     {
-      "description": "Only with \"mintable\" extension. Returns who can mint and how much. Return type: MinterResponse.",
       "type": "object",
       "required": [
-        "minter"
+        "proposals"
       ],
       "properties": {
-        "minter": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Only with \"allowance\" extension. Returns how much spender can use from owner account, 0 if unset. Return type: AllowanceResponse.",
-      "type": "object",
-      "required": [
-        "allowance"
-      ],
-      "properties": {
-        "allowance": {
-          "type": "object",
-          "required": [
-            "owner",
-            "spender"
-          ],
-          "properties": {
-            "owner": {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            "spender": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Only with \"enumerable\" extension (and \"allowances\") Returns all allowances this owner has approved. Supports pagination. Return type: AllAllowancesResponse.",
-      "type": "object",
-      "required": [
-        "all_allowances"
-      ],
-      "properties": {
-        "all_allowances": {
-          "type": "object",
-          "required": [
-            "owner"
-          ],
-          "properties": {
-            "limit": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0.0
-            },
-            "owner": {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            "start_after": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Only with \"enumerable\" extension Returns all accounts that have balances. Supports pagination. Return type: AllAccountsResponse.",
-      "type": "object",
-      "required": [
-        "all_accounts"
-      ],
-      "properties": {
-        "all_accounts": {
+        "proposals": {
           "type": "object",
           "properties": {
             "limit": {
@@ -126,24 +30,49 @@
               "format": "uint32",
               "minimum": 0.0
             },
-            "start_after": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "start": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "proposal"
+      ],
+      "properties": {
+        "proposal": {
+          "type": "object",
+          "required": [
+            "proposal_id"
+          ],
+          "properties": {
+            "proposal_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "latest_executed_proposal"
+      ],
+      "properties": {
+        "latest_executed_proposal": {
+          "type": "object"
+        }
+      }
     }
-  ],
-  "definitions": {
-    "HumanAddr": {
-      "type": "string"
-    }
-  }
+  ]
 }
