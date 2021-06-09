@@ -1199,9 +1199,9 @@ fn liquidation_compute_amounts(
 
     // Collateral: debt to repay in uusd times the liquidation
     // bonus
-    let mut collateral_amount_to_liquidate =
-        debt_amount_to_repay * (Decimal256::one() + liquidation_bonus) * debt_price
-            / collateral_price;
+    let debt_to_repay_in_uusd =
+        debt_amount_to_repay * (Decimal256::one() + liquidation_bonus) * debt_price;
+    let mut collateral_amount_to_liquidate = debt_to_repay_in_uusd / collateral_price;
 
     // If collateral amount to liquidate is higher than user_collateral_balance,
     // liquidate the full balance and adjust the debt amount to repay accordingly
