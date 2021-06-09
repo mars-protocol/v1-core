@@ -29,6 +29,13 @@ pub struct CreateOrUpdateConfig {
 pub enum HandleMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
+
+    /// Sets the xMars and Staking contract addresses
+    SetContractAddresses {
+        xmars_token_address: HumanAddr,
+        staking_contract_address: HumanAddr,
+    },
+
     /// Callback to initialize Mars token
     InitTokenCallback {},
 
@@ -96,6 +103,7 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
+    pub staking_contract_address: HumanAddr,
     pub proposal_required_deposit: Uint128,
 }
 
