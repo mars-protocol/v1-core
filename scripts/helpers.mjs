@@ -14,7 +14,6 @@ export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
     fee: new StdFee(30000000, [
-      new Coin('uluna', 4500000),
       new Coin('uusd', 4500000)
     ]),
   });
@@ -201,5 +200,22 @@ export async function deployBasecampContract(terra, wallet, basecampConfig) {
   let basecampContractAddress = result.logs[0].eventsByType.from_contract.contract_address[0];
 
   console.log("Basecamp Contract Address: " + basecampContractAddress);
-  return basecampContractAddress
+  return { basecampContractAddress, cw20CodeId: basecampConfig.cw20_code_id }
+}
+
+export async function deployStakingContract(terra, wallet, stakingConfig) {
+  if (!stakingConfig.cw20_code_id) {
+    console.log("Uploading Cw20 Contract...");
+    stakingConfig.cw20_code_id = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+  }
+
+  console.log("Deploying Staking...");
+  let stakingCodeId = await uploadContract(terra, wallet, './artifacts/staking.wasm');
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, stakingCodeId, stakingConfig, undefined, true);
+  let result = await performTransaction(terra, wallet, instantiateMsg);
+
+  let stakingContractAddress = result.logs[0].eventsByType.from_contract.contract_address[0];
+
+  console.log("Staking Contract Address: " + stakingContractAddress);
+  return stakingContractAddress
 }
