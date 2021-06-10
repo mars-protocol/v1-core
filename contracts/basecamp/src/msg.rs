@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
     pub cw20_code_id: u64,
-    #[serde(flatten)]
     pub config: CreateOrUpdateConfig,
 }
 

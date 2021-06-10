@@ -8,7 +8,6 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
-        #[serde(flatten)]
         pub config: CreateOrUpdateConfig,
     }
 
