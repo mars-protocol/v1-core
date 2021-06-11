@@ -27,6 +27,8 @@ pub struct Config {
     pub xmars_token_address: CanonicalAddr,
     /// Staking contract address
     pub staking_contract_address: CanonicalAddr,
+    /// Instuance fund address
+    pub insurance_fund_contract_address: CanonicalAddr,
 
     /// Blocks during which a proposal is active since being submitted
     pub proposal_voting_period: u64,

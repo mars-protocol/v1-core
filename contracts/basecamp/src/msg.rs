@@ -14,6 +14,7 @@ pub struct InitMsg {
 pub struct CreateOrUpdateConfig {
     pub xmars_token_address: Option<HumanAddr>,
     pub staking_contract_address: Option<HumanAddr>,
+    pub insurance_fund_contract_address: Option<HumanAddr>,
 
     pub proposal_voting_period: Option<u64>,
     pub proposal_effective_delay: Option<u64>,
@@ -33,6 +34,7 @@ pub enum HandleMsg {
     SetContractAddresses {
         xmars_token_address: HumanAddr,
         staking_contract_address: HumanAddr,
+        insurance_fund_contract_address: HumanAddr,
     },
 
     /// Callback to initialize Mars token
@@ -103,6 +105,8 @@ pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
     pub staking_contract_address: HumanAddr,
+    pub insurance_fund_contract_address: HumanAddr,
+
     pub proposal_required_deposit: Uint128,
 }
 
