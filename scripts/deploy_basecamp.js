@@ -78,6 +78,9 @@ async function main() {
   
   /************************************* Deploy Insurance Fund Contract *************************************/
   const insuranceFundContractAddress = await deployInsuranceFundContract(terra, wallet)
+  await executeContract(terra, wallet, insuranceFundContractAddress, { "update_config": { "owner": basecampContractAddress } })
+  const insuranceFundQueryResponse = await queryContract(terra, insuranceFundContractAddress, { "config": {} })
+  console.log("Insurance fund config successfully updated to have owner of: ", insuranceFundQueryResponse.owner)
 
   /**************************************** Setup Basecamp Contract *****************************************/
   console.log('Setting staking contract addresses in basecamp...')
