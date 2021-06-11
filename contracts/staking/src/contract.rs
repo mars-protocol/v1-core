@@ -5,9 +5,12 @@ use cosmwasm_std::{
 };
 
 use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, QueryMsg, ReceiveMsg,
+    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg,
+    QueryMsg, ReceiveMsg,
 };
-use crate::state::{config_state, config_state_read, cooldowns_state, Config, Cooldown};
+use crate::state::{
+    config_state, config_state_read, cooldowns_state, cooldowns_state_read, Config, Cooldown,
+};
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, unwrap_or};
@@ -417,6 +420,9 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::FetchCooldown { sender_address } => {
+            to_binary(&query_cooldown(deps, sender_address)?)
+        }
     }
 }
 
@@ -429,6 +435,22 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
         xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
     })
+}
+
+fn query_cooldown<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    sender_address: HumanAddr,
+) -> StdResult<CooldownResponse> {
+    let cooldown = cooldowns_state_read(&deps.storage)
+        .may_load(deps.api.canonical_address(&sender_address)?.as_slice())?;
+
+    match cooldown {
+        Some(result) => Ok(CooldownResponse {
+            timestamp: result.timestamp,
+            amount: result.amount,
+        }),
+        None => Result::Err(StdError::not_found("No cooldown found")),
+    }
 }
 
 // MIGRATION

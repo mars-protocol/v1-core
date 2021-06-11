@@ -1,4 +1,5 @@
-use cosmwasm_std::{CosmosMsg, HumanAddr};
+use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
+
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,7 @@ pub enum ReceiveMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
+    FetchCooldown { sender_address: HumanAddr },
 }
 
 // We define a custom struct for each query response
@@ -56,6 +58,14 @@ pub struct ConfigResponse {
     pub owner: HumanAddr,
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct CooldownResponse {
+    /// Timestamp where the cooldown was activated
+    pub timestamp: u64,
+    /// Amount that the user is allowed to unstake during the unstake window
+    pub amount: Uint128,
 }
 
 /// We currently take no arguments for migrations
