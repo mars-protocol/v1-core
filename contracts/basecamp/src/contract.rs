@@ -1077,6 +1077,12 @@ mod tests {
                 .unwrap(),
             config.staking_contract_address
         );
+        assert_eq!(
+            deps.api
+                .canonical_address(&insurance_fund_contract_address)
+                .unwrap(),
+            config.insurance_fund_contract_address
+        );
 
         let error_res = handle_set_contract_addresses(
             &mut deps,
@@ -1098,6 +1104,12 @@ mod tests {
                 .canonical_address(&staking_contract_address)
                 .unwrap(),
             config.staking_contract_address
+        );
+        assert_eq!(
+            deps.api
+                .canonical_address(&insurance_fund_contract_address)
+                .unwrap(),
+            config.insurance_fund_contract_address
         );
     }
 
