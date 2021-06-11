@@ -10,6 +10,9 @@ pub struct InitMsg {}
 pub enum HandleMsg {
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
+
+    /// Update basecamp config
+    UpdateConfig { owner: HumanAddr },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

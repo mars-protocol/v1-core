@@ -39,6 +39,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let CreateOrUpdateConfig {
         xmars_token_address: _,
         staking_contract_address: _,
+        insurance_fund_contract_address: _,
         proposal_voting_period,
         proposal_effective_delay,
         proposal_expiration_period,
@@ -67,6 +68,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         mars_token_address: CanonicalAddr::default(),
         xmars_token_address: CanonicalAddr::default(),
         staking_contract_address: CanonicalAddr::default(),
+        insurance_fund_contract_address: CanonicalAddr::default(),
 
         proposal_voting_period: proposal_voting_period.unwrap(),
         proposal_effective_delay: proposal_effective_delay.unwrap(),
@@ -125,7 +127,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::SetContractAddresses {
             xmars_token_address,
             staking_contract_address,
-        } => handle_set_contract_addresses(deps, xmars_token_address, staking_contract_address),
+            insurance_fund_contract_address,
+        } => handle_set_contract_addresses(
+            deps,
+            xmars_token_address,
+            staking_contract_address,
+            insurance_fund_contract_address,
+        ),
 
         HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
 
@@ -305,6 +313,7 @@ pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     xmars_token_address: HumanAddr,
     staking_contract_address: HumanAddr,
+    insurance_fund_contract_address: HumanAddr,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
@@ -318,6 +327,9 @@ pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
 
     config.xmars_token_address = deps.api.canonical_address(&xmars_token_address)?;
     config.staking_contract_address = deps.api.canonical_address(&staking_contract_address)?;
+    config.insurance_fund_contract_address = deps
+        .api
+        .canonical_address(&insurance_fund_contract_address)?;
     config_singleton.save(&config)?;
 
     Ok(HandleResponse {
@@ -326,6 +338,10 @@ pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
             log("action", "set_contract_addresses"),
             log("xmars_token_address", &xmars_token_address),
             log("staking_contract_address", &staking_contract_address),
+            log(
+                "insurance_fund_contract_address",
+                &insurance_fund_contract_address,
+            ),
         ],
         data: None,
     })
@@ -578,6 +594,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     let CreateOrUpdateConfig {
         xmars_token_address,
         staking_contract_address,
+        insurance_fund_contract_address,
         proposal_voting_period,
         proposal_effective_delay,
         proposal_expiration_period,
@@ -594,6 +611,11 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
         deps.api,
         staking_contract_address,
         config.staking_contract_address,
+    )?;
+    config.insurance_fund_contract_address = unwrap_or(
+        deps.api,
+        insurance_fund_contract_address,
+        config.insurance_fund_contract_address,
     )?;
     config.proposal_voting_period = proposal_voting_period.unwrap_or(config.proposal_voting_period);
     config.proposal_effective_delay =
@@ -671,10 +693,19 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         HumanAddr::default()
     };
 
+    let insurance_fund_contract_address =
+        if config.insurance_fund_contract_address != CanonicalAddr::default() {
+            deps.api
+                .human_address(&config.insurance_fund_contract_address)?
+        } else {
+            HumanAddr::default()
+        };
+
     Ok(ConfigResponse {
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
         xmars_token_address,
         staking_contract_address,
+        insurance_fund_contract_address,
         proposal_required_deposit: config.proposal_required_deposit,
     })
 }
@@ -848,6 +879,7 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
 
             proposal_voting_period: None,
             proposal_effective_delay: None,
@@ -875,6 +907,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -901,6 +934,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -999,6 +1033,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -1021,10 +1056,12 @@ mod tests {
 
         let xmars_token_address = HumanAddr::from("xmars_token");
         let staking_contract_address = HumanAddr::from("staking_contract");
+        let insurance_fund_contract_address = HumanAddr::from("insurance_contract");
         handle_set_contract_addresses(
             &mut deps,
             xmars_token_address.clone(),
             staking_contract_address.clone(),
+            insurance_fund_contract_address.clone(),
         )
         .unwrap();
 
@@ -1045,6 +1082,7 @@ mod tests {
             &mut deps,
             HumanAddr::from("different_xmars_token"),
             HumanAddr::from("different_staking_contract"),
+            HumanAddr::from("different_insurance_contract"),
         )
         .unwrap_err();
         assert_eq!(error_res, StdError::unauthorized());
@@ -1073,6 +1111,7 @@ mod tests {
         let init_config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
             proposal_voting_period: Some(10),
             proposal_effective_delay: Some(11),
             proposal_expiration_period: Some(12),
@@ -1127,6 +1166,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             xmars_token_address: Some(HumanAddr::from("new_xmars_addr")),
             staking_contract_address: Some(HumanAddr::from("new_staking_addr")),
+            insurance_fund_contract_address: Some(HumanAddr::from("new_insurance_addr")),
             proposal_voting_period: Some(101),
             proposal_effective_delay: Some(111),
             proposal_expiration_period: Some(121),
@@ -2147,6 +2187,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             xmars_token_address: None,
             staking_contract_address: None,
+            insurance_fund_contract_address: None,
 
             proposal_voting_period: Some(TEST_PROPOSAL_VOTING_PERIOD),
             proposal_effective_delay: Some(TEST_PROPOSAL_EFFECTIVE_DELAY),
@@ -2175,6 +2216,11 @@ mod tests {
         config.staking_contract_address = deps
             .api
             .canonical_address(&HumanAddr::from("staking_contract"))
+            .unwrap();
+        config_singleton.save(&config).unwrap();
+        config.insurance_fund_contract_address = deps
+            .api
+            .canonical_address(&HumanAddr::from("insurance_contract"))
             .unwrap();
         config_singleton.save(&config).unwrap();
 

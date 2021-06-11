@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, InitResponse,
+    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
     MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage,
 };
 
@@ -35,6 +35,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
+        HandleMsg::UpdateConfig { owner } => handle_update_config(deps, env, owner),
     }
 }
 
@@ -53,6 +54,28 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![msg],
         log: vec![log("action", "execute_cosmos_msg")],
+        data: None,
+    })
+}
+
+pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    owner: HumanAddr,
+) -> StdResult<HandleResponse> {
+    let mut config_singleton = config_state(&mut deps.storage);
+    let mut config = config_singleton.load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    };
+
+    config.owner = deps.api.canonical_address(&owner)?;
+    config_singleton.save(&config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![log("action", "update_config"), log("owner", &owner)],
         data: None,
     })
 }
