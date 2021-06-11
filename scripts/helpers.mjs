@@ -219,3 +219,15 @@ export async function deployStakingContract(terra, wallet, stakingConfig) {
   console.log("Staking Contract Address: " + stakingContractAddress);
   return stakingContractAddress
 }
+
+export async function deployInsuranceFundContract(terra, wallet) {
+  console.log("Deploying Insurance Fund...");
+  let insuranceFundCodeId = await uploadContract(terra, wallet, './artifacts/insurance_fund.wasm');
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, insuranceFundCodeId, {}, undefined, true);
+  let result = await performTransaction(terra, wallet, instantiateMsg);
+
+  let insuranceFundContractAddress = result.logs[0].eventsByType.instantiate_contract.contract_address[0];
+
+  console.log("Insurance Fund Contract Address: " + insuranceFundContractAddress);
+  return insuranceFundContractAddress
+}

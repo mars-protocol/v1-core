@@ -1,6 +1,6 @@
 import 'dotenv/config.js';
-import { deployBasecampContract, deployStakingContract, recover, queryContract, executeContract} from "./helpers.mjs";
-import {LCDClient, LocalTerra} from "@terra-money/terra.js";
+import { recover, queryContract, executeContract, deployBasecampContract, deployStakingContract, deployInsuranceFundContract } from "./helpers.mjs";
+import { LCDClient, LocalTerra } from "@terra-money/terra.js";
 
 async function main() {
   let terra;
@@ -51,8 +51,8 @@ async function main() {
         "proposal_effective_delay": 150,
         "proposal_expiration_period": 3000,
         "proposal_required_deposit": "100000000",
-        "proposal_required_quorum": "10",
-        "proposal_required_threshold": "5"
+        "proposal_required_quorum": "0.1",
+        "proposal_required_threshold": "0.05"
       }
     };
 
@@ -76,12 +76,18 @@ async function main() {
   const stakingContractAddress = await deployStakingContract(terra, wallet, stakingConfig);
   const stakingQueryResponse = await queryContract(terra, stakingContractAddress, { "config": {} })
   
+  /************************************* Deploy Insurance Fund Contract *************************************/
+  const insuranceFundContractAddress = await deployInsuranceFundContract(terra, wallet)
+
   /**************************************** Setup Basecamp Contract *****************************************/
   console.log('Setting staking contract addresses in basecamp...')
   await executeContract(terra, wallet, basecampContractAddress, {
     "set_contract_addresses": {
       xmars_token_address: stakingQueryResponse.xmars_token_address,
-      staking_contract_address: stakingContractAddress, } })
+      staking_contract_address: stakingContractAddress,
+      insurance_fund_contract_address: insuranceFundContractAddress
+    }
+  })
   basecampQueryResponse = await queryContract(terra, basecampContractAddress, { "config": {} })
   console.log("Basecamp config successfully setup: ", basecampQueryResponse)
 
