@@ -49,7 +49,7 @@ pub enum ReceiveMsg {
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
     Config {},
-    FetchCooldown { sender_address: HumanAddr },
+    Cooldown { sender_address: HumanAddr },
 }
 
 // We define a custom struct for each query response

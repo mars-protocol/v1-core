@@ -420,9 +420,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::FetchCooldown { sender_address } => {
-            to_binary(&query_cooldown(deps, sender_address)?)
-        }
+        QueryMsg::Cooldown { sender_address } => to_binary(&query_cooldown(deps, sender_address)?),
     }
 }
 
