@@ -732,6 +732,7 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
 
             Ok(ProposalInfo {
                 proposal_id,
+                submitter_address: deps.api.human_address(&v.submitter_canonical_address)?,
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
@@ -760,6 +761,9 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
 
     Ok(ProposalInfo {
         proposal_id,
+        submitter_address: deps
+            .api
+            .human_address(&proposal.submitter_canonical_address)?,
         status: proposal.status,
         for_votes: proposal.for_votes,
         against_votes: proposal.against_votes,
@@ -791,6 +795,7 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
 
             Ok(ProposalInfo {
                 proposal_id,
+                submitter_address: deps.api.human_address(&v.submitter_canonical_address)?,
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
