@@ -12,6 +12,30 @@
           "type": "object"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "cooldown"
+      ],
+      "properties": {
+        "cooldown": {
+          "type": "object",
+          "required": [
+            "sender_address"
+          ],
+          "properties": {
+            "sender_address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "HumanAddr": {
+      "type": "string"
+    }
+  }
 }

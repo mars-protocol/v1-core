@@ -1,4 +1,4 @@
-use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal, HumanAddr, Uint128};
 
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -15,6 +15,7 @@ pub struct InitMsg {
 pub struct CreateOrUpdateConfig {
     pub mars_token_address: Option<HumanAddr>,
     pub terraswap_factory_address: Option<HumanAddr>,
+    pub terraswap_max_spread: Option<Decimal>,
     pub cooldown_duration: Option<u64>,
     pub unstake_window: Option<u64>,
 }

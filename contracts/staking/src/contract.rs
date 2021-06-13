@@ -14,9 +14,7 @@ use crate::state::{
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, unwrap_or};
-use terraswap::asset::{
-    Asset as TerraswapAsset, AssetInfo, PairInfo,
-};
+use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
 use terraswap::pair::HandleMsg as TerraswapPairHandleMsg;
 use terraswap::querier::query_pair_info;
 
@@ -32,6 +30,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     let CreateOrUpdateConfig {
         mars_token_address,
         terraswap_factory_address,
+        terraswap_max_spread,
         cooldown_duration,
         unstake_window,
     } = msg.config;
@@ -39,6 +38,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // All fields should be available
     let available = mars_token_address.is_some()
         && terraswap_factory_address.is_some()
+        && terraswap_max_spread.is_some()
         && cooldown_duration.is_some()
         && unstake_window.is_some();
 
@@ -56,6 +56,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         terraswap_factory_address: deps
             .api
             .canonical_address(&terraswap_factory_address.unwrap())?,
+        terraswap_max_spread: terraswap_max_spread.unwrap(),
         cooldown_duration: cooldown_duration.unwrap(),
         unstake_window: unstake_window.unwrap(),
     };
@@ -135,6 +136,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     let CreateOrUpdateConfig {
         mars_token_address,
         terraswap_factory_address,
+        terraswap_max_spread,
         cooldown_duration,
         unstake_window,
     } = new_config;
@@ -149,6 +151,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
         terraswap_factory_address,
         config.terraswap_factory_address,
     )?;
+    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
     config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
@@ -530,7 +533,7 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
                     amount: contract_asset_balance,
                 },
                 belief_price: None,
-                max_spread: None,
+                max_spread: Some(config.terraswap_max_spread),
                 to: None,
             })?,
             send: vec![Coin {
@@ -549,7 +552,7 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
                         amount: contract_asset_balance,
                     },
                     belief_price: None,
-                    max_spread: None,
+                    max_spread: Some(config.terraswap_max_spread),
                     to: None,
                 })?),
             })?,
@@ -620,7 +623,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, HumanAddr};
+    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, Decimal, HumanAddr};
     use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     use crate::msg::HandleMsg::UpdateConfig;
@@ -640,6 +643,7 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             mars_token_address: None,
             terraswap_factory_address: None,
+            terraswap_max_spread: None,
             cooldown_duration: None,
             unstake_window: None,
         };
@@ -659,6 +663,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             mars_token_address: Some(HumanAddr::from("mars_token")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
+            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -755,6 +760,7 @@ mod tests {
         let init_config = CreateOrUpdateConfig {
             mars_token_address: Some(HumanAddr::from("mars_token")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
+            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -783,6 +789,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             mars_token_address: Some(HumanAddr::from("new_mars_addr")),
             terraswap_factory_address: Some(HumanAddr::from("new_factory")),
+            terraswap_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
             cooldown_duration: Some(200),
             unstake_window: Some(100),
         };
@@ -1460,7 +1467,7 @@ mod tests {
                         amount: contract_asset_balance,
                     },
                     belief_price: None,
-                    max_spread: None,
+                    max_spread: Some(config.terraswap_max_spread),
                     to: None,
                 })
                 .unwrap(),
@@ -1605,7 +1612,7 @@ mod tests {
                                 amount: contract_asset_balance,
                             },
                             belief_price: None,
-                            max_spread: None,
+                            max_spread: Some(config.terraswap_max_spread),
                             to: None,
                         })
                         .unwrap()
@@ -1633,6 +1640,7 @@ mod tests {
         let config = CreateOrUpdateConfig {
             mars_token_address: Some(HumanAddr::from("mars_token")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
+            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(TEST_COOLDOWN_DURATION),
             unstake_window: Some(TEST_UNSTAKE_WINDOW),
         };

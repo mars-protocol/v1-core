@@ -2,8 +2,8 @@ use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADD
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Api, BlockInfo, CanonicalAddr, Coin, ContractInfo, Decimal,
-    Env, Extern, HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError,
-    StdResult, SystemError, Uint128, WasmQuery,
+    Env, Extern, HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult,
+    SystemError, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
