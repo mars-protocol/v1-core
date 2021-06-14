@@ -11,6 +11,7 @@ pub mod msg {
         pub decimals: u8,
         pub initial_balances: Vec<Cw20CoinHuman>,
         pub mint: Option<MinterResponse>,
+        pub init_hook: Option<InitHook>,
     }
 
     impl InitMsg {
@@ -35,6 +36,13 @@ pub mod msg {
             }
             Ok(())
         }
+    }
+
+    /// Hook to be called after token initialization
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct InitHook {
+        pub msg: Binary,
+        pub contract_addr: HumanAddr,
     }
 
     fn is_valid_name(name: &str) -> bool {
