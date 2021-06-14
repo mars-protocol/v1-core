@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128,
+    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
@@ -61,7 +61,19 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         mint,
     };
     token_info(&mut deps.storage).save(&data)?;
-    Ok(InitResponse::default())
+
+    if let Some(hook) = msg.init_hook {
+        Ok(InitResponse {
+            messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: hook.contract_addr,
+                msg: hook.msg,
+                send: vec![],
+            })],
+            log: vec![],
+        })
+    } else {
+        Ok(InitResponse::default())
+    }
 }
 
 pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
@@ -419,6 +431,7 @@ mod tests {
                 amount,
             }],
             mint: mint.clone(),
+            init_hook: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(deps, env, init_msg).unwrap();
@@ -452,6 +465,7 @@ mod tests {
                 amount,
             }],
             mint: None,
+            init_hook: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env.clone(), init_msg).unwrap();
@@ -499,6 +513,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
+            init_hook: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
@@ -541,6 +556,7 @@ mod tests {
                 minter,
                 cap: Some(limit),
             }),
+            init_hook: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg);
@@ -686,6 +702,7 @@ mod tests {
                 },
             ],
             mint: None,
+            init_hook: None,
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
