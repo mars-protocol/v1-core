@@ -10,7 +10,7 @@ use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, unwrap_or};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
     InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
@@ -211,18 +211,18 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = new_config;
 
     // Update config
-    config.owner = unwrap_or(deps.api, owner, config.owner)?;
-    config.treasury_contract_address = unwrap_or(
+    config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
+    config.treasury_contract_address = human_addr_into_canonical(
         deps.api,
         treasury_contract_address,
         config.treasury_contract_address,
     )?;
-    config.insurance_fund_contract_address = unwrap_or(
+    config.insurance_fund_contract_address = human_addr_into_canonical(
         deps.api,
         insurance_fund_contract_address,
         config.insurance_fund_contract_address,
     )?;
-    config.staking_contract_address = unwrap_or(
+    config.staking_contract_address = human_addr_into_canonical(
         deps.api,
         staking_contract_address,
         config.staking_contract_address,
