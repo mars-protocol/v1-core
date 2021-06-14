@@ -41,27 +41,85 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         } => handle_set_asset_incentives(deps, env, set_asset_incentives),
         HandleMsg::HandleBalanceChange {
             user_address,
-            user_balance,
-            total_supply,
-        } => handle_balance_change(deps, env, user_address, user_balance, total_supply),
+            user_balance_before,
+            total_supply_before,
+        } => handle_balance_change(deps, env, user_address, user_balance_before, total_supply_before),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
 }
 
-/// Sets emission per second for asset incentives
-/// If there are existing incentives for the asset, index is updated
 pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _user_address: HumanAddr,
-    _user_balance: Uint128,
-    _total_supply: Uint128,
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    user_address: HumanAddr,
+    user_balance_before: Uint128,
+    total_supply_before: Uint128,
 ) -> StdResult<HandleResponse> {
+    let ma_token_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
+    let mut asset_incentive = 
+        match asset_incentives_bucket.may_load(ma_token_canonical_address.as_slice())? {
+            // If there are no incentives, an empty successful response is returned as the
+            // success of the call is needed to for the call that triggered the change to
+            // succeed and be persisted to state.
+            None => return Ok(HandleResponse::default()),
+            Some(ai) if ai.emission_per_second.is_zero() => return Ok(HandleResponse::default()),
+            Some(ai) => ai,
+        };
+    
+
+    // Compute asset new index and update state
+    if !(
+            env.block.time == asset_incentive.last_updated ||
+            total_supply_before.is_zero() ||
+            asset_incentive.emission_per_second.is_zero()
+        )
+    {
+        let seconds_elapsed = env.block.time - asset_incentive.last_updated;
+        let new_index =
+            asset_incentive.index +
+            Decimal::from_ratio(
+                asset_incentive.emission_per_second.u128() * seconds_elapsed as u128,
+                total_supply_before
+            );
+
+        asset_incentive.index = new_index;
+    }
+    asset_incentive.last_updated = env.block.time;
+    asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
+
+    // Check if user has accumulated uncomputed rewards (which means index is not up to date)
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let asset_user_index =
+        state::asset_user_indices_read(&deps.storage, &ma_token_canonical_address.as_slice())
+            .may_load(&user_canonical_address.as_slice())?
+            .unwrap_or(Decimal::zero());
+    if asset_user_index != asset_incentive.index {
+        // Compute user accrued rewards and update state
+        let accrued_rewards = 
+            ((user_balance_before * asset_incentive.index) - (user_balance_before * asset_user_index))?;
+
+        if !accrued_rewards.is_zero() {
+            let mut user_unclaimed_rewards_bucket =
+                state::user_unclaimed_rewards(&mut deps.storage);
+            let current_unclaimed_rewards = user_unclaimed_rewards_bucket
+                .may_load(&user_canonical_address.as_slice())?
+                .unwrap_or(Uint128::zero());
+
+            user_unclaimed_rewards_bucket.save(
+                &user_canonical_address.as_slice(), 
+                &(current_unclaimed_rewards + accrued_rewards)
+            )?
+        }
+
+        state::asset_user_indices(&mut deps.storage, &ma_token_canonical_address.as_slice())
+            .save(&user_canonical_address.as_slice(), &asset_incentive.index)?
+    }
+
+    
     Ok(HandleResponse::default())
 }
 
-/// Sets emission per second for asset incentives
-/// If there are existing incentives for the asset, index is updated
 pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -75,15 +133,15 @@ pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
         let new_asset_incentive =
             match asset_incentives_bucket.may_load(&ma_asset_canonical_address.as_slice())? {
                 Some(mut asset_incentive) => {
-                    // TODO: Update index
+                    // TODO: Update index up to now
                     asset_incentive.emission_per_second = set_asset_incentive.emission_per_second;
-                    asset_incentive.last_updated_timestamp = env.block.time;
+                    asset_incentive.last_updated = env.block.time;
                     asset_incentive
                 }
                 None => AssetIncentive {
                     emission_per_second: set_asset_incentive.emission_per_second,
-                    index: Decimal::one(),
-                    last_updated_timestamp: env.block.time,
+                    index: Decimal::zero(),
+                    last_updated: env.block.time,
                 },
             };
         asset_incentives_bucket
@@ -94,7 +152,6 @@ pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse::default())
 }
 
-/// Execute Cosmos message
 pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,

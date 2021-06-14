@@ -11,8 +11,9 @@ use cosmwasm_storage::{
 pub static CONFIG_KEY: &[u8] = b"config";
 
 // namespaces (for buckets)
-pub static ASSET_DATA_NAMESPACE: &[u8] = b"asset_data";
-pub static ASSET_USER_INDEXES_NAMESPACE: &[u8] = b"asset_user_indexes";
+pub static ASSET_INCENTIVES_NAMESPACE: &[u8] = b"asset_data";
+pub static ASSET_USER_INDICES_NAMESPACE: &[u8] = b"asset_user_indices";
+pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 
 /// Insurance fund global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -24,7 +25,7 @@ pub struct Config {
 pub struct AssetIncentive {
     pub emission_per_second: Uint128,
     pub index: Decimal,
-    pub last_updated_timestamp: u64,
+    pub last_updated: u64,
 }
 
 pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
@@ -36,9 +37,31 @@ pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
 }
 
 pub fn asset_incentives<S: Storage>(storage: &mut S) -> Bucket<S, AssetIncentive> {
-    bucket(ASSET_DATA_NAMESPACE, storage)
+    bucket(ASSET_INCENTIVES_NAMESPACE, storage)
 }
 
 pub fn asset_incentives_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, AssetIncentive> {
-    bucket_read(ASSET_DATA_NAMESPACE, storage)
+    bucket_read(ASSET_INCENTIVES_NAMESPACE, storage)
+}
+
+pub fn asset_user_indices<'a, S: Storage>(
+    storage: &'a mut S,
+    asset_reference: &[u8]
+) -> Bucket<'a, S, Decimal> {
+    Bucket::multilevel(&[ASSET_USER_INDICES_NAMESPACE, asset_reference], storage)
+}
+
+pub fn asset_user_indices_read<'a, S: Storage>(
+    storage: &'a S,
+    asset_reference: &[u8]
+) -> ReadonlyBucket<'a, S, Decimal> {
+    ReadonlyBucket::multilevel(&[ASSET_USER_INDICES_NAMESPACE, asset_reference], storage)
+}
+
+pub fn user_unclaimed_rewards<S: Storage>(storage: &mut S) -> Bucket<S, Uint128> {
+    bucket(USER_UNCLAIMED_REWARDS_NAMESPACE, storage)
+}
+
+pub fn user_unclaimed_rewards_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Uint128> {
+    bucket_read(USER_UNCLAIMED_REWARDS_NAMESPACE, storage)
 }
