@@ -900,7 +900,8 @@ mod tests {
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{from_binary, Coin};
     use mars::testing::{
-        get_test_addresses, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
+        assert_generic_error_message, get_test_addresses, mock_dependencies, mock_env,
+        MarsMockQuerier, MockEnvParams,
     };
 
     use crate::msg::HandleMsg::UpdateConfig;
@@ -935,13 +936,11 @@ mod tests {
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res_error = init(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(msg, "All params should be available during initialization")
-            }
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "All params should be available during initialization",
+        );
 
         // *
         // init with proposal_required_quorum, proposal_required_threshold greater than 1
@@ -963,15 +962,12 @@ mod tests {
             config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res_error = init(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                Invalid params: [proposal_required_quorum, proposal_required_threshold]"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                Invalid params: [proposal_required_quorum, proposal_required_threshold]",
+        );
 
         let config = CreateOrUpdateConfig {
             xmars_token_address: None,
@@ -1193,15 +1189,12 @@ mod tests {
             config,
         };
         let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                Invalid params: [proposal_required_quorum, proposal_required_threshold]"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                Invalid params: [proposal_required_quorum, proposal_required_threshold]",
+        );
 
         // *
         // non owner is not authorized
@@ -1318,7 +1311,8 @@ mod tests {
         };
 
         let env = mock_env("someoneelse", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
     }
 
     #[test]
@@ -1340,7 +1334,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Title too short");
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
@@ -1356,7 +1351,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Title too long");
 
         // Invalid description
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -1373,7 +1369,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Description too short");
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
@@ -1389,7 +1386,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Description too long");
 
         // Invalid link
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -1406,7 +1404,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Link too short");
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
             msg: Some(
@@ -1422,7 +1421,8 @@ mod tests {
             amount: Uint128(2_000_000),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Link too long");
 
         // Invalid deposit amount
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -1439,7 +1439,8 @@ mod tests {
             amount: (TEST_PROPOSAL_REQUIRED_DEPOSIT - Uint128(100)).unwrap(),
         });
         let env = mock_env("mars_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Must deposit at least 10000 tokens");
 
         // Invalid deposit currency
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -1456,7 +1457,8 @@ mod tests {
             amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
         let env = mock_env("someothertoken", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
     }
 
     #[test]
@@ -1632,55 +1634,71 @@ mod tests {
             .save(&executed_proposal_id.to_be_bytes(), &executed_proposal)
             .unwrap();
 
-        let msgs = vec![
-            // voting on a non-existent proposal should fail
-            (
-                "valid_voter",
-                HandleMsg::CastVote {
-                    proposal_id: 3,
-                    vote: ProposalVoteOption::For,
-                },
-                100_001,
-            ),
-            // voting on an inactive proposal should fail
-            (
-                "valid_voter",
-                HandleMsg::CastVote {
-                    proposal_id: executed_proposal_id,
-                    vote: ProposalVoteOption::For,
-                },
-                100_001,
-            ),
-            // voting after proposal end should fail
-            (
-                "valid_voter",
-                HandleMsg::CastVote {
-                    proposal_id: active_proposal_id,
-                    vote: ProposalVoteOption::For,
-                },
-                100_200,
-            ),
-            // voting without any voting power should fail
-            (
-                "invalid_voter",
-                HandleMsg::CastVote {
-                    proposal_id: active_proposal_id,
-                    vote: ProposalVoteOption::For,
-                },
-                100_001,
-            ),
-        ];
+        // voting on a non-existent proposal should fail
+        let msg = HandleMsg::CastVote {
+            proposal_id: 3,
+            vote: ProposalVoteOption::For,
+        };
+        let env = mock_env(
+            "valid_voter",
+            MockEnvParams {
+                block_height: 100_001,
+                ..Default::default()
+            },
+        );
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(
+            res_error,
+            StdError::NotFound {
+                kind: "basecamp::state::Proposal".to_string(),
+                backtrace: None
+            }
+        );
 
-        for (voter, msg, block_height) in msgs {
-            let env = mock_env(
-                voter,
-                MockEnvParams {
-                    block_height,
-                    ..Default::default()
-                },
-            );
-            handle(&mut deps, env, msg).unwrap_err();
-        }
+        // voting on an inactive proposal should fail
+        let msg = HandleMsg::CastVote {
+            proposal_id: executed_proposal_id,
+            vote: ProposalVoteOption::For,
+        };
+        let env = mock_env(
+            "valid_voter",
+            MockEnvParams {
+                block_height: 100_001,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Proposal is not active");
+
+        // voting after proposal end should fail
+        let msg = HandleMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
+        };
+        let env = mock_env(
+            "valid_voter",
+            MockEnvParams {
+                block_height: 100_200,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Proposal has expired");
+
+        // voting without any voting power should fail
+        let msg = HandleMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
+        };
+        let env = mock_env(
+            "invalid_voter",
+            MockEnvParams {
+                block_height: 100_001,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "User has no balance at block: 99999");
     }
 
     #[test]
@@ -1774,7 +1792,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "User has already voted in this proposal");
 
         // Valid against vote
         let msg = HandleMsg::CastVote {
@@ -1882,33 +1901,33 @@ mod tests {
             },
         );
 
-        let msgs = vec![
-            // cannot end a proposal that has not ended its voting period
-            (
-                HandleMsg::EndProposal {
-                    proposal_id: active_proposal_id,
-                },
-                100_000,
-            ),
-            // cannot end a non active proposal
-            (
-                HandleMsg::EndProposal {
-                    proposal_id: executed_proposal_id,
-                },
-                100_001,
-            ),
-        ];
+        // cannot end a proposal that has not ended its voting period
+        let msg = HandleMsg::EndProposal {
+            proposal_id: active_proposal_id,
+        };
+        let env = mock_env(
+            "ender",
+            MockEnvParams {
+                block_height: 100_000,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Voting period has not ended");
 
-        for (msg, block_height) in msgs {
-            let env = mock_env(
-                "ender",
-                MockEnvParams {
-                    block_height,
-                    ..Default::default()
-                },
-            );
-            handle(&mut deps, env, msg).unwrap_err();
-        }
+        // cannot end a non active proposal
+        let msg = HandleMsg::EndProposal {
+            proposal_id: executed_proposal_id,
+        };
+        let env = mock_env(
+            "ender",
+            MockEnvParams {
+                block_height: 100_001,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Proposal is not active");
     }
 
     #[test]
@@ -2116,43 +2135,53 @@ mod tests {
             },
         );
 
-        let msgs = vec![
-            // cannot execute a non Passed proposal
-            (
-                HandleMsg::ExecuteProposal {
-                    proposal_id: executed_proposal_id,
-                },
-                executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
-            ),
-            // cannot execute a proposal before the effective delay has passed
-            (
-                HandleMsg::ExecuteProposal {
-                    proposal_id: passed_proposal_id,
-                },
-                passed_proposal.end_height + 1,
-            ),
-            // cannot execute an expired proposal
-            (
-                HandleMsg::ExecuteProposal {
-                    proposal_id: passed_proposal_id,
-                },
-                passed_proposal.end_height
+        // cannot execute a non Passed proposal
+        let msg = HandleMsg::ExecuteProposal {
+            proposal_id: executed_proposal_id,
+        };
+        let env = mock_env(
+            "executer",
+            MockEnvParams {
+                block_height: executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "Proposal has not passed or has already been executed",
+        );
+
+        // cannot execute a proposal before the effective delay has passed
+        let msg = HandleMsg::ExecuteProposal {
+            proposal_id: passed_proposal_id,
+        };
+        let env = mock_env(
+            "executer",
+            MockEnvParams {
+                block_height: passed_proposal.end_height + 1,
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Proposal has not ended its delay period");
+
+        // cannot execute an expired proposal
+        let msg = HandleMsg::ExecuteProposal {
+            proposal_id: passed_proposal_id,
+        };
+        let env = mock_env(
+            "executer",
+            MockEnvParams {
+                block_height: passed_proposal.end_height
                     + TEST_PROPOSAL_EFFECTIVE_DELAY
                     + TEST_PROPOSAL_EXPIRATION_PERIOD
                     + 1,
-            ),
-        ];
-
-        for (msg, block_height) in msgs {
-            let env = mock_env(
-                "executer",
-                MockEnvParams {
-                    block_height,
-                    ..Default::default()
-                },
-            );
-            handle(&mut deps, env, msg).unwrap_err();
-        }
+                ..Default::default()
+            },
+        );
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Proposal has expired");
     }
 
     #[test]
