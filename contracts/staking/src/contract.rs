@@ -109,11 +109,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
         HandleMsg::SwapAssetToUusd {
-            offer_asset_info: asset,
-        } => handle_swap_asset_to_uusd(deps, env, asset),
+            offer_asset_info,
+            amount,
+        } => handle_swap_asset_to_uusd(deps, env, offer_asset_info, amount),
         HandleMsg::SwapAssetToMars {
-            offer_asset_info: asset,
-        } => handle_swap_asset_to_mars(deps, env, asset),
+            offer_asset_info,
+            amount,
+        } => handle_swap_asset_to_mars(deps, env, offer_asset_info, amount),
     }
 }
 
@@ -443,6 +445,7 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     offer_asset_info: AssetInfo,
+    amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     let config = config_state_read(&deps.storage).load()?;
 
@@ -450,7 +453,7 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
         denom: "uusd".to_string(),
     };
 
-    handle_swap(deps, env, config, offer_asset_info, ask_asset_info)
+    handle_swap(deps, env, config, offer_asset_info, ask_asset_info, amount)
 }
 
 /// Swap any asset on the contract to Mars
@@ -458,6 +461,7 @@ pub fn handle_swap_asset_to_mars<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     offer_asset_info: AssetInfo,
+    amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     let config = config_state_read(&deps.storage).load()?;
 
@@ -466,7 +470,7 @@ pub fn handle_swap_asset_to_mars<S: Storage, A: Api, Q: Querier>(
         contract_addr: mars_token_human_addr,
     };
 
-    handle_swap(deps, env, config, offer_asset_info, ask_asset_info)
+    handle_swap(deps, env, config, offer_asset_info, ask_asset_info, amount)
 }
 
 fn handle_swap<S: Storage, A: Api, Q: Querier>(
@@ -475,6 +479,7 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
     config: Config,
     offer_asset_info: AssetInfo,
     ask_asset_info: AssetInfo,
+    amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     // swapping the same assets doesn't make any sense
     if offer_asset_info == ask_asset_info {
@@ -512,6 +517,17 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
+    let contract_asset_balance_for_swap = match amount {
+        Some(amount) if amount > contract_asset_balance => {
+            return Err(StdError::generic_err(format!(
+                "The amount requested for swap exceeds contract balance for the asset {}",
+                asset_label
+            )));
+        }
+        Some(amount) => amount,
+        None => contract_asset_balance,
+    };
+
     let terraswap_factory_human_addr = deps.api.human_address(&config.terraswap_factory_address)?;
     let pair_info: PairInfo = query_pair_info(
         &deps,
@@ -525,7 +541,7 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
             msg: to_binary(&TerraswapPairHandleMsg::Swap {
                 offer_asset: TerraswapAsset {
                     info: offer_asset_info,
-                    amount: contract_asset_balance,
+                    amount: contract_asset_balance_for_swap,
                 },
                 belief_price: None,
                 max_spread: Some(config.terraswap_max_spread),
@@ -533,18 +549,18 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
             })?,
             send: vec![Coin {
                 denom,
-                amount: contract_asset_balance,
+                amount: contract_asset_balance_for_swap,
             }],
         }),
         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr,
             msg: to_binary(&Cw20HandleMsg::Send {
                 contract: pair_info.contract_addr,
-                amount: contract_asset_balance,
+                amount: contract_asset_balance_for_swap,
                 msg: Some(to_binary(&TerraswapPairHandleMsg::Swap {
                     offer_asset: TerraswapAsset {
                         info: offer_asset_info,
-                        amount: contract_asset_balance,
+                        amount: contract_asset_balance_for_swap,
                     },
                     belief_price: None,
                     max_spread: Some(config.terraswap_max_spread),
@@ -1370,6 +1386,7 @@ mod tests {
             offer_asset_info: AssetInfo::NativeToken {
                 denom: "uusd".to_string(),
             },
+            amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg);
@@ -1388,6 +1405,7 @@ mod tests {
             offer_asset_info: AssetInfo::Token {
                 contract_addr: deps.api.human_address(&config.mars_token_address).unwrap(),
             },
+            amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg);
@@ -1403,6 +1421,7 @@ mod tests {
             offer_asset_info: AssetInfo::NativeToken {
                 denom: "zero".to_string(),
             },
+            amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg);
@@ -1410,6 +1429,25 @@ mod tests {
             Err(StdError::GenericErr { msg, .. }) => {
                 assert_eq!(msg, "Contract has no balance for the asset zero")
             }
+            other_err => panic!("Unexpected error: {:?}", other_err),
+        }
+
+        // *
+        // can't swap amount greater than contract balance
+        // *
+        let msg = HandleMsg::SwapAssetToUusd {
+            offer_asset_info: AssetInfo::NativeToken {
+                denom: "somecoin".to_string(),
+            },
+            amount: Some(Uint128(1_000_001)),
+        };
+        let env = mock_env("owner", MockEnvParams::default());
+        let error_res = handle(&mut deps, env, msg);
+        match error_res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "The amount requested for swap exceeds contract balance for the asset somecoin"
+            ),
             other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
@@ -1433,6 +1471,7 @@ mod tests {
             offer_asset_info: AssetInfo::NativeToken {
                 denom: "somecoin".to_string(),
             },
+            amount: None,
         };
 
         let env = mock_env("owner", MockEnvParams::default());
@@ -1482,6 +1521,7 @@ mod tests {
             offer_asset_info: AssetInfo::Token {
                 contract_addr: config_mars_token_human_addr.clone(),
             },
+            amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg);
@@ -1503,6 +1543,7 @@ mod tests {
             offer_asset_info: AssetInfo::Token {
                 contract_addr: config_mars_token_human_addr.clone(),
             },
+            amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg);
@@ -1524,6 +1565,7 @@ mod tests {
             offer_asset_info: AssetInfo::Token {
                 contract_addr: cw20_contract_address,
             },
+            amount: None,
         };
 
         let env = mock_env("owner", MockEnvParams::default());
@@ -1535,9 +1577,6 @@ mod tests {
             other_err => panic!("Unexpected error: {:?}", other_err),
         }
 
-        // *
-        // swap
-        // *
         let cw20_contract_address = HumanAddr::from("cw20_token");
         let contract_asset_balance = Uint128(1_000_000);
         deps.querier.set_cw20_balances(
@@ -1545,6 +1584,28 @@ mod tests {
             &[(HumanAddr::from(MOCK_CONTRACT_ADDR), contract_asset_balance)],
         );
 
+        // *
+        // can't swap amount greater than contract balance
+        // *
+        let msg = HandleMsg::SwapAssetToMars {
+            offer_asset_info: AssetInfo::Token {
+                contract_addr: cw20_contract_address.clone(),
+            },
+            amount: Some(Uint128(1_000_001)),
+        };
+        let env = mock_env("owner", MockEnvParams::default());
+        let error_res = handle(&mut deps, env, msg);
+        match error_res {
+            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
+                msg,
+                "The amount requested for swap exceeds contract balance for the asset cw20_token"
+            ),
+            other_err => panic!("Unexpected error: {:?}", other_err),
+        }
+
+        // *
+        // swap
+        // *
         deps.querier.set_terraswap_pair(PairInfo {
             asset_infos: [
                 AssetInfo::Token {
@@ -1562,6 +1623,7 @@ mod tests {
             offer_asset_info: AssetInfo::Token {
                 contract_addr: cw20_contract_address.clone(),
             },
+            amount: None,
         };
 
         let env = mock_env("owner", MockEnvParams::default());

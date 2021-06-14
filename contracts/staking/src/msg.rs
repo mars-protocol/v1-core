@@ -38,9 +38,15 @@ pub enum HandleMsg {
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
     /// Swap any asset on the contract to uusd
-    SwapAssetToUusd { offer_asset_info: AssetInfo },
+    SwapAssetToUusd {
+        offer_asset_info: AssetInfo,
+        amount: Option<Uint128>,
+    },
     /// swap any asset on the contract to Mars
-    SwapAssetToMars { offer_asset_info: AssetInfo },
+    SwapAssetToMars {
+        offer_asset_info: AssetInfo,
+        amount: Option<Uint128>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
