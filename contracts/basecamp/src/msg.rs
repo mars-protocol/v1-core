@@ -97,6 +97,9 @@ pub enum QueryMsg {
         proposal_id: u64,
     },
     LatestExecutedProposal {},
+    Votes {
+        proposal_id: u64,
+    },
 }
 
 // We define a custom struct for each query response
@@ -129,6 +132,19 @@ pub struct ProposalInfo {
     pub link: Option<String>,
     pub execute_calls: Option<Vec<ProposalExecuteCall>>,
     pub deposit_amount: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Votes {
+    pub proposal_id: u64,
+    pub votes: Vec<Vote>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Vote {
+    pub voter_address: HumanAddr,
+    pub option: ProposalVoteOption,
+    pub power: Uint128,
 }
 
 /// We currently take no arguments for migrations
