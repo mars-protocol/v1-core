@@ -97,7 +97,7 @@ pub enum QueryMsg {
         proposal_id: u64,
     },
     LatestExecutedProposal {},
-    Votes {
+    ProposalVotes {
         proposal_id: u64,
     },
 }
@@ -135,13 +135,13 @@ pub struct ProposalInfo {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Votes {
+pub struct ProposalVotesResponse {
     pub proposal_id: u64,
-    pub votes: Vec<Vote>,
+    pub votes: Vec<ProposalVoteResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Vote {
+pub struct ProposalVoteResponse {
     pub voter_address: HumanAddr,
     pub option: ProposalVoteOption,
     pub power: Uint128,

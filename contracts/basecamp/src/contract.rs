@@ -11,7 +11,8 @@ use mars::xmars_token;
 
 use crate::msg::{
     ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
-    ProposalInfo, ProposalsListResponse, QueryMsg, ReceiveMsg, Vote, Votes,
+    ProposalInfo, ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg,
+    ReceiveMsg,
 };
 use crate::state::{
     basecamp_state, basecamp_state_read, config_state, config_state_read, proposal_votes_state,
@@ -673,7 +674,9 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
         QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
-        QueryMsg::Votes { proposal_id } => to_binary(&query_votes(deps, proposal_id)?),
+        QueryMsg::ProposalVotes { proposal_id } => {
+            to_binary(&query_proposal_votes(deps, proposal_id)?)
+        }
     }
 }
 
@@ -808,25 +811,26 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn query_votes<S: Storage, A: Api, Q: Querier>(
+fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     proposal_id: u64,
-) -> StdResult<Votes> {
-    let votes: StdResult<Vec<Vote>> = proposal_votes_state_read(&deps.storage, proposal_id)
-        .range(None, None, Order::Ascending)
-        .map(|vote| {
-            let (k, v) = vote?;
-            let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
+) -> StdResult<ProposalVotesResponse> {
+    let votes: StdResult<Vec<ProposalVoteResponse>> =
+        proposal_votes_state_read(&deps.storage, proposal_id)
+            .range(None, None, Order::Ascending)
+            .map(|vote| {
+                let (k, v) = vote?;
+                let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
 
-            Ok(Vote {
-                voter_address,
-                option: v.option,
-                power: v.power,
+                Ok(ProposalVoteResponse {
+                    voter_address,
+                    option: v.option,
+                    power: v.power,
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    Ok(Votes {
+    Ok(ProposalVotesResponse {
         proposal_id,
         votes: votes?,
     })
