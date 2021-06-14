@@ -205,8 +205,8 @@ export async function deployBasecampContract(terra, wallet, basecampConfig) {
 
 export async function deployStakingContract(terra, wallet, stakingConfig) {
   if (!stakingConfig.cw20_code_id) {
-    console.log("Uploading Cw20 Contract...");
-    stakingConfig.cw20_code_id = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+    console.log("Uploading xMars token Contract...");
+    stakingConfig.cw20_code_id = await uploadContract(terra, wallet, './artifacts/xmars_token.wasm');
   }
 
   console.log("Deploying Staking...");

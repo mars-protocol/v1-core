@@ -26,8 +26,8 @@ async function main() {
     basecampConfig = {
       "cw20_code_id": undefined,
       "config": {
-        "proposal_voting_period": 10,
-        "proposal_effective_delay": 10,
+        "proposal_voting_period": 40,
+        "proposal_effective_delay": 20,
         "proposal_expiration_period": 300,
         "proposal_required_deposit": "100000000",
         "proposal_required_quorum": "0.1",
@@ -71,7 +71,6 @@ async function main() {
   let basecampQueryResponse = await queryContract(terra, basecampContractAddress, { "config": {} })
 
   /**************************************** Deploy Staking Contract *****************************************/
-  stakingConfig.cw20_code_id = cw20CodeId
   stakingConfig.config.mars_token_address = basecampQueryResponse.mars_token_address
   const stakingContractAddress = await deployStakingContract(terra, wallet, stakingConfig);
   const stakingQueryResponse = await queryContract(terra, stakingContractAddress, { "config": {} })
