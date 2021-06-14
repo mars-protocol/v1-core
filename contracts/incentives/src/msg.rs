@@ -9,19 +9,23 @@ pub struct InitMsg {}
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
     /// Set emission per second for a list of assets
+    /// set_asset_incentives: list of asset incentives to initilize/update
     SetAssetIncentives {
         set_asset_incentives: Vec<SetAssetIncentive>,
     },
 
     /// Handle a balance change. Sent on an external contract,
     /// triggered on user balance changes
+    /// user_address: address of the user
+    /// user_balance: user balance up to the instant before the change
+    /// total_supply: total supply up to the instant before the change
     HandleBalanceChange {
         user_address: HumanAddr,
-        user_balance: Uint128,
-        total_supply: Uint128,
+        user_balance_before: Uint128,
+        total_supply_before: Uint128,
     },
 
-    /// Execute Cosmos msg
+    /// Execute Cosmos msg. Only callable by owner
     ExecuteCosmosMsg(CosmosMsg),
 }
 
