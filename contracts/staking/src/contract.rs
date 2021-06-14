@@ -484,11 +484,6 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
         )));
     }
 
-    // only owner can call this function
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
-    }
-
     let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
     let (contract_asset_balance, asset_label) = match offer_asset_info.clone() {
         AssetInfo::NativeToken { denom } => (
@@ -1369,18 +1364,6 @@ mod tests {
         ]);
 
         // *
-        // non owner is not authorized
-        // *
-        let msg = HandleMsg::SwapAssetToUusd {
-            offer_asset_info: AssetInfo::NativeToken {
-                denom: "somecoin".to_string(),
-            },
-        };
-        let env = mock_env("random", MockEnvParams::default());
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
-
-        // *
         // can't swap the same assets
         // *
         let msg = HandleMsg::SwapAssetToUusd {
@@ -1491,18 +1474,6 @@ mod tests {
         let config = config_state(&mut deps.storage).load().unwrap();
         let config_mars_token_human_addr =
             deps.api.human_address(&config.mars_token_address).unwrap();
-
-        // *
-        // non owner is not authorized
-        // *
-        let msg = HandleMsg::SwapAssetToMars {
-            offer_asset_info: AssetInfo::Token {
-                contract_addr: HumanAddr::from("some_address"),
-            },
-        };
-        let env = mock_env("random", MockEnvParams::default());
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
 
         // *
         // can't swap the same assets
