@@ -12,6 +12,8 @@ use terra_cosmwasm::{
 };
 
 use crate::xmars_token;
+use terraswap::asset::PairInfo;
+use terraswap::factory::QueryMsg;
 
 pub struct MockEnvParams<'a> {
     pub sent_funds: &'a [Coin],
@@ -227,6 +229,7 @@ pub struct MarsMockQuerier {
     native_querier: NativeQuerier,
     cw20_querier: Cw20Querier,
     xmars_querier: XMarsQuerier,
+    terraswap_pair_querier: TerraswapPairQuerier,
 }
 
 impl Querier for MarsMockQuerier {
@@ -252,6 +255,7 @@ impl MarsMockQuerier {
             native_querier: NativeQuerier::default(),
             cw20_querier: Cw20Querier::default(),
             xmars_querier: XMarsQuerier::default(),
+            terraswap_pair_querier: TerraswapPairQuerier::default(),
         }
     }
 
@@ -314,6 +318,12 @@ impl MarsMockQuerier {
 
     pub fn set_xmars_total_supply_at(&mut self, block: u64, balance: Uint128) {
         self.xmars_querier.total_supplies_at.insert(block, balance);
+    }
+
+    pub fn set_terraswap_pair(&mut self, pair_info: PairInfo) {
+        let asset_infos = &pair_info.asset_infos;
+        let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
+        self.terraswap_pair_querier.pairs.insert(key, pair_info);
     }
 
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
@@ -389,10 +399,40 @@ impl MarsMockQuerier {
                     return self.xmars_querier.handle_query(contract_addr, xmars_query);
                 }
 
+                // Terraswap Queries
+                let terraswap_pair_query: StdResult<terraswap::factory::QueryMsg> =
+                    from_binary(&msg);
+                if let Ok(pair_query) = terraswap_pair_query {
+                    return self.terraswap_pair_querier.handle_query(&pair_query);
+                }
+
                 panic!("[mock]: Unsupported wasm query: {:?}", msg);
             }
 
             _ => self.base.handle_query(request),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct TerraswapPairQuerier {
+    pairs: HashMap<String, PairInfo>,
+}
+
+impl TerraswapPairQuerier {
+    pub fn handle_query(&self, request: &terraswap::factory::QueryMsg) -> QuerierResult {
+        match &request {
+            QueryMsg::Pair { asset_infos } => {
+                let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
+                match self.pairs.get(&key) {
+                    Some(pair_info) => Ok(to_binary(&pair_info)),
+                    None => Err(SystemError::InvalidRequest {
+                        error: format!("PairInfo is not found for {}", key),
+                        request: Default::default(),
+                    }),
+                }
+            }
+            _ => panic!("[mock]: Unsupported Terraswap Pair query"),
         }
     }
 }

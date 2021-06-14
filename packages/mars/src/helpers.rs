@@ -62,7 +62,8 @@ pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
     }
 }
 
-pub fn unwrap_or<A: Api>(
+/// Converts human addr into canonical addr if present, otherwise use default
+pub fn human_addr_into_canonical<A: Api>(
     api: A,
     human_addr: Option<HumanAddr>,
     default: CanonicalAddr,

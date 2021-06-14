@@ -18,3 +18,4 @@ cosmwasm-bignumber = "1.0"
 terra-cosmwasm = { version = "1.2" }
 schemars = "0.7"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+terraswap = "1.1.0"

@@ -6,7 +6,7 @@ use cosmwasm_std::{
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::{read_be_u64, unwrap_or};
+use mars::helpers::{human_addr_into_canonical, read_be_u64};
 use mars::xmars_token;
 
 use crate::msg::{
@@ -613,15 +613,16 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = new_config;
 
     // Update config
-    config.mars_token_address = unwrap_or(deps.api, mars_token_address, config.mars_token_address)?;
+    config.mars_token_address =
+        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
     config.xmars_token_address =
-        unwrap_or(deps.api, xmars_token_address, config.xmars_token_address)?;
-    config.staking_contract_address = unwrap_or(
+        human_addr_into_canonical(deps.api, xmars_token_address, config.xmars_token_address)?;
+    config.staking_contract_address = human_addr_into_canonical(
         deps.api,
         staking_contract_address,
         config.staking_contract_address,
     )?;
-    config.insurance_fund_contract_address = unwrap_or(
+    config.insurance_fund_contract_address = human_addr_into_canonical(
         deps.api,
         insurance_fund_contract_address,
         config.insurance_fund_contract_address,

@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Storage, Uint128};
+use cosmwasm_std::{CanonicalAddr, Decimal, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -22,6 +22,10 @@ pub struct Config {
     pub mars_token_address: CanonicalAddr,
     /// xMars token address
     pub xmars_token_address: CanonicalAddr,
+    /// Terraswap factory contract address
+    pub terraswap_factory_address: CanonicalAddr,
+    /// Terraswap max spread
+    pub terraswap_max_spread: Decimal,
     /// Cooldown duration in seconds
     pub cooldown_duration: u64,
     /// Time in seconds after the cooldown ends during which the unstaking of
