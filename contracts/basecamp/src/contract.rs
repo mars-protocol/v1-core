@@ -380,12 +380,20 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
         ));
     };
 
+    let balance_at_block = proposal.start_height - 1;
     let voting_power = xmars_get_balance_at(
         &deps.querier,
         deps.api.human_address(&config.xmars_token_address)?,
         env.message.sender.clone(),
-        proposal.start_height - 1,
+        balance_at_block,
     )?;
+
+    if voting_power == Uint128::zero() {
+        return Err(StdError::generic_err(format!(
+            "User has no balance at block: {}",
+            balance_at_block
+        )));
+    }
 
     match vote_option {
         ProposalVoteOption::For => proposal.for_votes += voting_power,
@@ -1548,16 +1556,20 @@ mod tests {
     #[test]
     fn test_invalid_cast_votes() {
         let mut deps = th_setup(&[]);
-        let voter_address = HumanAddr::from("voter");
+        let (voter_address, _voter_canonical_address) =
+            get_test_addresses(&deps.api, "valid_voter");
+        let (invalid_voter_address, _invalid_voter_canonical_address) =
+            get_test_addresses(&deps.api, "invalid_voter");
 
-        deps.querier.set_cw20_balances(
-            HumanAddr::from("xmars_token"),
-            &[(voter_address, Uint128(100))],
-        );
+        deps.querier
+            .set_xmars_address(HumanAddr::from("xmars_token"));
+        deps.querier
+            .set_xmars_balance_at(voter_address, 99_999, Uint128(100));
+        deps.querier
+            .set_xmars_balance_at(invalid_voter_address, 99_999, Uint128::zero());
 
         let active_proposal_id = 1_u64;
-        let executed_proposal_id = 2_u64;
-        th_build_mock_proposal(
+        let active_proposal = th_build_mock_proposal(
             &mut deps,
             MockProposal {
                 id: active_proposal_id,
@@ -1567,28 +1579,38 @@ mod tests {
                 ..Default::default()
             },
         );
-        th_build_mock_proposal(
+        proposals_state(&mut deps.storage)
+            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
+            .unwrap();
+
+        let executed_proposal_id = 2_u64;
+        let executed_proposal = th_build_mock_proposal(
             &mut deps,
             MockProposal {
-                id: active_proposal_id,
+                id: executed_proposal_id,
                 status: ProposalStatus::Executed,
                 start_height: 100_000,
                 end_height: 100_100,
                 ..Default::default()
             },
         );
+        proposals_state(&mut deps.storage)
+            .save(&executed_proposal_id.to_be_bytes(), &executed_proposal)
+            .unwrap();
 
         let msgs = vec![
-            // voting a non-existent proposal should fail
+            // voting on a non-existent proposal should fail
             (
+                "valid_voter",
                 HandleMsg::CastVote {
                     proposal_id: 3,
                     vote: ProposalVoteOption::For,
                 },
                 100_001,
             ),
-            // voting a an inactive proposal should fail
+            // voting on an inactive proposal should fail
             (
+                "valid_voter",
                 HandleMsg::CastVote {
                     proposal_id: executed_proposal_id,
                     vote: ProposalVoteOption::For,
@@ -1597,17 +1619,27 @@ mod tests {
             ),
             // voting after proposal end should fail
             (
+                "valid_voter",
                 HandleMsg::CastVote {
                     proposal_id: active_proposal_id,
                     vote: ProposalVoteOption::For,
                 },
                 100_200,
             ),
+            // voting without any voting power should fail
+            (
+                "invalid_voter",
+                HandleMsg::CastVote {
+                    proposal_id: active_proposal_id,
+                    vote: ProposalVoteOption::For,
+                },
+                100_001,
+            ),
         ];
 
-        for (msg, block_height) in msgs {
+        for (voter, msg, block_height) in msgs {
             let env = mock_env(
-                "voter",
+                voter,
                 MockEnvParams {
                     block_height,
                     ..Default::default()
