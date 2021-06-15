@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     log, to_binary, Api, Binary, CosmosMsg, Decimal, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, Uint128,
+    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, Uint128, WasmQuery, QueryRequest, CanonicalAddr, Order
 };
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, SetAssetIncentive};
@@ -44,80 +44,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             user_balance_before,
             total_supply_before,
         } => handle_balance_change(deps, env, user_address, user_balance_before, total_supply_before),
+        HandleMsg::ClaimRewards => handle_claim_rewards(deps, env),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
-}
-
-pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    user_address: HumanAddr,
-    user_balance_before: Uint128,
-    total_supply_before: Uint128,
-) -> StdResult<HandleResponse> {
-    let ma_token_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
-    let mut asset_incentive = 
-        match asset_incentives_bucket.may_load(ma_token_canonical_address.as_slice())? {
-            // If there are no incentives, an empty successful response is returned as the
-            // success of the call is needed to for the call that triggered the change to
-            // succeed and be persisted to state.
-            None => return Ok(HandleResponse::default()),
-            Some(ai) if ai.emission_per_second.is_zero() => return Ok(HandleResponse::default()),
-            Some(ai) => ai,
-        };
-    
-
-    // Compute asset new index and update state
-    if !(
-            env.block.time == asset_incentive.last_updated ||
-            total_supply_before.is_zero() ||
-            asset_incentive.emission_per_second.is_zero()
-        )
-    {
-        let seconds_elapsed = env.block.time - asset_incentive.last_updated;
-        let new_index =
-            asset_incentive.index +
-            Decimal::from_ratio(
-                asset_incentive.emission_per_second.u128() * seconds_elapsed as u128,
-                total_supply_before
-            );
-
-        asset_incentive.index = new_index;
-    }
-    asset_incentive.last_updated = env.block.time;
-    asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
-
-    // Check if user has accumulated uncomputed rewards (which means index is not up to date)
-    let user_canonical_address = deps.api.canonical_address(&user_address)?;
-    let asset_user_index =
-        state::asset_user_indices_read(&deps.storage, &ma_token_canonical_address.as_slice())
-            .may_load(&user_canonical_address.as_slice())?
-            .unwrap_or(Decimal::zero());
-    if asset_user_index != asset_incentive.index {
-        // Compute user accrued rewards and update state
-        let accrued_rewards = 
-            ((user_balance_before * asset_incentive.index) - (user_balance_before * asset_user_index))?;
-
-        if !accrued_rewards.is_zero() {
-            let mut user_unclaimed_rewards_bucket =
-                state::user_unclaimed_rewards(&mut deps.storage);
-            let current_unclaimed_rewards = user_unclaimed_rewards_bucket
-                .may_load(&user_canonical_address.as_slice())?
-                .unwrap_or(Uint128::zero());
-
-            user_unclaimed_rewards_bucket.save(
-                &user_canonical_address.as_slice(), 
-                &(current_unclaimed_rewards + accrued_rewards)
-            )?
-        }
-
-        state::asset_user_indices(&mut deps.storage, &ma_token_canonical_address.as_slice())
-            .save(&user_canonical_address.as_slice(), &asset_incentive.index)?
-    }
-
-    
-    Ok(HandleResponse::default())
 }
 
 pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
@@ -152,6 +81,132 @@ pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse::default())
 }
 
+pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    user_address: HumanAddr,
+    user_balance_before: Uint128,
+    total_supply_before: Uint128,
+) -> StdResult<HandleResponse> {
+    let ma_token_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
+    let mut asset_incentive = 
+        match asset_incentives_bucket.may_load(ma_token_canonical_address.as_slice())? {
+            // If there are no incentives, an empty successful response is returned as the
+            // success of the call is needed to for the call that triggered the change to
+            // succeed and be persisted to state.
+            None => return Ok(HandleResponse::default()),
+            Some(ai) if ai.emission_per_second.is_zero() => return Ok(HandleResponse::default()),
+            Some(ai) => ai,
+        };
+    
+
+    asset_incentive_update_index(&mut asset_incentive, total_supply_before, env.block.time);
+    asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
+
+    // Check if user has accumulated uncomputed rewards (which means index is not up to date)
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let user_asset_index =
+        state::user_asset_indices_read(&deps.storage, &user_canonical_address.as_slice())
+            .may_load(&ma_token_canonical_address.as_slice())?
+            .unwrap_or(Decimal::zero());
+    if user_asset_index != asset_incentive.index {
+        // Compute user accrued rewards and update state
+        let accrued_rewards = user_compute_accrued_rewards(
+                user_balance_before,
+                user_asset_index,
+                asset_incentive.index
+            )?;
+
+        // Store user accrued rewards as unclaimed
+        if !accrued_rewards.is_zero() {
+            let mut user_unclaimed_rewards_bucket =
+                state::user_unclaimed_rewards(&mut deps.storage);
+            let current_unclaimed_rewards = user_unclaimed_rewards_bucket
+                .may_load(&user_canonical_address.as_slice())?
+                .unwrap_or(Uint128::zero());
+
+            user_unclaimed_rewards_bucket.save(
+                &user_canonical_address.as_slice(), 
+                &(current_unclaimed_rewards + accrued_rewards)
+            )?
+        }
+
+        state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice())
+            .save(&ma_token_canonical_address.as_slice(), &asset_incentive.index)?
+    }
+
+    
+    Ok(HandleResponse::default())
+}
+
+pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+) -> StdResult<HandleResponse> {
+    let user_canonical_address = deps.api.canonical_address(&env.message.sender)?;
+    let unclaimed_rewards =
+        state::user_unclaimed_rewards_read(&deps.storage)
+            .may_load(&user_canonical_address.as_slice())?
+            .unwrap_or(Uint128::zero());
+    let mut accrued_rewards = unclaimed_rewards;
+
+    // Since we need the mutable storage reference while iterating we need to get all
+    // values on the range first
+    let result_user_asset_indices: Vec<StdResult<(Vec<u8>, Decimal)>> =
+        state::user_asset_indices_read(&deps.storage, &user_canonical_address.as_slice())
+            .range(None, None, Order::Ascending)
+            .collect();
+
+    for result_kv_pair in result_user_asset_indices {
+        let (ma_token_canonical_address_vec, user_asset_index) = result_kv_pair?;
+        let ma_token_canonical_address = CanonicalAddr::from(ma_token_canonical_address_vec);
+        let ma_token_address = deps.api.human_address(&ma_token_canonical_address)?;
+        // Get asset user balances and total supply
+        let balance_and_total_supply: mars::ma_token::msg::BalanceAndTotalSupplyResponse =
+            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: ma_token_address,
+                msg: to_binary(&mars::ma_token::msg::QueryMsg::BalanceAndTotalSupply {
+                    address: env.message.sender.clone(),
+                })?,
+            }))?;
+
+        // Get asset pending rewards
+        let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
+        let mut asset_incentive = 
+           asset_incentives_bucket.load(ma_token_canonical_address.as_slice())?;
+        asset_incentive_update_index(
+            &mut asset_incentive,
+            balance_and_total_supply.total_supply, 
+            env.block.time
+        );
+        asset_incentives_bucket.save(
+            &ma_token_canonical_address.as_slice(),
+            &asset_incentive
+        )?;
+
+        if user_asset_index != asset_incentive.index {
+            // Compute user accrued rewards and update user index
+            let asset_accrued_rewards = user_compute_accrued_rewards(
+                    balance_and_total_supply.balance,
+                    user_asset_index,
+                    asset_incentive.index
+                )?;
+            accrued_rewards += asset_accrued_rewards;
+
+            state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice())
+                .save(&ma_token_canonical_address.as_slice(), &asset_incentive.index)?
+        }
+    }
+
+    // clear unclaimed rewards
+    state::user_unclaimed_rewards(&mut deps.storage)
+        .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
+
+    // TODO stake and send rewards
+    Ok(HandleResponse::default())
+}
+
 pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -168,6 +223,49 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
         log: vec![log("action", "execute_cosmos_msg")],
         data: None,
     })
+}
+
+// HELPERS
+
+/// Updates asset incentive index and last updated timestamp by computing
+/// how many rewards were accrued since last time updated given incentive's
+/// emission per second.
+/// Total supply is the total (liquidity) token supply during the period being computed.
+/// Note that this method does not commit updates to state as that should be handled by the
+/// caller
+fn asset_incentive_update_index<>(
+    asset_incentive: &mut AssetIncentive,
+    total_supply: Uint128,
+    current_block_time: u64,
+) {
+    if !(
+            current_block_time == asset_incentive.last_updated ||
+            total_supply.is_zero() ||
+            asset_incentive.emission_per_second.is_zero()
+        )
+    {
+        let seconds_elapsed = current_block_time - asset_incentive.last_updated;
+        let new_index =
+            asset_incentive.index +
+            Decimal::from_ratio(
+                asset_incentive.emission_per_second.u128() * seconds_elapsed as u128,
+                total_supply
+            );
+
+        asset_incentive.index = new_index;
+    }
+    asset_incentive.last_updated = current_block_time;
+}
+
+/// Computes user accrued rewards using the difference between asset_incentive index and
+/// user current index
+/// asset_incentives index should be up to date.
+fn user_compute_accrued_rewards(
+    user_balance: Uint128,
+    user_asset_index: Decimal,
+    asset_incentive_index: Decimal,
+) -> StdResult<Uint128> {
+    (user_balance * asset_incentive_index) - (user_balance * user_asset_index)
 }
 
 // QUERIES

@@ -25,6 +25,10 @@ pub enum HandleMsg {
         total_supply_before: Uint128,
     },
 
+    /// Claim rewards. Mars rewards accrued by the user will be staked into xMars before
+    /// being sent.
+    ClaimRewards,
+
     /// Execute Cosmos msg. Only callable by owner
     ExecuteCosmosMsg(CosmosMsg),
 }

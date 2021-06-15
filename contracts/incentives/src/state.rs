@@ -12,7 +12,7 @@ pub static CONFIG_KEY: &[u8] = b"config";
 
 // namespaces (for buckets)
 pub static ASSET_INCENTIVES_NAMESPACE: &[u8] = b"asset_data";
-pub static ASSET_USER_INDICES_NAMESPACE: &[u8] = b"asset_user_indices";
+pub static USER_ASSET_INDICES_NAMESPACE: &[u8] = b"asset_user_indices";
 pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 
 /// Insurance fund global configuration
@@ -44,18 +44,18 @@ pub fn asset_incentives_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Asset
     bucket_read(ASSET_INCENTIVES_NAMESPACE, storage)
 }
 
-pub fn asset_user_indices<'a, S: Storage>(
+pub fn user_asset_indices<'a, S: Storage>(
     storage: &'a mut S,
-    asset_reference: &[u8]
+    user_reference: &[u8]
 ) -> Bucket<'a, S, Decimal> {
-    Bucket::multilevel(&[ASSET_USER_INDICES_NAMESPACE, asset_reference], storage)
+    Bucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
 }
 
-pub fn asset_user_indices_read<'a, S: Storage>(
+pub fn user_asset_indices_read<'a, S: Storage>(
     storage: &'a S,
-    asset_reference: &[u8]
+    user_reference: &[u8]
 ) -> ReadonlyBucket<'a, S, Decimal> {
-    ReadonlyBucket::multilevel(&[ASSET_USER_INDICES_NAMESPACE, asset_reference], storage)
+    ReadonlyBucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
 }
 
 pub fn user_unclaimed_rewards<S: Storage>(storage: &mut S) -> Bucket<S, Uint128> {

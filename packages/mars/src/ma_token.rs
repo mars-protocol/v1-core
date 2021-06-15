@@ -122,6 +122,12 @@ pub mod msg {
         Balance {
             address: HumanAddr,
         },
+        /// Returns both balance (0 if unset) and total supply
+        /// Used by incentives contract when computing unclaimed rewards
+        /// Return type: BalanceAndTotalSupplyResponse
+        BalanceAndTotalSupply {
+            address: HumanAddr,
+        },
         /// Returns metadata on the contract - name, decimals, supply, etc.
         /// Return type: TokenInfoResponse.
         TokenInfo {},
@@ -148,6 +154,12 @@ pub mod msg {
             start_after: Option<HumanAddr>,
             limit: Option<u32>,
         },
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct BalanceAndTotalSupplyResponse {
+        pub balance: Uint128,
+        pub total_supply: Uint128,
     }
 
     /// We currently take no arguments for migrations
