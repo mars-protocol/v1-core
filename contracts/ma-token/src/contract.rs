@@ -14,7 +14,10 @@ use crate::state;
 use crate::state::{
     balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo,
 };
-use mars::ma_token::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg};
+use mars::ma_token::msg::{
+    HandleMsg, InitMsg, MigrateMsg, QueryMsg,
+    BalanceAndTotalSupplyResponse
+};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
@@ -347,6 +350,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
+        QueryMsg::BalanceAndTotalSupply { address } => to_binary(&query_balance_and_total_supply(deps, address)?),
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(deps)?),
         QueryMsg::Minter {} => to_binary(&query_minter(deps)?),
         QueryMsg::Allowance { owner, spender } => {
@@ -372,6 +376,21 @@ pub fn query_balance<S: Storage, A: Api, Q: Querier>(
         .may_load(addr_raw.as_slice())?
         .unwrap_or_default();
     Ok(BalanceResponse { balance })
+}
+
+pub fn query_balance_and_total_supply<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+) -> StdResult<BalanceAndTotalSupplyResponse> {
+    let addr_raw = deps.api.canonical_address(&address)?;
+    let balance = balances_read(&deps.storage)
+        .may_load(addr_raw.as_slice())?
+        .unwrap_or_default();
+    let info = token_info_read(&deps.storage).load()?;
+    Ok(BalanceAndTotalSupplyResponse {
+        balance,
+        total_supply: info.total_supply,
+    })
 }
 
 pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
