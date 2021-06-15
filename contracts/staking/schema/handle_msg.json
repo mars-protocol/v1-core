@@ -103,6 +103,16 @@
             "offer_asset_info"
           ],
           "properties": {
+            "amount": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "offer_asset_info": {
               "$ref": "#/definitions/AssetInfo"
             }
@@ -123,6 +133,16 @@
             "offer_asset_info"
           ],
           "properties": {
+            "amount": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "offer_asset_info": {
               "$ref": "#/definitions/AssetInfo"
             }

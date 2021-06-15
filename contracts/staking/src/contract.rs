@@ -4,18 +4,20 @@ use cosmwasm_std::{
     StdResult, Storage, Uint128, WasmMsg,
 };
 
-use crate::msg::{
-    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg,
-    QueryMsg, ReceiveMsg,
-};
 use crate::state::{
     config_state, config_state_read, cooldowns_state, cooldowns_state_read, Config, Cooldown,
 };
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, human_addr_into_canonical};
+
 use mars::swapping::handle_swap;
 use terraswap::asset::AssetInfo;
+
+use mars::staking::msg::{
+    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg,
+    QueryMsg, ReceiveMsg,
+};
 
 // INIT
 
@@ -562,9 +564,9 @@ mod tests {
         assert_generic_error_message, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
     };
 
-    use crate::msg::HandleMsg::UpdateConfig;
     use crate::state::{config_state_read, cooldowns_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
+    use mars::staking::msg::HandleMsg::UpdateConfig;
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;
