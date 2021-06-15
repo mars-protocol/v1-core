@@ -53,10 +53,13 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ReceiveMsg {
-        /// Stake Mars and get minted xMars in return
-        Stake,
+        /// Stake Mars and mint xMars in return
+        /// - recipient: address to receive the xMars tokens. Set to sender if not specified
+        Stake { recipient: Option<HumanAddr> },
+
         /// Unstake Mars and burn xMars
-        Unstake,
+        /// - recipient: address to receive the Mars tokens. Set to sender if not specified
+        Unstake { recipient: Option<HumanAddr> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
