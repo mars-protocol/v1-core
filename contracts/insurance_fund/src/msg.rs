@@ -1,10 +1,13 @@
-use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InitMsg {}
+pub struct InitMsg {
+    pub terraswap_factory_address: HumanAddr,
+    pub terraswap_max_spread: Decimal,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]

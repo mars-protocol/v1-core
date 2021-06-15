@@ -13,11 +13,13 @@ use terraswap::asset::AssetInfo;
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    _msg: InitMsg,
+    msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // initialize Config
     let config = Config {
         owner: deps.api.canonical_address(&env.message.sender)?,
+        terraswap_factory_address: deps.api.canonical_address(&msg.terraswap_factory_address)?,
+        terraswap_max_spread: msg.terraswap_max_spread,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -93,15 +95,14 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
-    let _config = config_state_read(&deps.storage).load()?;
+    let config = config_state_read(&deps.storage).load()?;
 
     let ask_asset_info = AssetInfo::NativeToken {
         denom: "uusd".to_string(),
     };
 
-    // TODO provide terraswap factory address and max spread
-    let terraswap_factory_human_addr = HumanAddr::from("terraswap_factory_address");
-    let terraswap_max_spread: Option<Decimal> = None;
+    let terraswap_factory_human_addr = deps.api.human_address(&config.terraswap_factory_address)?;
+    let terraswap_max_spread = Some(config.terraswap_max_spread);
 
     handle_swap(
         deps,
@@ -158,7 +159,10 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {};
+        let msg = InitMsg {
+            terraswap_factory_address: HumanAddr::from("terraswap_factory"),
+            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+        };
         let env = mock_env("owner", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
@@ -178,7 +182,10 @@ mod tests {
     fn test_execute_cosmos_msg() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {};
+        let msg = InitMsg {
+            terraswap_factory_address: HumanAddr::from("terraswap_factory"),
+            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+        };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
 
