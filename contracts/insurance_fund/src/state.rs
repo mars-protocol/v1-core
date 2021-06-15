@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Storage};
+use cosmwasm_std::{CanonicalAddr, Decimal, Storage};
 use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
 
 // keys (for singleton)
@@ -11,6 +11,10 @@ pub static CONFIG_KEY: &[u8] = b"config";
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: CanonicalAddr,
+    /// Terraswap factory contract address
+    pub terraswap_factory_address: CanonicalAddr,
+    /// Terraswap max spread
+    pub terraswap_max_spread: Decimal,
 }
 
 pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
