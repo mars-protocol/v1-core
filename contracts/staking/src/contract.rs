@@ -172,8 +172,12 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
-            ReceiveMsg::Stake => handle_stake(deps, env, cw20_msg.sender, cw20_msg.amount),
-            ReceiveMsg::Unstake => handle_unstake(deps, env, cw20_msg.sender, cw20_msg.amount),
+            ReceiveMsg::Stake { recipient } => {
+                handle_stake(deps, env, cw20_msg.sender, recipient, cw20_msg.amount)
+            }
+            ReceiveMsg::Unstake { recipient } => {
+                handle_unstake(deps, env, cw20_msg.sender, recipient, cw20_msg.amount)
+            }
         }
     } else {
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
@@ -185,6 +189,7 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     staker: HumanAddr,
+    option_recipient: Option<HumanAddr>,
     stake_amount: Uint128,
 ) -> StdResult<HandleResponse> {
     // check stake is valid
@@ -218,18 +223,21 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
             stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_staking_contract)
         };
 
+    let recipient = option_recipient.unwrap_or_else(|| staker.clone());
+
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&config.xmars_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: staker.clone(),
+                recipient: recipient.clone(),
                 amount: mint_amount,
             })?,
         })],
         log: vec![
             log("action", "stake"),
-            log("user", staker),
+            log("staker", staker),
+            log("recipient", recipient),
             log("mars_staked", stake_amount),
             log("xmars_minted", mint_amount),
         ],
@@ -242,6 +250,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     staker: HumanAddr,
+    option_recipient: Option<HumanAddr>,
     burn_amount: Uint128,
 ) -> StdResult<HandleResponse> {
     // check if unstake is valid
@@ -303,6 +312,8 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     let unstake_amount =
         burn_amount.multiply_ratio(total_mars_in_staking_contract, total_xmars_supply);
 
+    let recipient = option_recipient.unwrap_or_else(|| staker.clone());
+
     Ok(HandleResponse {
         messages: vec![
             CosmosMsg::Wasm(WasmMsg::Execute {
@@ -316,14 +327,15 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
                 contract_addr: deps.api.human_address(&config.mars_token_address)?,
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: staker.clone(),
+                    recipient: recipient.clone(),
                     amount: unstake_amount,
                 })?,
             }),
         ],
         log: vec![
             log("action", "unstake"),
-            log("user", staker),
+            log("staker", staker),
+            log("recipient", recipient),
             log("mars_unstaked", unstake_amount),
             log("xmars_burned", burn_amount),
         ],
@@ -786,7 +798,7 @@ mod tests {
         // no Mars in pool
         // stake X Mars -> should receive X xMars
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Stake { recipient: None }).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });
@@ -817,7 +829,8 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "stake"),
-                log("user", HumanAddr::from("staker")),
+                log("staker", HumanAddr::from("staker")),
+                log("recipient", HumanAddr::from("staker")),
                 log("mars_staked", 2_000_000),
                 log("xmars_minted", 2_000_000),
             ],
@@ -826,12 +839,18 @@ mod tests {
 
         // Some Mars in pool and some xMars supply
         // stake Mars -> should receive less xMars
+        // set recipient -> should send xMars to recipient
         let stake_amount = Uint128(2_000_000);
         let mars_in_basecamp = Uint128(4_000_000);
         let xmars_supply = Uint128(1_000_000);
 
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
+            msg: Some(
+                to_binary(&ReceiveMsg::Stake {
+                    recipient: Some(HumanAddr::from("recipient")),
+                })
+                .unwrap(),
+            ),
             sender: HumanAddr::from("staker"),
             amount: stake_amount,
         });
@@ -855,7 +874,7 @@ mod tests {
                 contract_addr: HumanAddr::from("xmars_token"),
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("staker"),
+                    recipient: HumanAddr::from("recipient"),
                     amount: expected_minted_xmars,
                 })
                 .unwrap(),
@@ -865,7 +884,8 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "stake"),
-                log("user", HumanAddr::from("staker")),
+                log("staker", HumanAddr::from("staker")),
+                log("recipient", HumanAddr::from("recipient")),
                 log("mars_staked", stake_amount),
                 log("xmars_minted", expected_minted_xmars),
             ],
@@ -874,7 +894,7 @@ mod tests {
 
         // stake other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Stake).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Stake { recipient: None }).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: Uint128(2_000_000),
         });
@@ -888,7 +908,7 @@ mod tests {
         let unstake_xmars_supply = Uint128(3_000_000);
         let unstake_block_timestamp = 1_000_000_000;
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Unstake { recipient: None }).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: unstake_amount,
         });
@@ -1029,7 +1049,8 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "unstake"),
-                log("user", HumanAddr::from("staker")),
+                log("staker", HumanAddr::from("staker")),
+                log("recipient", HumanAddr::from("staker")),
                 log("mars_unstaked", expected_returned_mars),
                 log("xmars_burned", unstake_amount),
             ],
@@ -1045,7 +1066,7 @@ mod tests {
 
         // unstake other token -> Unauthorized
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
+            msg: Some(to_binary(&ReceiveMsg::Unstake { recipient: None }).unwrap()),
             sender: HumanAddr::from("staker"),
             amount: pending_cooldown_amount,
         });
@@ -1069,7 +1090,12 @@ mod tests {
             },
         );
         let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::Unstake).unwrap()),
+            msg: Some(
+                to_binary(&ReceiveMsg::Unstake {
+                    recipient: Some(HumanAddr::from("recipient")),
+                })
+                .unwrap(),
+            ),
             sender: HumanAddr::from("staker"),
             amount: pending_cooldown_amount,
         });
@@ -1094,7 +1120,7 @@ mod tests {
                     contract_addr: HumanAddr::from("mars_token"),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Transfer {
-                        recipient: HumanAddr::from("staker"),
+                        recipient: HumanAddr::from("recipient"),
                         amount: expected_returned_mars,
                     })
                     .unwrap(),
@@ -1105,7 +1131,8 @@ mod tests {
         assert_eq!(
             vec![
                 log("action", "unstake"),
-                log("user", HumanAddr::from("staker")),
+                log("staker", HumanAddr::from("staker")),
+                log("recipient", HumanAddr::from("recipient")),
                 log("mars_unstaked", expected_returned_mars),
                 log("xmars_burned", pending_cooldown_amount),
             ],
