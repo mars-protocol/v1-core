@@ -1,9 +1,11 @@
 use cosmwasm_std::{
-    to_binary, Api, CanonicalAddr, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128,
-    WasmQuery,
+    to_binary, Api, CanonicalAddr, Coin, CosmosMsg, Decimal, Empty, Extern, HumanAddr, Querier,
+    QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
-use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
+use cw20::{BalanceResponse, Cw20HandleMsg, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
+use terraswap::asset::{Asset, AssetInfo};
+use terraswap::pair::HandleMsg as TerraswapPairHandleMsg;
 
 // CW20
 pub fn cw20_get_balance<Q: Querier>(
@@ -93,4 +95,43 @@ pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> StdResul
     }
 
     Ok(())
+}
+
+/// Construct terraswap message to swap assets
+pub fn asset_into_swap_msg<S: Storage, A: Api, Q: Querier>(
+    _deps: &Extern<S, A, Q>,
+    pair_contract: HumanAddr,
+    offer_asset: Asset,
+    max_spread: Option<Decimal>,
+) -> StdResult<CosmosMsg<Empty>> {
+    let message = match offer_asset.info.clone() {
+        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: pair_contract,
+            msg: to_binary(&TerraswapPairHandleMsg::Swap {
+                offer_asset: offer_asset.clone(),
+                belief_price: None,
+                max_spread,
+                to: None,
+            })?,
+            send: vec![Coin {
+                denom,
+                amount: offer_asset.amount,
+            }],
+        }),
+        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr,
+            msg: to_binary(&Cw20HandleMsg::Send {
+                contract: pair_contract,
+                amount: offer_asset.amount,
+                msg: Some(to_binary(&TerraswapPairHandleMsg::Swap {
+                    offer_asset,
+                    belief_price: None,
+                    max_spread,
+                    to: None,
+                })?),
+            })?,
+            send: vec![],
+        }),
+    };
+    Ok(message)
 }

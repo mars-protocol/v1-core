@@ -1,6 +1,7 @@
-use cosmwasm_std::{CosmosMsg, HumanAddr};
+use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use terraswap::asset::AssetInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {}
@@ -13,6 +14,12 @@ pub enum HandleMsg {
 
     /// Update basecamp config
     UpdateConfig { owner: HumanAddr },
+
+    /// Swap any asset on the contract to uusd
+    SwapAssetToUusd {
+        offer_asset_info: AssetInfo,
+        amount: Option<Uint128>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -1,10 +1,13 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage,
+    log, to_binary, Api, Binary, CosmosMsg, Decimal, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, Uint128,
 };
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{config_state, config_state_read, Config};
+use mars::helpers::{asset_into_swap_msg, cw20_get_balance};
+use terraswap::asset::{Asset, AssetInfo, PairInfo};
+use terraswap::querier::query_pair_info;
 
 // INIT
 
@@ -36,6 +39,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     match msg {
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
         HandleMsg::UpdateConfig { owner } => handle_update_config(deps, env, owner),
+        HandleMsg::SwapAssetToUusd {
+            offer_asset_info,
+            amount,
+        } => handle_swap_asset_to_uusd(deps, env, offer_asset_info, amount),
     }
 }
 
@@ -76,6 +83,85 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![],
         log: vec![log("action", "update_config"), log("owner", &owner)],
+        data: None,
+    })
+}
+
+/// Swap any asset on the contract to uusd
+pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    offer_asset_info: AssetInfo,
+    amount: Option<Uint128>,
+) -> StdResult<HandleResponse> {
+    let config = config_state_read(&deps.storage).load()?;
+
+    let ask_asset_info = AssetInfo::NativeToken {
+        denom: "uusd".to_string(),
+    };
+
+    if offer_asset_info == ask_asset_info {
+        return Err(StdError::generic_err("Cannot swap uusd"));
+    }
+
+    let (contract_asset_balance, asset_label) = match offer_asset_info.clone() {
+        AssetInfo::NativeToken { denom } => (
+            deps.querier
+                .query_balance(env.contract.address, denom.as_str())?
+                .amount,
+            denom,
+        ),
+        AssetInfo::Token { contract_addr } => {
+            let asset_label = String::from(contract_addr.as_str());
+            (
+                cw20_get_balance(&deps.querier, contract_addr, env.contract.address)?,
+                asset_label,
+            )
+        }
+    };
+
+    if contract_asset_balance.is_zero() {
+        return Err(StdError::generic_err(format!(
+            "Contract has no balance for the asset {}",
+            asset_label
+        )));
+    }
+
+    let amount_to_swap = match amount {
+        Some(amount) if amount > contract_asset_balance => {
+            return Err(StdError::generic_err(format!(
+                "The amount requested for swap exceeds contract balance for the asset {}",
+                asset_label
+            )));
+        }
+        Some(amount) => amount,
+        None => contract_asset_balance,
+    };
+
+    // TODO provide terraswap factory address and max spread
+    let terraswap_factory_human_addr = HumanAddr::from("terraswap_factory_address");
+    let terraswap_max_spread: Option<Decimal> = None;
+
+    let pair_info: PairInfo = query_pair_info(
+        &deps,
+        &terraswap_factory_human_addr,
+        &[offer_asset_info.clone(), ask_asset_info],
+    )?;
+
+    let offer_asset = Asset {
+        info: offer_asset_info,
+        amount: amount_to_swap,
+    };
+    let send_msg = asset_into_swap_msg(
+        deps,
+        pair_info.contract_addr,
+        offer_asset,
+        terraswap_max_spread,
+    )?;
+
+    Ok(HandleResponse {
+        messages: vec![send_msg],
+        log: vec![log("action", "swap"), log("asset", asset_label)],
         data: None,
     })
 }

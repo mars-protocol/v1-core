@@ -13,8 +13,10 @@ use crate::state::{
 };
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use mars::cw20_token;
-use mars::helpers::{cw20_get_balance, cw20_get_total_supply, human_addr_into_canonical};
-use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
+use mars::helpers::{
+    asset_into_swap_msg, cw20_get_balance, cw20_get_total_supply, human_addr_into_canonical,
+};
+use terraswap::asset::{Asset as TerraswapAsset, Asset, AssetInfo, PairInfo};
 use terraswap::pair::HandleMsg as TerraswapPairHandleMsg;
 use terraswap::querier::query_pair_info;
 
@@ -536,41 +538,16 @@ fn handle_swap<S: Storage, A: Api, Q: Querier>(
         &[offer_asset_info.clone(), ask_asset_info],
     )?;
 
-    let send_msg = match offer_asset_info.clone() {
-        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: pair_info.contract_addr,
-            msg: to_binary(&TerraswapPairHandleMsg::Swap {
-                offer_asset: TerraswapAsset {
-                    info: offer_asset_info,
-                    amount: amount_to_swap,
-                },
-                belief_price: None,
-                max_spread: Some(config.terraswap_max_spread),
-                to: None,
-            })?,
-            send: vec![Coin {
-                denom,
-                amount: amount_to_swap,
-            }],
-        }),
-        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
-            msg: to_binary(&Cw20HandleMsg::Send {
-                contract: pair_info.contract_addr,
-                amount: amount_to_swap,
-                msg: Some(to_binary(&TerraswapPairHandleMsg::Swap {
-                    offer_asset: TerraswapAsset {
-                        info: offer_asset_info,
-                        amount: amount_to_swap,
-                    },
-                    belief_price: None,
-                    max_spread: Some(config.terraswap_max_spread),
-                    to: None,
-                })?),
-            })?,
-            send: vec![],
-        }),
+    let offer_asset = Asset {
+        info: offer_asset_info,
+        amount: amount_to_swap,
     };
+    let send_msg = asset_into_swap_msg(
+        deps,
+        pair_info.contract_addr,
+        offer_asset,
+        Some(config.terraswap_max_spread),
+    )?;
 
     Ok(HandleResponse {
         messages: vec![send_msg],

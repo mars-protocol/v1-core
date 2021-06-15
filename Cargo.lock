@@ -223,6 +223,7 @@ dependencies = [
  "serde",
  "snafu",
  "terra-cosmwasm",
+ "terraswap",
 ]
 
 [[package]]
