@@ -74,20 +74,25 @@ pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
         let ma_asset_canonical_address = deps
             .api
             .canonical_address(&set_asset_incentive.ma_token_address)?;
-        let new_asset_incentive =
-            match asset_incentives_bucket.may_load(&ma_asset_canonical_address.as_slice())? {
-                Some(mut asset_incentive) => {
-                    // TODO: Update index up to now
-                    asset_incentive.emission_per_second = set_asset_incentive.emission_per_second;
-                    asset_incentive.last_updated = env.block.time;
-                    asset_incentive
-                }
-                None => AssetIncentive {
-                    emission_per_second: set_asset_incentive.emission_per_second,
-                    index: Decimal::zero(),
-                    last_updated: env.block.time,
-                },
-            };
+        let new_asset_incentive = match asset_incentives_bucket
+            .may_load(&ma_asset_canonical_address.as_slice())?
+        {
+            Some(mut asset_incentive) => {
+                // Update index up to now
+                let total_supply = mars::helpers::cw20_get_total_supply(
+                    &deps.querier,
+                    set_asset_incentive.ma_token_address.clone(),
+                )?;
+                asset_incentive_update_index(&mut asset_incentive, total_supply, env.block.time);
+                asset_incentive.emission_per_second = set_asset_incentive.emission_per_second;
+                asset_incentive
+            }
+            None => AssetIncentive {
+                emission_per_second: set_asset_incentive.emission_per_second,
+                index: Decimal::zero(),
+                last_updated: env.block.time,
+            },
+        };
         asset_incentives_bucket
             .save(&ma_asset_canonical_address.as_slice(), &new_asset_incentive)?;
     }
