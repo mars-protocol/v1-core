@@ -342,7 +342,7 @@ pub fn handle_redeem<S: Storage, A: Api, Q: Querier>(
     reserve_apply_accumulated_interests(&env, &mut reserve);
 
     // Redeem amount is computed with the updated index
-    let redeem_amount = burn_amount * reserve.liquidity_index;
+    let redeem_amount = burn_amount * get_updated_liquidity_index(&reserve, env.block.time);
 
     reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, redeem_amount)?;
     reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
@@ -598,7 +598,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     if reserve.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
     }
-    let mint_amount = deposit_amount / reserve.liquidity_index;
+    let mint_amount = deposit_amount / get_updated_liquidity_index(&reserve, env.block.time);
 
     let mut log = vec![
         log("action", "deposit"),
@@ -728,7 +728,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             };
 
         let asset_reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
-        let debt_amount = borrower_debt.amount_scaled * asset_reserve.borrow_index;
+        let debt_amount =
+            borrower_debt.amount_scaled * get_updated_borrow_index(&asset_reserve, env.block.time);
         if borrow_amount + debt_amount > Uint256::from(uncollateralized_loan_limit) {
             return Err(StdError::generic_err(
                 "borrow amount exceeds uncollateralized loan limit given existing debt",
@@ -755,7 +756,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         },
         Err(error) => return Err(error),
     };
-    let borrow_amount_scaled = borrow_amount / borrow_reserve.borrow_index;
+    let borrow_amount_scaled =
+        borrow_amount / get_updated_borrow_index(&borrow_reserve, env.block.time);
     debt.amount_scaled += borrow_amount_scaled;
     debts_asset_bucket.save(borrower_canonical_addr.as_slice(), &debt)?;
 
@@ -827,14 +829,15 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
 
     reserve_apply_accumulated_interests(&env, &mut reserve);
 
-    let mut repay_amount_scaled = repay_amount / reserve.borrow_index;
+    let mut repay_amount_scaled = repay_amount / get_updated_borrow_index(&reserve, env.block.time);
 
     let mut messages: Vec<CosmosMsg> = vec![];
     let mut refund_amount = Uint256::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
         // TODO: Should we log this?
-        refund_amount = (repay_amount_scaled - debt.amount_scaled) * reserve.borrow_index;
+        refund_amount = (repay_amount_scaled - debt.amount_scaled)
+            * get_updated_borrow_index(&reserve, env.block.time);
         let refund_msg = match asset_type {
             AssetType::Native => build_send_native_asset_msg(
                 env.contract.address.clone(),
@@ -902,6 +905,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     sent_debt_asset_amount: Uint256,
     receive_ma_token: bool,
 ) -> StdResult<HandleResponse> {
+    let block_time = env.block.time;
+
     let user_canonical_address = deps.api.canonical_address(&user_address)?;
     let (debt_asset_label, debt_asset_reference, _) = asset_get_attributes(deps, &debt_asset)?;
 
@@ -940,7 +945,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let collateral_ma_address = deps
         .api
         .human_address(&collateral_reserve.ma_token_address)?;
-    let user_collateral_balance = collateral_reserve.liquidity_index
+    let user_collateral_balance = get_updated_liquidity_index(&collateral_reserve, block_time)
         * Uint256::from(cw20_get_balance(
             &deps.querier,
             collateral_ma_address.clone(),
@@ -968,7 +973,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         &money_market,
         &user,
         &user_canonical_address,
-        env.block.time,
+        block_time,
     )?;
 
     let health_factor = match user_health_status {
@@ -1005,7 +1010,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     reserve_apply_accumulated_interests(&env, &mut debt_reserve);
 
-    let user_debt_asset_total_debt = user_debt.amount_scaled * debt_reserve.borrow_index;
+    let user_debt_asset_total_debt =
+        user_debt.amount_scaled * get_updated_borrow_index(&debt_reserve, block_time);
 
     let (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount) =
         liquidation_compute_amounts(
@@ -1038,8 +1044,9 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
         }
 
-        let collateral_amount_to_liquidate_scaled =
-            collateral_amount_to_liquidate / collateral_reserve.liquidity_index;
+        let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
+            / get_updated_liquidity_index(&collateral_reserve, block_time);
+
         messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_ma_address,
             msg: to_binary(&mars::ma_token::msg::HandleMsg::TransferOnLiquidation {
@@ -1087,8 +1094,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             collateral_amount_to_liquidate,
         )?;
 
-        let collateral_amount_to_liquidate_scaled =
-            collateral_amount_to_liquidate / collateral_reserve.liquidity_index;
+        let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
+            / get_updated_liquidity_index(&collateral_reserve, block_time);
 
         let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_ma_address,
@@ -1118,7 +1125,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     // 5. Update debt reserve and positions
 
-    let debt_amount_to_repay_scaled = debt_amount_to_repay / debt_reserve.borrow_index;
+    let debt_amount_to_repay_scaled =
+        debt_amount_to_repay / get_updated_borrow_index(&debt_reserve, block_time);
 
     // update user and reserve debt
     let mut debts_asset_bucket =
@@ -1441,7 +1449,8 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     }
 
     if !treasury_amount.is_zero() {
-        let scaled_mint_amount = treasury_amount / reserve.liquidity_index;
+        let scaled_mint_amount =
+            treasury_amount / get_updated_liquidity_index(&reserve, env.block.time);
         let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
@@ -1725,6 +1734,42 @@ pub fn reserve_apply_accumulated_interests(env: &Env, reserve: &mut Reserve) {
     reserve.protocol_income_to_distribute += new_protocol_income_to_distribute;
 }
 
+/// Return applied interest rate for borrow index according to passed blocks
+fn get_updated_borrow_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
+    if reserve.interests_last_updated < block_time {
+        let time_elapsed = block_time - reserve.interests_last_updated;
+
+        if reserve.borrow_rate > Decimal256::zero() {
+            let applied_interest_rate = calculate_applied_linear_interest_rate(
+                reserve.borrow_index,
+                reserve.borrow_rate,
+                time_elapsed,
+            );
+            return applied_interest_rate;
+        }
+    }
+
+    reserve.borrow_index
+}
+
+/// Return applied interest rate for liquidity index according to passed blocks
+fn get_updated_liquidity_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
+    if reserve.interests_last_updated < block_time {
+        let time_elapsed = block_time - reserve.interests_last_updated;
+
+        if reserve.liquidity_rate > Decimal256::zero() {
+            let applied_interest_rate = calculate_applied_linear_interest_rate(
+                reserve.liquidity_index,
+                reserve.liquidity_rate,
+                time_elapsed,
+            );
+            return applied_interest_rate;
+        }
+    }
+
+    reserve.liquidity_index
+}
+
 fn calculate_applied_linear_interest_rate(
     index: Decimal256,
     rate: Decimal256,
@@ -1784,7 +1829,8 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     let available_liquidity = Decimal256::from_uint256(
         contract_current_balance - liquidity_to_deduct_from_current_balance,
     );
-    let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled) * reserve.borrow_index;
+    let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled)
+        * get_updated_borrow_index(&reserve, env.block.time);
     let utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
     } else {
@@ -1848,16 +1894,7 @@ where
                 deps.api.human_address(user_canonical_address)?,
             )?;
 
-            let liquidity_index = if reserve.interests_last_updated < block_time {
-                let time_elapsed = block_time - reserve.interests_last_updated;
-                calculate_applied_linear_interest_rate(
-                    reserve.liquidity_index,
-                    reserve.liquidity_rate,
-                    time_elapsed,
-                )
-            } else {
-                reserve.liquidity_index
-            };
+            let liquidity_index = get_updated_liquidity_index(&reserve, block_time);
 
             let collateral =
                 Decimal256::from_uint256(Uint256::from(asset_balance)) * liquidity_index;
@@ -1871,16 +1908,7 @@ where
             let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
             let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
 
-            let borrow_index = if reserve.interests_last_updated < block_time {
-                let time_elapsed = block_time - reserve.interests_last_updated;
-                calculate_applied_linear_interest_rate(
-                    reserve.borrow_index,
-                    reserve.borrow_rate,
-                    time_elapsed,
-                )
-            } else {
-                reserve.borrow_index
-            };
+            let borrow_index = get_updated_borrow_index(&reserve, block_time);
 
             user_debt.amount_scaled * borrow_index
         } else {
@@ -4594,7 +4622,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            let res = handle(&mut deps, env, liquidate_msg).unwrap();
+            let res = handle(&mut deps, env.clone(), liquidate_msg).unwrap();
 
             // get expected indices and rates for debt reserve
             let expected_debt_rates = th_get_expected_indices_and_rates(
@@ -4621,6 +4649,9 @@ mod tests {
                 * (Decimal256::one() + collateral_liquidation_bonus)
                 / Decimal256::from(collateral_price);
 
+            let expected_liquidated_collateral_amount_scaled = expected_liquidated_collateral_amount
+                / get_updated_liquidity_index(&collateral_reserve_after, env.block.time);
+
             assert_eq!(
                 res.messages,
                 vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -4628,7 +4659,7 @@ mod tests {
                     msg: to_binary(&mars::ma_token::msg::HandleMsg::TransferOnLiquidation {
                         sender: user_address.clone(),
                         recipient: liquidator_address.clone(),
-                        amount: expected_liquidated_collateral_amount.into(),
+                        amount: expected_liquidated_collateral_amount_scaled.into(),
                     })
                     .unwrap(),
                     send: vec![],
@@ -5598,7 +5629,7 @@ mod tests {
             asset: asset.clone(),
             amount: Some(permissible_amount),
         };
-        let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
+        let res = handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap();
 
         let config = config_state_read(&deps.storage).load().unwrap();
         let reserve_after_distribution = reserves_state_read(&deps.storage)
@@ -5610,7 +5641,8 @@ mod tests {
         let expected_staking_amount =
             permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
 
-        let scaled_mint_amount = expected_treasury_amount / reserve_initial.liquidity_index;
+        let scaled_mint_amount = expected_treasury_amount
+            / get_updated_liquidity_index(&reserve_initial, owner_env.block.time);
 
         assert_eq!(
             res.messages,
@@ -5675,7 +5707,7 @@ mod tests {
             asset,
             amount: None,
         };
-        let res = handle(&mut deps, owner_env, distribute_income_msg).unwrap();
+        let res = handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap();
 
         // verify messages are correct and protocol_income_to_distribute field is now zero
         let expected_insurance_amount =
@@ -5685,8 +5717,8 @@ mod tests {
         let expected_staking_amount = expected_remaining_income_to_be_distributed
             - (expected_insurance_amount + expected_treasury_amount);
 
-        let scaled_mint_amount =
-            expected_treasury_amount / reserve_after_distribution.liquidity_index;
+        let scaled_mint_amount = expected_treasury_amount
+            / get_updated_liquidity_index(&reserve_after_distribution, owner_env.block.time);
 
         assert_eq!(
             res.messages,
