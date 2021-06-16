@@ -12,13 +12,19 @@ pub static CONFIG_KEY: &[u8] = b"config";
 
 // namespaces (for buckets)
 pub static ASSET_INCENTIVES_NAMESPACE: &[u8] = b"asset_data";
-pub static USER_ASSET_INDICES_NAMESPACE: &[u8] = b"asset_user_indices";
+pub static USER_ASSET_INDICES_NAMESPACE: &[u8] = b"user_asset_indices";
 pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 
 /// Insurance fund global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
+    /// Contract owner
     pub owner: CanonicalAddr,
+    /// Mars token address: rewards are emitted in Mars. This contract should have enough
+    /// balance for this.
+    pub mars_token_address: CanonicalAddr,
+    /// Staking contract address: used to stake Mars rewards and give xMars when claiming
+    pub staking_address: CanonicalAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -46,14 +52,14 @@ pub fn asset_incentives_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Asset
 
 pub fn user_asset_indices<'a, S: Storage>(
     storage: &'a mut S,
-    user_reference: &[u8]
+    user_reference: &[u8],
 ) -> Bucket<'a, S, Decimal> {
     Bucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
 }
 
 pub fn user_asset_indices_read<'a, S: Storage>(
     storage: &'a S,
-    user_reference: &[u8]
+    user_reference: &[u8],
 ) -> ReadonlyBucket<'a, S, Decimal> {
     ReadonlyBucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
 }

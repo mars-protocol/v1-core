@@ -35,11 +35,11 @@ pub struct Config {
     pub staking_contract_address: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
-    // Maximum percentage of outstanding debt that can be covered by a liquidator
+    /// Maximum percentage of outstanding debt that can be covered by a liquidator
     pub close_factor: Decimal256,
-    // Percentage of fees that are sent to the insurance fund
+    /// Percentage of fees that are sent to the insurance fund
     pub insurance_fund_fee_share: Decimal256,
-    // Percentage of fees that are sent to the treasury
+    /// Percentage of fees that are sent to the treasury
     pub treasury_fee_share: Decimal256,
 }
 
