@@ -177,6 +177,7 @@ mod tests {
 
     use crate::contract::{handle, init, query_balance, query_token_info};
     use mars::ma_token::msg::{HandleMsg, InitMsg};
+    use mars::testing::assert_generic_error_message;
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
         deps: &Extern<S, A, Q>,
@@ -396,12 +397,7 @@ mod tests {
             expires: None,
         };
         let res = handle(&mut deps, env.clone(), msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => {
-                assert_eq!(msg, "Cannot set allowance to own account")
-            }
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Cannot set allowance to own account");
 
         // decrease self-allowance
         let msg = HandleMsg::DecreaseAllowance {
@@ -410,12 +406,7 @@ mod tests {
             expires: None,
         };
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => {
-                assert_eq!(msg, "Cannot set allowance to own account")
-            }
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Cannot set allowance to own account");
     }
 
     #[test]
@@ -517,9 +508,6 @@ mod tests {
         };
         let env = mock_env(spender, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(msg, "Allowance is expired"),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Allowance is expired");
     }
 }
