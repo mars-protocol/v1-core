@@ -1,6 +1,7 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Decimal, Env, Extern, HandleResponse, HumanAddr,
-    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, Uint128, WasmQuery, QueryRequest, CanonicalAddr, Order
+    log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Decimal, Env, Extern, HandleResponse,
+    HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier, QueryRequest,
+    StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, SetAssetIncentive};
@@ -12,12 +13,14 @@ use crate::state::{AssetIncentive, Config};
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
-    _msg: InitMsg,
+    _env: Env,
+    msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // initialize Config
     let config = Config {
-        owner: deps.api.canonical_address(&env.message.sender)?,
+        owner: deps.api.canonical_address(&msg.owner)?,
+        staking_address: deps.api.canonical_address(&msg.staking_address)?,
+        mars_token_address: deps.api.canonical_address(&msg.mars_token_address)?,
     };
 
     state::config(&mut deps.storage).save(&config)?;
@@ -43,7 +46,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             user_address,
             user_balance_before,
             total_supply_before,
-        } => handle_balance_change(deps, env, user_address, user_balance_before, total_supply_before),
+        } => handle_balance_change(
+            deps,
+            env,
+            user_address,
+            user_balance_before,
+            total_supply_before,
+        ),
         HandleMsg::ClaimRewards => handle_claim_rewards(deps, env),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
@@ -90,7 +99,7 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let ma_token_canonical_address = deps.api.canonical_address(&env.message.sender)?;
     let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
-    let mut asset_incentive = 
+    let mut asset_incentive =
         match asset_incentives_bucket.may_load(ma_token_canonical_address.as_slice())? {
             // If there are no incentives, an empty successful response is returned as the
             // success of the call is needed to for the call that triggered the change to
@@ -99,7 +108,6 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
             Some(ai) if ai.emission_per_second.is_zero() => return Ok(HandleResponse::default()),
             Some(ai) => ai,
         };
-    
 
     asset_incentive_update_index(&mut asset_incentive, total_supply_before, env.block.time);
     asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
@@ -113,10 +121,10 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
     if user_asset_index != asset_incentive.index {
         // Compute user accrued rewards and update state
         let accrued_rewards = user_compute_accrued_rewards(
-                user_balance_before,
-                user_asset_index,
-                asset_incentive.index
-            )?;
+            user_balance_before,
+            user_asset_index,
+            asset_incentive.index,
+        )?;
 
         // Store user accrued rewards as unclaimed
         if !accrued_rewards.is_zero() {
@@ -127,16 +135,17 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
                 .unwrap_or(Uint128::zero());
 
             user_unclaimed_rewards_bucket.save(
-                &user_canonical_address.as_slice(), 
-                &(current_unclaimed_rewards + accrued_rewards)
+                &user_canonical_address.as_slice(),
+                &(current_unclaimed_rewards + accrued_rewards),
             )?
         }
 
-        state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice())
-            .save(&ma_token_canonical_address.as_slice(), &asset_incentive.index)?
+        state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice()).save(
+            &ma_token_canonical_address.as_slice(),
+            &asset_incentive.index,
+        )?
     }
 
-    
     Ok(HandleResponse::default())
 }
 
@@ -145,11 +154,13 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
     env: Env,
 ) -> StdResult<HandleResponse> {
     let user_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    let unclaimed_rewards =
-        state::user_unclaimed_rewards_read(&deps.storage)
-            .may_load(&user_canonical_address.as_slice())?
-            .unwrap_or(Uint128::zero());
+    let unclaimed_rewards = state::user_unclaimed_rewards_read(&deps.storage)
+        .may_load(&user_canonical_address.as_slice())?
+        .unwrap_or(Uint128::zero());
     let mut accrued_rewards = unclaimed_rewards;
+    // clear unclaimed rewards
+    state::user_unclaimed_rewards(&mut deps.storage)
+        .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
 
     // Since we need the mutable storage reference while iterating we need to get all
     // values on the range first
@@ -173,38 +184,53 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
 
         // Get asset pending rewards
         let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
-        let mut asset_incentive = 
-           asset_incentives_bucket.load(ma_token_canonical_address.as_slice())?;
+        let mut asset_incentive =
+            asset_incentives_bucket.load(ma_token_canonical_address.as_slice())?;
         asset_incentive_update_index(
             &mut asset_incentive,
-            balance_and_total_supply.total_supply, 
-            env.block.time
+            balance_and_total_supply.total_supply,
+            env.block.time,
         );
-        asset_incentives_bucket.save(
-            &ma_token_canonical_address.as_slice(),
-            &asset_incentive
-        )?;
+        asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
 
         if user_asset_index != asset_incentive.index {
             // Compute user accrued rewards and update user index
             let asset_accrued_rewards = user_compute_accrued_rewards(
-                    balance_and_total_supply.balance,
-                    user_asset_index,
-                    asset_incentive.index
-                )?;
+                balance_and_total_supply.balance,
+                user_asset_index,
+                asset_incentive.index,
+            )?;
             accrued_rewards += asset_accrued_rewards;
 
-            state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice())
-                .save(&ma_token_canonical_address.as_slice(), &asset_incentive.index)?
+            state::user_asset_indices(&mut deps.storage, &user_canonical_address.as_slice()).save(
+                &ma_token_canonical_address.as_slice(),
+                &asset_incentive.index,
+            )?
         }
     }
 
-    // clear unclaimed rewards
-    state::user_unclaimed_rewards(&mut deps.storage)
-        .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
+    let config = state::config_read(&deps.storage).load()?;
+    let mars_token_address = deps.api.human_address(&config.mars_token_address)?;
+    let staking_address = deps.api.human_address(&config.staking_address)?;
 
-    // TODO stake and send rewards
-    Ok(HandleResponse::default())
+    Ok(HandleResponse {
+        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address,
+            msg: to_binary(&cw20::Cw20HandleMsg::Send {
+                contract: staking_address,
+                amount: accrued_rewards,
+                msg: Some(to_binary(&mars::staking::msg::ReceiveMsg::Stake {
+                    recipient: Some(env.message.sender.clone()),
+                })?),
+            })?,
+            send: vec![],
+        })],
+        log: vec![
+            log("action", "claim_rewards"),
+            log("user", env.message.sender),
+        ],
+        data: None,
+    })
 }
 
 pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
@@ -233,23 +259,20 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
 /// Total supply is the total (liquidity) token supply during the period being computed.
 /// Note that this method does not commit updates to state as that should be handled by the
 /// caller
-fn asset_incentive_update_index<>(
+fn asset_incentive_update_index(
     asset_incentive: &mut AssetIncentive,
     total_supply: Uint128,
     current_block_time: u64,
 ) {
-    if !(
-            current_block_time == asset_incentive.last_updated ||
-            total_supply.is_zero() ||
-            asset_incentive.emission_per_second.is_zero()
-        )
+    if !(current_block_time == asset_incentive.last_updated
+        || total_supply.is_zero()
+        || asset_incentive.emission_per_second.is_zero())
     {
         let seconds_elapsed = current_block_time - asset_incentive.last_updated;
-        let new_index =
-            asset_incentive.index +
-            Decimal::from_ratio(
+        let new_index = asset_incentive.index
+            + Decimal::from_ratio(
                 asset_incentive.emission_per_second.u128() * seconds_elapsed as u128,
-                total_supply
+                total_supply,
             );
 
         asset_incentive.index = new_index;
@@ -303,15 +326,20 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cosmwasm_std::testing::{MockApi, MockStorage};
     use cosmwasm_std::{BankMsg, Coin, CosmosMsg, HumanAddr, Uint128};
-    use mars::testing::{mock_dependencies, mock_env, MockEnvParams};
+    use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {};
-        let env = mock_env("owner", MockEnvParams::default());
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            staking_address: HumanAddr::from("staking"),
+            mars_token_address: HumanAddr::from("mars_token"),
+        };
+        let env = mock_env("sender", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
         let empty_vec: Vec<CosmosMsg> = vec![];
@@ -324,15 +352,23 @@ mod tests {
                 .unwrap(),
             config.owner
         );
+        assert_eq!(
+            deps.api
+                .canonical_address(&HumanAddr::from("staking"))
+                .unwrap(),
+            config.staking_address
+        );
+        assert_eq!(
+            deps.api
+                .canonical_address(&HumanAddr::from("mars_token"))
+                .unwrap(),
+            config.mars_token_address
+        );
     }
 
     #[test]
     fn test_execute_cosmos_msg() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        let msg = InitMsg {};
-        let env = mock_env("owner", MockEnvParams::default());
-        let _res = init(&mut deps, env, msg).unwrap();
+        let mut deps = th_setup(&[]);
 
         let bank = BankMsg::Send {
             from_address: HumanAddr("source".to_string()),
@@ -360,5 +396,20 @@ mod tests {
         assert_eq!(res.messages, vec![cosmos_msg]);
         let expected_log = vec![log("action", "execute_cosmos_msg")];
         assert_eq!(res.log, expected_log);
+    }
+
+    // TEST HELPERS
+    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
+        let mut deps = mock_dependencies(20, contract_balances);
+
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            staking_address: HumanAddr::from("staking"),
+            mars_token_address: HumanAddr::from("mars_token"),
+        };
+        let env = mock_env("owner", MockEnvParams::default());
+        init(&mut deps, env, msg).unwrap();
+
+        deps
     }
 }
