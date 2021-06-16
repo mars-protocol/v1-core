@@ -6,7 +6,7 @@ use cosmwasm_std::{
 
 use mars::helpers::human_addr_into_canonical;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, SetAssetIncentive};
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state;
 use crate::state::{AssetIncentive, Config};
 
@@ -40,9 +40,10 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::SetAssetIncentives {
-            set_asset_incentives,
-        } => handle_set_asset_incentives(deps, env, set_asset_incentives),
+        HandleMsg::SetAssetIncentive {
+            ma_token_address,
+            emission_per_second,
+        } => handle_set_asset_incentive(deps, env, ma_token_address, emission_per_second),
         HandleMsg::HandleBalanceChange {
             user_address,
             user_balance_before,
@@ -64,41 +65,53 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-pub fn handle_set_asset_incentives<S: Storage, A: Api, Q: Querier>(
+pub fn handle_set_asset_incentive<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    set_asset_incentives: Vec<SetAssetIncentive>,
+    ma_token_address: HumanAddr,
+    emission_per_second: Uint128,
 ) -> StdResult<HandleResponse> {
+    // only owner can call this
+    let owner = state::config_read(&deps.storage).load()?.owner;
+    if deps.api.canonical_address(&env.message.sender)? != owner {
+        return Err(StdError::unauthorized());
+    }
+
+    let ma_asset_canonical_address = deps.api.canonical_address(&ma_token_address)?;
+
     let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
-    for set_asset_incentive in set_asset_incentives {
-        let ma_asset_canonical_address = deps
-            .api
-            .canonical_address(&set_asset_incentive.ma_token_address)?;
-        let new_asset_incentive = match asset_incentives_bucket
-            .may_load(&ma_asset_canonical_address.as_slice())?
-        {
+    let new_asset_incentive =
+        match asset_incentives_bucket.may_load(&ma_asset_canonical_address.as_slice())? {
             Some(mut asset_incentive) => {
                 // Update index up to now
-                let total_supply = mars::helpers::cw20_get_total_supply(
-                    &deps.querier,
-                    set_asset_incentive.ma_token_address.clone(),
-                )?;
+                let total_supply =
+                    mars::helpers::cw20_get_total_supply(&deps.querier, ma_token_address.clone())?;
                 asset_incentive_update_index(&mut asset_incentive, total_supply, env.block.time);
-                asset_incentive.emission_per_second = set_asset_incentive.emission_per_second;
+
+                // Set new emission
+                asset_incentive.emission_per_second = emission_per_second;
+
                 asset_incentive
             }
             None => AssetIncentive {
-                emission_per_second: set_asset_incentive.emission_per_second,
+                emission_per_second: emission_per_second,
                 index: Decimal::zero(),
                 last_updated: env.block.time,
             },
         };
-        asset_incentives_bucket
-            .save(&ma_asset_canonical_address.as_slice(), &new_asset_incentive)?;
-    }
 
-    //TODO: Maybe log this?
-    Ok(HandleResponse::default())
+    asset_incentives_bucket.save(&ma_asset_canonical_address.as_slice(), &new_asset_incentive)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        data: None,
+        log: vec![
+            log("action", "set_asset_incentives"),
+            log("ma_asset", ma_token_address),
+            log("emission_per_second", emission_per_second),
+            log("asset_index", new_asset_incentive.index),
+        ],
+    })
 }
 
 pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
