@@ -1322,7 +1322,7 @@ mod tests {
         };
         let env = mock_env("owner", MockEnvParams::default());
         let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Cannot swap the same assets mars_token");
+        assert_generic_error_message(response, "Cannot swap an asset into itself. Both offer and ask assets were specified as mars_token");
     }
 
     // TEST HELPERS

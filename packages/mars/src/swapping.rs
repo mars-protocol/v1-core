@@ -18,10 +18,10 @@ pub fn handle_swap<S: Storage, A: Api, Q: Querier>(
     terraswap_factory_human_addr: HumanAddr,
     terraswap_max_spread: Option<Decimal>,
 ) -> StdResult<HandleResponse> {
-    // swapping the same assets doesn't make any sense
+    // Having the same asset as offer and ask asset doesn't make any sense
     if offer_asset_info == ask_asset_info {
         return Err(StdError::generic_err(format!(
-            "Cannot swap the same assets {}",
+            "Cannot swap an asset into itself. Both offer and ask assets were specified as {}",
             offer_asset_info
         )));
     }
@@ -162,7 +162,7 @@ mod tests {
             );
             assert_generic_error_message(
                 response,
-                &format!("Cannot swap the same assets {}", asset_name),
+                &format!("Cannot swap an asset into itself. Both offer and ask assets were specified as {}", asset_name),
             );
         }
     }

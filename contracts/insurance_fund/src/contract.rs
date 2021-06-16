@@ -5,6 +5,7 @@ use cosmwasm_std::{
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state::{config_state, config_state_read, Config};
+use mars::helpers::human_addr_into_canonical;
 use mars::swapping::handle_swap;
 use terraswap::asset::AssetInfo;
 
@@ -39,7 +40,17 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
-        HandleMsg::UpdateConfig { owner } => handle_update_config(deps, env, owner),
+        HandleMsg::UpdateConfig {
+            owner,
+            terraswap_factory_address,
+            terraswap_max_spread,
+        } => handle_update_config(
+            deps,
+            env,
+            owner,
+            terraswap_factory_address,
+            terraswap_max_spread,
+        ),
         HandleMsg::SwapAssetToUusd {
             offer_asset_info,
             amount,
@@ -69,7 +80,9 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
 pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    owner: HumanAddr,
+    owner: Option<HumanAddr>,
+    terraswap_factory_address: Option<HumanAddr>,
+    terraswap_max_spread: Option<Decimal>,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = config_state(&mut deps.storage);
     let mut config = config_singleton.load()?;
@@ -78,12 +91,18 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     };
 
-    config.owner = deps.api.canonical_address(&owner)?;
+    config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
+    config.terraswap_factory_address = human_addr_into_canonical(
+        deps.api,
+        terraswap_factory_address,
+        config.terraswap_factory_address,
+    )?;
+    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
     config_singleton.save(&config)?;
 
     Ok(HandleResponse {
         messages: vec![],
-        log: vec![log("action", "update_config"), log("owner", &owner)],
+        log: vec![log("action", "update_config")],
         data: None,
     })
 }
@@ -150,9 +169,10 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, HumanAddr, Uint128};
+    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, Decimal, HumanAddr, Uint128};
     use mars::testing::{mock_dependencies, mock_env, MockEnvParams};
 
+    use crate::msg::HandleMsg::UpdateConfig;
     use crate::state::config_state_read;
 
     #[test]
@@ -175,6 +195,66 @@ mod tests {
                 .canonical_address(&HumanAddr::from("owner"))
                 .unwrap(),
             config.owner
+        );
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut deps = mock_dependencies(20, &[]);
+
+        // *
+        // init config with valid params
+        // *
+        let msg = InitMsg {
+            terraswap_factory_address: HumanAddr::from("terraswap_factory"),
+            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+        };
+        let env = mock_env("owner", MockEnvParams::default());
+        let _res = init(&mut deps, env, msg).unwrap();
+
+        // *
+        // non owner is not authorized
+        // *
+        let msg = UpdateConfig {
+            owner: None,
+            terraswap_factory_address: None,
+            terraswap_max_spread: None,
+        };
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // update config with all new params
+        // *
+        let msg = UpdateConfig {
+            owner: Some(HumanAddr::from("new_owner")),
+            terraswap_factory_address: Some(HumanAddr::from("new_factory")),
+            terraswap_max_spread: Some(Decimal::from_ratio(10u128, 100u128)),
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        // we can just call .unwrap() to assert this was a success
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // Read config from state
+        let new_config = config_state_read(&deps.storage).load().unwrap();
+
+        assert_eq!(
+            new_config.owner,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_owner"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.terraswap_factory_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_factory"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.terraswap_max_spread,
+            Decimal::from_ratio(10u128, 100u128)
         );
     }
 
