@@ -104,13 +104,12 @@ pub fn handle_set_asset_incentive<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![],
-        data: None,
         log: vec![
             log("action", "set_asset_incentives"),
             log("ma_asset", ma_token_address),
             log("emission_per_second", emission_per_second),
-            log("asset_index", new_asset_incentive.index),
         ],
+        data: None,
     })
 }
 
@@ -142,9 +141,12 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
         state::user_asset_indices_read(&deps.storage, &user_canonical_address.as_slice())
             .may_load(&ma_token_canonical_address.as_slice())?
             .unwrap_or(Decimal::zero());
+
+    let mut accrued_rewards = Uint128::zero();
+
     if user_asset_index != asset_incentive.index {
         // Compute user accrued rewards and update state
-        let accrued_rewards = user_compute_accrued_rewards(
+        accrued_rewards = user_compute_accrued_rewards(
             user_balance_before,
             user_asset_index,
             asset_incentive.index,
@@ -170,7 +172,16 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
         )?
     }
 
-    Ok(HandleResponse::default())
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![
+            log("action", "balance_change"),
+            log("ma_asset", env.message.sender),
+            log("user", user_address),
+            log("rewards_accrued", accrued_rewards),
+        ],
+        data: None,
+    })
 }
 
 pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
@@ -252,6 +263,7 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
         log: vec![
             log("action", "claim_rewards"),
             log("user", env.message.sender),
+            log("mars_staked_as_rewards", accrued_rewards),
         ],
         data: None,
     })
