@@ -16,7 +16,11 @@ pub enum HandleMsg {
     ExecuteCosmosMsg(CosmosMsg),
 
     /// Update basecamp config
-    UpdateConfig { owner: HumanAddr },
+    UpdateConfig {
+        owner: Option<HumanAddr>,
+        terraswap_factory_address: Option<HumanAddr>,
+        terraswap_max_spread: Option<Decimal>,
+    },
 
     /// Swap any asset on the contract to uusd
     SwapAssetToUusd {
