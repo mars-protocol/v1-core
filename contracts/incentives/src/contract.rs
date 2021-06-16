@@ -4,8 +4,9 @@ use cosmwasm_std::{
     StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, SetAssetIncentive};
+use mars::helpers::human_addr_into_canonical;
 
+use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg, SetAssetIncentive};
 use crate::state;
 use crate::state::{AssetIncentive, Config};
 
@@ -54,6 +55,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             total_supply_before,
         ),
         HandleMsg::ClaimRewards => handle_claim_rewards(deps, env),
+        HandleMsg::UpdateConfig {
+            owner,
+            mars_token_address,
+            staking_address,
+        } => handle_update_config(deps, env, owner, mars_token_address, staking_address),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
 }
@@ -233,6 +239,35 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
     })
 }
 
+pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
+    deps: &mut Extern<S, A, Q>,
+    env: Env,
+    owner: Option<HumanAddr>,
+    mars_token_address: Option<HumanAddr>,
+    staking_address: Option<HumanAddr>,
+) -> StdResult<HandleResponse> {
+    let mut config_singleton = state::config(&mut deps.storage);
+    let mut config = config_singleton.load()?;
+
+    if deps.api.canonical_address(&env.message.sender)? != config.owner {
+        return Err(StdError::unauthorized());
+    };
+
+    config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
+    config.mars_token_address =
+        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
+    config.staking_address =
+        human_addr_into_canonical(deps.api, staking_address, config.staking_address)?;
+
+    config_singleton.save(&config)?;
+
+    Ok(HandleResponse {
+        messages: vec![],
+        log: vec![log("action", "update_config")],
+        data: None,
+    })
+}
+
 pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -363,6 +398,58 @@ mod tests {
                 .canonical_address(&HumanAddr::from("mars_token"))
                 .unwrap(),
             config.mars_token_address
+        );
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut deps = th_setup(&[]);
+
+        // *
+        // non owner is not authorized
+        // *
+        let msg = HandleMsg::UpdateConfig {
+            owner: None,
+            mars_token_address: None,
+            staking_address: None,
+        };
+        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
+        let error_res = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(error_res, StdError::unauthorized());
+
+        // *
+        // update config with new params
+        // *
+        let msg = HandleMsg::UpdateConfig {
+            owner: Some(HumanAddr::from("new_owner")),
+            mars_token_address: None,
+            staking_address: Some(HumanAddr::from("new_staking")),
+        };
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+
+        let res = handle(&mut deps, env, msg).unwrap();
+        assert_eq!(0, res.messages.len());
+
+        // Read config from state
+        let new_config = state::config_read(&deps.storage).load().unwrap();
+
+        assert_eq!(
+            new_config.owner,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_owner"))
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.mars_token_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("mars_token")) // should not change
+                .unwrap()
+        );
+        assert_eq!(
+            new_config.staking_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("new_staking"))
+                .unwrap()
         );
     }
 

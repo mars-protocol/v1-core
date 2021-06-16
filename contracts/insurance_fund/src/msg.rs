@@ -16,7 +16,7 @@ pub enum HandleMsg {
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
 
-    /// Update basecamp config
+    /// Update contract config (only callable by owner)
     UpdateConfig {
         owner: Option<HumanAddr>,
         terraswap_factory_address: Option<HumanAddr>,
