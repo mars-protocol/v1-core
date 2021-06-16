@@ -33,6 +33,13 @@ pub enum HandleMsg {
     /// being sent.
     ClaimRewards,
 
+    /// Update contract config (only callable by owner)
+    UpdateConfig {
+        owner: Option<HumanAddr>,
+        mars_token_address: Option<HumanAddr>,
+        staking_address: Option<HumanAddr>,
+    },
+
     /// Execute Cosmos msg. Only callable by owner
     ExecuteCosmosMsg(CosmosMsg),
 }
