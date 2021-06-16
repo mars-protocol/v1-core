@@ -432,6 +432,116 @@ mod tests {
     }
 
     #[test]
+    fn test_only_owner_can_set_asset_incentive() {
+        let mut deps = th_setup(&[]);
+
+        let env = mock_env("sender", MockEnvParams::default());
+
+        let msg = HandleMsg::SetAssetIncentive {
+            ma_token_address: HumanAddr::from("ma_token"),
+            emission_per_second: Uint128(100),
+        };
+
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+
+        assert_eq!(res_error, StdError::unauthorized());
+    }
+
+    #[test]
+    fn test_set_new_asset_incentive_new() {
+        let mut deps = th_setup(&[]);
+        let (ma_asset_address, ma_asset_canonical_address) =
+            mars::testing::get_test_addresses(&deps.api, "ma_asset");
+
+        let env = mock_env(
+            "owner",
+            MockEnvParams {
+                block_time: 1_000_000,
+                ..Default::default()
+            },
+        );
+        let msg = HandleMsg::SetAssetIncentive {
+            ma_token_address: ma_asset_address,
+            emission_per_second: Uint128(100),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "set_asset_incentives"),
+                log("ma_asset", "ma_asset"),
+                log("emission_per_second", 100),
+            ]
+        );
+
+        let asset_incentive = state::asset_incentives_read(&deps.storage)
+            .load(&ma_asset_canonical_address.as_slice())
+            .unwrap();
+
+        assert_eq!(asset_incentive.emission_per_second, Uint128(100));
+        assert_eq!(asset_incentive.index, Decimal::zero());
+        assert_eq!(asset_incentive.last_updated, 1_000_000);
+    }
+
+    #[test]
+    fn test_set_existing_asset_incentive() {
+        // setup
+        let mut deps = th_setup(&[]);
+        let (ma_asset_address, ma_asset_canonical_address) =
+            mars::testing::get_test_addresses(&deps.api, "ma_asset");
+        let ma_asset_total_supply = 2_000_000u128;
+        deps.querier
+            .set_cw20_total_supply(ma_asset_address.clone(), Uint128(ma_asset_total_supply));
+
+        state::asset_incentives(&mut deps.storage)
+            .save(
+                &ma_asset_canonical_address.as_slice(),
+                &AssetIncentive {
+                    emission_per_second: Uint128(100),
+                    index: Decimal::from_ratio(1_u128, 2_u128),
+                    last_updated: 500_000,
+                },
+            )
+            .unwrap();
+
+        // handle msg
+        let env = mock_env(
+            "owner",
+            MockEnvParams {
+                block_time: 1_000_000,
+                ..Default::default()
+            },
+        );
+        let msg = HandleMsg::SetAssetIncentive {
+            ma_token_address: ma_asset_address,
+            emission_per_second: Uint128(200),
+        };
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        // tests
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "set_asset_incentives"),
+                log("ma_asset", "ma_asset"),
+                log("emission_per_second", 200),
+            ]
+        );
+
+        let asset_incentive = state::asset_incentives_read(&deps.storage)
+            .load(&ma_asset_canonical_address.as_slice())
+            .unwrap();
+
+        let expected_index = Decimal::from_ratio(1_u128, 2_u128)
+            + Decimal::from_ratio(100_u128 * 500_000u128, ma_asset_total_supply);
+
+        assert_eq!(asset_incentive.emission_per_second, Uint128(200));
+        assert_eq!(asset_incentive.index, expected_index);
+        assert_eq!(asset_incentive.last_updated, 1_000_000);
+    }
+
+    #[test]
     fn test_update_config() {
         let mut deps = th_setup(&[]);
 
