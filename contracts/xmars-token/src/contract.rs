@@ -374,7 +374,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env};
     use cosmwasm_std::{coins, from_binary, CosmosMsg, StdError, WasmMsg};
-    use mars::testing::MockEnvParams;
+    use mars::testing::{assert_generic_error_message, MockEnvParams};
 
     use super::*;
 
@@ -560,10 +560,7 @@ mod tests {
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(&msg, "Initial supply greater than cap"),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Initial supply greater than cap");
     }
 
     #[test]
@@ -619,10 +616,7 @@ mod tests {
         };
         let env = mock_env(&minter, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Invalid zero amount");
 
         // but if it exceeds cap (even over multiple rounds), it fails
         // cap is enforced
@@ -632,12 +626,7 @@ mod tests {
         };
         let env = mock_env(&minter, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => {
-                assert_eq!(msg, "Minting cannot exceed the cap".to_string())
-            }
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Minting cannot exceed the cap");
     }
 
     #[test]
@@ -656,11 +645,8 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("anyone else"), &[]);
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Unauthorized { .. } => {}
-            e => panic!("expected unauthorized error, got {}", e),
-        }
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
     }
 
     #[test]
@@ -673,11 +659,8 @@ mod tests {
             amount: Uint128(222),
         };
         let env = mock_env(&HumanAddr::from("genesis"), &[]);
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Unauthorized { .. } => {}
-            e => panic!("expected unauthorized error, got {}", e),
-        }
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
     }
 
     #[test]
@@ -768,10 +751,7 @@ mod tests {
             amount: Uint128::zero(),
         };
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Invalid zero amount");
 
         // cannot send more than we have
         let env = mock_env(addr1.clone(), &[]);
@@ -842,10 +822,7 @@ mod tests {
             amount: Uint128::zero(),
         };
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Invalid zero amount");
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // cannot burn more than we have
@@ -903,10 +880,7 @@ mod tests {
             msg: Some(send_msg.clone()),
         };
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!("Invalid zero amount", msg),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Invalid zero amount");
 
         // cannot send more than we have
         let env = mock_env(addr1.clone(), &[]);

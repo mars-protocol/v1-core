@@ -1261,7 +1261,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_health_status {
         if health_factor < Decimal256::one() {
-            return Err(StdError::generic_err("Cannot make token transfer if it results in a helth factor lower than 1 for the sender"));
+            return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender"));
         }
     }
 
@@ -2159,7 +2159,9 @@ mod tests {
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, Extern};
     use mars::liquidity_pool::msg::HandleMsg::UpdateConfig;
-    use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
+    use mars::testing::{
+        assert_generic_error_message, mock_dependencies, MarsMockQuerier, MockEnvParams,
+    };
 
     #[test]
     fn test_accumulated_index_calculation() {
@@ -2202,13 +2204,11 @@ mod tests {
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res_error = init(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(msg, "All params should be available during initialization")
-            }
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "All params should be available during initialization",
+        );
 
         // *
         // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
@@ -2224,15 +2224,9 @@ mod tests {
         };
         let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = init(&mut deps, env, msg);
-        match res {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env, msg);
+        assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
+                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
 
         // *
         // init config with invalid fee share amounts
@@ -2248,14 +2242,11 @@ mod tests {
         };
         let exceeding_fees_msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = init(&mut deps, env.clone(), exceeding_fees_msg);
-        match res {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env.clone(), exceeding_fees_msg);
+        assert_generic_error_message(
+            response,
+            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+        );
 
         // *
         // init config with valid params
@@ -2338,15 +2329,9 @@ mod tests {
             config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = handle(&mut deps, env, msg);
-        match res {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
+                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
 
         // *
         // update config with invalid fee share amounts
@@ -2362,14 +2347,11 @@ mod tests {
             config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = handle(&mut deps, env.clone(), exceeding_fees_msg);
-        match res {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env.clone(), exceeding_fees_msg);
+        assert_generic_error_message(
+            response,
+            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+        );
 
         // *
         // update config with all new params
@@ -2490,13 +2472,11 @@ mod tests {
             },
             asset_params: empty_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(msg, "All params should be available during initialization",)
-            }
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "All params should be available during initialization",
+        );
 
         // *
         // init asset with some params greater than 1
@@ -2513,15 +2493,9 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [loan_to_value, reserve_factor]",
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
+                Invalid params: [loan_to_value, reserve_factor]");
 
         // *
         // init asset where LTV >= liquidity threshold
@@ -2538,18 +2512,15 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "liquidation_threshold should be greater than loan_to_value. \
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "liquidation_threshold should be greater than loan_to_value. \
                     old_liquidation_threshold: 0, \
                     old_loan_to_value: 0, \
                     new_liquidation_threshold: 0.5, \
                     new_loan_to_value: 0.5",
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        );
 
         // *
         // owner is authorized
@@ -2626,11 +2597,8 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset already initialized",),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Asset already initialized");
 
         // *
         // callback comes back with created token
@@ -2789,11 +2757,8 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, "Asset not initialized",),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Asset not initialized");
 
         // *
         // initialize asset
@@ -2821,15 +2786,9 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [liquidation_threshold]",
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
+                Invalid params: [liquidation_threshold]");
 
         // *
         // update asset where LTV >= liquidity threshold
@@ -2846,18 +2805,15 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let res_error = handle(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                "liquidation_threshold should be greater than loan_to_value. \
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "liquidation_threshold should be greater than loan_to_value. \
                     old_liquidation_threshold: 0.8, \
                     old_loan_to_value: 0.5, \
                     new_liquidation_threshold: 0.5, \
                     new_loan_to_value: 0.6",
-            ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        );
 
         // *
         // update asset with new params
@@ -3069,7 +3025,8 @@ mod tests {
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Deposit amount must be greater than 0 somecoin");
     }
 
     #[test]
@@ -3187,7 +3144,11 @@ mod tests {
             sender: HumanAddr::from("depositor"),
             amount: Uint128(deposit_amount),
         });
-        handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(
+            res_error,
+            StdError::not_found("liquidity_pool::state::Reserve")
+        );
     }
 
     #[test]
@@ -3198,7 +3159,11 @@ mod tests {
         let msg = HandleMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(
+            res_error,
+            StdError::not_found("liquidity_pool::state::Reserve")
+        );
     }
 
     #[test]
@@ -3482,7 +3447,8 @@ mod tests {
         });
 
         let env = cosmwasm_std::testing::mock_env("matoken", &[]);
-        handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity");
     }
 
     #[test]
@@ -3848,14 +3814,11 @@ mod tests {
             },
             amount: Uint256::from(83968_u128),
         };
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        match res_error {
-            StdError::GenericErr { msg, .. } => assert_eq!(
-                "borrow amount exceeds maximum allowed given current collateral value",
-                msg
-            ),
-            e => panic!("Unexpected error: {}", e),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "borrow amount exceeds maximum allowed given current collateral value",
+        );
 
         // *
         // Repay zero native debt(should fail)
@@ -3871,7 +3834,11 @@ mod tests {
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "Repay amount must be greater than 0 borrowedcoinnative",
+        );
 
         // *
         // Repay some native debt
@@ -4024,7 +3991,8 @@ mod tests {
         let msg = HandleMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        handle(&mut deps, env, msg).unwrap_err();
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Cannot repay 0 debt");
 
         // *
         // Repay all cw20 debt (and then some)
@@ -4170,14 +4138,11 @@ mod tests {
         };
         let mut env = mars::testing::mock_env("borrower", MockEnvParams::default());
         env.block.time = new_block_time;
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        match res_error {
-            StdError::GenericErr { msg, .. } => assert_eq!(
-                "borrow amount exceeds maximum allowed given current collateral value",
-                msg
-            ),
-            e => panic!("Unexpected error: {}", e),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "borrow amount exceeds maximum allowed given current collateral value",
+        );
 
         let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
         let msg = HandleMsg::Borrow {
@@ -4360,7 +4325,11 @@ mod tests {
             amount: exceeding_borrow_amount,
         };
         let env = cosmwasm_std::testing::mock_env("borrower", &[]);
-        handle(&mut deps, env, borrow_msg).unwrap_err();
+        let response = handle(&mut deps, env, borrow_msg);
+        assert_generic_error_message(
+            response,
+            "borrow amount exceeds maximum allowed given current collateral value",
+        );
 
         // borrow permissible amount given current collateral, should succeed
         let borrow_msg = HandleMsg::Borrow {
@@ -4384,7 +4353,7 @@ mod tests {
         let debt_contract_addr_canonical = deps.api.canonical_address(&debt_contract_addr).unwrap();
         let user_address = HumanAddr::from("user");
         let user_canonical_addr = deps.api.canonical_address(&user_address).unwrap();
-        let collateral_address = HumanAddr::from("collateral");
+        let _collateral_address = HumanAddr::from("collateral");
         let liquidator_address = HumanAddr::from("liquidator");
 
         let collateral_max_ltv = Decimal256::from_ratio(5, 10);
@@ -4492,7 +4461,7 @@ mod tests {
         // trying to liquidate user with zero collateral balance should fail
         {
             deps.querier.set_cw20_balances(
-                collateral_address,
+                HumanAddr::from(collateral_reserve.ma_token_address),
                 &[(user_address.clone(), Uint128::zero())],
             );
 
@@ -4513,7 +4482,11 @@ mod tests {
             });
 
             let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
-            handle(&mut deps, env, liquidate_msg).unwrap_err();
+            let response = handle(&mut deps, env, liquidate_msg);
+            assert_generic_error_message(
+                response,
+                "user has no balance in specified collateral asset to be liquidated",
+            );
         }
 
         // Set the querier to return positive collateral balance
@@ -4548,7 +4521,8 @@ mod tests {
             });
 
             let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
-            handle(&mut deps, env, liquidate_msg).unwrap_err();
+            let response = handle(&mut deps, env, liquidate_msg);
+            assert_generic_error_message(response, "User has no outstanding debt in the specified debt asset and thus cannot be liquidated");
         }
 
         // set user to have positive debt amount in debt asset
@@ -4580,7 +4554,11 @@ mod tests {
             });
 
             let env = cosmwasm_std::testing::mock_env(debt_contract_addr.clone(), &[]);
-            handle(&mut deps, env, liquidate_msg).unwrap_err();
+            let response = handle(&mut deps, env, liquidate_msg);
+            assert_generic_error_message(
+                response,
+                "Must send more than 0 debt in order to liquidate",
+            );
         }
 
         // Perform first successful liquidation receiving ma_token in return
@@ -5039,7 +5017,11 @@ mod tests {
         });
 
         let env = cosmwasm_std::testing::mock_env(debt_contract_addr, &[]);
-        handle(&mut deps, env, liquidate_msg).unwrap_err();
+        let response = handle(&mut deps, env, liquidate_msg);
+        assert_generic_error_message(
+            response,
+            "User's health factor is not less than 1 and thus cannot be liquidated",
+        );
     }
 
     #[test]
@@ -5150,13 +5132,8 @@ mod tests {
                 amount: Uint128(500_000),
             };
 
-            let res = handle(&mut deps, env_matoken.clone(), msg);
-
-            match res.unwrap_err() {
-                StdError::GenericErr { msg, .. } =>
-                    assert_eq!("Cannot make token transfer if it results in a helth factor lower than 1 for the sender", msg),
-                e => panic!("Unexpected error: {}", e),
-            }
+            let response = handle(&mut deps, env_matoken.clone(), msg);
+            assert_generic_error_message(response, "Cannot make token transfer if it results in a health factor lower than 1 for the sender");
         }
 
         // Finalize transfer with health factor > 1 for goes through
@@ -5218,7 +5195,11 @@ mod tests {
             };
             let env = cosmwasm_std::testing::mock_env(HumanAddr::from("othertoken"), &[]);
 
-            handle(&mut deps, env, msg).unwrap_err();
+            let res_error = handle(&mut deps, env, msg).unwrap_err();
+            match res_error {
+                StdError::NotFound { .. } => {}
+                e => panic!("Unexpected error: {}", e),
+            }
         }
     }
 
@@ -5269,7 +5250,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, update_limit_env, update_limit_msg.clone()).unwrap_err();
+        let res_error = handle(&mut deps, update_limit_env, update_limit_msg.clone()).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
 
         // Update borrower limit as owner
         let update_limit_env = mars::testing::mock_env(
@@ -5382,7 +5364,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, borrow_env, borrow_msg).unwrap_err();
+        let response = handle(&mut deps, borrow_env, borrow_msg);
+        assert_generic_error_message(
+            response,
+            "borrow amount exceeds uncollateralized loan limit given existing debt",
+        );
 
         // Borrow a valid amount given uncollateralized loan limit
         block_time += 1000_u64;
@@ -5486,18 +5472,16 @@ mod tests {
             enable: true,
         };
         let env = cosmwasm_std::testing::mock_env("user", &[]);
-        let res_error = handle(&mut deps, env.clone(), update_msg.clone());
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => assert_eq!(
-                msg,
-                format!(
-                    "User address {} has no balance in specified collateral asset {}",
-                    user_addr.as_str(),
-                    String::from(cw20_contract_addr.as_str())
-                )
+        let response = handle(&mut deps, env.clone(), update_msg.clone());
+        assert_generic_error_message(
+            response,
+            &format!(
+                "User address {} has no balance in specified collateral asset {}",
+                user_addr.as_str(),
+                String::from(cw20_contract_addr.as_str())
             ),
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        );
+
         let user = users_state(&mut deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
@@ -5582,7 +5566,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, random_env, distribute_income_msg).unwrap_err();
+        let res_error = handle(&mut deps, random_env, distribute_income_msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
 
         // call function providing amount exceeding protocol_income_to_distribute, should fail
         let exceeding_amount = protocol_income_to_distribute + Uint256::from(1_000_u64);
@@ -5601,7 +5586,11 @@ mod tests {
             },
         );
 
-        handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap_err();
+        let response = handle(&mut deps, owner_env.clone(), distribute_income_msg);
+        assert_generic_error_message(
+            response,
+            "amount specified exceeds reserve's income to be distributed",
+        );
 
         // call function providing amount less than protocol_income_to_distribute
         let permissible_amount = Decimal256::from_ratio(1, 2) * protocol_income_to_distribute;

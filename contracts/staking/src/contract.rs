@@ -602,13 +602,11 @@ mod tests {
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res_error = init(&mut deps, env, msg);
-        match res_error {
-            Err(StdError::GenericErr { msg, .. }) => {
-                assert_eq!(msg, "All params should be available during initialization")
-            }
-            other_err => panic!("Unexpected error: {:?}", other_err),
-        }
+        let response = init(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "All params should be available during initialization",
+        );
 
         let config = CreateOrUpdateConfig {
             mars_token_address: Some(HumanAddr::from("mars_token")),
@@ -900,7 +898,8 @@ mod tests {
         });
 
         let env = mock_env("other_token", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
 
         // setup variables for unstake
         let unstake_amount = Uint128(1_000_000);
@@ -932,7 +931,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, env, msg.clone()).unwrap_err();
+        let response = handle(&mut deps, env, msg.clone());
+        assert_generic_error_message(response, "Address must have a valid cooldown to unstake");
 
         // unstake Mars expired cooldown -> unauthorized
         cooldowns_state(&mut deps.storage)
@@ -955,7 +955,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, env, msg.clone()).unwrap_err();
+        let response = handle(&mut deps, env, msg.clone());
+        assert_generic_error_message(response, "Cooldown has expired");
 
         // unstake Mars unfinished cooldown -> unauthorized
         cooldowns_state(&mut deps.storage)
@@ -975,7 +976,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, env, msg.clone()).unwrap_err();
+        let response = handle(&mut deps, env, msg.clone());
+        assert_generic_error_message(response, "Cooldown has not finished");
 
         // unstake Mars cooldown with low amount -> unauthorized
         cooldowns_state(&mut deps.storage)
@@ -995,7 +997,11 @@ mod tests {
                 ..Default::default()
             },
         );
-        handle(&mut deps, env, msg.clone()).unwrap_err();
+        let response = handle(&mut deps, env, msg.clone());
+        assert_generic_error_message(
+            response,
+            "Unstake amount must not be greater than cooldown amount",
+        );
 
         // partial unstake Mars valid cooldown -> burn xMars, receive Mars back,
         // deduct cooldown amount
@@ -1079,7 +1085,8 @@ mod tests {
             },
         );
 
-        handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
 
         // unstake pending amount Mars -> cooldown is deleted
         let env = mock_env(
@@ -1154,10 +1161,14 @@ mod tests {
         let ongoing_cooldown_block_time = initial_block_time + TEST_COOLDOWN_DURATION / 2;
 
         // staker with no xmars is unauthorized
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("xmars_token"),
+            &[(HumanAddr::from("staker"), Uint128::zero())],
+        );
         let msg = HandleMsg::Cooldown {};
-
         let env = mock_env("staker", MockEnvParams::default());
-        handle(&mut deps, env, msg).unwrap_err();
+        let res_error = handle(&mut deps, env, msg).unwrap_err();
+        assert_eq!(res_error, StdError::unauthorized());
 
         // staker with xmars gets a cooldown equal to the xmars balance
         let initial_xmars_balance = Uint128(1_000_000);

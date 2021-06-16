@@ -250,6 +250,7 @@ mod tests {
     use crate::contract::{
         handle, init, query_balance, query_balance_at, query_token_info, query_total_supply_at,
     };
+    use mars::testing::assert_generic_error_message;
     use mars::xmars_token::msg::{HandleMsg, InitMsg};
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
@@ -469,13 +470,8 @@ mod tests {
             amount: Uint128(7777),
             expires: None,
         };
-        let res = handle(&mut deps, env.clone(), msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => {
-                assert_eq!(msg, "Cannot set allowance to own account")
-            }
-            e => panic!("Unexpected error: {}", e),
-        }
+        let response = handle(&mut deps, env.clone(), msg);
+        assert_generic_error_message(response, "Cannot set allowance to own account");
 
         // decrease self-allowance
         let msg = HandleMsg::DecreaseAllowance {
@@ -483,13 +479,8 @@ mod tests {
             amount: Uint128(7777),
             expires: None,
         };
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => {
-                assert_eq!(msg, "Cannot set allowance to own account")
-            }
-            e => panic!("Unexpected error: {}", e),
-        }
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(response, "Cannot set allowance to own account");
     }
 
     #[test]
@@ -577,10 +568,7 @@ mod tests {
         };
         let env = mock_env(spender, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(msg, "Allowance is expired"),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Allowance is expired");
     }
 
     #[test]
@@ -663,10 +651,7 @@ mod tests {
         };
         let env = mock_env(spender, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(msg, "Allowance is expired"),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Allowance is expired");
     }
 
     #[test]
@@ -764,9 +749,6 @@ mod tests {
         };
         let env = mock_env(spender, &[]);
         let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::GenericErr { msg, .. } => assert_eq!(msg, "Allowance is expired"),
-            e => panic!("Unexpected error: {}", e),
-        }
+        assert_generic_error_message(res, "Allowance is expired");
     }
 }
