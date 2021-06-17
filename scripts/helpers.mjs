@@ -62,40 +62,39 @@ export async function deployContract(terra, wallet, filepath, initMsg) {
   return await instantiateContract(terra, wallet, codeId, initMsg);
 }
 
-export async function deployLiquidityPool(terra, wallet, cache = {}) {
-  let cw20CodeId = cache.cw20CodeId;
-  if (cw20CodeId) {
-    console.log(`Using existing cw20_token, code_id: ${cw20CodeId}`)
+export async function deployLiquidityPool(terra, wallet, lpInitMsg) {
+  console.log("Deploying Liquidity Pool...");
+
+  if (lpInitMsg.config.ma_token_code_id) {
+    console.log(`Using existing cw20_token, code_id: ${lpInitMsg.config.ma_token_code_id}`)
   } else {
-    cw20CodeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
-    console.log(`Uploaded cw20_token contract code: ${cw20CodeId}`);
+    lpInitMsg.config.ma_token_code_id = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+    console.log(`Uploaded cw20_token contract code: ${lpInitMsg.config.ma_token_code_id}`);
   }
 
-  let lpCodeId = cache.lpCodeId;
-  if (lpCodeId) {
-    console.log(`Using existing lpCodeId, code_id: ${lpCodeId}`)
-  } else {
-    lpCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
-    console.log(`Instantiated liquidity_pool contract, code_id: ${lpCodeId}`);
-  }
-
-  const lpInitMsg = { "ma_token_code_id": cw20CodeId, close_factor: "0.5" };
+  const lpCodeId = await uploadContract(terra, wallet, './artifacts/liquidity_pool.wasm');
   const lpAddress = await instantiateContract(terra, wallet, lpCodeId, lpInitMsg);
   console.log(`Instantiated liquidity_pool contract: address: ${lpAddress}`);
 
-  return {
-    lpAddress,
-    lpCodeId,
-    cw20CodeId,
-  };
+  return lpAddress
 }
 
 export async function setupLiquidityPool(terra, wallet, contractAddress, options) {
+  console.log("Setting up initial asset liquidity pools...");
+
   const initialAssets = options.initialAssets ?? [];
   const initialDeposits = options.initialDeposits ?? [];
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
+    let asset_params = {
+      "borrow_slope": asset.borrow_slope,
+      "loan_to_value": asset.loan_to_value,
+      "reserve_factor": asset.reserve_factor,
+      "liquidation_threshold": asset.liquidation_threshold,
+      "liquidation_bonus": asset.liquidation_bonus,
+    }
+
     if (asset.denom) {
       let initAssetMsg = {
         "init_asset": {
@@ -104,12 +103,7 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
               "denom": asset.denom,
             }
           },
-          "asset_params": {
-            "borrow_slope": asset.borrow_slope,
-            "loan_to_value": asset.loan_to_value,
-            "liquidation_threshold": asset.liquidation_threshold,
-            "liquidation_bonus": asset.liquidation_bonus,
-          },
+          "asset_params": asset_params,
         },
       };
       await executeContract(terra, wallet, contractAddress, initAssetMsg);
@@ -122,12 +116,7 @@ export async function setupLiquidityPool(terra, wallet, contractAddress, options
               "contract_addr": asset.contract_addr,
             }
           },
-          "asset_params": {
-            "borrow_slope": asset.borrow_slope,
-            "loan_to_value": asset.loan_to_value,
-            "liquidation_threshold": asset.liquidation_threshold,
-            "liquidation_bonus": asset.liquidation_bonus,
-          },
+          "asset_params": asset_params,
         },
       };
       await executeContract(terra, wallet, contractAddress, initAssetMsg);
@@ -220,14 +209,18 @@ export async function deployStakingContract(terra, wallet, stakingConfig) {
   return stakingContractAddress
 }
 
-export async function deployInsuranceFundContract(terra, wallet) {
+export async function deployInsuranceFundContract(terra, wallet, insuranceFundConfig) {
   console.log("Deploying Insurance Fund...");
   let insuranceFundCodeId = await uploadContract(terra, wallet, './artifacts/insurance_fund.wasm');
-  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, insuranceFundCodeId, {}, undefined, true);
-  let result = await performTransaction(terra, wallet, instantiateMsg);
-
-  let insuranceFundContractAddress = result.logs[0].eventsByType.instantiate_contract.contract_address[0];
-
+  let insuranceFundContractAddress = await instantiateContract(terra, wallet, insuranceFundCodeId, insuranceFundConfig)
   console.log("Insurance Fund Contract Address: " + insuranceFundContractAddress);
   return insuranceFundContractAddress
+}
+
+export async function deployTreasuryContract(terra, wallet) {
+  console.log("Deploying Treasury...");
+  let treasuryCodeId = await uploadContract(terra, wallet, './artifacts/treasury.wasm');
+  let treasuryContractAddress = await instantiateContract(terra, wallet, treasuryCodeId, {})
+  console.log("Treasury Contract Address: " + treasuryContractAddress);
+  return treasuryContractAddress
 }
