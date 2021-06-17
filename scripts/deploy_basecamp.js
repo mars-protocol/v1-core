@@ -1,5 +1,15 @@
 import 'dotenv/config.js';
-import { recover, queryContract, executeContract, deployBasecampContract, deployStakingContract, deployInsuranceFundContract } from "./helpers.mjs";
+import {
+  recover,
+  queryContract,
+  executeContract,
+  deployBasecampContract,
+  deployStakingContract,
+  deployInsuranceFundContract,
+  deployTreasuryContract,
+  deployLiquidityPool,
+  setupLiquidityPool,
+} from "./helpers.mjs";
 import { LCDClient, LocalTerra } from "@terra-money/terra.js";
 
 async function main() {
@@ -19,8 +29,11 @@ async function main() {
     wallet = terra.wallets.test1;
   }
 
+  // TODO, abstract these configs to a separate file...
   let basecampConfig;
   let stakingConfig;
+  let insuranceFundConfig;
+  let lpConfig;
 
   if (process.env.NETWORK === "testnet") {
     basecampConfig = {
@@ -39,8 +52,27 @@ async function main() {
       "cw20_code_id": undefined,
       "config": {
         "mars_token_address": undefined,
+        "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+        "terraswap_max_spread": "0.05",
         "cooldown_duration": 10,
         "unstake_window": 300,
+      }
+    }
+
+    insuranceFundConfig = {
+      "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "terraswap_max_spread": "0.05",
+    }
+
+    lpConfig = {
+      "config": {
+        "treasury_contract_address": undefined,
+        "insurance_fund_contract_address": undefined,
+        "staking_contract_address": undefined,
+        "insurance_fund_fee_share": "0.1",
+        "treasury_fee_share": "0.2",
+        "ma_token_code_id": undefined,
+        "close_factor": "0.5"
       }
     }
   } else {
@@ -60,8 +92,27 @@ async function main() {
       "cw20_code_id": undefined,
       "config": {
         "mars_token_address": undefined,
+        "terraswap_factory_address": undefined,
+        "terraswap_max_spread": "0.05",
         "cooldown_duration": 10,
         "unstake_window": 300,
+      }
+    }
+
+    insuranceFundConfig = {
+      "terraswap_factory_address": undefined,
+      "terraswap_max_spread": "0.05",
+    }
+
+    lpConfig = {
+      "config": {
+        "treasury_contract_address": undefined,
+        "insurance_fund_contract_address": undefined,
+        "staking_contract_address": undefined,
+        "insurance_fund_fee_share": "0.1",
+        "treasury_fee_share": "0.2",
+        "ma_token_code_id": undefined,
+        "close_factor": "0.5"
       }
     }
   }
@@ -76,10 +127,33 @@ async function main() {
   const stakingQueryResponse = await queryContract(terra, stakingContractAddress, { "config": {} })
   
   /************************************* Deploy Insurance Fund Contract *************************************/
-  const insuranceFundContractAddress = await deployInsuranceFundContract(terra, wallet)
+  const insuranceFundContractAddress = await deployInsuranceFundContract(terra, wallet, insuranceFundConfig)
   await executeContract(terra, wallet, insuranceFundContractAddress, { "update_config": { "owner": basecampContractAddress } })
   const insuranceFundQueryResponse = await queryContract(terra, insuranceFundContractAddress, { "config": {} })
   console.log("Insurance fund config successfully updated to have owner of: ", insuranceFundQueryResponse.owner)
+
+  /**************************************** Deploy Treasury Contract ****************************************/
+  const treasuryContractAddress = await deployTreasuryContract(terra, wallet)
+
+  /************************************* Deploy Liquidity Pool Contract *************************************/
+  lpConfig.config.treasury_contract_address = treasuryContractAddress
+  lpConfig.config.insurance_fund_contract_address = insuranceFundContractAddress
+  lpConfig.config.staking_contract_address = stakingContractAddress
+  lpConfig.config.ma_token_code_id = cw20CodeId
+  const lpContractAddress = await deployLiquidityPool(terra, wallet, lpConfig)
+  // TODO, owner of lp contract should be set to basecamp
+
+  /************************************* Setup Initial Liquidity Pools **************************************/
+
+  // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
+  // TODO this config should be moved into env specific variable?
+  const initialAssets = [
+    { denom: "uluna", borrow_slope: "0.1", loan_to_value: "0.5", reserve_factor: "0.3", liquidation_threshold: "0.525", liquidation_bonus: "0.1" },
+    { denom: "uusd", borrow_slope: "0.5", loan_to_value: "0.8", reserve_factor: "0.3", liquidation_threshold: "0.825", liquidation_bonus: "0.1" },
+    { symbol: "ANC", contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc", borrow_slope: "0.1", loan_to_value: "0.5", reserve_factor: "0.3", liquidation_threshold: "0.525", liquidation_bonus: "0.1" },
+    { symbol: "MIR", contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u", borrow_slope: "0.1", loan_to_value: "0.5", reserve_factor: "0.3", liquidation_threshold: "0.525", liquidation_bonus: "0.1" },
+  ];
+  await setupLiquidityPool(terra, wallet, lpContractAddress, { initialAssets });
 
   /**************************************** Setup Basecamp Contract *****************************************/
   console.log('Setting staking contract addresses in basecamp...')
