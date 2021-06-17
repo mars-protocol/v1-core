@@ -3648,8 +3648,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let debt = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
             .load(&borrower_canonical_addr.as_slice())
@@ -3702,8 +3702,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
             &deps,
@@ -3767,8 +3767,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_native = th_get_expected_indices_and_rates(
             &deps,
@@ -3915,8 +3915,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(true, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(get_bit(user.borrowed_assets, 1).unwrap());
 
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
             .load(&borrower_canonical_addr.as_slice())
@@ -3996,8 +3996,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
             .load(&borrower_canonical_addr.as_slice())
@@ -4091,8 +4091,8 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(false, get_bit(user.borrowed_assets, 0).unwrap());
-        assert_eq!(false, get_bit(user.borrowed_assets, 1).unwrap());
+        assert!(!get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let debt1 = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
             .load(&borrower_canonical_addr.as_slice())
@@ -4205,7 +4205,7 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
 
         let debt = debts_asset_state_read(&deps.storage, b"uusd")
             .load(&borrower_canonical_addr.as_slice())
@@ -4692,14 +4692,8 @@ mod tests {
             let user = users_state_read(&deps.storage)
                 .load(user_canonical_addr.as_slice())
                 .unwrap();
-            assert_eq!(
-                true,
-                get_bit(user.collateral_assets, collateral_reserve_before.index).unwrap()
-            );
-            assert_eq!(
-                true,
-                get_bit(user.borrowed_assets, debt_reserve_before.index).unwrap()
-            );
+            assert!(get_bit(user.collateral_assets, collateral_reserve_before.index).unwrap());
+            assert!(get_bit(user.borrowed_assets, debt_reserve_before.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
             let debt =
@@ -4879,14 +4873,8 @@ mod tests {
             let user = users_state_read(&deps.storage)
                 .load(user_canonical_addr.as_slice())
                 .unwrap();
-            assert_eq!(
-                true,
-                get_bit(user.collateral_assets, collateral_reserve_initial.index).unwrap()
-            );
-            assert_eq!(
-                true,
-                get_bit(user.borrowed_assets, debt_reserve_initial.index).unwrap()
-            );
+            assert!(get_bit(user.collateral_assets, collateral_reserve_initial.index).unwrap());
+            assert!(get_bit(user.borrowed_assets, debt_reserve_initial.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
@@ -5124,15 +5112,9 @@ mod tests {
             let recipient_user = users_bucket
                 .load(recipient_canonical_address.as_slice())
                 .unwrap();
-            assert_eq!(
-                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
-                true
-            );
+            assert!(get_bit(sender_user.collateral_assets, reserve.index).unwrap());
             // Should create user and set deposited to true as previous balance is 0
-            assert_eq!(
-                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
-                true
-            );
+            assert!(get_bit(recipient_user.collateral_assets, reserve.index).unwrap());
         }
 
         // Finalize transfer with health factor < 1 for sender doesn't go through
@@ -5205,14 +5187,8 @@ mod tests {
                 .load(recipient_canonical_address.as_slice())
                 .unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
-            assert_eq!(
-                get_bit(sender_user.collateral_assets, reserve.index).unwrap(),
-                false
-            );
-            assert_eq!(
-                get_bit(recipient_user.collateral_assets, reserve.index).unwrap(),
-                true
-            );
+            assert!(!get_bit(sender_user.collateral_assets, reserve.index).unwrap());
+            assert!(get_bit(recipient_user.collateral_assets, reserve.index).unwrap());
         }
 
         // Calling this with other token fails
@@ -5365,7 +5341,7 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        assert_eq!(true, get_bit(user.borrowed_assets, 0).unwrap());
+        assert!(get_bit(user.borrowed_assets, 0).unwrap());
 
         let debt = debts_asset_state_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
@@ -5519,7 +5495,7 @@ mod tests {
         let reserve_1_collateral =
             get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
         // Balance for first asset is zero so don't update bit
-        assert_eq!(reserve_1_collateral, false);
+        assert!(!reserve_1_collateral);
 
         // Set the querier to return balance more than zero for the first asset
         deps.querier
@@ -5533,7 +5509,7 @@ mod tests {
         let reserve_1_collateral =
             get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
         // Balance for first asset is more than zero so update bit
-        assert_eq!(reserve_1_collateral, true);
+        assert!(reserve_1_collateral);
 
         // Disable second reserve index
         let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
@@ -5548,7 +5524,7 @@ mod tests {
             .unwrap();
         let reserve_2_collateral =
             get_bit(user.collateral_assets, reserve_2_initial.index).unwrap();
-        assert_eq!(reserve_2_collateral, false);
+        assert!(!reserve_2_collateral);
     }
 
     #[test]
