@@ -22,9 +22,10 @@ pub enum HandleMsg {
         emission_per_second: Uint128,
     },
 
-    /// Handle a balance change. Sent on an external contract,
-    /// triggered on user balance changes
-    HandleBalanceChange {
+    /// Handle balance change updating user and asset rewards.
+    /// Sent from an external contract, triggered on user balance changes
+    /// Will return an empty response noop if no incentive is applied for the asset
+    BalanceChange {
         user_address: HumanAddr,
         /// user balance up to the instant before the change
         user_balance_before: Uint128,
