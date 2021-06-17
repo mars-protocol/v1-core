@@ -1061,23 +1061,21 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
         // Ensure contract has enough collateral to send back underlying asset
         let contract_collateral_balance = match collateral_asset.clone() {
-            Asset::Native { denom } => {
-                Uint256::from(
-                    deps.querier
-                        .query_balance(env.contract.address.clone(), denom.as_str())?
-                        .amount,
-                ) * collateral_reserve.liquidity_index
-            }
+            Asset::Native { denom } => Uint256::from(
+                deps.querier
+                    .query_balance(env.contract.address.clone(), denom.as_str())?
+                    .amount,
+            ),
             Asset::Cw20 {
                 contract_addr: token_addr,
-            } => {
-                Uint256::from(cw20_get_balance(
-                    &deps.querier,
-                    token_addr,
-                    env.contract.address.clone(),
-                )?) * collateral_reserve.liquidity_index
-            }
+            } => Uint256::from(cw20_get_balance(
+                &deps.querier,
+                token_addr,
+                env.contract.address.clone(),
+            )?),
         };
+        let contract_collateral_balance = contract_collateral_balance
+            * get_updated_liquidity_index(&collateral_reserve, block_time);
         if contract_collateral_balance < collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1735,6 +1733,8 @@ pub fn reserve_apply_accumulated_interests(env: &Env, reserve: &mut Reserve) {
 }
 
 /// Return applied interest rate for borrow index according to passed blocks
+/// NOTE: Calling this function when interests for the reserve are up to date with the current block
+/// and index is not, will use the wrong interest rate to update the index.
 fn get_updated_borrow_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
     if reserve.interests_last_updated < block_time {
         let time_elapsed = block_time - reserve.interests_last_updated;
@@ -1753,6 +1753,8 @@ fn get_updated_borrow_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
 }
 
 /// Return applied interest rate for liquidity index according to passed blocks
+/// NOTE: Calling this function when interests for the reserve are up to date with the current block
+/// and index is not, will use the wrong interest rate to update the index.
 fn get_updated_liquidity_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
     if reserve.interests_last_updated < block_time {
         let time_elapsed = block_time - reserve.interests_last_updated;
