@@ -11,6 +11,7 @@ use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
 
+use crate::ma_token;
 use crate::xmars_token;
 use terraswap::asset::PairInfo;
 use terraswap::factory::QueryMsg;
@@ -80,7 +81,7 @@ pub struct Cw20Querier {
 }
 
 impl Cw20Querier {
-    fn handle_query(&self, contract_addr: &HumanAddr, query: Cw20QueryMsg) -> QuerierResult {
+    fn handle_cw20_query(&self, contract_addr: &HumanAddr, query: Cw20QueryMsg) -> QuerierResult {
         match query {
             Cw20QueryMsg::Balance { address } => {
                 let contract_balances = match self.balances.get(&contract_addr) {
@@ -129,6 +130,64 @@ impl Cw20Querier {
                 };
 
                 Ok(to_binary(token_info_response))
+            }
+
+            other_query => Err(SystemError::InvalidRequest {
+                error: format!("[mock]: query not supported {:?}", other_query),
+                request: Default::default(),
+            }),
+        }
+    }
+
+    fn handle_ma_token_query(
+        &self,
+        contract_addr: &HumanAddr,
+        query: ma_token::msg::QueryMsg,
+    ) -> QuerierResult {
+        match query {
+            ma_token::msg::QueryMsg::BalanceAndTotalSupply { address } => {
+                let contract_balances = match self.balances.get(&contract_addr) {
+                    Some(balances) => balances,
+                    None => {
+                        return Err(SystemError::InvalidRequest {
+                            error: format!(
+                                "no balance available for account address {}",
+                                contract_addr
+                            ),
+                            request: Default::default(),
+                        })
+                    }
+                };
+
+                let user_balance = match contract_balances.get(&address) {
+                    Some(balance) => balance,
+                    None => {
+                        return Err(SystemError::InvalidRequest {
+                            error: format!(
+                                "no balance available for account address {}",
+                                contract_addr
+                            ),
+                            request: Default::default(),
+                        })
+                    }
+                };
+                let token_info_response = match self.token_info_responses.get(&contract_addr) {
+                    Some(tir) => tir,
+                    None => {
+                        return Err(SystemError::InvalidRequest {
+                            error: format!(
+                                "no token_info mock for account address {}",
+                                contract_addr
+                            ),
+                            request: Default::default(),
+                        })
+                    }
+                };
+
+                Ok(to_binary(&ma_token::msg::BalanceAndTotalSupplyResponse {
+                    balance: *user_balance,
+                    total_supply: token_info_response.total_supply,
+                }))
             }
 
             other_query => Err(SystemError::InvalidRequest {
@@ -390,7 +449,17 @@ impl MarsMockQuerier {
                 // Cw20 Queries
                 let parse_cw20_query: StdResult<Cw20QueryMsg> = from_binary(&msg);
                 if let Ok(cw20_query) = parse_cw20_query {
-                    return self.cw20_querier.handle_query(contract_addr, cw20_query);
+                    return self
+                        .cw20_querier
+                        .handle_cw20_query(contract_addr, cw20_query);
+                }
+
+                // MaToken Queries
+                let parse_ma_token_query: StdResult<ma_token::msg::QueryMsg> = from_binary(&msg);
+                if let Ok(ma_token_query) = parse_ma_token_query {
+                    return self
+                        .cw20_querier
+                        .handle_ma_token_query(contract_addr, ma_token_query);
                 }
 
                 // XMars Queries
