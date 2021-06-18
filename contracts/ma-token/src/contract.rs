@@ -15,8 +15,7 @@ use crate::state::{
     balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo,
 };
 use mars::ma_token::msg::{
-    HandleMsg, InitMsg, MigrateMsg, QueryMsg,
-    BalanceAndTotalSupplyResponse
+    BalanceAndTotalSupplyResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg,
 };
 
 // version info for migration info
@@ -350,7 +349,9 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
-        QueryMsg::BalanceAndTotalSupply { address } => to_binary(&query_balance_and_total_supply(deps, address)?),
+        QueryMsg::BalanceAndTotalSupply { address } => {
+            to_binary(&query_balance_and_total_supply(deps, address)?)
+        }
         QueryMsg::TokenInfo {} => to_binary(&query_token_info(deps)?),
         QueryMsg::Minter {} => to_binary(&query_minter(deps)?),
         QueryMsg::Allowance { owner, spender } => {
