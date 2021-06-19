@@ -105,13 +105,16 @@ pub mod msg {
             /// Amount to distribute to protocol contracts, defaults to full amount if not specified
             amount: Option<Uint256>,
         },
+        /// Withdraw asset
+        Withdraw {
+            asset: Asset,
+            amount: Option<Uint256>,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ReceiveMsg {
-        /// Redeem the sent tokens for the underlying asset
-        Redeem {},
         /// Deposit the sent cw20 tokens
         DepositCw20 {},
         /// Repay the sent cw20 tokens
