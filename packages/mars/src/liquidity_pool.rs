@@ -8,6 +8,7 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
+        pub owner: HumanAddr,
         pub config: CreateOrUpdateConfig,
     }
 

@@ -10,12 +10,12 @@ use crate::state::{config_state, config_state_read, Config};
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
-    _msg: InitMsg,
+    _env: Env,
+    msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // initialize Config
     let config = Config {
-        owner: deps.api.canonical_address(&env.message.sender)?,
+        owner: deps.api.canonical_address(&msg.owner)?,
     };
 
     config_state(&mut deps.storage).save(&config)?;
@@ -101,7 +101,9 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {};
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+        };
         let env = mock_env("owner", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
@@ -121,7 +123,9 @@ mod tests {
     fn test_execute_cosmos_msg() {
         let mut deps = mock_dependencies(20, &[]);
 
-        let msg = InitMsg {};
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+        };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
 
