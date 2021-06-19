@@ -67,7 +67,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     // initialize Config
     let config = Config {
-        owner: deps.api.canonical_address(&env.message.sender)?,
+        owner: deps.api.canonical_address(&msg.owner)?,
         mars_token_address: CanonicalAddr::default(),
         xmars_token_address: CanonicalAddr::default(),
         staking_contract_address: CanonicalAddr::default(),
@@ -1014,6 +1014,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 11,
+            owner: HumanAddr::from("owner"),
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -1040,6 +1041,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 12,
+            owner: HumanAddr::from("owner"),
             config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -1064,6 +1066,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 11,
+            owner: HumanAddr::from("owner"),
             config,
         };
         let env = mock_env("owner", MockEnvParams::default());
@@ -1163,6 +1166,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 11,
+            owner: HumanAddr::from("owner"),
             config,
         };
         let env = mock_env("owner", MockEnvParams::default());
@@ -1252,6 +1256,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 40,
+            owner: HumanAddr::from("owner"),
             config: init_config.clone(),
         };
         let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
@@ -2636,6 +2641,7 @@ mod tests {
         };
         let msg = InitMsg {
             cw20_code_id: 1,
+            owner: HumanAddr::from("owner"),
             config,
         };
         let env = mock_env("owner", MockEnvParams::default());

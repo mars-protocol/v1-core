@@ -33,7 +33,7 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // Destructuring a struct’s fields into separate variables in order to force
@@ -64,7 +64,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
 
     let config = Config {
-        owner: deps.api.canonical_address(&env.message.sender)?,
+        owner: deps.api.canonical_address(&msg.owner)?,
         treasury_contract_address: deps
             .api
             .canonical_address(&treasury_contract_address.unwrap())?,
@@ -2231,6 +2231,7 @@ mod tests {
             close_factor: None,
         };
         let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -2252,7 +2253,10 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
-        let msg = InitMsg { config };
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = init(&mut deps, env, msg);
         assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
@@ -2270,7 +2274,10 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
-        let exceeding_fees_msg = InitMsg { config };
+        let exceeding_fees_msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = init(&mut deps, env.clone(), exceeding_fees_msg);
         assert_generic_error_message(
@@ -2290,7 +2297,10 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config
         };
-        let msg = InitMsg { config };
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
 
         // we can just call .unwrap() to assert this was a success
         let res = init(&mut deps, env, msg).unwrap();
@@ -2325,6 +2335,7 @@ mod tests {
             close_factor: Some(close_factor),
         };
         let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
             config: init_config.clone(),
         };
         // we can just call .unwrap() to assert this was a success
@@ -2462,7 +2473,10 @@ mod tests {
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg { config };
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -2753,7 +2767,10 @@ mod tests {
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg { config };
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -5763,7 +5780,10 @@ mod tests {
             ma_token_code_id: Some(1u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg { config };
+        let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
+            config,
+        };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 

@@ -13,12 +13,12 @@ use terraswap::asset::AssetInfo;
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // initialize Config
     let config = Config {
-        owner: deps.api.canonical_address(&env.message.sender)?,
+        owner: deps.api.canonical_address(&msg.owner)?,
         terraswap_factory_address: deps.api.canonical_address(&msg.terraswap_factory_address)?,
         terraswap_max_spread: msg.terraswap_max_spread,
     };
@@ -180,6 +180,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
             terraswap_factory_address: HumanAddr::from("terraswap_factory"),
             terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
@@ -206,6 +207,7 @@ mod tests {
         // init config with valid params
         // *
         let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
             terraswap_factory_address: HumanAddr::from("terraswap_factory"),
             terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
@@ -263,6 +265,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let msg = InitMsg {
+            owner: HumanAddr::from("owner"),
             terraswap_factory_address: HumanAddr::from("terraswap_factory"),
             terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
         };

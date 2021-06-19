@@ -5,6 +5,7 @@ use terraswap::asset::AssetInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
+    pub owner: HumanAddr,
     pub terraswap_factory_address: HumanAddr,
     pub terraswap_max_spread: Decimal,
 }
