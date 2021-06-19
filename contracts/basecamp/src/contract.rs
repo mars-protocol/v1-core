@@ -5,14 +5,13 @@ use cosmwasm_std::{
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
-use mars::cw20_token;
 use mars::helpers::{human_addr_into_canonical, read_be_u64};
-use mars::xmars_token;
+use mars::{cw20_token, xmars_token};
 
 use crate::msg::{
     ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
-    ProposalInfo, ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg,
-    ReceiveMsg,
+    ProposalInfo, ProposalVoteResponse, ProposalVotesFilter, ProposalVotesResponse,
+    ProposalVotesSort, ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
     basecamp_state, basecamp_state_read, config_state, config_state_read, proposal_votes_state,
@@ -27,6 +26,9 @@ const MIN_DESC_LENGTH: usize = 4;
 const MAX_DESC_LENGTH: usize = 1024;
 const MIN_LINK_LENGTH: usize = 12;
 const MAX_LINK_LENGTH: usize = 128;
+const DEFAULT_START: u64 = 1;
+const DEFAULT_LIMIT: u32 = 10;
+const MAX_LIMIT: u32 = 30;
 
 // INIT
 
@@ -683,9 +685,20 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
         QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
-        QueryMsg::ProposalVotes { proposal_id } => {
-            to_binary(&query_proposal_votes(deps, proposal_id)?)
-        }
+        QueryMsg::ProposalVotes {
+            proposal_id,
+            start,
+            limit,
+            sort,
+            filter,
+        } => to_binary(&query_proposal_votes(
+            deps,
+            proposal_id,
+            start,
+            limit,
+            sort,
+            filter,
+        )?),
     }
 }
 
@@ -722,10 +735,6 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         proposal_required_deposit: config.proposal_required_deposit,
     })
 }
-
-const DEFAULT_START: u64 = 1;
-const MAX_LIMIT: u32 = 30;
-const DEFAULT_LIMIT: u32 = 10;
 
 fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
@@ -828,10 +837,46 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
 fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     proposal_id: u64,
+    start: Option<u64>,
+    limit: Option<u32>,
+    sort: Option<ProposalVotesSort>,
+    filter: Option<ProposalVotesFilter>,
 ) -> StdResult<ProposalVotesResponse> {
-    let votes: StdResult<Vec<ProposalVoteResponse>> =
+    let start = start.unwrap_or(0) as usize;
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let sort = sort.unwrap_or(ProposalVotesSort::Descending);
+
+    let voter_canonical_address = match &filter {
+        Some(filter) => match &filter.voter_address {
+            Some(voter_address) => deps.api.canonical_address(&voter_address).unwrap(),
+            None => CanonicalAddr::default(),
+        },
+        None => CanonicalAddr::default(),
+    };
+
+    let votes_filtered: StdResult<Vec<ProposalVoteResponse>> =
         proposal_votes_state_read(&deps.storage, proposal_id)
             .range(None, None, Order::Ascending)
+            .filter(|vote| match &filter {
+                Some(filter) => match &filter.voter_address {
+                    Some(_) => {
+                        let (k, _) = vote.as_ref().unwrap();
+                        CanonicalAddr::from(k.as_slice()) == voter_canonical_address
+                    }
+                    None => true,
+                },
+                None => true,
+            })
+            .filter(|vote| match &filter {
+                Some(filter) => match &filter.vote_option {
+                    Some(proposal_vote_option) => {
+                        let (_, v) = vote.as_ref().unwrap();
+                        &v.option == proposal_vote_option
+                    }
+                    None => true,
+                },
+                None => true,
+            })
             .map(|vote| {
                 let (k, v) = vote?;
                 let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
@@ -844,9 +889,36 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
             })
             .collect();
 
+    let mut votes_sorted = votes_filtered?;
+    match sort {
+        ProposalVotesSort::Ascending => {
+            votes_sorted.sort_by(|a, b| a.power.cmp(&b.power));
+        }
+        ProposalVotesSort::Descending => {
+            votes_sorted.sort_by(|a, b| b.power.cmp(&a.power));
+        }
+    }
+
+    let proposal_votes_count = votes_sorted.len();
+    let end = if (start + limit) < proposal_votes_count {
+        start + limit
+    } else {
+        proposal_votes_count
+    };
+    if start > end {
+        return Ok(ProposalVotesResponse {
+            proposal_id,
+            votes: vec![],
+            proposal_votes_count: proposal_votes_count as u64,
+        });
+    }
+
+    let votes_paginated = votes_sorted[start..end].to_vec();
+
     Ok(ProposalVotesResponse {
         proposal_id,
-        votes: votes?,
+        votes: votes_paginated,
+        proposal_votes_count: proposal_votes_count as u64,
     })
 }
 
@@ -1871,6 +1943,256 @@ mod tests {
             .unwrap();
         assert_eq!(proposal.for_votes, Uint128(100 + 300));
         assert_eq!(proposal.against_votes, Uint128(200 + 400));
+    }
+
+    #[test]
+    fn test_query_proposal_votes() {
+        // Arrange
+        let mut deps = th_setup(&[]);
+
+        deps.querier
+            .set_xmars_address(HumanAddr::from("xmars_token"));
+        let active_proposal_id = 1_u64;
+
+        let (voter_address1, _voter_canonical_address1) = get_test_addresses(&deps.api, "voter1");
+        let (voter_address2, _voter_canonical_address2) = get_test_addresses(&deps.api, "voter2");
+        let (voter_address3, _voter_canonical_address3) = get_test_addresses(&deps.api, "voter3");
+        let (voter_address4, _voter_canonical_address4) = get_test_addresses(&deps.api, "voter4");
+        let (voter_address5, _voter_canonical_address5) = get_test_addresses(&deps.api, "voter5");
+        deps.querier
+            .set_xmars_balance_at(voter_address1, 99_999, Uint128(100));
+        deps.querier
+            .set_xmars_balance_at(voter_address2, 99_999, Uint128(200));
+        deps.querier
+            .set_xmars_balance_at(voter_address3, 99_999, Uint128(300));
+        deps.querier
+            .set_xmars_balance_at(voter_address4, 99_999, Uint128(400));
+        deps.querier
+            .set_xmars_balance_at(voter_address5, 99_999, Uint128(500));
+
+        let active_proposal = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Active,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        proposals_state(&mut deps.storage)
+            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
+            .unwrap();
+
+        let msg_vote_for = HandleMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
+        };
+        let msg_vote_against = HandleMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::Against,
+        };
+
+        // Act
+        let env = mock_env(
+            "voter1",
+            MockEnvParams {
+                block_height: active_proposal.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg_vote_for.clone()).unwrap();
+
+        let env = mock_env(
+            "voter2",
+            MockEnvParams {
+                block_height: active_proposal.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg_vote_for.clone()).unwrap();
+
+        let env = mock_env(
+            "voter3",
+            MockEnvParams {
+                block_height: active_proposal.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg_vote_for).unwrap();
+
+        let env = mock_env(
+            "voter4",
+            MockEnvParams {
+                block_height: active_proposal.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg_vote_against.clone()).unwrap();
+
+        let env = mock_env(
+            "voter5",
+            MockEnvParams {
+                block_height: active_proposal.start_height + 1,
+                ..Default::default()
+            },
+        );
+        handle(&mut deps, env, msg_vote_against).unwrap();
+
+        // Assert default params
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_votes_count, 5);
+        assert_eq!(res.votes.len(), 5);
+        assert_eq!(res.proposal_id, active_proposal_id);
+
+        // Assert start != 0
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::from(2),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 3);
+        // Assert total count still returned on pagination
+        assert_eq!(res.proposal_votes_count, 5);
+
+        // Assert start = last items index
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::from(4),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 1);
+
+        // Assert start > length of collection
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::from(99),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 0);
+
+        // Assert limit
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::from(1),
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 1);
+
+        // Assert limit greater than length of collection
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::from(99),
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 5);
+
+        // Assert corectly sorts desc
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::from(ProposalVotesSort::Descending),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter5"));
+        assert_eq!(res.votes[0].option, ProposalVoteOption::Against);
+        assert_eq!(res.votes[0].power, Uint128(500));
+
+        // Assert corectly sorts asc
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::from(ProposalVotesSort::Ascending),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
+        assert_eq!(res.votes[0].option, ProposalVoteOption::For);
+        assert_eq!(res.votes[0].power, Uint128(100));
+
+        // Assert correctly filters by vote type for
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::from(ProposalVotesFilter {
+                voter_address: Option::None,
+                vote_option: Option::from(ProposalVoteOption::For),
+            }),
+        )
+        .unwrap();
+        assert_eq!(res.proposal_votes_count, 3);
+        assert_eq!(res.votes.len(), 3);
+
+        // Assert correctly filters by vote type against
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::from(ProposalVotesFilter {
+                voter_address: Option::None,
+                vote_option: Option::from(ProposalVoteOption::Against),
+            }),
+        )
+        .unwrap();
+        assert_eq!(res.proposal_votes_count, 2);
+        assert_eq!(res.votes.len(), 2);
+
+        // Assert correctly filters by voter address
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::from(ProposalVotesFilter {
+                voter_address: Option::from(HumanAddr::from("voter1")),
+                vote_option: Option::None,
+            }),
+        )
+        .unwrap();
+        assert_eq!(res.proposal_votes_count, 1);
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
+        assert_eq!(res.votes[0].option, ProposalVoteOption::For);
+        assert_eq!(res.votes[0].power, Uint128(100));
     }
 
     #[test]
