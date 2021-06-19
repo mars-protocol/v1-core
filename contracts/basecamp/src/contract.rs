@@ -848,7 +848,10 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
 
     let voter_canonical_address = match &filter {
         Some(filter) => match &filter.voter_address {
-            Some(voter_address) => deps.api.canonical_address(&voter_address).unwrap(),
+            Some(voter_address) => match deps.api.canonical_address(&voter_address) {
+                Ok(voter_canonical_address) => voter_canonical_address,
+                Err(_) => return Err(StdError::generic_err("Invalid voter address")),
+            },
             None => CanonicalAddr::default(),
         },
         None => CanonicalAddr::default(),
