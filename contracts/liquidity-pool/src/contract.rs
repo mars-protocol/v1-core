@@ -14,7 +14,7 @@ use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
     InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
-    ReserveResponse, ReservesListResponse,
+    ReserveResponse, ReservesListResponse, UncollateralizedLoanLimitResponse,
 };
 
 use crate::state::{
@@ -1492,6 +1492,14 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Reserve { asset } => to_binary(&query_reserve(deps, asset)?),
         QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
+        QueryMsg::UncollateralizedLoanLimit {
+            user_address,
+            asset,
+        } => to_binary(&query_uncollateralized_loan_limit(
+            deps,
+            user_address,
+            asset,
+        )?),
     }
 }
 
@@ -1509,7 +1517,6 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
-        // TODO do we need this in ConfigResponse?
         reserve_count: money_market.reserve_count,
         close_factor: config.close_factor,
     })
@@ -1677,6 +1684,31 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .collect();
 
     Ok(DebtResponse { debts: debts? })
+}
+
+fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    user_address: HumanAddr,
+    asset: Asset,
+) -> StdResult<UncollateralizedLoanLimitResponse> {
+    let user_canonical_address = match deps.api.canonical_address(&user_address) {
+        Ok(user_canonical_address) => user_canonical_address,
+        Err(_) => return Err(StdError::generic_err("Invalid user_address")),
+    };
+    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let limit = match uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice())
+        .load(&user_canonical_address.as_slice())
+    {
+        Ok(uncollateralized_loan_limit) => uncollateralized_loan_limit,
+        Err(_) => {
+            return Err(StdError::not_found(format!(
+                "No uncollateralized loan approved for user_address: {} on asset: {}",
+                user_address, asset_label
+            )))
+        }
+    };
+
+    Ok(UncollateralizedLoanLimitResponse { limit })
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(
