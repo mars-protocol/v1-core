@@ -535,6 +535,9 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         owner: deps.api.human_address(&config.owner)?,
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
         xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+        terraswap_max_spread: config.terraswap_max_spread,
+        cooldown_duration: config.cooldown_duration,
+        unstake_window: config.unstake_window,
     })
 }
 

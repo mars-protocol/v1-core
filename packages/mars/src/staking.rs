@@ -75,6 +75,9 @@ pub mod msg {
         pub owner: HumanAddr,
         pub mars_token_address: HumanAddr,
         pub xmars_token_address: HumanAddr,
+        pub terraswap_max_spread: Decimal,
+        pub cooldown_duration: u64,
+        pub unstake_window: u64,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
