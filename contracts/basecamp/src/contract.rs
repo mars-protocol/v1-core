@@ -719,7 +719,12 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         xmars_token_address,
         staking_contract_address,
         insurance_fund_contract_address,
+        proposal_voting_period: config.proposal_voting_period,
+        proposal_effective_delay: config.proposal_effective_delay,
+        proposal_expiration_period: config.proposal_expiration_period,
         proposal_required_deposit: config.proposal_required_deposit,
+        proposal_required_quorum: config.proposal_required_quorum,
+        proposal_required_threshold: config.proposal_required_threshold,
     })
 }
 

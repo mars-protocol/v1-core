@@ -110,7 +110,12 @@ pub struct ConfigResponse {
     pub staking_contract_address: HumanAddr,
     pub insurance_fund_contract_address: HumanAddr,
 
+    pub proposal_voting_period: u64,
+    pub proposal_effective_delay: u64,
+    pub proposal_expiration_period: u64,
     pub proposal_required_deposit: Uint128,
+    pub proposal_required_quorum: Decimal,
+    pub proposal_required_threshold: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
