@@ -117,6 +117,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             recipient,
             amount,
         } => handle_transfer_from(deps, env, owner, recipient, amount),
+        // TODO: Bring back SendFrom (Won't cause troubles anymore witht he new withdraw API)
     }
 }
 
@@ -198,18 +199,26 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 
     // lower balance
     let mut accounts = balances(&mut deps.storage);
-    let user_balance_old = accounts.load(user_raw.as_slice()).unwrap_or_default();
-    let user_balance_new = (user_balance_old - amount)?;
+    let user_balance_before = accounts.load(user_raw.as_slice()).unwrap_or_default();
+    let user_balance_new = (user_balance_before - amount)?;
     accounts.save(user_raw.as_slice(), &user_balance_new)?;
 
     // reduce total_supply
+    let mut total_supply_before = Uint128::zero();
     token_info(&mut deps.storage).update(|mut info| {
+        total_supply_before = info.total_supply;
         info.total_supply = (info.total_supply - amount)?;
         Ok(info)
     })?;
 
     let res = HandleResponse {
-        messages: vec![],
+        messages: vec![core::balance_change_msg(
+            &deps.api,
+            &config.incentives_address,
+            user.clone(),
+            user_balance_before,
+            total_supply_before,
+        )?],
         log: vec![
             log("action", "burn"),
             log("user", user),
@@ -230,32 +239,40 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Invalid zero amount"));
     }
 
-    let mut config = token_info_read(&deps.storage).load()?;
-    if config.mint.is_none()
-        || config.mint.as_ref().unwrap().minter
-            != deps.api.canonical_address(&env.message.sender)?
+    let mut info = token_info_read(&deps.storage).load()?;
+    if info.mint.is_none()
+        || info.mint.as_ref().unwrap().minter != deps.api.canonical_address(&env.message.sender)?
     {
         return Err(StdError::unauthorized());
     }
+    let total_supply_before = info.total_supply;
 
     // update supply and enforce cap
-    config.total_supply += amount;
-    if let Some(limit) = config.get_cap() {
-        if config.total_supply > limit {
+    info.total_supply += amount;
+    if let Some(limit) = info.get_cap() {
+        if info.total_supply > limit {
             return Err(StdError::generic_err("Minting cannot exceed the cap"));
         }
     }
-    token_info(&mut deps.storage).save(&config)?;
+    token_info(&mut deps.storage).save(&info)?;
 
     // add amount to recipient balance
     let mut accounts = balances(&mut deps.storage);
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
-    let rcpt_balance_old = accounts.load(rcpt_raw.as_slice()).unwrap_or_default();
-    let rcpt_balance_new = rcpt_balance_old + amount;
+    let rcpt_balance_before = accounts.load(rcpt_raw.as_slice()).unwrap_or_default();
+    let rcpt_balance_new = rcpt_balance_before + amount;
     accounts.save(rcpt_raw.as_slice(), &rcpt_balance_new)?;
 
+    let config = state::load_config(&deps.storage)?;
+
     let res = HandleResponse {
-        messages: vec![],
+        messages: vec![core::balance_change_msg(
+            &deps.api,
+            &config.incentives_address,
+            recipient.clone(),
+            rcpt_balance_before,
+            total_supply_before,
+        )?],
         log: vec![
             log("action", "mint"),
             log("to", recipient),
@@ -618,7 +635,19 @@ mod tests {
 
         let env = mock_env(&minter, &[]);
         let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("incentives"),
+                msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    user_address: winner.clone(),
+                    user_balance_before: Uint128::zero(),
+                    total_supply_before: amount,
+                },)
+                .unwrap(),
+                send: vec![],
+            }),]
+        );
         assert_eq!(get_balance(&deps, &genesis), amount);
         assert_eq!(get_balance(&deps, &winner), prize);
         assert_eq!(
@@ -1007,7 +1036,19 @@ mod tests {
             amount: burn,
         };
         let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(res.messages.len(), 0);
+        assert_eq!(
+            res.messages,
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("incentives"),
+                msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    user_address: addr1.clone(),
+                    user_balance_before: amount1,
+                    total_supply_before: amount1,
+                },)
+                .unwrap(),
+                send: vec![],
+            }),]
+        );
 
         let remainder = (amount1 - burn).unwrap();
         assert_eq!(get_balance(&deps, &addr1), remainder);
@@ -1063,7 +1104,7 @@ mod tests {
         let binary_msg = Cw20ReceiveMsg {
             sender: addr1.clone(),
             amount: transfer,
-            msg: Some(send_msg.clone()),
+            msg: Some(send_msg),
         }
         .into_binary()
         .unwrap();
