@@ -61,6 +61,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         &mut deps.storage,
         &Config {
             money_market_address: deps.api.canonical_address(&msg.money_market_address)?,
+            incentives_address: deps.api.canonical_address(&msg.incentives_address)?,
         },
     )?;
 
@@ -501,6 +502,7 @@ mod tests {
             }],
             mint: mint.clone(),
             money_market_address: HumanAddr::from("money_market"),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(deps, env, init_msg).unwrap();
@@ -537,6 +539,7 @@ mod tests {
             }],
             mint: None,
             money_market_address: money_market_address.clone(),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
@@ -578,6 +581,7 @@ mod tests {
                 cap: Some(limit),
             }),
             money_market_address: HumanAddr::from("money_market"),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
@@ -621,6 +625,7 @@ mod tests {
                 cap: Some(limit),
             }),
             money_market_address: HumanAddr::from("money_market"),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg);
@@ -732,6 +737,7 @@ mod tests {
             ],
             mint: None,
             money_market_address: HumanAddr::from("money_market"),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();

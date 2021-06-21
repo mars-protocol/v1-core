@@ -14,6 +14,7 @@ pub mod msg {
         pub initial_balances: Vec<Cw20CoinHuman>,
         pub mint: Option<MinterResponse>,
         pub money_market_address: HumanAddr,
+        pub incentives_address: HumanAddr,
     }
 
     impl InitMsg {

@@ -27,7 +27,7 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
 
 pub fn finalize_transfer_msg<A: Api>(
     api: &A,
-    money_market_address: &CanonicalAddr,
+    money_market_canonical_address: &CanonicalAddr,
     sender_address: HumanAddr,
     recipient_address: HumanAddr,
     sender_previous_balance: Uint128,
@@ -35,7 +35,7 @@ pub fn finalize_transfer_msg<A: Api>(
     amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: api.human_address(money_market_address)?,
+        contract_addr: api.human_address(money_market_canonical_address)?,
         msg: to_binary(
             &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                 sender_address,
@@ -43,6 +43,26 @@ pub fn finalize_transfer_msg<A: Api>(
                 sender_previous_balance,
                 recipient_previous_balance,
                 amount,
+            },
+        )?,
+        send: vec![],
+    }))
+}
+
+pub fn balance_change_msg<A: Api>(
+    api: &A,
+    incentives_canonical_address: &CanonicalAddr,
+    user_address: HumanAddr,
+    user_balance_before: Uint128,
+    total_supply_before: Uint128,
+) -> StdResult<CosmosMsg> {
+    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: api.human_address(incentives_canonical_address)?,
+        msg: to_binary(
+            &mars::incentives::msg::HandleMsg::BalanceChange {
+                user_address,
+                user_balance_before,
+                total_supply_before,
             },
         )?,
         send: vec![],
