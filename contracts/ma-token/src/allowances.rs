@@ -115,7 +115,6 @@ pub fn handle_transfer_from<S: Storage, A: Api, Q: Querier>(
     recipient: HumanAddr,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    let rcpt_raw = deps.api.canonical_address(&recipient)?;
     let owner_raw = deps.api.canonical_address(&owner)?;
     let spender_raw = deps.api.canonical_address(&env.message.sender)?;
 
@@ -129,19 +128,11 @@ pub fn handle_transfer_from<S: Storage, A: Api, Q: Querier>(
     )?;
 
     // move the tokens to the contract
-    let (from_previous_balance, to_previous_balance) =
-        core::transfer(deps, &owner_raw, &rcpt_raw, amount)?;
+    let config = state::load_config(&deps.storage)?;
+    let messages = core::transfer(deps, &config, &owner, &recipient, amount, true)?;
 
     let res = HandleResponse {
-        messages: vec![core::finalize_transfer_msg(
-            &deps.api,
-            &state::load_config(&deps.storage)?.money_market_address,
-            owner.clone(),
-            recipient.clone(),
-            from_previous_balance,
-            to_previous_balance,
-            amount,
-        )?],
+        messages,
         log: vec![
             log("action", "transfer_from"),
             log("from", owner),
@@ -450,21 +441,43 @@ mod tests {
             ]
         );
         assert_eq!(
-            res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("money_market"),
-                msg: to_binary(
-                    &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        sender_address: owner.clone(),
-                        recipient_address: rcpt.clone(),
-                        sender_previous_balance: start,
-                        recipient_previous_balance: Uint128::zero(),
-                        amount: transfer,
-                    }
-                )
-                .unwrap(),
-                send: vec![],
-            }),
+            res.messages,
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("money_market"),
+                    msg: to_binary(
+                        &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                            sender_address: owner.clone(),
+                            recipient_address: rcpt.clone(),
+                            sender_previous_balance: start,
+                            recipient_previous_balance: Uint128::zero(),
+                            amount: transfer,
+                        }
+                    )
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: owner.clone(),
+                        user_balance_before: start,
+                        total_supply_before: start,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: rcpt.clone(),
+                        user_balance_before: Uint128::zero(),
+                        total_supply_before: start,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+            ]
         );
 
         // make sure money arrived
