@@ -24,7 +24,7 @@ pub enum HandleMsg {
 
     /// Handle balance change updating user and asset rewards.
     /// Sent from an external contract, triggered on user balance changes
-    /// Will return an empty response noop if no incentive is applied for the asset
+    /// Will return an empty response if no incentive is applied for the asset
     BalanceChange {
         user_address: HumanAddr,
         /// user balance up to the instant before the change
@@ -35,7 +35,7 @@ pub enum HandleMsg {
 
     /// Claim rewards. Mars rewards accrued by the user will be staked into xMars before
     /// being sent.
-    ClaimRewards,
+    ClaimRewards {},
 
     /// Update contract config (only callable by owner)
     UpdateConfig {
@@ -54,7 +54,7 @@ pub enum QueryMsg {
     Config {},
 }
 
-// We define a custom struct for each query response
+/// Query response with config values
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub owner: HumanAddr,
