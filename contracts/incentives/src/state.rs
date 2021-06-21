@@ -15,7 +15,7 @@ pub static ASSET_INCENTIVES_NAMESPACE: &[u8] = b"asset_data";
 pub static USER_ASSET_INDICES_NAMESPACE: &[u8] = b"user_asset_indices";
 pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 
-/// Insurance fund global configuration
+/// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner

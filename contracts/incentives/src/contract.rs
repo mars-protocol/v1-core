@@ -55,7 +55,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             user_balance_before,
             total_supply_before,
         ),
-        HandleMsg::ClaimRewards => handle_claim_rewards(deps, env),
+        HandleMsg::ClaimRewards {} => handle_claim_rewards(deps, env),
         HandleMsg::UpdateConfig {
             owner,
             mars_token_address,
@@ -126,7 +126,7 @@ pub fn handle_balance_change<S: Storage, A: Api, Q: Querier>(
         match asset_incentives_bucket.may_load(ma_token_canonical_address.as_slice())? {
             // If there are no incentives,
             // an empty successful response is returned as the
-            // success of the call is needed to for the call that triggered the change to
+            // success of the call is needed for the call that triggered the change to
             // succeed and be persisted to state.
             None => return Ok(HandleResponse::default()),
             Some(ai) => ai,
@@ -189,13 +189,9 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
     env: Env,
 ) -> StdResult<HandleResponse> {
     let user_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    let unclaimed_rewards = state::user_unclaimed_rewards_read(&deps.storage)
+    let mut accrued_rewards = state::user_unclaimed_rewards_read(&deps.storage)
         .may_load(&user_canonical_address.as_slice())?
         .unwrap_or_else(Uint128::zero);
-    let mut accrued_rewards = unclaimed_rewards;
-    // clear unclaimed rewards
-    state::user_unclaimed_rewards(&mut deps.storage)
-        .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
 
     // Since we need the mutable storage reference while iterating we need to get all
     // values on the range first
@@ -221,13 +217,11 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
         let mut asset_incentives_bucket = state::asset_incentives(&mut deps.storage);
         let mut asset_incentive =
             asset_incentives_bucket.load(ma_token_canonical_address.as_slice())?;
-        println!("{:?}", asset_incentive);
         asset_incentive_update_index(
             &mut asset_incentive,
             balance_and_total_supply.total_supply,
             env.block.time,
         )?;
-        println!("{:?}", asset_incentive);
         asset_incentives_bucket.save(&ma_token_canonical_address.as_slice(), &asset_incentive)?;
 
         if user_asset_index != asset_incentive.index {
@@ -245,6 +239,10 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
             )?
         }
     }
+
+    // clear unclaimed rewards
+    state::user_unclaimed_rewards(&mut deps.storage)
+        .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
 
     let config = state::config_read(&deps.storage).load()?;
     let mars_token_address = deps.api.human_address(&config.mars_token_address)?;
@@ -337,9 +335,9 @@ fn asset_incentive_update_index(
     total_supply: Uint128,
     current_block_time: u64,
 ) -> StdResult<()> {
-    if !(current_block_time == asset_incentive.last_updated
-        || total_supply.is_zero()
-        || asset_incentive.emission_per_second.is_zero())
+    if (current_block_time != asset_incentive.last_updated)
+        && !total_supply.is_zero()
+        && !asset_incentive.emission_per_second.is_zero()
     {
         asset_incentive.index = asset_incentive_compute_index(
             asset_incentive.index,
@@ -364,11 +362,12 @@ fn asset_incentive_compute_index(
         return Err(StdError::underflow(time_end, time_start));
     }
     let seconds_elapsed = time_end - time_start;
-    Ok(previous_index
+    let new_index = previous_index
         + Decimal::from_ratio(
             emission_per_second.u128() * seconds_elapsed as u128,
             total_supply,
-        ))
+        );
+    Ok(new_index)
 }
 
 /// Computes user accrued rewards using the difference between asset_incentive index and
@@ -477,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn test_set_new_asset_incentive_new() {
+    fn test_set_new_asset_incentive() {
         let mut deps = th_setup(&[]);
         let (ma_asset_address, ma_asset_canonical_address) =
             mars::testing::get_test_addresses(&deps.api, "ma_asset");
@@ -1058,7 +1057,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let msg = HandleMsg::ClaimRewards;
+        let msg = HandleMsg::ClaimRewards {};
         let res = handle(&mut deps, env, msg).unwrap();
 
         // ASSERT
@@ -1169,7 +1168,7 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         let env = mock_env("user", MockEnvParams::default());
-        let msg = HandleMsg::ClaimRewards;
+        let msg = HandleMsg::ClaimRewards {};
         let res = handle(&mut deps, env, msg).unwrap();
 
         // ASSERT
