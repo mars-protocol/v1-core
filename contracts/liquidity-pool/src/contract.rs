@@ -1701,13 +1701,11 @@ fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
             .load(&user_canonical_address.as_slice());
 
     match uncollateralized_loan_limit {
-        Ok(limit) => return Ok(UncollateralizedLoanLimitResponse { limit }),
-        Err(_) => {
-            return Err(StdError::not_found(format!(
-                "No uncollateralized loan approved for user_address: {} on asset: {}",
-                user_address, asset_label
-            )))
-        }
+        Ok(limit) => Ok(UncollateralizedLoanLimitResponse { limit }),
+        Err(_) => Err(StdError::not_found(format!(
+            "No uncollateralized loan approved for user_address: {} on asset: {}",
+            user_address, asset_label
+        ))),
     }
 }
 
