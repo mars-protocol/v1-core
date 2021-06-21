@@ -1696,19 +1696,19 @@ fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
         Err(_) => return Err(StdError::generic_err("Invalid user_address")),
     };
     let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
-    let limit = match uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice())
-        .load(&user_canonical_address.as_slice())
-    {
-        Ok(uncollateralized_loan_limit) => uncollateralized_loan_limit,
+    let uncollateralized_loan_limit =
+        uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice())
+            .load(&user_canonical_address.as_slice());
+
+    match uncollateralized_loan_limit {
+        Ok(limit) => return Ok(UncollateralizedLoanLimitResponse { limit }),
         Err(_) => {
             return Err(StdError::not_found(format!(
                 "No uncollateralized loan approved for user_address: {} on asset: {}",
                 user_address, asset_label
             )))
         }
-    };
-
-    Ok(UncollateralizedLoanLimitResponse { limit })
+    }
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(
