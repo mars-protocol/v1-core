@@ -6,9 +6,9 @@ use cosmwasm_std::{
 
 use mars::helpers::human_addr_into_canonical;
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 use crate::state;
 use crate::state::{AssetIncentive, Config};
+use mars::incentives::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 
 // INIT
 

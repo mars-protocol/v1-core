@@ -1,5 +1,6 @@
 pub mod cw20_token;
 pub mod helpers;
+pub mod incentives;
 pub mod liquidity_pool;
 pub mod ma_token;
 pub mod staking;
