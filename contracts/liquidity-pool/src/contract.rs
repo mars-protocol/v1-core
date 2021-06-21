@@ -1691,10 +1691,7 @@ fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
     user_address: HumanAddr,
     asset: Asset,
 ) -> StdResult<UncollateralizedLoanLimitResponse> {
-    let user_canonical_address = match deps.api.canonical_address(&user_address) {
-        Ok(user_canonical_address) => user_canonical_address,
-        Err(_) => return Err(StdError::generic_err("Invalid user_address")),
-    };
+    let user_canonical_address = deps.api.canonical_address(&user_address)?;
     let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
     let uncollateralized_loan_limit =
         uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice())
