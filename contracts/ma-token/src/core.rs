@@ -1,18 +1,25 @@
-use crate::state::balances;
 use cosmwasm_std::{
     to_binary, Api, CanonicalAddr, CosmosMsg, Extern, HumanAddr, Querier, StdResult, Storage,
     Uint128, WasmMsg,
 };
 
+use crate::state;
+use crate::state::{balances, Config};
+
 /// Deduct amount form sender balance and deducts it from recipient
-/// Returns previous balances
+/// Returns messages to be sent on the final response
 pub fn transfer<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    sender_raw: &CanonicalAddr,
-    recipient_raw: &CanonicalAddr,
+    config: &Config,
+    sender_address: &HumanAddr,
+    recipient_address: &HumanAddr,
     amount: Uint128,
-) -> StdResult<(Uint128, Uint128)> {
+    finalize_on_money_market: bool,
+) -> StdResult<Vec<CosmosMsg>> {
     let mut accounts = balances(&mut deps.storage);
+
+    let sender_raw = deps.api.canonical_address(sender_address)?;
+    let recipient_raw = deps.api.canonical_address(recipient_address)?;
 
     let sender_previous_balance = accounts.load(sender_raw.as_slice()).unwrap_or_default();
     let sender_new_balance = (sender_previous_balance - amount)?;
@@ -22,7 +29,42 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     let recipient_new_balance = recipient_previous_balance + amount;
     accounts.save(recipient_raw.as_slice(), &recipient_new_balance)?;
 
-    Ok((sender_previous_balance, recipient_previous_balance))
+    let total_supply = state::token_info_read(&deps.storage).load()?.total_supply;
+
+    let mut messages = vec![];
+
+    // If the transfer results from a method called on the money market,
+    // it is finalized there. Else it needs to update state and perform some validations
+    // to ensure the transfer can be executed
+    if finalize_on_money_market {
+        messages.push(finalize_transfer_msg(
+            &deps.api,
+            &config.money_market_address,
+            sender_address.clone(),
+            recipient_address.clone(),
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        )?);
+    }
+
+    // Build incentive messages
+    messages.push(balance_change_msg(
+        &deps.api,
+        &config.incentives_address,
+        sender_address.clone(),
+        sender_previous_balance,
+        total_supply,
+    )?);
+    messages.push(balance_change_msg(
+        &deps.api,
+        &config.incentives_address,
+        recipient_address.clone(),
+        recipient_previous_balance,
+        total_supply,
+    )?);
+
+    Ok(messages)
 }
 
 pub fn finalize_transfer_msg<A: Api>(

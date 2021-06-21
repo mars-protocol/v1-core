@@ -129,47 +129,15 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
-    let sender_raw = deps.api.canonical_address(&env.message.sender)?;
-    let rcpt_raw = deps.api.canonical_address(&recipient)?;
-
-    let (from_previous_balance, to_previous_balance) =
-        core::transfer(deps, &sender_raw, &rcpt_raw, amount)?;
 
     let config = state::load_config(&deps.storage)?;
-    let money_market_canonical_address = config.money_market_address;
-    let incentives_canonical_address = config.incentives_address;
-
-    let total_supply = state::token_info_read(&deps.storage).load()?.total_supply;
+    let messages = core::transfer(deps, &config, &env.message.sender, &recipient, amount, true)?;
 
     let res = HandleResponse {
-        messages: vec![
-            core::finalize_transfer_msg(
-                &deps.api,
-                &money_market_canonical_address,
-                env.message.sender.clone(),
-                recipient.clone(),
-                from_previous_balance,
-                to_previous_balance,
-                amount,
-            )?,
-            core::balance_change_msg(
-                &deps.api,
-                &incentives_canonical_address,
-                env.message.sender,
-                from_previous_balance,
-                total_supply,
-            )?,
-            core::balance_change_msg(
-                &deps.api,
-                &incentives_canonical_address,
-                recipient.clone(),
-                to_previous_balance,
-                total_supply,
-            )?,
-        ],
+        messages,
         log: vec![
             log("action", "transfer"),
-            log("from", deps.api.human_address(&sender_raw)?),
+            log("from", env.message.sender),
             log("to", recipient),
             log("amount", amount),
         ],
@@ -194,16 +162,14 @@ pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
-    let sender_raw = deps.api.canonical_address(&sender)?;
-    let recipient_raw = deps.api.canonical_address(&recipient)?;
 
-    core::transfer(deps, &sender_raw, &recipient_raw, amount)?;
+    let messages = core::transfer(deps, &config, &sender, &recipient, amount, false)?;
 
     let res = HandleResponse {
-        messages: vec![],
+        messages,
         log: vec![
             log("action", "transfer_on_liquidation"),
-            log("from", sender),
+            log("from", env.message.sender),
             log("to", recipient),
             log("amount", amount),
         ],
@@ -311,39 +277,17 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Invalid zero amount"));
     }
 
-    let rcpt_raw = deps.api.canonical_address(&contract)?;
-    let sender_raw = deps.api.canonical_address(&env.message.sender)?;
-
     // move the tokens to the contract
-    let (from_previous_balance, to_previous_balance) =
-        core::transfer(deps, &sender_raw, &rcpt_raw, amount)?;
+    let sender = env.message.sender;
+    let config = state::load_config(&deps.storage)?;
+    let mut messages = core::transfer(deps, &config, &sender, &contract, amount, true)?;
 
-    let sender = deps.api.human_address(&sender_raw)?;
     let logs = vec![
         log("action", "send"),
         log("from", &sender),
         log("to", &contract),
         log("amount", amount),
     ];
-
-    // If the send call is to the money market (to redeem), then
-    // don't ask money market to finalize the transfer. The corresponding logic
-    // should be run synchronously with the redeem call.
-    let money_market_address = state::load_config(&deps.storage)?.money_market_address;
-
-    let mut messages = if money_market_address == deps.api.canonical_address(&contract)? {
-        vec![]
-    } else {
-        vec![core::finalize_transfer_msg(
-            &deps.api,
-            &money_market_address,
-            env.message.sender,
-            contract.clone(),
-            from_previous_balance,
-            to_previous_balance,
-            amount,
-        )?]
-    };
 
     // create a send message
     messages.push(
@@ -979,7 +923,31 @@ mod tests {
                 amount: transfer,
             };
             let res = handle(&mut deps, env, msg).unwrap();
-            assert_eq!(res.messages.len(), 0);
+            assert_eq!(
+                res.messages,
+                vec![
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: HumanAddr::from("incentives"),
+                        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                            user_address: addr1.clone(),
+                            user_balance_before: amount1,
+                            total_supply_before: amount1,
+                        },)
+                        .unwrap(),
+                        send: vec![],
+                    }),
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: HumanAddr::from("incentives"),
+                        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                            user_address: addr2.clone(),
+                            user_balance_before: Uint128::zero(),
+                            total_supply_before: amount1,
+                        },)
+                        .unwrap(),
+                        send: vec![],
+                    }),
+                ]
+            );
 
             let remainder = (amount1 - transfer).unwrap();
             assert_eq!(get_balance(&deps, &addr1), remainder);
@@ -1089,26 +1057,6 @@ mod tests {
             msg: Some(send_msg.clone()),
         };
         let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(res.messages.len(), 2);
-
-        // Ensure finalize liquidity token transfer msg is sent
-        assert_eq!(
-            res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("money_market"),
-                msg: to_binary(
-                    &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        sender_address: addr1.clone(),
-                        recipient_address: contract.clone(),
-                        sender_previous_balance: amount1,
-                        recipient_previous_balance: Uint128::zero(),
-                        amount: transfer,
-                    }
-                )
-                .unwrap(),
-                send: vec![],
-            })
-        );
 
         // ensure proper send message sent
         // this is the message we want delivered to the other side
@@ -1119,14 +1067,51 @@ mod tests {
         }
         .into_binary()
         .unwrap();
-        // and this is how it must be wrapped for the vm to process it
+
+        // Ensure finalize liquidity token transfer msg is sent
         assert_eq!(
-            res.messages[1],
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: contract.clone(),
-                msg: binary_msg,
-                send: vec![],
-            })
+            res.messages,
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("money_market"),
+                    msg: to_binary(
+                        &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                            sender_address: addr1.clone(),
+                            recipient_address: contract.clone(),
+                            sender_previous_balance: amount1,
+                            recipient_previous_balance: Uint128::zero(),
+                            amount: transfer,
+                        }
+                    )
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: addr1.clone(),
+                        user_balance_before: amount1,
+                        total_supply_before: amount1,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: contract.clone(),
+                        user_balance_before: Uint128::zero(),
+                        total_supply_before: amount1,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract.clone(),
+                    msg: binary_msg,
+                    send: vec![],
+                }),
+            ]
         );
 
         // ensure balance is properly transfered
@@ -1134,35 +1119,5 @@ mod tests {
         assert_eq!(get_balance(&deps, &addr1), remainder);
         assert_eq!(get_balance(&deps, &contract), transfer);
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
-
-        // valid transfer to money market
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
-            contract: HumanAddr::from("money_market"),
-            amount: transfer,
-            msg: Some(send_msg.clone()),
-        };
-        let res = handle(&mut deps, env, msg).unwrap();
-
-        // should not have finalize token transfer call
-        assert_eq!(res.messages.len(), 1);
-        // ensure proper send message sent
-        // this is the message we want delivered to the other side
-        let binary_msg = Cw20ReceiveMsg {
-            sender: addr1,
-            amount: transfer,
-            msg: Some(send_msg),
-        }
-        .into_binary()
-        .unwrap();
-        // and this is how it must be wrapped for the vm to process it
-        assert_eq!(
-            res.messages[0],
-            CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("money_market"),
-                msg: binary_msg,
-                send: vec![],
-            })
-        );
     }
 }
