@@ -58,13 +58,11 @@ pub fn balance_change_msg<A: Api>(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: api.human_address(incentives_canonical_address)?,
-        msg: to_binary(
-            &mars::incentives::msg::HandleMsg::BalanceChange {
-                user_address,
-                user_balance_before,
-                total_supply_before,
-            },
-        )?,
+        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+            user_address,
+            user_balance_before,
+            total_supply_before,
+        })?,
         send: vec![],
     }))
 }

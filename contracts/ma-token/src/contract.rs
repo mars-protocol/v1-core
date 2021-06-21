@@ -135,16 +135,38 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
     let (from_previous_balance, to_previous_balance) =
         core::transfer(deps, &sender_raw, &rcpt_raw, amount)?;
 
+    let config = state::load_config(&deps.storage)?;
+    let money_market_canonical_address = config.money_market_address;
+    let incentives_canonical_address = config.incentives_address;
+
+    let total_supply = state::token_info_read(&deps.storage).load()?.total_supply;
+
     let res = HandleResponse {
-        messages: vec![core::finalize_transfer_msg(
-            &deps.api,
-            &state::load_config(&deps.storage)?.money_market_address,
-            env.message.sender,
-            recipient.clone(),
-            from_previous_balance,
-            to_previous_balance,
-            amount,
-        )?],
+        messages: vec![
+            core::finalize_transfer_msg(
+                &deps.api,
+                &money_market_canonical_address,
+                env.message.sender.clone(),
+                recipient.clone(),
+                from_previous_balance,
+                to_previous_balance,
+                amount,
+            )?,
+            core::balance_change_msg(
+                &deps.api,
+                &incentives_canonical_address,
+                env.message.sender,
+                from_previous_balance,
+                total_supply,
+            )?,
+            core::balance_change_msg(
+                &deps.api,
+                &incentives_canonical_address,
+                recipient.clone(),
+                to_previous_balance,
+                total_supply,
+            )?,
+        ],
         log: vec![
             log("action", "transfer"),
             log("from", deps.api.human_address(&sender_raw)?),
@@ -838,20 +860,42 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("money_market"),
-                msg: to_binary(
-                    &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                        sender_address: addr1.clone(),
-                        recipient_address: addr2.clone(),
-                        sender_previous_balance: amount1,
-                        recipient_previous_balance: Uint128::zero(),
-                        amount: transfer,
-                    }
-                )
-                .unwrap(),
-                send: vec![],
-            })],
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("money_market"),
+                    msg: to_binary(
+                        &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                            sender_address: addr1.clone(),
+                            recipient_address: addr2.clone(),
+                            sender_previous_balance: amount1,
+                            recipient_previous_balance: Uint128::zero(),
+                            amount: transfer,
+                        }
+                    )
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: addr1.clone(),
+                        user_balance_before: amount1,
+                        total_supply_before: amount1,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        user_address: addr2.clone(),
+                        user_balance_before: Uint128::zero(),
+                        total_supply_before: amount1,
+                    },)
+                    .unwrap(),
+                    send: vec![],
+                }),
+            ],
         );
 
         let remainder = (amount1 - transfer).unwrap();
