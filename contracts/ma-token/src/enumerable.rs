@@ -85,6 +85,7 @@ mod tests {
             }],
             mint: None,
             money_market_address: HumanAddr::from("money_market"),
+            incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         init(deps, env, init_msg).unwrap();

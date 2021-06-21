@@ -11,6 +11,7 @@ use cw20::AllowanceResponse;
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
     pub money_market_address: CanonicalAddr,
+    pub incentives_address: CanonicalAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
