@@ -317,39 +317,35 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     asset: Asset,
     amount: Option<Uint256>,
 ) -> StdResult<HandleResponse> {
+    let withdrawer_addr = env.message.sender.clone();
+
     let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
     let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
-    let contract_balance = match asset.clone() {
-        Asset::Native { denom } => Uint256::from(
-            deps.querier
-                .query_balance(env.contract.address.clone(), denom.as_str())?
-                .amount,
-        ),
-        Asset::Cw20 { contract_addr } => Uint256::from(cw20_get_balance(
-            &deps.querier,
-            contract_addr,
-            env.contract.address.clone(),
-        )?),
-    };
+    let asset_ma_human_addr = deps.api.human_address(&reserve.ma_token_address)?;
+    let withdrawer_balance = Uint256::from(cw20_get_balance(
+        &deps.querier,
+        asset_ma_human_addr,
+        withdrawer_addr.clone(),
+    )?) * get_updated_liquidity_index(&reserve, env.block.time);
 
-    if contract_balance.is_zero() {
+    if withdrawer_balance.is_zero() {
         return Err(StdError::generic_err(format!(
-            "Contract has no balance (asset: {})",
+            "User has no balance (asset: {})",
             asset_label,
         )));
     }
 
-    // Check contract has sufficient balance to send back
+    // Check user has sufficient balance to send back
     let withdraw_amount = match amount {
-        Some(amount) if amount.is_zero() || amount > contract_balance => {
+        Some(amount) if amount.is_zero() || amount > withdrawer_balance => {
             return Err(StdError::generic_err(format!(
-                "Withdraw amount must be greater than 0 and less or equal contract balance (asset: {})",
+                "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
                 asset_label,
             )));
         }
         Some(amount) => amount,
-        None => contract_balance,
+        None => withdrawer_balance,
     };
 
     reserve_apply_accumulated_interests(&env, &mut reserve);
@@ -373,8 +369,6 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
         })?,
     });
 
-    let withdrawer_addr = env.message.sender;
-
     let send_underlying_asset_msg = build_send_asset_msg(
         env.contract.address,
         withdrawer_addr.clone(),
@@ -385,7 +379,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let messages = vec![burn_ma_tokens_msg, send_underlying_asset_msg];
 
     let mut log = vec![
-        log("action", "redeem"),
+        log("action", "withdraw"),
         log("reserve", asset_label.as_str()),
         log("user", withdrawer_addr.as_str()),
         log("burn_amount", withdraw_amount_scaled),
@@ -3241,6 +3235,11 @@ mod tests {
         let withdraw_amount = Uint256::from(20000u128);
         let seconds_elapsed = 2000u64;
 
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("matoken"),
+            &[(HumanAddr::from("withdrawer"), Uint128(2000000u128))],
+        );
+
         let reserve_initial =
             th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
         reserve_ma_tokens_state(&mut deps.storage)
@@ -3261,7 +3260,7 @@ mod tests {
         };
 
         let env = mars::testing::mock_env(
-            "redeemer",
+            "withdrawer",
             MockEnvParams {
                 sent_funds: &[],
                 block_time: mock_reserve.interests_last_updated + seconds_elapsed,
@@ -3300,7 +3299,7 @@ mod tests {
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("redeemer"),
+                    to_address: HumanAddr::from("withdrawer"),
                     amount: vec![Coin {
                         denom: String::from("somecoin"),
                         amount: withdraw_amount.into(),
@@ -3311,9 +3310,9 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "redeem"),
+                log("action", "withdraw"),
                 log("reserve", "somecoin"),
-                log("user", "redeemer"),
+                log("user", "withdrawer"),
                 log("burn_amount", withdraw_amount_scaled),
                 log("withdraw_amount", withdraw_amount),
                 log("borrow_index", expected_params.borrow_index),
@@ -3353,10 +3352,7 @@ mod tests {
         );
         deps.querier.set_cw20_balances(
             ma_token_addr.clone(),
-            &[(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
-                Uint128(initial_available_liquidity),
-            )],
+            &[(HumanAddr::from("withdrawer"), Uint128(2000000u128))],
         );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
@@ -3392,7 +3388,7 @@ mod tests {
             )
             .unwrap();
 
-        let redeemer_addr = HumanAddr::from("redeemer");
+        let withdrawer_addr = HumanAddr::from("withdrawer");
 
         let msg = HandleMsg::Withdraw {
             asset: Asset::Cw20 {
@@ -3402,7 +3398,7 @@ mod tests {
         };
 
         let env = mars::testing::mock_env(
-            "redeemer",
+            "withdrawer",
             MockEnvParams {
                 sent_funds: &[],
                 block_time: mock_reserve.interests_last_updated + seconds_elapsed,
@@ -3442,7 +3438,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: cw20_contract_addr,
                     msg: to_binary(&Cw20HandleMsg::Transfer {
-                        recipient: redeemer_addr,
+                        recipient: withdrawer_addr,
                         amount: withdraw_amount.into(),
                     })
                     .unwrap(),
@@ -3453,9 +3449,9 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "redeem"),
+                log("action", "withdraw"),
                 log("reserve", "somecontract"),
-                log("user", "redeemer"),
+                log("user", "withdrawer"),
                 log("burn_amount", withdraw_amount_scaled),
                 log("withdraw_amount", withdraw_amount),
                 log("borrow_index", expected_params.borrow_index),
@@ -3486,6 +3482,11 @@ mod tests {
             ..Default::default()
         };
 
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("matoken"),
+            &[(HumanAddr::from("withdrawer"), Uint128(200u128))],
+        );
+
         th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
 
         let msg = HandleMsg::Withdraw {
@@ -3495,9 +3496,9 @@ mod tests {
             amount: Some(Uint256::from(2000u128)),
         };
 
-        let env = cosmwasm_std::testing::mock_env("redeemer", &[]);
+        let env = cosmwasm_std::testing::mock_env("withdrawer", &[]);
         let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Contract has no balance (asset: somecoin)");
+        assert_generic_error_message(response, "Withdraw amount must be greater than 0 and less or equal user balance (asset: somecoin)");
     }
 
     #[test]
