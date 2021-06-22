@@ -408,8 +408,8 @@ mod tests {
         let spender = HumanAddr::from("addr0002");
         let rcpt = HumanAddr::from("addr0003");
 
-        let start = Uint128(999999);
-        do_init(&mut deps, &owner, start);
+        let start_balance = Uint128(999999);
+        do_init(&mut deps, &owner, start_balance);
 
         // provide an allowance
         let allow1 = Uint128(77777);
@@ -449,7 +449,7 @@ mod tests {
                         &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: owner.clone(),
                             recipient_address: rcpt.clone(),
-                            sender_previous_balance: start,
+                            sender_previous_balance: start_balance,
                             recipient_previous_balance: Uint128::zero(),
                             amount: transfer,
                         }
@@ -461,8 +461,8 @@ mod tests {
                     contract_addr: HumanAddr::from("incentives"),
                     msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
                         user_address: owner.clone(),
-                        user_balance_before: start,
-                        total_supply_before: start,
+                        user_balance_before: start_balance,
+                        total_supply_before: start_balance,
                     },)
                     .unwrap(),
                     send: vec![],
@@ -472,7 +472,7 @@ mod tests {
                     msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
                         user_address: rcpt.clone(),
                         user_balance_before: Uint128::zero(),
-                        total_supply_before: start,
+                        total_supply_before: start_balance,
                     },)
                     .unwrap(),
                     send: vec![],
@@ -481,7 +481,7 @@ mod tests {
         );
 
         // make sure money arrived
-        assert_eq!(get_balance(&deps, &owner), (start - transfer).unwrap());
+        assert_eq!(get_balance(&deps, &owner), (start_balance - transfer).unwrap());
         assert_eq!(get_balance(&deps, &rcpt), transfer);
 
         // ensure it looks good
