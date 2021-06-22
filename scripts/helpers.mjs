@@ -217,10 +217,10 @@ export async function deployInsuranceFundContract(terra, wallet, insuranceFundCo
   return insuranceFundContractAddress
 }
 
-export async function deployTreasuryContract(terra, wallet) {
+export async function deployTreasuryContract(terra, wallet, treasuryConfig) {
   console.log("Deploying Treasury...");
   let treasuryCodeId = await uploadContract(terra, wallet, './artifacts/treasury.wasm');
-  let treasuryContractAddress = await instantiateContract(terra, wallet, treasuryCodeId, {})
+  let treasuryContractAddress = await instantiateContract(terra, wallet, treasuryCodeId, treasuryConfig)
   console.log("Treasury Contract Address: " + treasuryContractAddress);
   return treasuryContractAddress
 }

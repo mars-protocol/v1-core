@@ -38,6 +38,7 @@ async function main() {
   if (process.env.NETWORK === "testnet") {
     basecampConfig = {
       "cw20_code_id": undefined,
+      "owner": wallet.key.accAddress,
       "config": {
         "proposal_voting_period": 40,
         "proposal_effective_delay": 20,
@@ -50,6 +51,7 @@ async function main() {
 
     stakingConfig = {
       "cw20_code_id": undefined,
+      "owner": undefined,
       "config": {
         "mars_token_address": undefined,
         "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
@@ -60,11 +62,13 @@ async function main() {
     }
 
     insuranceFundConfig = {
+      "owner": undefined,
       "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
       "terraswap_max_spread": "0.05",
     }
 
     lpConfig = {
+      "owner": wallet.key.accAddress,
       "config": {
         "treasury_contract_address": undefined,
         "insurance_fund_contract_address": undefined,
@@ -78,6 +82,7 @@ async function main() {
   } else {
     basecampConfig = {
       "cw20_code_id": undefined,
+      "owner": wallet.key.accAddress,
       "config": {
         "proposal_voting_period": 1000,
         "proposal_effective_delay": 150,
@@ -90,6 +95,7 @@ async function main() {
 
     stakingConfig = {
       "cw20_code_id": undefined,
+      "owner": undefined,
       "config": {
         "mars_token_address": undefined,
         "terraswap_factory_address": undefined,
@@ -100,11 +106,13 @@ async function main() {
     }
 
     insuranceFundConfig = {
+      "owner": undefined,
       "terraswap_factory_address": undefined,
       "terraswap_max_spread": "0.05",
     }
 
     lpConfig = {
+      "owner": wallet.key.accAddress,
       "config": {
         "treasury_contract_address": undefined,
         "insurance_fund_contract_address": undefined,
@@ -122,18 +130,17 @@ async function main() {
   let basecampQueryResponse = await queryContract(terra, basecampContractAddress, { "config": {} })
 
   /**************************************** Deploy Staking Contract *****************************************/
+  stakingConfig.owner = basecampContractAddress
   stakingConfig.config.mars_token_address = basecampQueryResponse.mars_token_address
   const stakingContractAddress = await deployStakingContract(terra, wallet, stakingConfig);
   const stakingQueryResponse = await queryContract(terra, stakingContractAddress, { "config": {} })
   
   /************************************* Deploy Insurance Fund Contract *************************************/
+  insuranceFundConfig.owner = basecampContractAddress
   const insuranceFundContractAddress = await deployInsuranceFundContract(terra, wallet, insuranceFundConfig)
-  await executeContract(terra, wallet, insuranceFundContractAddress, { "update_config": { "owner": basecampContractAddress } })
-  const insuranceFundQueryResponse = await queryContract(terra, insuranceFundContractAddress, { "config": {} })
-  console.log("Insurance fund config successfully updated to have owner of: ", insuranceFundQueryResponse.owner)
 
   /**************************************** Deploy Treasury Contract ****************************************/
-  const treasuryContractAddress = await deployTreasuryContract(terra, wallet)
+  const treasuryContractAddress = await deployTreasuryContract(terra, wallet, { "owner": basecampContractAddress })
 
   /************************************* Deploy Liquidity Pool Contract *************************************/
   lpConfig.config.treasury_contract_address = treasuryContractAddress
@@ -141,7 +148,6 @@ async function main() {
   lpConfig.config.staking_contract_address = stakingContractAddress
   lpConfig.config.ma_token_code_id = cw20CodeId
   const lpContractAddress = await deployLiquidityPool(terra, wallet, lpConfig)
-  // TODO, owner of lp contract should be set to basecamp
 
   /************************************* Setup Initial Liquidity Pools **************************************/
 
@@ -154,6 +160,11 @@ async function main() {
     { symbol: "MIR", contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u", borrow_slope: "0.1", loan_to_value: "0.5", reserve_factor: "0.3", liquidation_threshold: "0.525", liquidation_bonus: "0.1" },
   ];
   await setupLiquidityPool(terra, wallet, lpContractAddress, { initialAssets });
+
+  // TODO - for now leave as EOA so we can easy dev against it...
+  // // Once initial assets initialized, set the owner to be basecamp rather than EOA
+  // lpConfig.owner = basecampContractAddress
+  // await executeContract(terra, wallet, lpContractAddress, { "update_config": lpConfig })
 
   /**************************************** Setup Basecamp Contract *****************************************/
   console.log('Setting staking contract addresses in basecamp...')
