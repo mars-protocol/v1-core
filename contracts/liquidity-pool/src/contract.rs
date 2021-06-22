@@ -323,13 +323,13 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
     let asset_ma_human_addr = deps.api.human_address(&reserve.ma_token_address)?;
-    let withdrawer_balance = Uint256::from(cw20_get_balance(
+    let withdrawer_balance_scaled = Uint256::from(cw20_get_balance(
         &deps.querier,
         asset_ma_human_addr,
         withdrawer_addr.clone(),
-    )?) * get_updated_liquidity_index(&reserve, env.block.time);
+    )?);
 
-    if withdrawer_balance.is_zero() {
+    if withdrawer_balance_scaled.is_zero() {
         return Err(StdError::generic_err(format!(
             "User has no balance (asset: {})",
             asset_label,
@@ -337,15 +337,24 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     }
 
     // Check user has sufficient balance to send back
-    let withdraw_amount = match amount {
-        Some(amount) if amount.is_zero() || amount > withdrawer_balance => {
-            return Err(StdError::generic_err(format!(
-                "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
-                asset_label,
-            )));
+    let (withdraw_amount, withdraw_amount_scaled) = match amount {
+        Some(amount) => {
+            let amount_scaled = amount / get_updated_liquidity_index(&reserve, env.block.time);
+            if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
+                return Err(StdError::generic_err(format!(
+                    "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
+                    asset_label,
+                )));
+            };
+            (amount, amount_scaled)
         }
-        Some(amount) => amount,
-        None => withdrawer_balance,
+        None => {
+            // NOTE: We prefer to just do one multiplication equation instead of two: division and multiplication.
+            // This helps to avoid rounding errors if we want to be sure in burning total balance.
+            let withdrawer_balance =
+                withdrawer_balance_scaled * get_updated_liquidity_index(&reserve, env.block.time);
+            (withdrawer_balance, withdrawer_balance_scaled)
+        }
     };
 
     reserve_apply_accumulated_interests(&env, &mut reserve);
@@ -357,9 +366,6 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
         withdraw_amount,
     )?;
     reserves_state(&mut deps.storage).save(asset_reference.as_slice(), &reserve)?;
-
-    let withdraw_amount_scaled =
-        withdraw_amount / get_updated_liquidity_index(&reserve, env.block.time);
 
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
@@ -3499,6 +3505,134 @@ mod tests {
         let env = cosmwasm_std::testing::mock_env("withdrawer", &[]);
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(response, "Withdraw amount must be greater than 0 and less or equal user balance (asset: somecoin)");
+    }
+
+    #[test]
+    fn test_withdraw_total_balance() {
+        // Withdraw native token
+        let initial_available_liquidity = 12000000u128;
+        let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
+
+        let initial_liquidity_index = Decimal256::from_ratio(15, 10);
+        let mock_reserve = MockReserve {
+            ma_token_address: "matoken",
+            liquidity_index: initial_liquidity_index,
+            borrow_index: Decimal256::from_ratio(2, 1),
+            borrow_slope: Decimal256::from_ratio(1, 10),
+            borrow_rate: Decimal256::from_ratio(20, 100),
+            liquidity_rate: Decimal256::from_ratio(10, 100),
+            reserve_factor: Decimal256::from_ratio(1, 10),
+            debt_total_scaled: Uint256::from(10000000u128),
+            interests_last_updated: 10000000,
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let withdrawer_balance_scaled = Uint256::from(123456u128);
+        let seconds_elapsed = 2000u64;
+
+        deps.querier.set_cw20_balances(
+            HumanAddr::from("matoken"),
+            &[(
+                HumanAddr::from("withdrawer"),
+                withdrawer_balance_scaled.into(),
+            )],
+        );
+
+        let reserve_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        reserve_ma_tokens_state(&mut deps.storage)
+            .save(
+                deps.api
+                    .canonical_address(&HumanAddr::from("matoken"))
+                    .unwrap()
+                    .as_slice(),
+                &(b"somecoin".to_vec()),
+            )
+            .unwrap();
+
+        let msg = HandleMsg::Withdraw {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: None,
+        };
+
+        let env = mars::testing::mock_env(
+            "withdrawer",
+            MockEnvParams {
+                sent_funds: &[],
+                block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                ..Default::default()
+            },
+        );
+        let res = handle(&mut deps, env, msg).unwrap();
+
+        let reserve = reserves_state_read(&deps.storage)
+            .load(b"somecoin")
+            .unwrap();
+
+        let withdrawer_balance = withdrawer_balance_scaled
+            * get_updated_liquidity_index(
+                &reserve_initial,
+                reserve_initial.interests_last_updated + seconds_elapsed,
+            );
+
+        let expected_params = th_get_expected_indices_and_rates(
+            &deps,
+            &reserve_initial,
+            mock_reserve.interests_last_updated + seconds_elapsed,
+            initial_available_liquidity,
+            TestUtilizationDeltas {
+                less_liquidity: withdrawer_balance.into(),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            res.messages,
+            vec![
+                CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: HumanAddr::from("matoken"),
+                    send: vec![],
+                    msg: to_binary(&Cw20HandleMsg::Burn {
+                        amount: withdrawer_balance_scaled.into(),
+                    })
+                    .unwrap(),
+                }),
+                CosmosMsg::Bank(BankMsg::Send {
+                    from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    to_address: HumanAddr::from("withdrawer"),
+                    amount: vec![Coin {
+                        denom: String::from("somecoin"),
+                        amount: withdrawer_balance.into(),
+                    }],
+                }),
+            ]
+        );
+        assert_eq!(
+            res.log,
+            vec![
+                log("action", "withdraw"),
+                log("reserve", "somecoin"),
+                log("user", "withdrawer"),
+                log("burn_amount", withdrawer_balance_scaled),
+                log("withdraw_amount", withdrawer_balance),
+                log("borrow_index", expected_params.borrow_index),
+                log("liquidity_index", expected_params.liquidity_index),
+                log("borrow_rate", expected_params.borrow_rate),
+                log("liquidity_rate", expected_params.liquidity_rate),
+            ]
+        );
+
+        // BR = U * Bslope = 0.5 * 0.01 = 0.05
+        assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
+        assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
+        assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
+        assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(
+            reserve.protocol_income_to_distribute,
+            expected_params.protocol_income_to_distribute
+        );
     }
 
     #[test]
