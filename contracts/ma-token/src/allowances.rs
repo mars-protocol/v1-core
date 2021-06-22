@@ -481,7 +481,10 @@ mod tests {
         );
 
         // make sure money arrived
-        assert_eq!(get_balance(&deps, &owner), (start_balance - transfer).unwrap());
+        assert_eq!(
+            get_balance(&deps, &owner),
+            (start_balance - transfer).unwrap()
+        );
         assert_eq!(get_balance(&deps, &rcpt), transfer);
 
         // ensure it looks good
