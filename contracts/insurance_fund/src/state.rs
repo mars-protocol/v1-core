@@ -17,10 +17,10 @@ pub struct Config {
     pub terraswap_max_spread: Decimal,
 }
 
-pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
     singleton_read(storage, CONFIG_KEY)
 }

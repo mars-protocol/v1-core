@@ -13,7 +13,7 @@ pub struct InitMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HandleMsg {
-    /// Execute Cosmos msg
+    /// Execute Cosmos msg (only callable by owner)
     ExecuteCosmosMsg(CosmosMsg),
 
     /// Update contract config (only callable by owner)
