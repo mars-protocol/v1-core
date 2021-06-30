@@ -3,71 +3,34 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "decimals",
-    "initial_balances",
-    "money_market_address",
-    "name",
-    "symbol"
+    "config"
   ],
   "properties": {
-    "decimals": {
-      "type": "integer",
-      "format": "uint8",
-      "minimum": 0.0
-    },
-    "initial_balances": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Cw20CoinHuman"
-      }
-    },
-    "mint": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/MinterResponse"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "money_market_address": {
-      "$ref": "#/definitions/HumanAddr"
-    },
-    "name": {
-      "type": "string"
-    },
-    "symbol": {
-      "type": "string"
+    "config": {
+      "$ref": "#/definitions/CreateOrUpdateConfig"
     }
   },
   "definitions": {
-    "Cw20CoinHuman": {
+    "CreateOrUpdateConfig": {
       "type": "object",
-      "required": [
-        "address",
-        "amount"
-      ],
       "properties": {
-        "address": {
-          "$ref": "#/definitions/HumanAddr"
+        "proposal_effective_delay": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
-        "amount": {
-          "$ref": "#/definitions/Uint128"
-        }
-      }
-    },
-    "HumanAddr": {
-      "type": "string"
-    },
-    "MinterResponse": {
-      "type": "object",
-      "required": [
-        "minter"
-      ],
-      "properties": {
-        "cap": {
-          "description": "cap is how many more tokens can be issued by the minter",
+        "proposal_expiration_period": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "proposal_required_deposit": {
           "anyOf": [
             {
               "$ref": "#/definitions/Uint128"
@@ -77,10 +40,62 @@
             }
           ]
         },
-        "minter": {
-          "$ref": "#/definitions/HumanAddr"
+        "proposal_required_quorum": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal_required_threshold": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposal_voting_period": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "staking_contract_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "xmars_token_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
+    },
+    "Decimal": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
+      "type": "string"
+    },
+    "HumanAddr": {
+      "type": "string"
     },
     "Uint128": {
       "type": "string"

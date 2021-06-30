@@ -13,7 +13,7 @@ pub mod msg {
         pub decimals: u8,
         pub initial_balances: Vec<Cw20CoinHuman>,
         pub mint: Option<MinterResponse>,
-        pub money_market_address: HumanAddr,
+        pub red_bank_address: HumanAddr,
         pub incentives_address: HumanAddr,
     }
 
@@ -52,7 +52,7 @@ pub mod msg {
             return false;
         }
         for byte in bytes.iter() {
-            if *byte < 65 || *byte > 90 {
+            if (*byte != 45) && (*byte < 65 || *byte > 90) && (*byte < 97 || *byte > 122) {
                 return false;
             }
         }
