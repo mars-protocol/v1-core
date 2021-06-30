@@ -1,5 +1,5 @@
 [package]
-name = "basecamp"
+name = "council"
 version = "0.1.0"
 authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
 edition = "2018"

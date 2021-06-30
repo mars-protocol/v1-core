@@ -10,25 +10,21 @@ use mars::helpers::all_conditions_valid;
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
-pub static BASECAMP_KEY: &[u8] = b"basecamp";
+pub static COUNCIL_KEY: &[u8] = b"council";
 
 // namespaces (for buckets)
 pub static PROPOSALS_NAMESPACE: &[u8] = b"proposals";
 pub static PROPOSAL_VOTES_NAMESPACE: &[u8] = b"proposal_votes";
 
-/// Basecamp global configuration
+/// Council global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    /// Contract owner
-    pub owner: CanonicalAddr,
-    /// Mars token address
+    /// Mars token address (Used as a deposit for proposals)
     pub mars_token_address: CanonicalAddr,
-    /// xMars token address
+    /// xMars token address (Used for voting power)
     pub xmars_token_address: CanonicalAddr,
-    /// Staking contract address
+    /// Staking contract address (Receives Mars deposits of rejected proposals)
     pub staking_contract_address: CanonicalAddr,
-    /// Insurance fund address
-    pub insurance_fund_contract_address: CanonicalAddr,
 
     /// Blocks during which a proposal is active since being submitted
     pub proposal_voting_period: u64,
@@ -66,27 +62,27 @@ impl Config {
     }
 }
 
-pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
     singleton_read(storage, CONFIG_KEY)
 }
 
-/// Basecamp global state
+/// Council global state
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Basecamp {
+pub struct Council {
     /// Number of proposals
     pub proposal_count: u64,
 }
 
-pub fn basecamp_state<S: Storage>(storage: &mut S) -> Singleton<S, Basecamp> {
-    singleton(storage, BASECAMP_KEY)
+pub fn council<S: Storage>(storage: &mut S) -> Singleton<S, Council> {
+    singleton(storage, COUNCIL_KEY)
 }
 
-pub fn basecamp_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Basecamp> {
-    singleton_read(storage, BASECAMP_KEY)
+pub fn council_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Council> {
+    singleton_read(storage, COUNCIL_KEY)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -104,11 +100,11 @@ pub struct Proposal {
     pub deposit_amount: Uint128,
 }
 
-pub fn proposals_state<S: Storage>(storage: &mut S) -> Bucket<S, Proposal> {
+pub fn proposals<S: Storage>(storage: &mut S) -> Bucket<S, Proposal> {
     bucket(PROPOSALS_NAMESPACE, storage)
 }
 
-pub fn proposals_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Proposal> {
+pub fn proposals_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Proposal> {
     bucket_read(PROPOSALS_NAMESPACE, storage)
 }
 
@@ -154,17 +150,14 @@ impl std::fmt::Display for ProposalVoteOption {
     }
 }
 
-pub fn proposal_votes_state<S: Storage>(
-    storage: &mut S,
-    proposal_id: u64,
-) -> Bucket<S, ProposalVote> {
+pub fn proposal_votes<S: Storage>(storage: &mut S, proposal_id: u64) -> Bucket<S, ProposalVote> {
     Bucket::multilevel(
         &[PROPOSAL_VOTES_NAMESPACE, &proposal_id.to_be_bytes()],
         storage,
     )
 }
 
-pub fn proposal_votes_state_read<S: Storage>(
+pub fn proposal_votes_read<S: Storage>(
     storage: &S,
     proposal_id: u64,
 ) -> ReadonlyBucket<S, ProposalVote> {
