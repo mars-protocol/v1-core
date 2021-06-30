@@ -4,7 +4,8 @@ use cosmwasm_std::{
 };
 
 use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
-use crate::state::{config_state, config_state_read, Config};
+use crate::state;
+use crate::state::Config;
 use mars::helpers::human_addr_into_canonical;
 use mars::swapping::handle_swap;
 use terraswap::asset::AssetInfo;
@@ -23,7 +24,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         terraswap_max_spread: msg.terraswap_max_spread,
     };
 
-    config_state(&mut deps.storage).save(&config)?;
+    state::config(&mut deps.storage).save(&config)?;
 
     Ok(InitResponse {
         log: vec![],
@@ -64,7 +65,7 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: CosmosMsg,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
         return Err(StdError::unauthorized());
@@ -84,7 +85,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     terraswap_factory_address: Option<HumanAddr>,
     terraswap_max_spread: Option<Decimal>,
 ) -> StdResult<HandleResponse> {
-    let mut config_singleton = config_state(&mut deps.storage);
+    let mut config_singleton = state::config(&mut deps.storage);
     let mut config = config_singleton.load()?;
 
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
@@ -114,7 +115,7 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     let ask_asset_info = AssetInfo::NativeToken {
         denom: "uusd".to_string(),
@@ -148,7 +149,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 fn query_config<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ConfigResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
     Ok(ConfigResponse {
         owner: deps.api.human_address(&config.owner)?,
     })
@@ -173,7 +174,6 @@ mod tests {
     use mars::testing::{mock_dependencies, mock_env, MockEnvParams};
 
     use crate::msg::HandleMsg::UpdateConfig;
-    use crate::state::config_state_read;
 
     #[test]
     fn test_proper_initialization() {
@@ -190,7 +190,7 @@ mod tests {
         let empty_vec: Vec<CosmosMsg> = vec![];
         assert_eq!(empty_vec, res.messages);
 
-        let config = config_state_read(&deps.storage).load().unwrap();
+        let config = state::config_read(&deps.storage).load().unwrap();
         assert_eq!(
             deps.api
                 .canonical_address(&HumanAddr::from("owner"))
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // Read config from state
-        let new_config = config_state_read(&deps.storage).load().unwrap();
+        let new_config = state::config_read(&deps.storage).load().unwrap();
 
         assert_eq!(
             new_config.owner,
