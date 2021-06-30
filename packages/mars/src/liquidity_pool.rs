@@ -169,7 +169,6 @@ pub mod msg {
         pub liquidity_index: Decimal256,
         pub borrow_rate: Decimal256,
         pub liquidity_rate: Decimal256,
-        pub borrow_slope: Decimal256,
         pub loan_to_value: Decimal256,
         pub interests_last_updated: u64,
         pub debt_total_scaled: Uint256,
@@ -211,8 +210,12 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitOrUpdateAssetParams {
-        /// Borrow slope to calculate borrow rate
-        pub borrow_slope: Option<Decimal256>,
+        /// Initial borrow rate
+        pub initial_borrow_rate: Option<Decimal256>,
+        /// Min borrow rate
+        pub min_borrow_rate: Option<Decimal256>,
+        /// Max borrow rate
+        pub max_borrow_rate: Option<Decimal256>,
         /// Max percentage of collateral that can be borrowed
         pub loan_to_value: Option<Decimal256>,
         /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
@@ -221,6 +224,14 @@ pub mod msg {
         pub liquidation_threshold: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
+        /// One of the PID parameter
+        pub kp: Option<Decimal256>,
+        /// Optimal utilization
+        pub optimal_utilization_rate: Option<Decimal256>,
+        /// Min error that triggers Kp augmentation
+        pub kp_augmentation_threshold: Option<Decimal256>,
+        /// Kp multiplier when error threshold is exceeded
+        pub kp_multiplier: Option<Decimal256>,
     }
 
     impl InitOrUpdateAssetParams {
@@ -229,19 +240,31 @@ pub mod msg {
             // Destructuring a struct’s fields into separate variables in order to force
             // compile error if we add more params
             let InitOrUpdateAssetParams {
-                borrow_slope,
+                initial_borrow_rate: borrow_rate,
+                min_borrow_rate,
+                max_borrow_rate,
                 loan_to_value,
                 reserve_factor,
                 liquidation_threshold,
                 liquidation_bonus,
+                kp,
+                optimal_utilization_rate: u_optimal,
+                kp_augmentation_threshold,
+                kp_multiplier,
             } = self;
 
             // All fields should be available
-            let available = borrow_slope.is_some()
+            let available = borrow_rate.is_some()
+                && min_borrow_rate.is_some()
+                && max_borrow_rate.is_some()
                 && loan_to_value.is_some()
                 && reserve_factor.is_some()
                 && liquidation_threshold.is_some()
-                && liquidation_bonus.is_some();
+                && liquidation_bonus.is_some()
+                && kp.is_some()
+                && u_optimal.is_some()
+                && kp_augmentation_threshold.is_some()
+                && kp_multiplier.is_some();
 
             if !available {
                 Err(StdError::generic_err(
@@ -274,11 +297,17 @@ pub mod msg {
             // Destructuring a struct’s fields into separate variables in order to force
             // compile error if we add more params
             let InitOrUpdateAssetParams {
-                borrow_slope: _,
+                initial_borrow_rate: _,
+                min_borrow_rate: _,
+                max_borrow_rate: _,
                 loan_to_value,
                 reserve_factor,
                 liquidation_threshold,
                 liquidation_bonus,
+                kp: _,
+                optimal_utilization_rate: _,
+                kp_augmentation_threshold: _,
+                kp_multiplier: _,
             } = self;
 
             // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1

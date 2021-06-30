@@ -1536,7 +1536,6 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
         liquidity_index: reserve.liquidity_index,
         borrow_rate: reserve.borrow_rate,
         liquidity_rate: reserve.liquidity_rate,
-        borrow_slope: reserve.borrow_slope,
         loan_to_value: reserve.loan_to_value,
         interests_last_updated: reserve.interests_last_updated,
         debt_total_scaled: reserve.debt_total_scaled,
@@ -1838,16 +1837,62 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     );
     let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled)
         * get_updated_borrow_index(&reserve, env.block.time);
-    let utilization_rate = if total_debt > Decimal256::zero() {
+    let current_utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
     } else {
         Decimal256::zero()
     };
 
-    reserve.borrow_rate = reserve.borrow_slope * utilization_rate;
+    // Use PID params for calculating borrow interest rate
+    let pid_params = reserve.pid_parameters.clone();
+
+    // error_value should be represented as integer number so we do this with help from boolean flag
+    let (error_value, error_positive) =
+        if pid_params.optimal_utilization_rate > current_utilization_rate {
+            (
+                pid_params.optimal_utilization_rate - current_utilization_rate,
+                true,
+            )
+        } else {
+            (
+                current_utilization_rate - pid_params.optimal_utilization_rate,
+                false,
+            )
+        };
+
+    let kp = if error_value >= pid_params.kp_augmentation_threshold {
+        pid_params.kp * pid_params.kp_multiplier
+    } else {
+        pid_params.kp
+    };
+
+    let p = kp * error_value;
+    let mut new_borrow_rate = if error_positive {
+        // error_positive = true (u_optimal > u) means we want utilization rate to go up
+        // so we lower interest rate (so more people borrow)
+        if reserve.borrow_rate > p {
+            reserve.borrow_rate - p
+        } else {
+            Decimal256::zero()
+        }
+    } else {
+        // error_positive = false (u_optimal < u) means we want utilization rate to go down
+        // so we increase interest rate (so less people borrow)
+        reserve.borrow_rate + p
+    };
+
+    // Check borrow rate conditions
+    if new_borrow_rate < reserve.min_borrow_rate {
+        new_borrow_rate = reserve.min_borrow_rate
+    } else if new_borrow_rate > reserve.max_borrow_rate {
+        new_borrow_rate = reserve.max_borrow_rate;
+    };
+
+    reserve.borrow_rate = new_borrow_rate;
     // This operation should not underflow as reserve_factor is checked to be <= 1
-    reserve.liquidity_rate =
-        reserve.borrow_rate * utilization_rate * (Decimal256::one() - reserve.reserve_factor);
+    reserve.liquidity_rate = reserve.borrow_rate
+        * current_utilization_rate
+        * (Decimal256::one() - reserve.reserve_factor);
 
     Ok(())
 }
