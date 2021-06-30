@@ -73,6 +73,107 @@
           "type": "object"
         }
       }
+    },
+    {
+      "type": "object",
+      "required": [
+        "proposal_votes"
+      ],
+      "properties": {
+        "proposal_votes": {
+          "type": "object",
+          "required": [
+            "proposal_id"
+          ],
+          "properties": {
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ProposalVotesFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "proposal_id": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "sort": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ProposalVotesSort"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "start": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
     }
-  ]
+  ],
+  "definitions": {
+    "HumanAddr": {
+      "type": "string"
+    },
+    "ProposalVoteOption": {
+      "type": "string",
+      "enum": [
+        "for",
+        "against"
+      ]
+    },
+    "ProposalVotesFilter": {
+      "type": "object",
+      "properties": {
+        "vote_option": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProposalVoteOption"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "voter_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ProposalVotesSort": {
+      "type": "string",
+      "enum": [
+        "ascending",
+        "descending"
+      ]
+    }
+  }
 }

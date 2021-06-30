@@ -15,35 +15,23 @@
       }
     },
     {
-      "description": "Callback to initialize Mars token",
+      "description": "Sets the xMars and Staking contract addresses",
       "type": "object",
       "required": [
-        "init_token_callback"
+        "set_contract_addresses"
       ],
       "properties": {
-        "init_token_callback": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Mint Mars tokens to receiver (Temp action for Testing)",
-      "type": "object",
-      "required": [
-        "mint_mars"
-      ],
-      "properties": {
-        "mint_mars": {
+        "set_contract_addresses": {
           "type": "object",
           "required": [
-            "amount",
-            "recipient"
+            "staking_contract_address",
+            "xmars_token_address"
           ],
           "properties": {
-            "amount": {
-              "$ref": "#/definitions/Uint128"
+            "staking_contract_address": {
+              "$ref": "#/definitions/HumanAddr"
             },
-            "recipient": {
+            "xmars_token_address": {
               "$ref": "#/definitions/HumanAddr"
             }
           }

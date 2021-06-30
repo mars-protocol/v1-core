@@ -60,7 +60,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     state::save_config(
         &mut deps.storage,
         &Config {
-            money_market_address: deps.api.canonical_address(&msg.money_market_address)?,
+            red_bank_address: deps.api.canonical_address(&msg.red_bank_address)?,
             incentives_address: deps.api.canonical_address(&msg.incentives_address)?,
         },
     )?;
@@ -156,7 +156,7 @@ pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     // only money market can call
     let config = state::load_config(&deps.storage)?;
-    if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
+    if deps.api.canonical_address(&env.message.sender)? != config.red_bank_address {
         return Err(StdError::unauthorized());
     }
 
@@ -187,7 +187,7 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     // only money market can burn
     let config = state::load_config(&deps.storage)?;
-    if deps.api.canonical_address(&env.message.sender)? != config.money_market_address {
+    if deps.api.canonical_address(&env.message.sender)? != config.red_bank_address {
         return Err(StdError::unauthorized());
     }
 
@@ -484,7 +484,7 @@ mod tests {
                 amount,
             }],
             mint: mint.clone(),
-            money_market_address: HumanAddr::from("money_market"),
+            red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -510,7 +510,7 @@ mod tests {
     fn proper_initialization() {
         let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
         let amount = Uint128::from(11223344u128);
-        let money_market_address = HumanAddr::from("money_market");
+        let red_bank_address = HumanAddr::from("red_bank");
 
         let init_msg = InitMsg {
             name: "Cash Token".to_string(),
@@ -521,7 +521,7 @@ mod tests {
                 amount,
             }],
             mint: None,
-            money_market_address: money_market_address.clone(),
+            red_bank_address: red_bank_address.clone(),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -540,8 +540,8 @@ mod tests {
         assert_eq!(get_balance(&deps, "addr0000"), Uint128(11223344));
         let config = state::load_config(&deps.storage).unwrap();
         assert_eq!(
-            config.money_market_address,
-            deps.api.canonical_address(&money_market_address).unwrap()
+            config.red_bank_address,
+            deps.api.canonical_address(&red_bank_address).unwrap()
         );
     }
 
@@ -563,7 +563,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
-            money_market_address: HumanAddr::from("money_market"),
+            red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -607,7 +607,7 @@ mod tests {
                 minter,
                 cap: Some(limit),
             }),
-            money_market_address: HumanAddr::from("money_market"),
+            red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -731,7 +731,7 @@ mod tests {
                 },
             ],
             mint: None,
-            money_market_address: HumanAddr::from("money_market"),
+            red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -835,7 +835,7 @@ mod tests {
             res.messages,
             vec![
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("money_market"),
+                    contract_addr: HumanAddr::from("red_bank"),
                     msg: to_binary(
                         &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: addr1.clone(),
@@ -882,7 +882,7 @@ mod tests {
         let mut deps = mock_dependencies(20, &coins(2, "token"));
         let addr1 = HumanAddr::from("addr0001");
         let addr2 = HumanAddr::from("addr0002");
-        let money_market = HumanAddr::from("money_market");
+        let red_bank = HumanAddr::from("red_bank");
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
@@ -891,7 +891,7 @@ mod tests {
 
         // cannot transfer nothing
         {
-            let env = mock_env(money_market.clone(), &[]);
+            let env = mock_env(red_bank.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
@@ -903,7 +903,7 @@ mod tests {
 
         // cannot send more than we have
         {
-            let env = mock_env(money_market.clone(), &[]);
+            let env = mock_env(red_bank.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
@@ -918,7 +918,7 @@ mod tests {
 
         // cannot send from empty account
         {
-            let env = mock_env(money_market.clone(), &[]);
+            let env = mock_env(red_bank.clone(), &[]);
             let msg = HandleMsg::TransferOnLiquidation {
                 sender: addr2.clone(),
                 recipient: addr1.clone(),
@@ -945,7 +945,7 @@ mod tests {
 
         // valid transfer on liquidation
         {
-            let env = mock_env(money_market, &[]);
+            let env = mock_env(red_bank, &[]);
             let msg = HandleMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
@@ -988,7 +988,7 @@ mod tests {
     #[test]
     fn burn() {
         let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let money_market = HumanAddr::from("money_market");
+        let red_bank = HumanAddr::from("red_bank");
         let addr1 = HumanAddr::from("addr0001");
         let amount1 = Uint128::from(12340000u128);
         let burn = Uint128::from(76543u128);
@@ -997,7 +997,7 @@ mod tests {
         do_init(&mut deps, &addr1, amount1);
 
         // cannot burn nothing
-        let env = mock_env(money_market.clone(), &[]);
+        let env = mock_env(red_bank.clone(), &[]);
         let msg = HandleMsg::Burn {
             user: addr1.clone(),
             amount: Uint128::zero(),
@@ -1007,7 +1007,7 @@ mod tests {
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // cannot burn more than we have
-        let env = mock_env(money_market.clone(), &[]);
+        let env = mock_env(red_bank.clone(), &[]);
         let msg = HandleMsg::Burn {
             user: addr1.clone(),
             amount: too_much,
@@ -1030,7 +1030,7 @@ mod tests {
         assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
 
         // valid burn reduces total supply
-        let env = mock_env(money_market, &[]);
+        let env = mock_env(red_bank, &[]);
         let msg = HandleMsg::Burn {
             user: addr1.clone(),
             amount: burn,
@@ -1114,7 +1114,7 @@ mod tests {
             res.messages,
             vec![
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("money_market"),
+                    contract_addr: HumanAddr::from("red_bank"),
                     msg: to_binary(
                         &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: addr1.clone(),
