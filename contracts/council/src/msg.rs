@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitMsg {
-    pub cw20_code_id: u64,
-    pub owner: HumanAddr,
     pub config: CreateOrUpdateConfig,
 }
 
@@ -15,7 +13,6 @@ pub struct InitMsg {
 pub struct CreateOrUpdateConfig {
     pub xmars_token_address: Option<HumanAddr>,
     pub staking_contract_address: Option<HumanAddr>,
-    pub insurance_fund_contract_address: Option<HumanAddr>,
 
     pub proposal_voting_period: Option<u64>,
     pub proposal_effective_delay: Option<u64>,
@@ -35,16 +32,6 @@ pub enum HandleMsg {
     SetContractAddresses {
         xmars_token_address: HumanAddr,
         staking_contract_address: HumanAddr,
-        insurance_fund_contract_address: HumanAddr,
-    },
-
-    /// Callback to initialize Mars token
-    InitTokenCallback {},
-
-    /// Mint Mars tokens to receiver (Temp action for Testing)
-    MintMars {
-        recipient: HumanAddr,
-        amount: Uint128,
     },
 
     /// Vote for a proposal
@@ -68,7 +55,7 @@ pub enum HandleMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
-    // TODO: Vote while sending tokens?
+    /// Submit a proposal to be voted
     SubmitProposal {
         title: String,
         description: String,
@@ -77,8 +64,10 @@ pub enum ReceiveMsg {
     },
 }
 
-/// Execute call that will be done by the DAO if the proposal succeeds. As this is part of
-/// the proposal creation call, the contract human address is sent (vs the canonical address when persisted)
+/// Execute call that will be done by the DAO if the proposal succeeds.
+/// Contains a the msg and contract_addr attributes of a WasmMsg::Execute call
+/// As this is part of the proposal creation call, the contract human address is sent
+/// (vs the canonical address when persisted)
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MsgExecuteCall {
     pub execution_order: u64,
@@ -113,7 +102,6 @@ pub struct ConfigResponse {
     pub mars_token_address: HumanAddr,
     pub xmars_token_address: HumanAddr,
     pub staking_contract_address: HumanAddr,
-    pub insurance_fund_contract_address: HumanAddr,
 
     pub proposal_voting_period: u64,
     pub proposal_effective_delay: u64,

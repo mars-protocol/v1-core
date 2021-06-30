@@ -42,22 +42,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b41b7ea54a0c9d92199de89e20e58d49f02f8e699814ef3fdf266f6f748d15c7"
 
 [[package]]
-name = "basecamp"
-version = "0.1.0"
-dependencies = [
- "cosmwasm-bignumber",
- "cosmwasm-schema",
- "cosmwasm-std",
- "cosmwasm-storage",
- "cw20",
- "mars",
- "schemars",
- "serde",
- "snafu",
- "terra-cosmwasm",
-]
-
-[[package]]
 name = "bigint"
 version = "4.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -122,6 +106,22 @@ checksum = "e103531a2ce636e86b7639cec25d348c4d360832ab8e0e7f9a6e00f08aac1379"
 dependencies = [
  "cosmwasm-std",
  "serde",
+]
+
+[[package]]
+name = "council"
+version = "0.1.0"
+dependencies = [
+ "cosmwasm-bignumber",
+ "cosmwasm-schema",
+ "cosmwasm-std",
+ "cosmwasm-storage",
+ "cw20",
+ "mars",
+ "schemars",
+ "serde",
+ "snafu",
+ "terra-cosmwasm",
 ]
 
 [[package]]
