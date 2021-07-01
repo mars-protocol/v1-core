@@ -4,11 +4,9 @@ use cosmwasm_std::{
     StdResult, Storage, Uint128, WasmMsg,
 };
 
-use crate::state::{
-    config_state, config_state_read, cooldowns_state, cooldowns_state_read, Config, Cooldown,
-};
-use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
-use mars::cw20_token;
+use crate::state;
+use crate::state::{Config, Cooldown};
+use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, human_addr_into_canonical};
 
 use mars::swapping::handle_swap;
@@ -23,7 +21,7 @@ use mars::staking::msg::{
 
 pub fn init<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
-    env: Env,
+    _env: Env,
     msg: InitMsg,
 ) -> StdResult<InitResponse> {
     // Destructuring a struct’s fields into separate variables in order to force
@@ -62,34 +60,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         unstake_window: unstake_window.unwrap(),
     };
 
-    config_state(&mut deps.storage).save(&config)?;
+    state::config(&mut deps.storage).save(&config)?;
 
-    // Prepare response, should instantiate xMars
-    // and use the Register hook
-    Ok(InitResponse {
-        log: vec![],
-        // TODO: Tokens are initialized here. Evaluate doing this outside of
-        // the contract
-        messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-            code_id: msg.cw20_code_id,
-            msg: to_binary(&cw20_token::msg::InitMsg {
-                name: "xMars token".to_string(),
-                symbol: "xMars".to_string(),
-                decimals: 6,
-                initial_balances: vec![],
-                mint: Some(MinterResponse {
-                    minter: HumanAddr::from(env.contract.address.as_str()),
-                    cap: None,
-                }),
-                init_hook: Some(cw20_token::msg::InitHook {
-                    msg: to_binary(&HandleMsg::InitTokenCallback {})?,
-                    contract_addr: env.contract.address,
-                }),
-            })?,
-            send: vec![],
-            label: None,
-        })],
-    })
+    Ok(InitResponse::default())
 }
 
 // HANDLERS
@@ -106,7 +79,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             config,
         } => handle_update_config(deps, env, owner, xmars_token_address, config),
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
-        HandleMsg::InitTokenCallback {} => handle_init_xmars_token_callback(deps, env),
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
         HandleMsg::SwapAssetToUusd {
@@ -128,7 +100,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     xmars_token_address: Option<HumanAddr>,
     new_config: CreateOrUpdateConfig,
 ) -> StdResult<HandleResponse> {
-    let mut config = config_state_read(&deps.storage).load()?;
+    let mut config = state::config_read(&deps.storage).load()?;
 
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
         return Err(StdError::unauthorized());
@@ -159,7 +131,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
     config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
-    config_state(&mut deps.storage).save(&config)?;
+    state::config(&mut deps.storage).save(&config)?;
 
     Ok(HandleResponse::default())
 }
@@ -193,7 +165,7 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
     stake_amount: Uint128,
 ) -> StdResult<HandleResponse> {
     // check stake is valid
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
     // Has to send Mars tokens
     if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
         return Err(StdError::unauthorized());
@@ -254,7 +226,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     burn_amount: Uint128,
 ) -> StdResult<HandleResponse> {
     // check if unstake is valid
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
     if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
         return Err(StdError::unauthorized());
     }
@@ -265,7 +237,7 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     }
 
     // check valid cooldown
-    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
+    let mut cooldowns_bucket = state::cooldowns(&mut deps.storage);
     let staker_canonical_addr = deps.api.canonical_address(&staker)?;
     match cooldowns_bucket.may_load(staker_canonical_addr.as_slice())? {
         Some(mut cooldown) => {
@@ -343,31 +315,6 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles xMars post-initialization storing the address in config
-pub fn handle_init_xmars_token_callback<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let mut config_singleton = config_state(&mut deps.storage);
-    let mut config = config_singleton.load()?;
-
-    if config.xmars_token_address == CanonicalAddr::default() {
-        config.xmars_token_address = deps.api.canonical_address(&env.message.sender)?;
-        config_singleton.save(&config)?;
-        Ok(HandleResponse {
-            messages: vec![],
-            log: vec![
-                log("action", "init_xmars_token"),
-                log("token_address", &env.message.sender),
-            ],
-            data: None,
-        })
-    } else {
-        // Can do this only once
-        Err(StdError::unauthorized())
-    }
-}
-
 /// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
 /// If a cooldown exists and amount has changed it computes the weighted average
 /// for the cooldown
@@ -375,7 +322,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     // get total xMars in contract before the stake transaction
     let xmars_balance = cw20_get_balance(
@@ -388,7 +335,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::unauthorized());
     }
 
-    let mut cooldowns_bucket = cooldowns_state(&mut deps.storage);
+    let mut cooldowns_bucket = state::cooldowns(&mut deps.storage);
     let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
 
     // compute new cooldown timestamp
@@ -441,7 +388,7 @@ pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
     env: Env,
     msg: CosmosMsg,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
         return Err(StdError::unauthorized());
@@ -461,7 +408,7 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     // throw error if the user tries to swap Mars
     let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
@@ -495,7 +442,7 @@ pub fn handle_swap_asset_to_mars<S: Storage, A: Api, Q: Querier>(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
 
     let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
     let ask_asset_info = AssetInfo::Token {
@@ -530,7 +477,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 fn query_config<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ConfigResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+    let config = state::config_read(&deps.storage).load()?;
     Ok(ConfigResponse {
         owner: deps.api.human_address(&config.owner)?,
         mars_token_address: deps.api.human_address(&config.mars_token_address)?,
@@ -545,7 +492,7 @@ fn query_cooldown<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     sender_address: HumanAddr,
 ) -> StdResult<CooldownResponse> {
-    let cooldown = cooldowns_state_read(&deps.storage)
+    let cooldown = state::cooldowns_read(&deps.storage)
         .may_load(deps.api.canonical_address(&sender_address)?.as_slice())?;
 
     match cooldown {
@@ -579,7 +526,6 @@ mod tests {
         assert_generic_error_message, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
     };
 
-    use crate::state::{config_state_read, cooldowns_state_read};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use mars::staking::msg::HandleMsg::UpdateConfig;
 
@@ -601,7 +547,6 @@ mod tests {
             unstake_window: None,
         };
         let msg = InitMsg {
-            cw20_code_id: 11,
             owner: HumanAddr::from("owner"),
             config: empty_config,
         };
@@ -620,38 +565,15 @@ mod tests {
             unstake_window: Some(10),
         };
         let msg = InitMsg {
-            cw20_code_id: 11,
             owner: HumanAddr::from("owner"),
             config,
         };
         let env = mock_env("owner", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
-        assert_eq!(
-            vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
-                code_id: 11,
-                msg: to_binary(&cw20_token::msg::InitMsg {
-                    name: "xMars token".to_string(),
-                    symbol: "xMars".to_string(),
-                    decimals: 6,
-                    initial_balances: vec![],
-                    mint: Some(MinterResponse {
-                        minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                        cap: None,
-                    }),
-                    init_hook: Some(cw20_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitTokenCallback {}).unwrap(),
-                        contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    }),
-                })
-                .unwrap(),
-                send: vec![],
-                label: None,
-            })],
-            res.messages
-        );
+        assert_eq!(0, res.messages.len());
 
-        let config = config_state_read(&deps.storage).load().unwrap();
+        let config = state::config_read(&deps.storage).load().unwrap();
         assert_eq!(
             deps.api
                 .canonical_address(&HumanAddr::from("owner"))
@@ -664,43 +586,6 @@ mod tests {
             .unwrap();
         assert_eq!(config.mars_token_address, mars_token_canonical_address);
         assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
-
-        // xmars token init callback
-        let msg = HandleMsg::InitTokenCallback {};
-        let env = mock_env("xmars_token", MockEnvParams::default());
-        let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(
-            vec![
-                log("action", "init_xmars_token"),
-                log("token_address", HumanAddr::from("xmars_token")),
-            ],
-            res.log
-        );
-        let config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("xmars_token"))
-                .unwrap(),
-            config.xmars_token_address
-        );
-
-        // trying again fails
-        let msg = HandleMsg::InitTokenCallback {};
-        let env = mock_env("xmars_token_again", MockEnvParams::default());
-        let _res = handle(&mut deps, env, msg).unwrap_err();
-        let config = config_state_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("xmars_token"))
-                .unwrap(),
-            config.xmars_token_address
-        );
-
-        // query works now
-        let res = query(&deps, QueryMsg::Config {}).unwrap();
-        let config: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!(HumanAddr::from("mars_token"), config.mars_token_address);
-        assert_eq!(HumanAddr::from("xmars_token"), config.xmars_token_address);
     }
 
     #[test]
@@ -718,7 +603,6 @@ mod tests {
             unstake_window: Some(10),
         };
         let msg = InitMsg {
-            cw20_code_id: 11,
             owner: HumanAddr::from("owner"),
             config: init_config.clone(),
         };
@@ -758,7 +642,7 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // Read config from state
-        let new_config = config_state_read(&deps.storage).load().unwrap();
+        let new_config = state::config_read(&deps.storage).load().unwrap();
 
         assert_eq!(
             new_config.owner,
@@ -941,7 +825,7 @@ mod tests {
         assert_generic_error_message(response, "Address must have a valid cooldown to unstake");
 
         // unstake Mars expired cooldown -> unauthorized
-        cooldowns_state(&mut deps.storage)
+        state::cooldowns(&mut deps.storage)
             .save(
                 staker_canonical_addr.as_slice(),
                 &Cooldown {
@@ -965,7 +849,7 @@ mod tests {
         assert_generic_error_message(response, "Cooldown has expired");
 
         // unstake Mars unfinished cooldown -> unauthorized
-        cooldowns_state(&mut deps.storage)
+        state::cooldowns(&mut deps.storage)
             .save(
                 staker_canonical_addr.as_slice(),
                 &Cooldown {
@@ -986,7 +870,7 @@ mod tests {
         assert_generic_error_message(response, "Cooldown has not finished");
 
         // unstake Mars cooldown with low amount -> unauthorized
-        cooldowns_state(&mut deps.storage)
+        state::cooldowns(&mut deps.storage)
             .save(
                 staker_canonical_addr.as_slice(),
                 &Cooldown {
@@ -1014,7 +898,7 @@ mod tests {
         let pending_cooldown_amount = Uint128(300_000);
         let pending_cooldown_timestamp = unstake_block_timestamp - TEST_COOLDOWN_DURATION;
 
-        cooldowns_state(&mut deps.storage)
+        state::cooldowns(&mut deps.storage)
             .save(
                 staker_canonical_addr.as_slice(),
                 &Cooldown {
@@ -1069,7 +953,7 @@ mod tests {
             res.log
         );
 
-        let actual_cooldown = cooldowns_state_read(&deps.storage)
+        let actual_cooldown = state::cooldowns_read(&deps.storage)
             .load(staker_canonical_addr.as_slice())
             .unwrap();
 
@@ -1152,7 +1036,7 @@ mod tests {
             res.log
         );
 
-        let actual_cooldown = cooldowns_state_read(&deps.storage)
+        let actual_cooldown = state::cooldowns_read(&deps.storage)
             .may_load(staker_canonical_addr.as_slice())
             .unwrap();
 
@@ -1192,7 +1076,7 @@ mod tests {
         );
         let res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = cooldowns_state_read(&deps.storage)
+        let cooldown = state::cooldowns_read(&deps.storage)
             .load(
                 deps.api
                     .canonical_address(&HumanAddr::from("staker"))
@@ -1223,7 +1107,7 @@ mod tests {
         );
         let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = cooldowns_state_read(&deps.storage)
+        let cooldown = state::cooldowns_read(&deps.storage)
             .load(
                 deps.api
                     .canonical_address(&HumanAddr::from("staker"))
@@ -1254,7 +1138,7 @@ mod tests {
         );
         let _res = handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = cooldowns_state_read(&deps.storage)
+        let cooldown = state::cooldowns_read(&deps.storage)
             .load(
                 deps.api
                     .canonical_address(&HumanAddr::from("staker"))
@@ -1291,7 +1175,7 @@ mod tests {
         );
         handle(&mut deps, env, HandleMsg::Cooldown {}).unwrap();
 
-        let cooldown = cooldowns_state_read(&deps.storage)
+        let cooldown = state::cooldowns_read(&deps.storage)
             .load(
                 deps.api
                     .canonical_address(&HumanAddr::from("staker"))
@@ -1340,7 +1224,7 @@ mod tests {
     fn test_cannot_swap_mars() {
         let mut deps = th_setup(&[]);
 
-        let config = config_state(&mut deps.storage).load().unwrap();
+        let config = state::config(&mut deps.storage).load().unwrap();
         let config_mars_token_human_addr =
             deps.api.human_address(&config.mars_token_address).unwrap();
 
@@ -1384,14 +1268,13 @@ mod tests {
             unstake_window: Some(TEST_UNSTAKE_WINDOW),
         };
         let msg = InitMsg {
-            cw20_code_id: 1,
             owner: HumanAddr::from("owner"),
             config,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let _res = init(&mut deps, env, msg).unwrap();
 
-        let mut config_singleton = config_state(&mut deps.storage);
+        let mut config_singleton = state::config(&mut deps.storage);
         let mut config = config_singleton.load().unwrap();
         config.xmars_token_address = deps
             .api
