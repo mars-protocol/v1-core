@@ -1,3 +1,4 @@
+pub mod address_provider;
 pub mod cw20_token;
 pub mod helpers;
 pub mod incentives;
