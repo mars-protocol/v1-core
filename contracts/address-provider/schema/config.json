@@ -4,20 +4,40 @@
   "description": "Treasury global configuration",
   "type": "object",
   "required": [
-    "cooldown_duration",
+    "council_address",
+    "incentives_address",
+    "insurance_fund_address",
     "mars_token_address",
     "owner",
-    "terraswap_factory_address",
-    "terraswap_max_spread",
-    "unstake_window",
+    "red_bank_address",
+    "staking_address",
+    "treasury_address",
     "xmars_token_address"
   ],
   "properties": {
-    "cooldown_duration": {
-      "description": "Cooldown duration in seconds",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
+    "council_address": {
+      "description": "Council contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "incentives_address": {
+      "description": "Incentives contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "insurance_fund_address": {
+      "description": "Insurance fund contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
     },
     "mars_token_address": {
       "description": "Mars token address",
@@ -35,27 +55,29 @@
         }
       ]
     },
-    "terraswap_factory_address": {
-      "description": "Terraswap factory contract address",
+    "red_bank_address": {
+      "description": "Red bank contract address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
     },
-    "terraswap_max_spread": {
-      "description": "Terraswap max spread",
+    "staking_address": {
+      "description": "Staking contract address",
       "allOf": [
         {
-          "$ref": "#/definitions/Decimal"
+          "$ref": "#/definitions/CanonicalAddr"
         }
       ]
     },
-    "unstake_window": {
-      "description": "Time in seconds after the cooldown ends during which the unstaking of the associated amount is allowed",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
+    "treasury_address": {
+      "description": "Treasury contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
     },
     "xmars_token_address": {
       "description": "xMars token address",
@@ -73,10 +95,6 @@
     },
     "CanonicalAddr": {
       "$ref": "#/definitions/Binary"
-    },
-    "Decimal": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
     }
   }
 }

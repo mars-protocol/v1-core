@@ -2,9 +2,9 @@ use std::env::current_dir;
 use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use mars::staking::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
+use mars::address_provider::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 
-use staking::state::Config;
+use address_provider::state::Config;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();
