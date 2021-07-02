@@ -20,11 +20,8 @@ pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 pub struct Config {
     /// Contract owner
     pub owner: CanonicalAddr,
-    /// Mars token address: rewards are emitted in Mars. This contract should have enough
-    /// balance for this.
-    pub mars_token_address: CanonicalAddr,
-    /// Staking contract address: used to stake Mars rewards and give xMars when claiming
-    pub staking_address: CanonicalAddr,
+    /// Address provider returns addresses for all protocol contracts
+    pub address_provider_address: CanonicalAddr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
