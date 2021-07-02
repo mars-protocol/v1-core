@@ -8,6 +8,8 @@ use mars::helpers::human_addr_into_canonical;
 
 use crate::state;
 use crate::state::{AssetIncentive, Config};
+use mars::address_provider;
+use mars::address_provider::msg::MarsContract;
 use mars::incentives::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
 
 // INIT
@@ -20,8 +22,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // initialize Config
     let config = Config {
         owner: deps.api.canonical_address(&msg.owner)?,
-        staking_address: deps.api.canonical_address(&msg.staking_address)?,
-        mars_token_address: deps.api.canonical_address(&msg.mars_token_address)?,
+        address_provider_address: deps.api.canonical_address(&msg.address_provider_address)?,
     };
 
     state::config(&mut deps.storage).save(&config)?;
@@ -58,9 +59,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::ClaimRewards {} => handle_claim_rewards(deps, env),
         HandleMsg::UpdateConfig {
             owner,
-            mars_token_address,
-            staking_address,
-        } => handle_update_config(deps, env, owner, mars_token_address, staking_address),
+            address_provider_address,
+        } => handle_update_config(deps, env, owner, address_provider_address),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
     }
 }
@@ -245,8 +245,17 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
         .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
 
     let config = state::config_read(&deps.storage).load()?;
-    let mars_token_address = deps.api.human_address(&config.mars_token_address)?;
-    let staking_address = deps.api.human_address(&config.staking_address)?;
+    let mut addresses_query = address_provider::helpers::get_addresses(
+        &deps,
+        &config.address_provider_address,
+        vec![MarsContract::MarsToken, MarsContract::Staking],
+    )?;
+    let staking_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("staking address not found"))?;
+    let mars_token_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
 
     let messages = if accrued_rewards > Uint128::zero() {
         vec![CosmosMsg::Wasm(WasmMsg::Execute {
@@ -279,8 +288,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
     owner: Option<HumanAddr>,
-    mars_token_address: Option<HumanAddr>,
-    staking_address: Option<HumanAddr>,
+    address_provider_address: Option<HumanAddr>,
 ) -> StdResult<HandleResponse> {
     let mut config_singleton = state::config(&mut deps.storage);
     let mut config = config_singleton.load()?;
@@ -290,10 +298,11 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     };
 
     config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
-    config.mars_token_address =
-        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
-    config.staking_address =
-        human_addr_into_canonical(deps.api, staking_address, config.staking_address)?;
+    config.address_provider_address = human_addr_into_canonical(
+        deps.api,
+        address_provider_address,
+        config.address_provider_address,
+    )?;
 
     config_singleton.save(&config)?;
 
@@ -427,8 +436,7 @@ mod tests {
 
         let msg = InitMsg {
             owner: HumanAddr::from("owner"),
-            staking_address: HumanAddr::from("staking"),
-            mars_token_address: HumanAddr::from("mars_token"),
+            address_provider_address: HumanAddr::from("address_provider"),
         };
         let env = mock_env("sender", MockEnvParams::default());
 
@@ -445,15 +453,9 @@ mod tests {
         );
         assert_eq!(
             deps.api
-                .canonical_address(&HumanAddr::from("staking"))
+                .canonical_address(&HumanAddr::from("address_provider"))
                 .unwrap(),
-            config.staking_address
-        );
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("mars_token"))
-                .unwrap(),
-            config.mars_token_address
+            config.address_provider_address
         );
     }
 
@@ -466,7 +468,7 @@ mod tests {
         let env = mock_env("sender", MockEnvParams::default());
 
         let msg = HandleMsg::SetAssetIncentive {
-            ma_token_address: HumanAddr::from("ma_token"),
+            ma_token_address: HumanAddr::from("ma_asset"),
             emission_per_second: Uint128(100),
         };
 
@@ -1193,8 +1195,7 @@ mod tests {
         // *
         let msg = HandleMsg::UpdateConfig {
             owner: None,
-            mars_token_address: None,
-            staking_address: None,
+            address_provider_address: None,
         };
         let env = mock_env("somebody", MockEnvParams::default());
         let error_res = handle(&mut deps, env, msg).unwrap_err();
@@ -1205,8 +1206,7 @@ mod tests {
         // *
         let msg = HandleMsg::UpdateConfig {
             owner: Some(HumanAddr::from("new_owner")),
-            mars_token_address: None,
-            staking_address: Some(HumanAddr::from("new_staking")),
+            address_provider_address: None,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
 
@@ -1223,15 +1223,9 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
-            new_config.mars_token_address,
+            new_config.address_provider_address,
             deps.api
-                .canonical_address(&HumanAddr::from("mars_token")) // should not change
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.staking_address,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_staking"))
+                .canonical_address(&HumanAddr::from("address_provider")) // should not change
                 .unwrap()
         );
     }
@@ -1337,8 +1331,7 @@ mod tests {
 
         let msg = InitMsg {
             owner: HumanAddr::from("owner"),
-            staking_address: HumanAddr::from("staking"),
-            mars_token_address: HumanAddr::from("mars_token"),
+            address_provider_address: HumanAddr::from("address_provider"),
         };
         let env = mock_env("owner", MockEnvParams::default());
         init(&mut deps, env, msg).unwrap();

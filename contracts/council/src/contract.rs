@@ -179,7 +179,7 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let mars_token_address = address_provider::utils::get_address(
+    let mars_token_address = address_provider::helpers::get_address(
         &deps,
         &config.address_provider_address,
         MarsContract::MarsToken,
@@ -274,7 +274,7 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let xmars_token_address = address_provider::utils::get_address(
+    let xmars_token_address = address_provider::helpers::get_address(
         &deps,
         &config.address_provider_address,
         MarsContract::XMarsToken,
@@ -340,7 +340,7 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let mut addresses_query = address_provider::utils::get_addresses(
+    let mut addresses_query = address_provider::helpers::get_addresses(
         &deps,
         &config.address_provider_address,
         vec![

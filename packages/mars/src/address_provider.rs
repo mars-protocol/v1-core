@@ -72,7 +72,7 @@ pub mod msg {
     pub struct MigrateMsg {}
 }
 
-pub mod utils {
+pub mod helpers {
     use super::msg::{MarsContract, QueryMsg};
     use cosmwasm_std::{
         to_binary, Api, CanonicalAddr, Extern, HumanAddr, Querier, QueryRequest, StdResult,
