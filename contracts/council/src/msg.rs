@@ -11,8 +11,7 @@ pub struct InitMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct CreateOrUpdateConfig {
-    pub xmars_token_address: Option<HumanAddr>,
-    pub staking_contract_address: Option<HumanAddr>,
+    pub address_provider_address: Option<HumanAddr>,
 
     pub proposal_voting_period: Option<u64>,
     pub proposal_effective_delay: Option<u64>,
@@ -28,12 +27,6 @@ pub enum HandleMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
-    /// Sets the xMars and Staking contract addresses
-    SetContractAddresses {
-        xmars_token_address: HumanAddr,
-        staking_contract_address: HumanAddr,
-    },
-
     /// Vote for a proposal
     CastVote {
         proposal_id: u64,
@@ -45,17 +38,15 @@ pub enum HandleMsg {
     /// Execute a successful proposal
     ExecuteProposal { proposal_id: u64 },
 
-    /// Update basecamp config
-    UpdateConfig {
-        mars_token_address: Option<HumanAddr>,
-        config: CreateOrUpdateConfig,
-    },
+    /// Update config
+    UpdateConfig { config: CreateOrUpdateConfig },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiveMsg {
     /// Submit a proposal to be voted
+    /// Requires a Mars deposit equal or greater than the proposal_required_deposit
     SubmitProposal {
         title: String,
         description: String,
@@ -99,9 +90,7 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub mars_token_address: HumanAddr,
-    pub xmars_token_address: HumanAddr,
-    pub staking_contract_address: HumanAddr,
+    pub address_provider_address: HumanAddr,
 
     pub proposal_voting_period: u64,
     pub proposal_effective_delay: u64,

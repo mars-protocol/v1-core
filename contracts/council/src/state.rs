@@ -19,13 +19,8 @@ pub static PROPOSAL_VOTES_NAMESPACE: &[u8] = b"proposal_votes";
 /// Council global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
-    /// Mars token address (Used as a deposit for proposals)
-    pub mars_token_address: CanonicalAddr,
-    /// xMars token address (Used for voting power)
-    pub xmars_token_address: CanonicalAddr,
-    /// Staking contract address (Receives Mars deposits of rejected proposals)
-    pub staking_contract_address: CanonicalAddr,
-
+    /// Address provider returns addresses for all protocol contracts
+    pub address_provider_address: CanonicalAddr,
     /// Blocks during which a proposal is active since being submitted
     pub proposal_voting_period: u64,
     /// Blocks that need to pass since a proposal succeeds in order for it to be available to be

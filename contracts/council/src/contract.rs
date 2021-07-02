@@ -5,6 +5,8 @@ use cosmwasm_std::{
 };
 
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
+use mars::address_provider;
+use mars::address_provider::msg::MarsContract;
 use mars::helpers::{human_addr_into_canonical, read_be_u64};
 use mars::xmars_token;
 
@@ -40,8 +42,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        xmars_token_address: _,
-        staking_contract_address: _,
+        address_provider_address,
         proposal_voting_period,
         proposal_effective_delay,
         proposal_expiration_period,
@@ -51,7 +52,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     } = msg.config;
 
     // Check required fields are available
-    let available = proposal_voting_period.is_some()
+    let available = address_provider_address.is_some()
+        && proposal_voting_period.is_some()
         && proposal_effective_delay.is_some()
         && proposal_expiration_period.is_some()
         && proposal_required_deposit.is_some()
@@ -66,9 +68,9 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     // initialize Config
     let config = Config {
-        mars_token_address: CanonicalAddr::default(),
-        xmars_token_address: CanonicalAddr::default(),
-        staking_contract_address: CanonicalAddr::default(),
+        address_provider_address: deps
+            .api
+            .canonical_address(&address_provider_address.unwrap())?,
 
         proposal_voting_period: proposal_voting_period.unwrap(),
         proposal_effective_delay: proposal_effective_delay.unwrap(),
@@ -100,23 +102,14 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     match msg {
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
 
-        HandleMsg::SetContractAddresses {
-            xmars_token_address,
-            staking_contract_address,
-        } => handle_set_contract_addresses(deps, xmars_token_address, staking_contract_address),
-
         HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
-
         HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
 
         HandleMsg::ExecuteProposal { proposal_id } => {
             handle_execute_proposal(deps, env, proposal_id)
         }
 
-        HandleMsg::UpdateConfig {
-            mars_token_address,
-            config,
-        } => handle_update_config(deps, env, mars_token_address, config),
+        HandleMsg::UpdateConfig { config } => handle_update_config(deps, env, config),
     }
 }
 
@@ -148,8 +141,6 @@ pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
         Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
     }
 }
-
-/// Submit new proposal
 
 pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
@@ -188,8 +179,13 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
+    let mars_token_address = address_provider::utils::get_address(
+        &deps,
+        &config.address_provider_address,
+        MarsContract::MarsToken,
+    )?;
 
-    if env.message.sender != deps.api.human_address(&config.mars_token_address)? {
+    if env.message.sender != mars_token_address {
         return Err(StdError::unauthorized());
     }
 
@@ -252,61 +248,6 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-/// Handles Mars post-initialization storing the address in config
-pub fn handle_init_mars_callback<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-) -> StdResult<HandleResponse> {
-    let mut config_singleton = state::config(&mut deps.storage);
-    let mut config = config_singleton.load()?;
-
-    if config.mars_token_address == CanonicalAddr::default() {
-        config.mars_token_address = deps.api.canonical_address(&env.message.sender)?;
-        config_singleton.save(&config)?;
-        Ok(HandleResponse {
-            messages: vec![],
-            log: vec![
-                log("action", "init_mars_token"),
-                log("token_address", &env.message.sender),
-            ],
-            data: None,
-        })
-    } else {
-        // Can do this only once
-        Err(StdError::unauthorized())
-    }
-}
-
-pub fn handle_set_contract_addresses<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    xmars_token_address: HumanAddr,
-    staking_contract_address: HumanAddr,
-) -> StdResult<HandleResponse> {
-    let mut config_singleton = state::config(&mut deps.storage);
-    let mut config = config_singleton.load()?;
-
-    if config.xmars_token_address != CanonicalAddr::default()
-        || config.staking_contract_address != CanonicalAddr::default()
-    {
-        // Can do this only once
-        return Err(StdError::unauthorized());
-    };
-
-    config.xmars_token_address = deps.api.canonical_address(&xmars_token_address)?;
-    config.staking_contract_address = deps.api.canonical_address(&staking_contract_address)?;
-    config_singleton.save(&config)?;
-
-    Ok(HandleResponse {
-        messages: vec![],
-        log: vec![
-            log("action", "set_contract_addresses"),
-            log("xmars_token_address", &xmars_token_address),
-            log("staking_contract_address", &staking_contract_address),
-        ],
-        data: None,
-    })
-}
-
 pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -333,17 +274,16 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-
-    if config.xmars_token_address == CanonicalAddr::default() {
-        return Err(StdError::generic_err(
-            "Council config not setup correctly, requires xmars_token_address",
-        ));
-    };
+    let xmars_token_address = address_provider::utils::get_address(
+        &deps,
+        &config.address_provider_address,
+        MarsContract::XMarsToken,
+    )?;
 
     let balance_at_block = proposal.start_height - 1;
     let voting_power = xmars_get_balance_at(
         &deps.querier,
-        deps.api.human_address(&config.xmars_token_address)?,
+        xmars_token_address,
         env.message.sender.clone(),
         balance_at_block,
     )?;
@@ -388,20 +328,6 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     env: Env,
     proposal_id: u64,
 ) -> StdResult<HandleResponse> {
-    let config = state::config_read(&deps.storage).load()?;
-
-    if config.xmars_token_address == CanonicalAddr::default() {
-        return Err(StdError::generic_err(
-            "Council config not setup correctly, requires xmars_token_address",
-        ));
-    };
-
-    if config.staking_contract_address == CanonicalAddr::default() {
-        return Err(StdError::generic_err(
-            "Council config not setup correctly, requires staking_contract_address",
-        ));
-    };
-
     let proposals_bucket = state::proposals(&mut deps.storage);
     let mut proposal = proposals_bucket.load(&proposal_id.to_be_bytes())?;
 
@@ -413,13 +339,33 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Voting period has not ended"));
     }
 
+    let config = state::config_read(&deps.storage).load()?;
+    let mut addresses_query = address_provider::utils::get_addresses(
+        &deps,
+        &config.address_provider_address,
+        vec![
+            MarsContract::MarsToken,
+            MarsContract::Staking,
+            MarsContract::XMarsToken,
+        ],
+    )?;
+    let xmars_token_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("xmars token address not found"))?;
+    let staking_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("staking address not found"))?;
+    let mars_token_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
+
     // Compute proposal quorum and threshold
     let for_votes = proposal.for_votes;
     let against_votes = proposal.against_votes;
     let total_votes = for_votes + against_votes;
     let total_voting_power = xmars_get_total_supply_at(
         &deps.querier,
-        deps.api.human_address(&config.xmars_token_address)?,
+        xmars_token_address,
         proposal.start_height - 1,
     )?;
 
@@ -433,18 +379,14 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     // Determine proposal result
-    let mut new_proposal_status = ProposalStatus::Rejected;
-    let mut log_proposal_result = "rejected";
-    let mut handle_response_messages = vec![];
-
-    if proposal_quorum >= config.proposal_required_quorum
+    let (new_proposal_status, log_proposal_result, messages) = if proposal_quorum
+        >= config.proposal_required_quorum
         && proposal_threshold >= config.proposal_required_threshold
     {
-        new_proposal_status = ProposalStatus::Passed;
-        log_proposal_result = "passed";
+        // if quorum and threshold are met then proposal passes
         // refund deposit amount to submitter
-        handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Transfer {
                 recipient: deps
@@ -452,26 +394,29 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
                     .human_address(&proposal.submitter_canonical_address)?,
                 amount: proposal.deposit_amount,
             })?,
-        }));
-    }
+        });
 
-    if new_proposal_status == ProposalStatus::Rejected {
-        handle_response_messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&config.mars_token_address)?,
+        (ProposalStatus::Passed, "passed", vec![msg])
+    } else {
+        // Else proposal is rejected
+        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address,
             msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: deps.api.human_address(&config.staking_contract_address)?,
+                recipient: staking_address,
                 amount: proposal.deposit_amount,
             })?,
             send: vec![],
-        }))
-    }
+        });
+
+        (ProposalStatus::Rejected, "rejected", vec![msg])
+    };
 
     // Update proposal status
     proposal.status = new_proposal_status;
     state::proposals(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
 
     Ok(HandleResponse {
-        messages: handle_response_messages,
+        messages,
         log: vec![
             log("action", "end_proposal"),
             log("proposal_id", proposal_id),
@@ -546,7 +491,6 @@ pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
 pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    mars_token_address: Option<HumanAddr>,
     new_config: CreateOrUpdateConfig,
 ) -> StdResult<HandleResponse> {
     let mut config = state::config_read(&deps.storage).load()?;
@@ -560,8 +504,8 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        xmars_token_address,
-        staking_contract_address,
+        address_provider_address,
+
         proposal_voting_period,
         proposal_effective_delay,
         proposal_expiration_period,
@@ -571,15 +515,12 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = new_config;
 
     // Update config
-    config.mars_token_address =
-        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
-    config.xmars_token_address =
-        human_addr_into_canonical(deps.api, xmars_token_address, config.xmars_token_address)?;
-    config.staking_contract_address = human_addr_into_canonical(
+    config.address_provider_address = human_addr_into_canonical(
         deps.api,
-        staking_contract_address,
-        config.staking_contract_address,
+        address_provider_address,
+        config.address_provider_address,
     )?;
+
     config.proposal_voting_period = proposal_voting_period.unwrap_or(config.proposal_voting_period);
     config.proposal_effective_delay =
         proposal_effective_delay.unwrap_or(config.proposal_effective_delay);
@@ -633,22 +574,14 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<ConfigResponse> {
     let config = state::config_read(&deps.storage).load()?;
 
-    let xmars_token_address = if config.xmars_token_address != CanonicalAddr::default() {
-        deps.api.human_address(&config.xmars_token_address)?
-    } else {
-        HumanAddr::default()
-    };
-
-    let staking_contract_address = if config.staking_contract_address != CanonicalAddr::default() {
-        deps.api.human_address(&config.staking_contract_address)?
-    } else {
-        HumanAddr::default()
-    };
+    let address_provider_address = deps
+        .api
+        .human_address(&config.address_provider_address)
+        .unwrap_or_default();
 
     Ok(ConfigResponse {
-        mars_token_address: deps.api.human_address(&config.mars_token_address)?,
-        xmars_token_address,
-        staking_contract_address,
+        address_provider_address,
+
         proposal_voting_period: config.proposal_voting_period,
         proposal_effective_delay: config.proposal_effective_delay,
         proposal_expiration_period: config.proposal_expiration_period,
@@ -917,8 +850,7 @@ mod tests {
         // init config with empty params
         // *
         let empty_config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
+            address_provider_address: None,
 
             proposal_voting_period: None,
             proposal_effective_delay: None,
@@ -941,8 +873,7 @@ mod tests {
         // init with proposal_required_quorum, proposal_required_threshold greater than 1
         // *
         let config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
+            address_provider_address: Some(HumanAddr::from("address_provider")),
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -961,8 +892,7 @@ mod tests {
         );
 
         let config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
+            address_provider_address: Some(HumanAddr::from("address_provider")),
 
             proposal_voting_period: Some(1),
             proposal_effective_delay: Some(1),
@@ -978,78 +908,15 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(CanonicalAddr::default(), config.mars_token_address);
+        assert_eq!(
+            deps.api
+                .canonical_address(&HumanAddr::from("address_provider"))
+                .unwrap(),
+            config.address_provider_address
+        );
 
         let council = state::council_read(&deps.storage).load().unwrap();
         assert_eq!(council.proposal_count, 0);
-    }
-
-    #[test]
-    fn test_set_contract_addresses() {
-        let mut deps = mock_dependencies(20, &[]);
-
-        let config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
-
-            proposal_voting_period: Some(1),
-            proposal_effective_delay: Some(1),
-            proposal_expiration_period: Some(1),
-            proposal_required_deposit: Some(Uint128(1)),
-            proposal_required_threshold: Some(Decimal::one()),
-            proposal_required_quorum: Some(Decimal::one()),
-        };
-        let msg = InitMsg { config };
-        let env = mock_env("owner", MockEnvParams::default());
-        init(&mut deps, env, msg).unwrap();
-
-        // Assert initally contract addresses are not set
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
-        assert_eq!(CanonicalAddr::default(), config.staking_contract_address);
-
-        let xmars_token_address = HumanAddr::from("xmars_token");
-        let staking_contract_address = HumanAddr::from("staking_contract");
-        handle_set_contract_addresses(
-            &mut deps,
-            xmars_token_address.clone(),
-            staking_contract_address.clone(),
-        )
-        .unwrap();
-
-        // Assert config address can be correctly set once
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api.canonical_address(&xmars_token_address).unwrap(),
-            config.xmars_token_address
-        );
-        assert_eq!(
-            deps.api
-                .canonical_address(&staking_contract_address)
-                .unwrap(),
-            config.staking_contract_address
-        );
-
-        let error_res = handle_set_contract_addresses(
-            &mut deps,
-            HumanAddr::from("different_xmars_token"),
-            HumanAddr::from("different_staking_contract"),
-        )
-        .unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
-
-        // Assert config address cannot be set more than once
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api.canonical_address(&xmars_token_address).unwrap(),
-            config.xmars_token_address
-        );
-        assert_eq!(
-            deps.api
-                .canonical_address(&staking_contract_address)
-                .unwrap(),
-            config.staking_contract_address
-        );
     }
 
     #[test]
@@ -1060,8 +927,8 @@ mod tests {
         // init config with valid params
         // *
         let init_config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
+            address_provider_address: Some(HumanAddr::from("address_provider")),
+
             proposal_voting_period: Some(10),
             proposal_effective_delay: Some(11),
             proposal_expiration_period: Some(12),
@@ -1083,10 +950,7 @@ mod tests {
             proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
             ..init_config.clone()
         };
-        let msg = UpdateConfig {
-            mars_token_address: Some(HumanAddr::from("mars_addr")),
-            config,
-        };
+        let msg = UpdateConfig { config };
         let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(
@@ -1099,7 +963,6 @@ mod tests {
         // only council itself is authorized
         // *
         let msg = UpdateConfig {
-            mars_token_address: None,
             config: init_config,
         };
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
@@ -1110,8 +973,8 @@ mod tests {
         // update config with all new params
         // *
         let config = CreateOrUpdateConfig {
-            xmars_token_address: Some(HumanAddr::from("new_xmars_addr")),
-            staking_contract_address: Some(HumanAddr::from("new_staking_addr")),
+            address_provider_address: Some(HumanAddr::from("new_address_provider")),
+
             proposal_voting_period: Some(101),
             proposal_effective_delay: Some(111),
             proposal_expiration_period: Some(121),
@@ -1120,7 +983,6 @@ mod tests {
             proposal_required_quorum: Some(Decimal::from_ratio(1u128, 5u128)),
         };
         let msg = UpdateConfig {
-            mars_token_address: Some(HumanAddr::from("new_mars_addr")),
             config: config.clone(),
         };
         // sender as contract address
@@ -1133,21 +995,9 @@ mod tests {
         let new_config = state::config_read(&deps.storage).load().unwrap();
 
         assert_eq!(
-            new_config.xmars_token_address,
+            new_config.address_provider_address,
             deps.api
-                .canonical_address(&HumanAddr::from("new_xmars_addr"))
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.mars_token_address,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_mars_addr"))
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.staking_contract_address,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_staking_addr"))
+                .canonical_address(&HumanAddr::from("new_address_provider"))
                 .unwrap()
         );
         assert_eq!(
@@ -1393,7 +1243,6 @@ mod tests {
                         execution_order: 0,
                         target_contract_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         msg: to_binary(&HandleMsg::UpdateConfig {
-                            mars_token_address: None,
                             config: CreateOrUpdateConfig::default(),
                         })
                         .unwrap(),
@@ -1442,7 +1291,6 @@ mod tests {
                     .canonical_address(&HumanAddr::from(MOCK_CONTRACT_ADDR))
                     .unwrap(),
                 msg: to_binary(&HandleMsg::UpdateConfig {
-                    mars_token_address: None,
                     config: CreateOrUpdateConfig::default()
                 })
                 .unwrap(),
@@ -2202,7 +2050,7 @@ mod tests {
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: HumanAddr::from("mars_token"),
                 msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("staking_contract"),
+                    recipient: HumanAddr::from("staking"),
                     amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
@@ -2255,7 +2103,7 @@ mod tests {
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: HumanAddr::from("mars_token"),
                 msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("staking_contract"),
+                    recipient: HumanAddr::from("staking"),
                     amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
@@ -2366,7 +2214,6 @@ mod tests {
                     ProposalExecuteCall {
                         execution_order: 3,
                         msg: to_binary(&HandleMsg::UpdateConfig {
-                            mars_token_address: None,
                             config: CreateOrUpdateConfig::default(),
                         })
                         .unwrap(),
@@ -2375,7 +2222,6 @@ mod tests {
                     ProposalExecuteCall {
                         execution_order: 1,
                         msg: to_binary(&HandleMsg::UpdateConfig {
-                            mars_token_address: None,
                             config: CreateOrUpdateConfig::default(),
                         })
                         .unwrap(),
@@ -2410,7 +2256,6 @@ mod tests {
                     contract_addr: contract_address.clone(),
                     send: vec![],
                     msg: to_binary(&HandleMsg::UpdateConfig {
-                        mars_token_address: None,
                         config: CreateOrUpdateConfig::default()
                     })
                     .unwrap(),
@@ -2424,7 +2269,6 @@ mod tests {
                     contract_addr: contract_address,
                     send: vec![],
                     msg: to_binary(&HandleMsg::UpdateConfig {
-                        mars_token_address: None,
                         config: CreateOrUpdateConfig::default()
                     })
                     .unwrap(),
@@ -2445,8 +2289,7 @@ mod tests {
 
         // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
-            xmars_token_address: None,
-            staking_contract_address: None,
+            address_provider_address: Some(HumanAddr::from("address_provider")),
 
             proposal_voting_period: Some(TEST_PROPOSAL_VOTING_PERIOD),
             proposal_effective_delay: Some(TEST_PROPOSAL_EFFECTIVE_DELAY),
@@ -2457,23 +2300,7 @@ mod tests {
         };
         let msg = InitMsg { config };
         let env = mock_env("owner", MockEnvParams::default());
-        let _res = init(&mut deps, env, msg).unwrap();
-
-        let mut config_singleton = state::config(&mut deps.storage);
-        let mut config = config_singleton.load().unwrap();
-        config.mars_token_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("mars_token"))
-            .unwrap();
-        config.xmars_token_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("xmars_token"))
-            .unwrap();
-        config.staking_contract_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("staking_contract"))
-            .unwrap();
-        config_singleton.save(&config).unwrap();
+        init(&mut deps, env, msg).unwrap();
 
         deps
     }
