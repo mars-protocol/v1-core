@@ -3,62 +3,82 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "cw20_code_id",
-    "proposal_effective_delay",
-    "proposal_expiration_period",
-    "proposal_required_deposit",
-    "proposal_required_quorum",
-    "proposal_required_threshold",
-    "proposal_voting_period",
-    "staking_contract_address",
-    "xmars_token_address"
+    "config"
   ],
   "properties": {
-    "cw20_code_id": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "proposal_effective_delay": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "proposal_expiration_period": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "proposal_required_deposit": {
-      "$ref": "#/definitions/Uint128"
-    },
-    "proposal_required_quorum": {
-      "$ref": "#/definitions/Decimal"
-    },
-    "proposal_required_threshold": {
-      "$ref": "#/definitions/Decimal"
-    },
-    "proposal_voting_period": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "staking_contract_address": {
-      "$ref": "#/definitions/HumanAddr"
-    },
-    "xmars_token_address": {
-      "$ref": "#/definitions/HumanAddr"
+    "config": {
+      "$ref": "#/definitions/CreateOrUpdateConfig"
     }
   },
   "definitions": {
-    "Decimal": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
+    "CreateOrUpdateConfig": {
+      "type": "object",
+      "properties": {
+        "address_provider_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "close_factor": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "insurance_fund_fee_share": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ma_token_code_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "treasury_fee_share": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Decimal256": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
       "type": "string"
     },
     "HumanAddr": {
-      "type": "string"
-    },
-    "Uint128": {
       "type": "string"
     }
   }
