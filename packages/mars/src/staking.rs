@@ -8,13 +8,13 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
-        pub owner: HumanAddr,
         pub config: CreateOrUpdateConfig,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CreateOrUpdateConfig {
-        pub mars_token_address: Option<HumanAddr>,
+        pub owner: Option<HumanAddr>,
+        pub address_provider_address: Option<HumanAddr>,
         pub terraswap_factory_address: Option<HumanAddr>,
         pub terraswap_max_spread: Option<Decimal>,
         pub cooldown_duration: Option<u64>,
@@ -25,11 +25,7 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
         /// Update staking config
-        UpdateConfig {
-            owner: Option<HumanAddr>,
-            xmars_token_address: Option<HumanAddr>,
-            config: CreateOrUpdateConfig,
-        },
+        UpdateConfig { config: CreateOrUpdateConfig },
         /// Implementation cw20 receive msg
         Receive(Cw20ReceiveMsg),
         /// Initialize or refresh cooldown
@@ -68,8 +64,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
         pub owner: HumanAddr,
-        pub mars_token_address: HumanAddr,
-        pub xmars_token_address: HumanAddr,
+        pub address_provider_address: HumanAddr,
         pub terraswap_max_spread: Decimal,
         pub cooldown_duration: u64,
         pub unstake_window: u64,
