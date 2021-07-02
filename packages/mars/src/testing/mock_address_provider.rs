@@ -37,7 +37,7 @@ pub fn handle_query(contract_addr: &HumanAddr, query: QueryMsg) -> QuerierResult
 fn get_contract_address(contract: MarsContract) -> HumanAddr {
     match contract {
         MarsContract::Council => HumanAddr::from("council"),
-        MarsContract::Incentives => HumanAddr::from("incentives_address"),
+        MarsContract::Incentives => HumanAddr::from("incentives"),
         MarsContract::InsuranceFund => HumanAddr::from("insurance_fund"),
         MarsContract::MarsToken => HumanAddr::from("mars_token"),
         MarsContract::RedBank => HumanAddr::from("red_bank"),

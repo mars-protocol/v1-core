@@ -13,6 +13,7 @@ pub mod msg {
         pub decimals: u8,
         pub initial_balances: Vec<Cw20CoinHuman>,
         pub mint: Option<MinterResponse>,
+        pub init_hook: Option<InitHook>,
         pub red_bank_address: HumanAddr,
         pub incentives_address: HumanAddr,
     }
@@ -57,6 +58,13 @@ pub mod msg {
             }
         }
         true
+    }
+
+    /// Hook to be called after token initialization
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct InitHook {
+        pub msg: Binary,
+        pub contract_addr: HumanAddr,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -9,13 +9,15 @@ use cosmwasm_std::{
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
-use mars::cw20_token;
+use mars::address_provider;
+use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
 use mars::liquidity_pool::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
     InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
     ReserveResponse, ReservesListResponse, UncollateralizedLoanLimitResponse,
 };
+use mars::ma_token;
 
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read, money_market_state,
@@ -39,9 +41,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        treasury_contract_address,
-        insurance_fund_contract_address,
-        staking_contract_address,
+        owner,
+        address_provider_address,
         insurance_fund_fee_share,
         treasury_fee_share,
         ma_token_code_id,
@@ -49,9 +50,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     } = msg.config;
 
     // All fields should be available
-    let available = treasury_contract_address.is_some()
-        && insurance_fund_contract_address.is_some()
-        && staking_contract_address.is_some()
+    let available = owner.is_some()
+        && address_provider_address.is_some()
         && insurance_fund_fee_share.is_some()
         && treasury_fee_share.is_some()
         && ma_token_code_id.is_some()
@@ -64,16 +64,10 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
 
     let config = Config {
-        owner: deps.api.canonical_address(&msg.owner)?,
-        treasury_contract_address: deps
+        owner: deps.api.canonical_address(&owner.unwrap())?,
+        address_provider_address: deps
             .api
-            .canonical_address(&treasury_contract_address.unwrap())?,
-        insurance_fund_contract_address: deps
-            .api
-            .canonical_address(&insurance_fund_contract_address.unwrap())?,
-        staking_contract_address: deps
-            .api
-            .canonical_address(&staking_contract_address.unwrap())?,
+            .canonical_address(&address_provider_address.unwrap())?,
         ma_token_code_id: ma_token_code_id.unwrap(),
         close_factor: close_factor.unwrap(),
         insurance_fund_fee_share: insurance_fund_fee_share.unwrap(),
@@ -96,19 +90,24 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::UpdateConfig { owner, config } => handle_update_config(deps, env, owner, config),
+        HandleMsg::UpdateConfig { config } => handle_update_config(deps, env, config),
+
         HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
+
         HandleMsg::InitAsset {
             asset,
             asset_params,
         } => handle_init_asset(deps, env, asset, asset_params),
+
         HandleMsg::UpdateAsset {
             asset,
             asset_params,
         } => handle_update_asset(deps, env, asset, asset_params),
+
         HandleMsg::InitAssetTokenCallback { reference } => {
             init_asset_token_callback(deps, env, reference)
         }
+
         HandleMsg::DepositNative { denom } => {
             let deposit_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             let depositor_address = env.message.sender.clone();
@@ -121,7 +120,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 deposit_amount,
             )
         }
+
         HandleMsg::Borrow { asset, amount } => handle_borrow(deps, env, asset, amount),
+
         HandleMsg::RepayNative { denom } => {
             let repay_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             let repayer_address = env.message.sender.clone();
@@ -135,6 +136,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 AssetType::Native,
             )
         }
+
         HandleMsg::LiquidateNative {
             collateral_asset,
             debt_asset,
@@ -155,6 +157,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
                 receive_ma_token,
             )
         }
+
         HandleMsg::FinalizeLiquidityTokenTransfer {
             sender_address,
             recipient_address,
@@ -170,6 +173,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             recipient_previous_balance,
             amount,
         ),
+
         HandleMsg::UpdateUncollateralizedLoanLimit {
             user_address,
             asset,
@@ -182,6 +186,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
         HandleMsg::DistributeProtocolIncome { asset, amount } => {
             handle_distribute_protocol_income(deps, env, asset, amount)
         }
+
         HandleMsg::Withdraw { asset, amount } => handle_withdraw(deps, env, asset, amount),
     }
 }
@@ -190,7 +195,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    owner: Option<HumanAddr>,
     new_config: CreateOrUpdateConfig,
 ) -> StdResult<HandleResponse> {
     let mut config = config_state_read(&deps.storage).load()?;
@@ -202,9 +206,8 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        treasury_contract_address,
-        insurance_fund_contract_address,
-        staking_contract_address,
+        owner,
+        address_provider_address,
         insurance_fund_fee_share,
         treasury_fee_share,
         ma_token_code_id,
@@ -213,20 +216,10 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
 
     // Update config
     config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
-    config.treasury_contract_address = human_addr_into_canonical(
+    config.address_provider_address = human_addr_into_canonical(
         deps.api,
-        treasury_contract_address,
-        config.treasury_contract_address,
-    )?;
-    config.insurance_fund_contract_address = human_addr_into_canonical(
-        deps.api,
-        insurance_fund_contract_address,
-        config.insurance_fund_contract_address,
-    )?;
-    config.staking_contract_address = human_addr_into_canonical(
-        deps.api,
-        staking_contract_address,
-        config.staking_contract_address,
+        address_provider_address,
+        config.address_provider_address,
     )?;
     config.ma_token_code_id = ma_token_code_id.unwrap_or(config.ma_token_code_id);
     config.close_factor = close_factor.unwrap_or(config.close_factor);
@@ -450,26 +443,34 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
             // Prepare response, should instantiate an maToken
             // and use the Register hook.
             // A new maToken should be created which callbacks this contract in order to be registered.
+            let incentives_address = address_provider::helpers::get_address(
+                &deps,
+                &config.address_provider_address,
+                MarsContract::Incentives,
+            )?;
+
             Ok(HandleResponse {
                 log: vec![log("action", "init_asset"), log("asset", asset_label)],
                 data: None,
                 messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
                     code_id: config.ma_token_code_id,
-                    msg: to_binary(&cw20_token::msg::InitMsg {
-                        name: format!("mars {} debt token", symbol),
+                    msg: to_binary(&ma_token::msg::InitMsg {
+                        name: format!("mars {} liquidity token", symbol),
                         symbol: format!("ma{}", symbol),
                         decimals: 6,
                         initial_balances: vec![],
                         mint: Some(MinterResponse {
-                            minter: HumanAddr::from(env.contract.address.as_str()),
+                            minter: env.contract.address.clone(),
                             cap: None,
                         }),
-                        init_hook: Some(cw20_token::msg::InitHook {
+                        init_hook: Some(ma_token::msg::InitHook {
                             msg: to_binary(&HandleMsg::InitAssetTokenCallback {
                                 reference: asset_reference,
                             })?,
-                            contract_addr: env.contract.address,
+                            contract_addr: env.contract.address.clone(),
                         }),
+                        red_bank_address: env.contract.address,
+                        incentives_address,
                     })?,
                     send: vec![],
                     label: None,
@@ -539,7 +540,7 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-/// Handle deposits and mint corresponding debt tokens
+/// Handle deposits and mint corresponding ma_tokens
 pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
@@ -1371,11 +1372,6 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     // Get config
     let config = config_state_read(&deps.storage).load()?;
 
-    // Only owner can do this
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
-    }
-
     let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
     let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
@@ -1396,11 +1392,24 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
 
     let mut messages = vec![];
 
-    let insurance_fund_address = deps
-        .api
-        .human_address(&config.insurance_fund_contract_address)?;
-    let treasury_fund_address = deps.api.human_address(&config.treasury_contract_address)?;
-    let staking_contract_address = deps.api.human_address(&config.staking_contract_address)?;
+    let mut addresses_query = address_provider::helpers::get_addresses(
+        &deps,
+        &config.address_provider_address,
+        vec![
+            MarsContract::InsuranceFund,
+            MarsContract::Staking,
+            MarsContract::Treasury,
+        ],
+    )?;
+    let treasury_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("treasury address not found"))?;
+    let staking_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("staking address not found"))?;
+    let insurance_fund_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("insurance_fund address not found"))?;
 
     let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
     let treasury_amount = amount_to_distribute * config.treasury_fee_share;
@@ -1431,7 +1440,7 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
             contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: treasury_fund_address,
+                recipient: treasury_address,
                 amount: scaled_mint_amount.into(),
             })?,
         });
@@ -1439,12 +1448,8 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     }
 
     if !staking_amount.is_zero() {
-        let staking_msg = build_send_asset_msg(
-            env.contract.address,
-            staking_contract_address,
-            asset,
-            staking_amount,
-        )?;
+        let staking_msg =
+            build_send_asset_msg(env.contract.address, staking_address, asset, staking_amount)?;
         messages.push(staking_msg);
     }
 
@@ -1488,10 +1493,7 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     let money_market = money_market_state_read(&deps.storage).load()?;
     Ok(ConfigResponse {
         owner: deps.api.human_address(&config.owner)?,
-        treasury_contract_address: deps.api.human_address(&config.treasury_contract_address)?,
-        insurance_fund_contract_address: deps
-            .api
-            .human_address(&config.insurance_fund_contract_address)?,
+        address_provider_address: deps.api.human_address(&config.address_provider_address)?,
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
@@ -2390,9 +2392,8 @@ mod tests {
 
         // Config with base params valid (just update the rest)
         let base_config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             ma_token_code_id: Some(10u64),
             insurance_fund_fee_share: None,
             treasury_fee_share: None,
@@ -2403,16 +2404,14 @@ mod tests {
         // init config with empty params
         // *
         let empty_config = CreateOrUpdateConfig {
-            treasury_contract_address: None,
-            insurance_fund_contract_address: None,
-            staking_contract_address: None,
+            owner: None,
+            address_provider_address: None,
             insurance_fund_fee_share: None,
             treasury_fee_share: None,
             ma_token_code_id: None,
             close_factor: None,
         };
         let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -2434,10 +2433,7 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = init(&mut deps, env, msg);
         assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
@@ -2455,10 +2451,7 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
-        let exceeding_fees_msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let exceeding_fees_msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = init(&mut deps, env.clone(), exceeding_fees_msg);
         assert_generic_error_message(
@@ -2478,10 +2471,7 @@ mod tests {
             close_factor: Some(close_factor),
             ..base_config
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
 
         // we can just call .unwrap() to assert this was a success
         let res = init(&mut deps, env, msg).unwrap();
@@ -2507,16 +2497,14 @@ mod tests {
         let mut treasury_fee_share = Decimal256::from_ratio(3, 10);
         let mut close_factor = Decimal256::from_ratio(1, 4);
         let init_config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             ma_token_code_id: Some(20u64),
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
             config: init_config.clone(),
         };
         // we can just call .unwrap() to assert this was a success
@@ -2527,7 +2515,6 @@ mod tests {
         // non owner is not authorized
         // *
         let msg = UpdateConfig {
-            owner: None,
             config: init_config.clone(),
         };
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
@@ -2541,15 +2528,13 @@ mod tests {
         treasury_fee_share = Decimal256::from_ratio(12, 10);
         close_factor = Decimal256::from_ratio(13, 10);
         let config = CreateOrUpdateConfig {
+            owner: None,
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..init_config.clone()
         };
-        let msg = UpdateConfig {
-            owner: None,
-            config,
-        };
+        let msg = UpdateConfig { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
@@ -2560,14 +2545,12 @@ mod tests {
         // *
         insurance_fund_fee_share = Decimal256::from_ratio(10, 10);
         let config = CreateOrUpdateConfig {
+            owner: None,
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: None,
             ..init_config
         };
-        let exceeding_fees_msg = UpdateConfig {
-            owner: None,
-            config,
-        };
+        let exceeding_fees_msg = UpdateConfig { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let response = handle(&mut deps, env.clone(), exceeding_fees_msg);
         assert_generic_error_message(
@@ -2582,16 +2565,14 @@ mod tests {
         treasury_fee_share = Decimal256::from_ratio(3, 100);
         close_factor = Decimal256::from_ratio(1, 20);
         let config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_addr")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_addr")),
-            staking_contract_address: Some(HumanAddr::from("staking_addr")),
+            owner: Some(HumanAddr::from("new_owner")),
+            address_provider_address: Some(HumanAddr::from("new_address_provider")),
             ma_token_code_id: Some(40u64),
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = UpdateConfig {
-            owner: Some(HumanAddr::from("new_owner")),
             config: config.clone(),
         };
 
@@ -2609,21 +2590,9 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
-            new_config.treasury_contract_address,
+            new_config.address_provider_address,
             deps.api
-                .canonical_address(&config.treasury_contract_address.unwrap())
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.insurance_fund_contract_address,
-            deps.api
-                .canonical_address(&config.insurance_fund_contract_address.unwrap())
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.staking_contract_address,
-            deps.api
-                .canonical_address(&config.staking_contract_address.unwrap())
+                .canonical_address(&config.address_provider_address.unwrap())
                 .unwrap()
         );
         assert_eq!(
@@ -2646,18 +2615,14 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_fund")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
             treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -2824,13 +2789,13 @@ mod tests {
         let money_market = money_market_state_read(&deps.storage).load().unwrap();
         assert_eq!(money_market.reserve_count, 1);
 
-        // should instantiate a debt token
+        // should instantiate a liquidity token
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
                 code_id: 5u64,
-                msg: to_binary(&cw20_token::msg::InitMsg {
-                    name: String::from("mars someasset debt token"),
+                msg: to_binary(&ma_token::msg::InitMsg {
+                    name: String::from("mars someasset liquidity token"),
                     symbol: String::from("masomeasset"),
                     decimals: 6,
                     initial_balances: vec![],
@@ -2838,13 +2803,15 @@ mod tests {
                         minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         cap: None,
                     }),
-                    init_hook: Some(cw20_token::msg::InitHook {
+                    init_hook: Some(ma_token::msg::InitHook {
                         msg: to_binary(&HandleMsg::InitAssetTokenCallback {
                             reference: "someasset".into(),
                         })
                         .unwrap(),
                         contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     }),
+                    red_bank_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                    incentives_address: HumanAddr::from("incentives"),
                 })
                 .unwrap(),
                 send: vec![],
@@ -2985,18 +2952,14 @@ mod tests {
         let mut deps = mock_dependencies(20, &[]);
 
         let config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_fund")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
             treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 
@@ -6242,23 +6205,6 @@ mod tests {
 
         let mut block_time = mock_reserve.interests_last_updated + 10000u64;
 
-        // call function as non-owner
-        let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
-            asset: asset.clone(),
-            amount: None,
-        };
-
-        let random_env = mars::testing::mock_env(
-            "random",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
-        let res_error = handle(&mut deps, random_env, distribute_income_msg).unwrap_err();
-        assert_eq!(res_error, StdError::unauthorized());
-
         // call function providing amount exceeding protocol_income_to_distribute, should fail
         let exceeding_amount = protocol_income_to_distribute + Uint256::from(1_000_u64);
         let distribute_income_msg = HandleMsg::DistributeProtocolIncome {
@@ -6267,8 +6213,8 @@ mod tests {
             },
             amount: Some(exceeding_amount),
         };
-        let owner_env = mars::testing::mock_env(
-            "owner",
+        let env = mars::testing::mock_env(
+            "anyone",
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
@@ -6276,7 +6222,7 @@ mod tests {
             },
         );
 
-        let response = handle(&mut deps, owner_env.clone(), distribute_income_msg);
+        let response = handle(&mut deps, env.clone(), distribute_income_msg);
         assert_generic_error_message(
             response,
             "amount specified exceeds reserve's income to be distributed",
@@ -6288,7 +6234,7 @@ mod tests {
             asset: asset.clone(),
             amount: Some(permissible_amount),
         };
-        let res = handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap();
+        let res = handle(&mut deps, env.clone(), distribute_income_msg).unwrap();
 
         let config = config_state_read(&deps.storage).load().unwrap();
         let reserve_after_distribution = reserves_state_read(&deps.storage)
@@ -6301,14 +6247,14 @@ mod tests {
             permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
 
         let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&reserve_initial, owner_env.block.time);
+            / get_updated_liquidity_index(&reserve_initial, env.block.time);
 
         assert_eq!(
             res.messages,
             vec![
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("insurance_contract"),
+                    to_address: HumanAddr::from("insurance_fund"),
                     amount: vec![Coin {
                         denom: "somecoin".to_string(),
                         amount: expected_insurance_fund_amount.into(),
@@ -6321,14 +6267,14 @@ mod tests {
                         .unwrap(),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Mint {
-                        recipient: HumanAddr::from("treasury_contract"),
+                        recipient: HumanAddr::from("treasury"),
                         amount: scaled_mint_amount.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("staking_contract"),
+                    to_address: HumanAddr::from("staking"),
                     amount: vec![Coin {
                         denom: "somecoin".to_string(),
                         amount: expected_staking_amount.into(),
@@ -6354,8 +6300,8 @@ mod tests {
 
         // call function without providing an amount, should send full remaining amount to contracts
         block_time += 1000;
-        let owner_env = mars::testing::mock_env(
-            "owner",
+        let env = mars::testing::mock_env(
+            "anyone",
             MockEnvParams {
                 sent_funds: &[],
                 block_time,
@@ -6366,7 +6312,7 @@ mod tests {
             asset,
             amount: None,
         };
-        let res = handle(&mut deps, owner_env.clone(), distribute_income_msg).unwrap();
+        let res = handle(&mut deps, env.clone(), distribute_income_msg).unwrap();
 
         // verify messages are correct and protocol_income_to_distribute field is now zero
         let expected_insurance_amount =
@@ -6377,14 +6323,14 @@ mod tests {
             - (expected_insurance_amount + expected_treasury_amount);
 
         let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&reserve_after_distribution, owner_env.block.time);
+            / get_updated_liquidity_index(&reserve_after_distribution, env.block.time);
 
         assert_eq!(
             res.messages,
             vec![
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("insurance_contract"),
+                    to_address: HumanAddr::from("insurance_fund"),
                     amount: vec![Coin {
                         denom: "somecoin".to_string(),
                         amount: expected_insurance_fund_amount.into(),
@@ -6397,14 +6343,14 @@ mod tests {
                         .unwrap(),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Mint {
-                        recipient: HumanAddr::from("treasury_contract"),
+                        recipient: HumanAddr::from("treasury"),
                         amount: scaled_mint_amount.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("staking_contract"),
+                    to_address: HumanAddr::from("staking"),
                     amount: vec![Coin {
                         denom: "somecoin".to_string(),
                         amount: expected_staking_amount.into(),
@@ -6436,18 +6382,14 @@ mod tests {
         let mut deps = mock_dependencies(20, contract_balances);
 
         let config = CreateOrUpdateConfig {
-            treasury_contract_address: Some(HumanAddr::from("treasury_contract")),
-            insurance_fund_contract_address: Some(HumanAddr::from("insurance_contract")),
-            staking_contract_address: Some(HumanAddr::from("staking_contract")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
             treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
             ma_token_code_id: Some(1u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         init(&mut deps, env, msg).unwrap();
 

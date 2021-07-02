@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128,
+    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
+    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
@@ -57,6 +57,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
     token_info(&mut deps.storage).save(&data)?;
 
+    // store token config
     state::save_config(
         &mut deps.storage,
         &Config {
@@ -65,8 +66,18 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
         },
     )?;
 
-    // store token config
-    Ok(InitResponse::default())
+    if let Some(hook) = msg.init_hook {
+        Ok(InitResponse {
+            messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: hook.contract_addr,
+                msg: hook.msg,
+                send: vec![],
+            })],
+            log: vec![],
+        })
+    } else {
+        Ok(InitResponse::default())
+    }
 }
 
 pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
@@ -484,6 +495,7 @@ mod tests {
                 amount,
             }],
             mint: mint.clone(),
+            init_hook: None,
             red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
@@ -511,6 +523,7 @@ mod tests {
         let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
         let amount = Uint128::from(11223344u128);
         let red_bank_address = HumanAddr::from("red_bank");
+        let send_msg = Binary::from(br#"{"some":123}"#);
 
         let init_msg = InitMsg {
             name: "Cash Token".to_string(),
@@ -521,12 +534,23 @@ mod tests {
                 amount,
             }],
             mint: None,
+            init_hook: Some(mars::ma_token::msg::InitHook {
+                msg: send_msg.clone(),
+                contract_addr: HumanAddr::from("some_contract"),
+            }),
             red_bank_address: red_bank_address.clone(),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
         let res = init(&mut deps, env, init_msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(
+            vec![CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: HumanAddr::from("some_contract"),
+                msg: send_msg,
+                send: vec![],
+            })],
+            res.messages
+        );
 
         assert_eq!(
             query_token_info(&deps).unwrap(),
@@ -563,6 +587,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
+            init_hook: None,
             red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
@@ -607,6 +632,7 @@ mod tests {
                 minter,
                 cap: Some(limit),
             }),
+            init_hook: None,
             red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
@@ -731,6 +757,7 @@ mod tests {
                 },
             ],
             mint: None,
+            init_hook: None,
             red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };

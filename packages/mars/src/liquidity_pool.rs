@@ -7,15 +7,13 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
-        pub owner: HumanAddr,
         pub config: CreateOrUpdateConfig,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CreateOrUpdateConfig {
-        pub treasury_contract_address: Option<HumanAddr>,
-        pub insurance_fund_contract_address: Option<HumanAddr>,
-        pub staking_contract_address: Option<HumanAddr>,
+        pub owner: Option<HumanAddr>,
+        pub address_provider_address: Option<HumanAddr>,
         pub insurance_fund_fee_share: Option<Decimal256>,
         pub treasury_fee_share: Option<Decimal256>,
         pub ma_token_code_id: Option<u64>,
@@ -26,10 +24,7 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
         /// Update LP config
-        UpdateConfig {
-            owner: Option<HumanAddr>,
-            config: CreateOrUpdateConfig,
-        },
+        UpdateConfig { config: CreateOrUpdateConfig },
 
         /// Implementation of cw20 receive msg
         Receive(Cw20ReceiveMsg),
@@ -41,6 +36,7 @@ pub mod msg {
             /// Asset parameters
             asset_params: InitOrUpdateAssetParams,
         },
+
         /// Update an asset on the money market
         UpdateAsset {
             /// Asset related info
@@ -48,27 +44,32 @@ pub mod msg {
             /// Asset parameters
             asset_params: InitOrUpdateAssetParams,
         },
+
         /// Callback sent from maToken contract after instantiated
         InitAssetTokenCallback {
             /// Either the denom for a terra native asset or address for a cw20 token
             reference: Vec<u8>,
         },
+
         /// Deposit Terra native coins
         DepositNative {
             /// Denom used in Terra (e.g: uluna, uusd)
             denom: String,
         },
+
         /// Borrow Terra native coins
         Borrow {
             /// Denom used in Terra (e.g: uluna, uusd)
             asset: Asset,
             amount: Uint256,
         },
+
         /// Repay Terra native coins loan
         RepayNative {
             /// Denom used in Terra (e.g: uluna, uusd)
             denom: String,
         },
+
         /// Liquidate under-collateralized native loans
         LiquidateNative {
             /// Details for collateral asset
@@ -80,6 +81,7 @@ pub mod msg {
             /// Sends maAsset to liquidator if true and underlying collateral asset if false
             receive_ma_token: bool,
         },
+
         /// Called by liquidity token. Validate liquidity token transfer is valid
         /// and update collateral status
         FinalizeLiquidityTokenTransfer {
@@ -89,14 +91,17 @@ pub mod msg {
             recipient_previous_balance: Uint128,
             amount: Uint128,
         },
+
         /// Update uncollateralized loan limit
         UpdateUncollateralizedLoanLimit {
             user_address: HumanAddr,
             asset: Asset,
             new_limit: Uint128,
         },
+
         /// Update (enable / disable) asset as collateral
         UpdateUserCollateralAssetStatus { asset: Asset, enable: bool },
+
         /// Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts
         DistributeProtocolIncome {
             /// Asset reserve fees to distribute
@@ -104,6 +109,7 @@ pub mod msg {
             /// Amount to distribute to protocol contracts, defaults to full amount if not specified
             amount: Option<Uint256>,
         },
+
         /// Withdraw asset
         Withdraw {
             asset: Asset,
@@ -152,8 +158,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
         pub owner: HumanAddr,
-        pub treasury_contract_address: HumanAddr,
-        pub insurance_fund_contract_address: HumanAddr,
+        pub address_provider_address: HumanAddr,
         pub insurance_fund_fee_share: Decimal256,
         pub treasury_fee_share: Decimal256,
         pub ma_token_code_id: u64,
