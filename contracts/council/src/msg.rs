@@ -82,6 +82,8 @@ pub enum QueryMsg {
     Proposals {
         start: Option<u64>,
         limit: Option<u32>,
+        sort: Option<Sort>,
+        filter: Option<ProposalsFilter>,
     },
     Proposal {
         proposal_id: u64,
@@ -91,7 +93,7 @@ pub enum QueryMsg {
         proposal_id: u64,
         start: Option<u64>,
         limit: Option<u32>,
-        sort: Option<ProposalVotesSort>,
+        sort: Option<Sort>,
         filter: Option<ProposalVotesFilter>,
     },
 }
@@ -135,9 +137,14 @@ pub struct ProposalInfo {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ProposalVotesSort {
+pub enum Sort {
     Ascending,
     Descending,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
+pub struct ProposalsFilter {
+    pub status: Option<ProposalStatus>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]

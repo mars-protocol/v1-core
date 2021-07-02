@@ -11,7 +11,7 @@ use mars::xmars_token;
 use crate::msg::{
     ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
     ProposalInfo, ProposalVoteResponse, ProposalVotesFilter, ProposalVotesResponse,
-    ProposalVotesSort, ProposalsListResponse, QueryMsg, ReceiveMsg,
+    ProposalsFilter, ProposalsListResponse, QueryMsg, ReceiveMsg, Sort,
 };
 use crate::state;
 use crate::state::{
@@ -26,7 +26,7 @@ const MIN_DESC_LENGTH: usize = 4;
 const MAX_DESC_LENGTH: usize = 1024;
 const MIN_LINK_LENGTH: usize = 12;
 const MAX_LINK_LENGTH: usize = 128;
-const DEFAULT_START: u64 = 1;
+const DEFAULT_START: u64 = 0;
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 30;
 
@@ -608,7 +608,12 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
+        QueryMsg::Proposals {
+            start,
+            limit,
+            sort,
+            filter,
+        } => to_binary(&query_proposals(deps, start, limit, sort, filter)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
         QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
         QueryMsg::ProposalVotes {
@@ -662,16 +667,28 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     start: Option<u64>,
     limit: Option<u32>,
+    sort: Option<Sort>,
+    filter: Option<ProposalsFilter>,
 ) -> StdResult<ProposalsListResponse> {
-    let council = state::council_read(&deps.storage).load().unwrap();
-    let start = start.unwrap_or(DEFAULT_START).to_be_bytes();
+    let start = start.unwrap_or(DEFAULT_START) as usize;
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let sort = sort.unwrap_or(Sort::Descending);
+
     let proposals = state::proposals_read(&deps.storage);
-    let proposals_list: StdResult<Vec<_>> = proposals
-        .range(Option::from(&start[..]), None, Order::Ascending)
-        .take(limit)
-        .map(|item| {
-            let (k, v) = item?;
+    let proposals_filtered: StdResult<Vec<_>> = proposals
+        .range(None, None, Order::Ascending)
+        .filter(|proposal| match &filter {
+            Some(filter) => match &filter.status {
+                Some(status) => {
+                    let (_, v) = proposal.as_ref().unwrap();
+                    &v.status == status
+                }
+                None => true,
+            },
+            None => true,
+        })
+        .map(|proposal| {
+            let (k, v) = proposal?;
             let proposal_id = read_be_u64(k.as_slice())?;
 
             Ok(ProposalInfo {
@@ -691,9 +708,35 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
         })
         .collect();
 
+    let mut proposals_sorted = proposals_filtered?;
+    match sort {
+        Sort::Ascending => {
+            proposals_sorted.sort_by(|a, b| a.end_height.cmp(&b.end_height));
+        }
+        Sort::Descending => {
+            proposals_sorted.sort_by(|a, b| b.end_height.cmp(&a.end_height));
+        }
+    }
+
+    let proposal_count = proposals_sorted.len();
+
+    let end = if (start + limit) < proposal_count {
+        start + limit
+    } else {
+        proposal_count
+    };
+    if start > end {
+        return Ok(ProposalsListResponse {
+            proposal_count: proposal_count as u64,
+            proposal_list: vec![],
+        });
+    }
+
+    let proposals_paginated = proposals_sorted[start..end].to_vec();
+
     Ok(ProposalsListResponse {
-        proposal_count: council.proposal_count,
-        proposal_list: proposals_list?,
+        proposal_count: proposal_count as u64,
+        proposal_list: proposals_paginated,
     })
 }
 
@@ -761,12 +804,12 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
     proposal_id: u64,
     start: Option<u64>,
     limit: Option<u32>,
-    sort: Option<ProposalVotesSort>,
+    sort: Option<Sort>,
     filter: Option<ProposalVotesFilter>,
 ) -> StdResult<ProposalVotesResponse> {
-    let start = start.unwrap_or(0) as usize;
+    let start = start.unwrap_or(DEFAULT_START) as usize;
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let sort = sort.unwrap_or(ProposalVotesSort::Descending);
+    let sort = sort.unwrap_or(Sort::Descending);
 
     let voter_canonical_address = match &filter {
         Some(filter) => match &filter.voter_address {
@@ -816,10 +859,10 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
 
     let mut votes_sorted = votes_filtered?;
     match sort {
-        ProposalVotesSort::Ascending => {
+        Sort::Ascending => {
             votes_sorted.sort_by(|a, b| a.power.cmp(&b.power));
         }
-        ProposalVotesSort::Descending => {
+        Sort::Descending => {
             votes_sorted.sort_by(|a, b| b.power.cmp(&a.power));
         }
     }
@@ -1734,6 +1777,163 @@ mod tests {
     }
 
     #[test]
+    fn test_query_proposals() {
+        // Arrange
+        let mut deps = th_setup(&[]);
+
+        let active_proposal_1_id = 1_u64;
+        let active_proposal_1 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_1_id,
+                status: ProposalStatus::Executed,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_1_id.to_be_bytes(), &active_proposal_1)
+            .unwrap();
+
+        let active_proposal_2_id = 2_u64;
+        let active_proposal_2 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_2_id,
+                status: ProposalStatus::Active,
+                start_height: 100_001,
+                end_height: 100_101,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_2_id.to_be_bytes(), &active_proposal_2)
+            .unwrap();
+
+        let active_proposal_3_id = 3_u64;
+        let active_proposal_3 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_3_id,
+                status: ProposalStatus::Active,
+                start_height: 100_002,
+                end_height: 100_102,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_3_id.to_be_bytes(), &active_proposal_3)
+            .unwrap();
+
+        // Assert default params
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_count, 3);
+        assert_eq!(res.proposal_list.len(), 3);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_3_id); // Default sort end_height desc
+
+        // Assert start != 0
+        let res = query_proposals(
+            &deps,
+            Option::from(1),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 2);
+        // Assert total count still returned on pagination
+        assert_eq!(res.proposal_count, 3);
+
+        // Assert start = last items index
+        let res = query_proposals(
+            &deps,
+            Option::from(2),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 1);
+
+        // Assert start > length of collection
+        let res = query_proposals(
+            &deps,
+            Option::from(99),
+            Option::None,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 0);
+
+        // Assert limit
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::from(1),
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 1);
+
+        // Assert limit greater than length of collection
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::from(99),
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 3);
+
+        // Assert corectly sorts desc
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::None,
+            Option::from(Sort::Descending),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_3_id);
+
+        // Assert corectly sorts asc
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::None,
+            Option::from(Sort::Ascending),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
+
+        // Assert correctly filters by proposal status
+        let res = query_proposals(
+            &deps,
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::from(ProposalsFilter {
+                status: Option::from(ProposalStatus::Executed),
+            }),
+        )
+        .unwrap();
+        assert_eq!(res.proposal_list.len(), 1);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
+    }
+
+    #[test]
     fn test_query_proposal_votes() {
         // Arrange
         let mut deps = th_setup(&[]);
@@ -1909,7 +2109,7 @@ mod tests {
             active_proposal_id,
             Option::None,
             Option::None,
-            Option::from(ProposalVotesSort::Descending),
+            Option::from(Sort::Descending),
             Option::None,
         )
         .unwrap();
@@ -1923,7 +2123,7 @@ mod tests {
             active_proposal_id,
             Option::None,
             Option::None,
-            Option::from(ProposalVotesSort::Ascending),
+            Option::from(Sort::Ascending),
             Option::None,
         )
         .unwrap();
