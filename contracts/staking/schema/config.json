@@ -4,28 +4,27 @@
   "description": "Treasury global configuration",
   "type": "object",
   "required": [
+    "address_provider_address",
     "cooldown_duration",
-    "mars_token_address",
     "owner",
     "terraswap_factory_address",
     "terraswap_max_spread",
-    "unstake_window",
-    "xmars_token_address"
+    "unstake_window"
   ],
   "properties": {
-    "cooldown_duration": {
-      "description": "Cooldown duration in seconds",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
-    "mars_token_address": {
-      "description": "Mars token address",
+    "address_provider_address": {
+      "description": "Address provider address",
       "allOf": [
         {
           "$ref": "#/definitions/CanonicalAddr"
         }
       ]
+    },
+    "cooldown_duration": {
+      "description": "Cooldown duration in seconds",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
     "owner": {
       "description": "Contract owner",
@@ -56,14 +55,6 @@
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
-    },
-    "xmars_token_address": {
-      "description": "xMars token address",
-      "allOf": [
-        {
-          "$ref": "#/definitions/CanonicalAddr"
-        }
-      ]
     }
   },
   "definitions": {

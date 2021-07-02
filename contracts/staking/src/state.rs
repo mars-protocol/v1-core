@@ -18,10 +18,8 @@ pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
 pub struct Config {
     /// Contract owner
     pub owner: CanonicalAddr,
-    /// Mars token address
-    pub mars_token_address: CanonicalAddr,
-    /// xMars token address
-    pub xmars_token_address: CanonicalAddr,
+    /// Address provider address
+    pub address_provider_address: CanonicalAddr,
     /// Terraswap factory contract address
     pub terraswap_factory_address: CanonicalAddr,
     /// Terraswap max spread

@@ -1,7 +1,7 @@
 use cosmwasm_std::{
-    from_binary, log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Querier, StdError,
-    StdResult, Storage, Uint128, WasmMsg,
+    from_binary, log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr,
+    InitResponse, MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage, Uint128,
+    WasmMsg,
 };
 
 use crate::state;
@@ -9,13 +9,14 @@ use crate::state::{Config, Cooldown};
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, human_addr_into_canonical};
 
-use mars::swapping::handle_swap;
-use terraswap::asset::AssetInfo;
-
+use mars::address_provider;
+use mars::address_provider::msg::MarsContract;
 use mars::staking::msg::{
     ConfigResponse, CooldownResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg,
     QueryMsg, ReceiveMsg,
 };
+use mars::swapping::handle_swap;
+use terraswap::asset::AssetInfo;
 
 // INIT
 
@@ -27,7 +28,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        mars_token_address,
+        owner,
+        address_provider_address,
         terraswap_factory_address,
         terraswap_max_spread,
         cooldown_duration,
@@ -35,7 +37,8 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     } = msg.config;
 
     // All fields should be available
-    let available = mars_token_address.is_some()
+    let available = owner.is_some()
+        && address_provider_address.is_some()
         && terraswap_factory_address.is_some()
         && terraswap_max_spread.is_some()
         && cooldown_duration.is_some()
@@ -49,9 +52,10 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     // Initialize config
     let config = Config {
-        owner: deps.api.canonical_address(&msg.owner)?,
-        mars_token_address: deps.api.canonical_address(&mars_token_address.unwrap())?,
-        xmars_token_address: CanonicalAddr::default(),
+        owner: deps.api.canonical_address(&owner.unwrap())?,
+        address_provider_address: deps
+            .api
+            .canonical_address(&address_provider_address.unwrap())?,
         terraswap_factory_address: deps
             .api
             .canonical_address(&terraswap_factory_address.unwrap())?,
@@ -73,11 +77,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
     msg: HandleMsg,
 ) -> StdResult<HandleResponse> {
     match msg {
-        HandleMsg::UpdateConfig {
-            owner,
-            xmars_token_address,
-            config,
-        } => handle_update_config(deps, env, owner, xmars_token_address, config),
+        HandleMsg::UpdateConfig { config } => handle_update_config(deps, env, config),
         HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
         HandleMsg::Cooldown {} => handle_cooldown(deps, env),
         HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
@@ -93,8 +93,6 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    owner: Option<HumanAddr>,
-    xmars_token_address: Option<HumanAddr>,
     new_config: CreateOrUpdateConfig,
 ) -> StdResult<HandleResponse> {
     let mut config = state::config_read(&deps.storage).load()?;
@@ -106,7 +104,8 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
-        mars_token_address,
+        owner,
+        address_provider_address,
         terraswap_factory_address,
         terraswap_max_spread,
         cooldown_duration,
@@ -115,10 +114,11 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
 
     // Update config
     config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
-    config.xmars_token_address =
-        human_addr_into_canonical(deps.api, xmars_token_address, config.xmars_token_address)?;
-    config.mars_token_address =
-        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
+    config.address_provider_address = human_addr_into_canonical(
+        deps.api,
+        address_provider_address,
+        config.address_provider_address,
+    )?;
     config.terraswap_factory_address = human_addr_into_canonical(
         deps.api,
         terraswap_factory_address,
@@ -163,27 +163,23 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     // check stake is valid
     let config = state::config_read(&deps.storage).load()?;
+    let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
+
     // Has to send Mars tokens
-    if deps.api.canonical_address(&env.message.sender)? != config.mars_token_address {
+    if env.message.sender != mars_token_address {
         return Err(StdError::unauthorized());
     }
     if stake_amount == Uint128(0) {
         return Err(StdError::generic_err("Stake amount must be greater than 0"));
     }
 
-    let total_mars_in_staking_contract = cw20_get_balance(
-        &deps.querier,
-        deps.api.human_address(&config.mars_token_address)?,
-        env.contract.address,
-    )?;
+    let total_mars_in_staking_contract =
+        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
     // Mars amount needs to be before the stake transaction (which is already in the staking contract's
     // balance so it needs to be deducted)
     let net_total_mars_in_staking_contract = (total_mars_in_staking_contract - stake_amount)?;
 
-    let total_xmars_supply = cw20_get_total_supply(
-        &deps.querier,
-        deps.api.human_address(&config.xmars_token_address)?,
-    )?;
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
     let mint_amount =
         if net_total_mars_in_staking_contract == Uint128(0) || total_xmars_supply == Uint128(0) {
@@ -196,7 +192,7 @@ pub fn handle_stake<S: Storage, A: Api, Q: Querier>(
 
     Ok(HandleResponse {
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&config.xmars_token_address)?,
+            contract_addr: xmars_token_address,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: recipient.clone(),
@@ -224,7 +220,8 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     // check if unstake is valid
     let config = state::config_read(&deps.storage).load()?;
-    if deps.api.canonical_address(&env.message.sender)? != config.xmars_token_address {
+    let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
+    if env.message.sender != xmars_token_address {
         return Err(StdError::unauthorized());
     }
     if burn_amount == Uint128(0) {
@@ -269,14 +266,11 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
 
     let total_mars_in_staking_contract = cw20_get_balance(
         &deps.querier,
-        deps.api.human_address(&config.mars_token_address)?,
+        mars_token_address.clone(),
         env.contract.address,
     )?;
 
-    let total_xmars_supply = cw20_get_total_supply(
-        &deps.querier,
-        deps.api.human_address(&config.xmars_token_address)?,
-    )?;
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
     let unstake_amount =
         burn_amount.multiply_ratio(total_mars_in_staking_contract, total_xmars_supply);
@@ -286,14 +280,14 @@ pub fn handle_unstake<S: Storage, A: Api, Q: Querier>(
     Ok(HandleResponse {
         messages: vec![
             CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps.api.human_address(&config.xmars_token_address)?,
+                contract_addr: xmars_token_address,
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Burn {
                     amount: burn_amount,
                 })?,
             }),
             CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps.api.human_address(&config.mars_token_address)?,
+                contract_addr: mars_token_address,
                 send: vec![],
                 msg: to_binary(&Cw20HandleMsg::Transfer {
                     recipient: recipient.clone(),
@@ -321,10 +315,16 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let config = state::config_read(&deps.storage).load()?;
 
+    let xmars_token_address = address_provider::helpers::get_address(
+        &deps,
+        &config.address_provider_address,
+        MarsContract::XMarsToken,
+    )?;
+
     // get total xMars in contract before the stake transaction
     let xmars_balance = cw20_get_balance(
         &deps.querier,
-        deps.api.human_address(&config.xmars_token_address)?,
+        xmars_token_address,
         env.message.sender.clone(),
     )?;
 
@@ -408,9 +408,14 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     let config = state::config_read(&deps.storage).load()?;
 
     // throw error if the user tries to swap Mars
-    let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
+    let mars_token_address = address_provider::helpers::get_address(
+        &deps,
+        &config.address_provider_address,
+        MarsContract::MarsToken,
+    )?;
+
     if let AssetInfo::Token { contract_addr } = offer_asset_info.clone() {
-        if contract_addr == mars_token_human_addr {
+        if contract_addr == mars_token_address {
             return Err(StdError::generic_err("Cannot swap Mars"));
         }
     }
@@ -444,9 +449,14 @@ pub fn handle_swap_uusd_to_mars<S: Storage, A: Api, Q: Querier>(
         denom: "uusd".to_string(),
     };
 
-    let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
+    let mars_token_address = address_provider::helpers::get_address(
+        &deps,
+        &config.address_provider_address,
+        MarsContract::MarsToken,
+    )?;
+
     let ask_asset_info = AssetInfo::Token {
-        contract_addr: mars_token_human_addr,
+        contract_addr: mars_token_address,
     };
 
     let terraswap_factory_human_addr = deps.api.human_address(&config.terraswap_factory_address)?;
@@ -480,8 +490,7 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     let config = state::config_read(&deps.storage).load()?;
     Ok(ConfigResponse {
         owner: deps.api.human_address(&config.owner)?,
-        mars_token_address: deps.api.human_address(&config.mars_token_address)?,
-        xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+        address_provider_address: deps.api.human_address(&config.address_provider_address)?,
         terraswap_max_spread: config.terraswap_max_spread,
         cooldown_duration: config.cooldown_duration,
         unstake_window: config.unstake_window,
@@ -516,6 +525,26 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 // HELPERS
 
+/// Gets mars and xmars token addresses from address provider and returns them in a tuple.
+fn get_token_addresses<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    config: &Config,
+) -> StdResult<(HumanAddr, HumanAddr)> {
+    let mut addresses_query = address_provider::helpers::get_addresses(
+        &deps,
+        &config.address_provider_address,
+        vec![MarsContract::MarsToken, MarsContract::XMarsToken],
+    )?;
+    let xmars_token_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("xmars token address not found"))?;
+    let mars_token_address = addresses_query
+        .pop()
+        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
+
+    Ok((mars_token_address, xmars_token_address))
+}
+
 // TESTS
 
 #[cfg(test)]
@@ -540,14 +569,14 @@ mod tests {
         // init config with empty params
         // *
         let empty_config = CreateOrUpdateConfig {
-            mars_token_address: None,
+            owner: None,
+            address_provider_address: None,
             terraswap_factory_address: None,
             terraswap_max_spread: None,
             cooldown_duration: None,
             unstake_window: None,
         };
         let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
             config: empty_config,
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -558,16 +587,14 @@ mod tests {
         );
 
         let config = CreateOrUpdateConfig {
-            mars_token_address: Some(HumanAddr::from("mars_token")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
             terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = mock_env("owner", MockEnvParams::default());
 
         let res = init(&mut deps, env, msg).unwrap();
@@ -580,12 +607,12 @@ mod tests {
                 .unwrap(),
             config.owner
         );
-        let mars_token_canonical_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("mars_token"))
-            .unwrap();
-        assert_eq!(config.mars_token_address, mars_token_canonical_address);
-        assert_eq!(CanonicalAddr::default(), config.xmars_token_address);
+        assert_eq!(
+            config.address_provider_address,
+            deps.api
+                .canonical_address(&HumanAddr::from("address_provider"))
+                .unwrap()
+        );
     }
 
     #[test]
@@ -596,14 +623,14 @@ mod tests {
         // init config with valid params
         // *
         let init_config = CreateOrUpdateConfig {
-            mars_token_address: Some(HumanAddr::from("mars_token")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
             terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
         let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
             config: init_config.clone(),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -613,8 +640,6 @@ mod tests {
         // non owner is not authorized
         // *
         let msg = UpdateConfig {
-            owner: None,
-            xmars_token_address: None,
             config: init_config,
         };
         let env = cosmwasm_std::testing::mock_env("somebody", &[]);
@@ -625,15 +650,14 @@ mod tests {
         // update config with all new params
         // *
         let config = CreateOrUpdateConfig {
-            mars_token_address: Some(HumanAddr::from("new_mars_addr")),
+            owner: Some(HumanAddr::from("new_owner")),
+            address_provider_address: Some(HumanAddr::from("new_address_provider")),
             terraswap_factory_address: Some(HumanAddr::from("new_factory")),
             terraswap_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
             cooldown_duration: Some(200),
             unstake_window: Some(100),
         };
         let msg = UpdateConfig {
-            owner: Some(HumanAddr::from("new_owner")),
-            xmars_token_address: Some(HumanAddr::from("new_xmars_addr")),
             config: config.clone(),
         };
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
@@ -651,15 +675,9 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
-            new_config.xmars_token_address,
+            new_config.address_provider_address,
             deps.api
-                .canonical_address(&HumanAddr::from("new_xmars_addr"))
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.mars_token_address,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_mars_addr"))
+                .canonical_address(&HumanAddr::from("new_address_provider"))
                 .unwrap()
         );
         assert_eq!(
@@ -1223,17 +1241,12 @@ mod tests {
     #[test]
     fn test_cannot_swap_mars() {
         let mut deps = th_setup(&[]);
-
-        let config = state::config(&mut deps.storage).load().unwrap();
-        let config_mars_token_human_addr =
-            deps.api.human_address(&config.mars_token_address).unwrap();
-
         // *
         // can't swap Mars with SwapAssetToUusd
         // *
         let msg = HandleMsg::SwapAssetToUusd {
             offer_asset_info: AssetInfo::Token {
-                contract_addr: config_mars_token_human_addr,
+                contract_addr: HumanAddr::from("mars_token"),
             },
             amount: None,
         };
@@ -1248,26 +1261,16 @@ mod tests {
 
         // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
-            mars_token_address: Some(HumanAddr::from("mars_token")),
+            owner: Some(HumanAddr::from("owner")),
+            address_provider_address: Some(HumanAddr::from("address_provider")),
             terraswap_factory_address: Some(HumanAddr::from("terraswap_factory")),
             terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(TEST_COOLDOWN_DURATION),
             unstake_window: Some(TEST_UNSTAKE_WINDOW),
         };
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
-            config,
-        };
+        let msg = InitMsg { config };
         let env = mock_env("owner", MockEnvParams::default());
-        let _res = init(&mut deps, env, msg).unwrap();
-
-        let mut config_singleton = state::config(&mut deps.storage);
-        let mut config = config_singleton.load().unwrap();
-        config.xmars_token_address = deps
-            .api
-            .canonical_address(&HumanAddr::from("xmars_token"))
-            .unwrap();
-        config_singleton.save(&config).unwrap();
+        init(&mut deps, env, msg).unwrap();
 
         deps
     }

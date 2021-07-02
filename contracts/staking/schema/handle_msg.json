@@ -17,26 +17,6 @@
           "properties": {
             "config": {
               "$ref": "#/definitions/CreateOrUpdateConfig"
-            },
-            "owner": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "xmars_token_address": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                },
-                {
-                  "type": "null"
-                }
-              ]
             }
           }
         }
@@ -62,18 +42,6 @@
       ],
       "properties": {
         "cooldown": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Callback to initialize xMars token",
-      "type": "object",
-      "required": [
-        "init_token_callback"
-      ],
-      "properties": {
-        "init_token_callback": {
           "type": "object"
         }
       }
@@ -298,6 +266,16 @@
     "CreateOrUpdateConfig": {
       "type": "object",
       "properties": {
+        "address_provider_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cooldown_duration": {
           "type": [
             "integer",
@@ -306,7 +284,7 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "mars_token_address": {
+        "owner": {
           "anyOf": [
             {
               "$ref": "#/definitions/HumanAddr"
