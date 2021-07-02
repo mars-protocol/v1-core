@@ -27,12 +27,8 @@ pub static UNCOLLATERALIZED_LOAN_LIMITS_NAMESPACE: &[u8] = b"uncollateralized_lo
 pub struct Config {
     /// Contract owner
     pub owner: CanonicalAddr,
-    /// Protocol treasury contract address
-    pub treasury_contract_address: CanonicalAddr,
-    /// Protocol insurance fund contract address
-    pub insurance_fund_contract_address: CanonicalAddr,
-    /// Protocol staking contract address
-    pub staking_contract_address: CanonicalAddr,
+    /// Address provider returns addresses for all protocol contracts
+    pub address_provider_address: CanonicalAddr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
     /// Maximum percentage of outstanding debt that can be covered by a liquidator

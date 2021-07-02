@@ -84,6 +84,7 @@ mod tests {
                 amount,
             }],
             mint: None,
+            init_hook: None,
             red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
