@@ -3,26 +3,47 @@
   "title": "ConfigResponse",
   "type": "object",
   "required": [
-    "mars_token_address",
-    "proposal_required_deposit",
-    "xmars_token_address"
+    "address_provider_address",
+    "close_factor",
+    "insurance_fund_fee_share",
+    "ma_token_code_id",
+    "owner",
+    "reserve_count",
+    "treasury_fee_share"
   ],
   "properties": {
-    "mars_token_address": {
+    "address_provider_address": {
       "$ref": "#/definitions/HumanAddr"
     },
-    "proposal_required_deposit": {
-      "$ref": "#/definitions/Uint128"
+    "close_factor": {
+      "$ref": "#/definitions/Decimal256"
     },
-    "xmars_token_address": {
+    "insurance_fund_fee_share": {
+      "$ref": "#/definitions/Decimal256"
+    },
+    "ma_token_code_id": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "owner": {
       "$ref": "#/definitions/HumanAddr"
+    },
+    "reserve_count": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    },
+    "treasury_fee_share": {
+      "$ref": "#/definitions/Decimal256"
     }
   },
   "definitions": {
-    "HumanAddr": {
+    "Decimal256": {
+      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
       "type": "string"
     },
-    "Uint128": {
+    "HumanAddr": {
       "type": "string"
     }
   }
