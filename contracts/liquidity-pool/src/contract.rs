@@ -1882,7 +1882,7 @@ fn get_updated_interest_rates(
     let p = kp * error_value;
     let mut new_borrow_rate = if error_positive {
         // error_positive = true (u_optimal > u) means we want utilization rate to go up
-        // so we lower interest rate (so more people borrow)
+        // we lower interest rate so more people borrow
         if reserve.borrow_rate > p {
             reserve.borrow_rate - p
         } else {
@@ -1890,7 +1890,7 @@ fn get_updated_interest_rates(
         }
     } else {
         // error_positive = false (u_optimal < u) means we want utilization rate to go down
-        // so we increase interest rate (so less people borrow)
+        // we increase interest rate so less people borrow
         reserve.borrow_rate + p
     };
 
@@ -2747,10 +2747,49 @@ mod tests {
         assert_generic_error_message(
             response,
             "liquidation_threshold should be greater than loan_to_value. \
-                    old_liquidation_threshold: 0, \
-                    old_loan_to_value: 0, \
-                    new_liquidation_threshold: 0.5, \
-                    new_loan_to_value: 0.5",
+                    liquidation_threshold: 0.5, \
+                    loan_to_value: 0.5",
+        );
+
+        // *
+        // init asset where min borrow rate >= max borrow rate
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            min_borrow_rate: Some(Decimal256::from_ratio(5, 10)),
+            max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params,
+        };
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5",
+        );
+
+        // *
+        // init asset where optimal utilization rate > 1
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params,
+        };
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "Optimal utilization rate can't be greater than one",
         );
 
         // *
@@ -3049,10 +3088,49 @@ mod tests {
         assert_generic_error_message(
             response,
             "liquidation_threshold should be greater than loan_to_value. \
-                    old_liquidation_threshold: 0.8, \
-                    old_loan_to_value: 0.5, \
-                    new_liquidation_threshold: 0.5, \
-                    new_loan_to_value: 0.6",
+                    liquidation_threshold: 0.5, \
+                    loan_to_value: 0.6",
+        );
+
+        // *
+        // init asset where min borrow rate >= max borrow rate
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            min_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
+            max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params,
+        };
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.4",
+        );
+
+        // *
+        // init asset where optimal utilization rate > 1
+        // *
+        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let invalid_asset_params = InitOrUpdateAssetParams {
+            optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
+            ..asset_params
+        };
+        let msg = HandleMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: invalid_asset_params,
+        };
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "Optimal utilization rate can't be greater than one",
         );
 
         // *

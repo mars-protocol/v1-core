@@ -165,12 +165,6 @@ impl Reserve {
         asset_type: AssetType,
         params: InitOrUpdateAssetParams,
     ) -> StdResult<Self> {
-        // Verify if there are all params
-        params.validate_availability_of_all_params()?;
-
-        // Verify correctness of params
-        params.validate_for_initialization()?;
-
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -186,6 +180,25 @@ impl Reserve {
             kp_augmentation_threshold,
             kp_multiplier,
         } = params;
+
+        // All fields should be available
+        let available = borrow_rate.is_some()
+            && min_borrow_rate.is_some()
+            && max_borrow_rate.is_some()
+            && loan_to_value.is_some()
+            && reserve_factor.is_some()
+            && liquidation_threshold.is_some()
+            && liquidation_bonus.is_some()
+            && kp.is_some()
+            && u_optimal.is_some()
+            && kp_augmentation_threshold.is_some()
+            && kp_multiplier.is_some();
+
+        if !available {
+            return Err(StdError::generic_err(
+                "All params should be available during initialization",
+            ));
+        }
 
         // Unwraps on params are save (validated with `validate_availability_of_all_params`)
         let new_pid_params = PidParameters {
@@ -213,14 +226,58 @@ impl Reserve {
             protocol_income_to_distribute: Uint256::zero(),
             pid_parameters: new_pid_params,
         };
+
+        new_reserve.validate()?;
+
         Ok(new_reserve)
+    }
+
+    fn validate(&self) -> StdResult<()> {
+        if self.min_borrow_rate >= self.max_borrow_rate {
+            return Err(StdError::generic_err(format!(
+                "max_borrow_rate should be greater than min_borrow_rate. \
+                    max_borrow_rate: {}, \
+                    min_borrow_rate: {}",
+                self.max_borrow_rate, self.min_borrow_rate
+            )));
+        }
+
+        if self.pid_parameters.optimal_utilization_rate > Decimal256::one() {
+            return Err(StdError::generic_err(
+                "Optimal utilization rate can't be greater than one",
+            ));
+        }
+
+        // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
+        let conditions_and_names = vec![
+            (self.loan_to_value.le(&Decimal256::one()), "loan_to_value"),
+            (self.reserve_factor.le(&Decimal256::one()), "reserve_factor"),
+            (
+                self.liquidation_threshold.le(&Decimal256::one()),
+                "liquidation_threshold",
+            ),
+            (
+                self.liquidation_bonus.le(&Decimal256::one()),
+                "liquidation_bonus",
+            ),
+        ];
+        all_conditions_valid(conditions_and_names)?;
+
+        // liquidation_threshold should be greater than loan_to_value
+        if self.liquidation_threshold <= self.loan_to_value {
+            return Err(StdError::generic_err(format!(
+                "liquidation_threshold should be greater than loan_to_value. \
+                    liquidation_threshold: {}, \
+                    loan_to_value: {}",
+                self.liquidation_threshold, self.loan_to_value
+            )));
+        }
+
+        Ok(())
     }
 
     /// Update reserve based on new params
     pub fn update_with(self, params: InitOrUpdateAssetParams) -> StdResult<Self> {
-        // Verify correctness of params
-        params.validate_for_update(self.loan_to_value, self.liquidation_threshold)?;
-
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -255,6 +312,9 @@ impl Reserve {
             pid_parameters: updated_pid_params,
             ..self
         };
+
+        updated_reserve.validate()?;
+
         Ok(updated_reserve)
     }
 }
