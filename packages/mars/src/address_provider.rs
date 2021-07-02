@@ -1,13 +1,18 @@
 pub mod msg {
-    use cosmwasm_std::{HumanAddr};
+    use cosmwasm_std::HumanAddr;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    /// Only owner can be set on initialization (the EOA doing all the deployments)
+    /// as all other contracts are supposed to be initialized after this one with its address
+    /// passed as a param.
+    /// After initializing all contracts. An update config call should be done council as the
+    /// owner and submiting all the contract addresses
     pub struct InitMsg {
         pub owner: HumanAddr,
     }
-    
+
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
@@ -22,11 +27,12 @@ pub mod msg {
             staking_address: Option<HumanAddr>,
             treasury_address: Option<HumanAddr>,
             xmars_token_address: Option<HumanAddr>,
-        }
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub enum MarsAddress {
+    /// Contracts from mars protocol
+    pub enum MarsContract {
         Council,
         Incentives,
         InsuranceFund,
@@ -43,9 +49,9 @@ pub mod msg {
         /// Get config
         Config {},
         /// Get a single address
-        Address { address: MarsAddress },
+        Address { contract: MarsContract },
         /// Get a list of addresses
-        Addresses { addresses: Vec<MarsAddress> },
+        Addresses { contracts: Vec<MarsContract> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -64,4 +70,42 @@ pub mod msg {
     /// We currently take no arguments for migrations
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct MigrateMsg {}
+}
+
+pub mod utils {
+    use super::msg::{MarsContract, QueryMsg};
+    use cosmwasm_std::{
+        to_binary, Api, CanonicalAddr, Extern, HumanAddr, Querier, QueryRequest, StdResult,
+        Storage, WasmQuery,
+    };
+
+    pub fn get_address<S: Storage, A: Api, Q: Querier>(
+        deps: &Extern<S, A, Q>,
+        address_provider_canonical_address: &CanonicalAddr,
+        contract: MarsContract,
+    ) -> StdResult<HumanAddr> {
+        let address_provider_address =
+            deps.api.human_address(address_provider_canonical_address)?;
+        let query: HumanAddr = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: address_provider_address,
+            msg: to_binary(&QueryMsg::Address { contract })?,
+        }))?;
+
+        Ok(query)
+    }
+
+    pub fn get_addresses<S: Storage, A: Api, Q: Querier>(
+        deps: &Extern<S, A, Q>,
+        address_provider_canonical_address: &CanonicalAddr,
+        contracts: Vec<MarsContract>,
+    ) -> StdResult<Vec<HumanAddr>> {
+        let address_provider_address =
+            deps.api.human_address(address_provider_canonical_address)?;
+        let query: Vec<HumanAddr> = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: address_provider_address,
+            msg: to_binary(&QueryMsg::Addresses { contracts })?,
+        }))?;
+
+        Ok(query)
+    }
 }

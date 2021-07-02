@@ -1,9 +1,13 @@
+mod helpers;
+mod mock_address_provider;
+pub use helpers::*;
+
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, Api, BlockInfo, CanonicalAddr, Coin, ContractInfo, Decimal,
-    Env, Extern, HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult,
-    SystemError, Uint128, WasmQuery,
+    from_binary, from_slice, to_binary, BlockInfo, Coin, ContractInfo, Decimal, Env, Extern,
+    HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
+    Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -11,6 +15,7 @@ use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
 };
 
+use crate::address_provider;
 use crate::ma_token;
 use crate::xmars_token;
 use terraswap::asset::PairInfo;
@@ -468,6 +473,16 @@ impl MarsMockQuerier {
                     return self.xmars_querier.handle_query(contract_addr, xmars_query);
                 }
 
+                // Address Provider Queries
+                let parse_address_provider_query: StdResult<address_provider::msg::QueryMsg> =
+                    from_binary(&msg);
+                if let Ok(address_provider_query) = parse_address_provider_query {
+                    return mock_address_provider::handle_query(
+                        contract_addr,
+                        address_provider_query,
+                    );
+                }
+
                 // Terraswap Queries
                 let terraswap_pair_query: StdResult<terraswap::factory::QueryMsg> =
                     from_binary(&msg);
@@ -503,32 +518,5 @@ impl TerraswapPairQuerier {
             }
             _ => panic!("[mock]: Unsupported Terraswap Pair query"),
         }
-    }
-}
-
-// HELPERS
-
-pub fn get_test_addresses(api: &MockApi, address: &str) -> (HumanAddr, CanonicalAddr) {
-    let human_address = HumanAddr::from(address);
-    let canonical_address = api.canonical_address(&human_address).unwrap();
-    (human_address, canonical_address)
-}
-
-/// Assert elements in vecs one by one in order to get a more meaningful error
-/// when debugging tests
-pub fn assert_eq_vec<T: std::fmt::Debug + PartialEq>(expected: Vec<T>, actual: Vec<T>) {
-    assert_eq!(expected.len(), actual.len());
-
-    for (i, element) in expected.iter().enumerate() {
-        assert_eq!(*element, actual[i]);
-    }
-}
-
-/// Assert StdError::GenericErr message with expected_msg
-pub fn assert_generic_error_message<T>(response: StdResult<T>, expected_msg: &str) {
-    match response {
-        Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, expected_msg),
-        Err(other_err) => panic!("Unexpected error: {:?}", other_err),
-        Ok(_) => panic!("SHOULD NOT ENTER HERE!"),
     }
 }

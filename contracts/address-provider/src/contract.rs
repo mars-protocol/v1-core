@@ -7,7 +7,7 @@ use crate::state;
 use crate::state::Config;
 
 use mars::address_provider::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MarsAddress, MigrateMsg, QueryMsg,
+    ConfigResponse, HandleMsg, InitMsg, MarsContract, MigrateMsg, QueryMsg,
 };
 
 use mars::helpers::human_addr_into_canonical;
@@ -126,8 +126,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Address { address } => to_binary(&query_address(deps, address)?),
-        QueryMsg::Addresses { addresses } => to_binary(&query_addresses(deps, addresses)?),
+        QueryMsg::Address { contract } => to_binary(&query_address(deps, contract)?),
+        QueryMsg::Addresses { contracts } => to_binary(&query_addresses(deps, contracts)?),
     }
 }
 
@@ -150,36 +150,38 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
 
 fn query_address<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    address: MarsAddress,
+    contract: MarsContract,
 ) -> StdResult<HumanAddr> {
     let config = state::config_read(&deps.storage).load()?;
-    Ok(get_address(&deps.api, &config, address)?)
+    Ok(get_address(&deps.api, &config, contract)?)
 }
 
 fn query_addresses<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    addresses: Vec<MarsAddress>,
+    contracts: Vec<MarsContract>,
 ) -> StdResult<Vec<HumanAddr>> {
     let config = state::config_read(&deps.storage).load()?;
-    let mut ret: Vec<HumanAddr> = Vec::with_capacity(addresses.len());
-    for address in addresses {
-        ret.push(get_address(&deps.api, &config, address)?);
+    let mut ret: Vec<HumanAddr> = Vec::with_capacity(contracts.len());
+    for contract in contracts {
+        ret.push(get_address(&deps.api, &config, contract)?);
     }
 
     Ok(ret)
 }
 
-fn get_address<A: Api>(api: &A, config: &Config, address: MarsAddress) -> StdResult<HumanAddr> {
-    match address {
-        MarsAddress::Council => api.human_address(&config.council_address),
-        MarsAddress::Incentives => api.human_address(&config.incentives_address),
-        MarsAddress::InsuranceFund => api.human_address(&config.insurance_fund_address),
-        MarsAddress::MarsToken => api.human_address(&config.mars_token_address),
-        MarsAddress::RedBank => api.human_address(&config.red_bank_address),
-        MarsAddress::Staking => api.human_address(&config.staking_address),
-        MarsAddress::Treasury => api.human_address(&config.treasury_address),
-        MarsAddress::XMarsToken => api.human_address(&config.xmars_token_address),
-    }
+fn get_address<A: Api>(api: &A, config: &Config, address: MarsContract) -> StdResult<HumanAddr> {
+    let canonical_addr = match address {
+        MarsContract::Council => &config.council_address,
+        MarsContract::Incentives => &config.incentives_address,
+        MarsContract::InsuranceFund => &config.insurance_fund_address,
+        MarsContract::MarsToken => &config.mars_token_address,
+        MarsContract::RedBank => &config.red_bank_address,
+        MarsContract::Staking => &config.staking_address,
+        MarsContract::Treasury => &config.treasury_address,
+        MarsContract::XMarsToken => &config.xmars_token_address,
+    };
+
+    api.human_address(&canonical_addr)
 }
 
 // MIGRATION
@@ -321,7 +323,7 @@ mod tests {
             let address_query = query(
                 &deps,
                 QueryMsg::Address {
-                    address: MarsAddress::Incentives,
+                    contract: MarsContract::Incentives,
                 },
             )
             .unwrap();
@@ -333,7 +335,7 @@ mod tests {
             let addresses_query = query(
                 &deps,
                 QueryMsg::Addresses {
-                    addresses: vec![MarsAddress::XMarsToken, MarsAddress::Council],
+                    contracts: vec![MarsContract::XMarsToken, MarsContract::Council],
                 },
             )
             .unwrap();
