@@ -153,7 +153,7 @@ fn query_address<S: Storage, A: Api, Q: Querier>(
     contract: MarsContract,
 ) -> StdResult<HumanAddr> {
     let config = state::config_read(&deps.storage).load()?;
-    Ok(get_address(&deps.api, &config, contract)?)
+    get_address(&deps.api, &config, contract)
 }
 
 fn query_addresses<S: Storage, A: Api, Q: Querier>(
