@@ -111,11 +111,13 @@ pub struct Reserve {
     pub liquidity_index: Decimal256,
     /// Rate charged to borrowers
     pub borrow_rate: Decimal256,
+    /// Minimum borrow rate
+    pub min_borrow_rate: Decimal256,
+    /// Maximum borrow rate
+    pub max_borrow_rate: Decimal256,
     /// Rate paid to depositors
     pub liquidity_rate: Decimal256,
 
-    /// Variable debt interest slope
-    pub borrow_slope: Decimal256,
     /// Max percentage of collateral that can be borrowed
     pub loan_to_value: Decimal256,
 
@@ -130,13 +132,29 @@ pub struct Reserve {
     /// Indicated whether the asset is native or a cw20 token
     pub asset_type: AssetType,
 
-    // Percentage at which the loan is defined as under-collateralized
+    /// Percentage at which the loan is defined as under-collateralized
     pub liquidation_threshold: Decimal256,
-    // Bonus on the price of assets of the collateral when liquidators purchase it
+    /// Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Decimal256,
 
-    // Income to be distributed to other protocol contracts
+    /// Income to be distributed to other protocol contracts
     pub protocol_income_to_distribute: Uint256,
+
+    /// PID parameters
+    pub pid_parameters: PidParameters,
+}
+
+/// PID parameters
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PidParameters {
+    /// Proportional parameter for the PID controller
+    pub kp: Decimal256,
+    /// Optimal utilization rate targeted by the PID controller. Interest rate will decrease when lower and increase when higher
+    pub optimal_utilization_rate: Decimal256,
+    /// Min error that triggers Kp augmentation
+    pub kp_augmentation_threshold: Decimal256,
+    /// Kp multiplier when error threshold is exceeded
+    pub kp_multiplier: Decimal256,
 }
 
 impl Reserve {
@@ -147,32 +165,58 @@ impl Reserve {
         asset_type: AssetType,
         params: InitOrUpdateAssetParams,
     ) -> StdResult<Self> {
-        // Verify if there are all params
-        params.validate_availability_of_all_params()?;
-
-        // Verify correctness of params
-        params.validate_for_initialization()?;
-
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
-            borrow_slope,
+            initial_borrow_rate: borrow_rate,
+            min_borrow_rate,
+            max_borrow_rate,
             loan_to_value,
             reserve_factor,
             liquidation_threshold,
             liquidation_bonus,
+            kp,
+            optimal_utilization_rate: u_optimal,
+            kp_augmentation_threshold,
+            kp_multiplier,
         } = params;
 
+        // All fields should be available
+        let available = borrow_rate.is_some()
+            && min_borrow_rate.is_some()
+            && max_borrow_rate.is_some()
+            && loan_to_value.is_some()
+            && reserve_factor.is_some()
+            && liquidation_threshold.is_some()
+            && liquidation_bonus.is_some()
+            && kp.is_some()
+            && u_optimal.is_some()
+            && kp_augmentation_threshold.is_some()
+            && kp_multiplier.is_some();
+
+        if !available {
+            return Err(StdError::generic_err(
+                "All params should be available during initialization",
+            ));
+        }
+
         // Unwraps on params are save (validated with `validate_availability_of_all_params`)
+        let new_pid_params = PidParameters {
+            kp: kp.unwrap(),
+            optimal_utilization_rate: u_optimal.unwrap(),
+            kp_augmentation_threshold: kp_augmentation_threshold.unwrap(),
+            kp_multiplier: kp_multiplier.unwrap(),
+        };
         let new_reserve = Reserve {
             index,
             asset_type,
             ma_token_address: CanonicalAddr::default(),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::one(),
-            borrow_rate: Decimal256::zero(),
+            borrow_rate: borrow_rate.unwrap(),
+            min_borrow_rate: min_borrow_rate.unwrap(),
+            max_borrow_rate: max_borrow_rate.unwrap(),
             liquidity_rate: Decimal256::zero(),
-            borrow_slope: borrow_slope.unwrap(),
             loan_to_value: loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
             interests_last_updated: block_time,
@@ -180,33 +224,97 @@ impl Reserve {
             liquidation_threshold: liquidation_threshold.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint256::zero(),
+            pid_parameters: new_pid_params,
         };
+
+        new_reserve.validate()?;
+
         Ok(new_reserve)
+    }
+
+    fn validate(&self) -> StdResult<()> {
+        if self.min_borrow_rate >= self.max_borrow_rate {
+            return Err(StdError::generic_err(format!(
+                "max_borrow_rate should be greater than min_borrow_rate. \
+                    max_borrow_rate: {}, \
+                    min_borrow_rate: {}",
+                self.max_borrow_rate, self.min_borrow_rate
+            )));
+        }
+
+        if self.pid_parameters.optimal_utilization_rate > Decimal256::one() {
+            return Err(StdError::generic_err(
+                "Optimal utilization rate can't be greater than one",
+            ));
+        }
+
+        // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
+        let conditions_and_names = vec![
+            (self.loan_to_value.le(&Decimal256::one()), "loan_to_value"),
+            (self.reserve_factor.le(&Decimal256::one()), "reserve_factor"),
+            (
+                self.liquidation_threshold.le(&Decimal256::one()),
+                "liquidation_threshold",
+            ),
+            (
+                self.liquidation_bonus.le(&Decimal256::one()),
+                "liquidation_bonus",
+            ),
+        ];
+        all_conditions_valid(conditions_and_names)?;
+
+        // liquidation_threshold should be greater than loan_to_value
+        if self.liquidation_threshold <= self.loan_to_value {
+            return Err(StdError::generic_err(format!(
+                "liquidation_threshold should be greater than loan_to_value. \
+                    liquidation_threshold: {}, \
+                    loan_to_value: {}",
+                self.liquidation_threshold, self.loan_to_value
+            )));
+        }
+
+        Ok(())
     }
 
     /// Update reserve based on new params
     pub fn update_with(self, params: InitOrUpdateAssetParams) -> StdResult<Self> {
-        // Verify correctness of params
-        params.validate_for_update(self.loan_to_value, self.liquidation_threshold)?;
-
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
-            borrow_slope,
+            initial_borrow_rate: _,
+            min_borrow_rate,
+            max_borrow_rate,
             loan_to_value,
             reserve_factor,
             liquidation_threshold,
             liquidation_bonus,
+            kp,
+            optimal_utilization_rate: u_optimal,
+            kp_augmentation_threshold,
+            kp_multiplier,
         } = params;
 
+        let updated_pid_params = PidParameters {
+            kp: kp.unwrap_or(self.pid_parameters.kp),
+            optimal_utilization_rate: u_optimal
+                .unwrap_or(self.pid_parameters.optimal_utilization_rate),
+            kp_augmentation_threshold: kp_augmentation_threshold
+                .unwrap_or(self.pid_parameters.kp_augmentation_threshold),
+            kp_multiplier: kp_multiplier.unwrap_or(self.pid_parameters.kp_multiplier),
+        };
         let updated_reserve = Reserve {
-            borrow_slope: borrow_slope.unwrap_or(self.borrow_slope),
+            min_borrow_rate: min_borrow_rate.unwrap_or(self.min_borrow_rate),
+            max_borrow_rate: max_borrow_rate.unwrap_or(self.max_borrow_rate),
             loan_to_value: loan_to_value.unwrap_or(self.loan_to_value),
             reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
             liquidation_threshold: liquidation_threshold.unwrap_or(self.liquidation_threshold),
             liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
+            pid_parameters: updated_pid_params,
             ..self
         };
+
+        updated_reserve.validate()?;
+
         Ok(updated_reserve)
     }
 }

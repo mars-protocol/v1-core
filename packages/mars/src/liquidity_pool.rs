@@ -1,7 +1,6 @@
 pub mod msg {
-    use crate::helpers::all_conditions_valid;
     use cosmwasm_bignumber::{Decimal256, Uint256};
-    use cosmwasm_std::{HumanAddr, StdError, StdResult, Uint128};
+    use cosmwasm_std::{HumanAddr, Uint128};
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
@@ -169,7 +168,6 @@ pub mod msg {
         pub liquidity_index: Decimal256,
         pub borrow_rate: Decimal256,
         pub liquidity_rate: Decimal256,
-        pub borrow_slope: Decimal256,
         pub loan_to_value: Decimal256,
         pub interests_last_updated: u64,
         pub debt_total_scaled: Uint256,
@@ -211,8 +209,12 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitOrUpdateAssetParams {
-        /// Borrow slope to calculate borrow rate
-        pub borrow_slope: Option<Decimal256>,
+        /// Initial borrow rate
+        pub initial_borrow_rate: Option<Decimal256>,
+        /// Min borrow rate
+        pub min_borrow_rate: Option<Decimal256>,
+        /// Max borrow rate
+        pub max_borrow_rate: Option<Decimal256>,
         /// Max percentage of collateral that can be borrowed
         pub loan_to_value: Option<Decimal256>,
         /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
@@ -221,102 +223,14 @@ pub mod msg {
         pub liquidation_threshold: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
-    }
-
-    impl InitOrUpdateAssetParams {
-        /// Validate availability of all params. Function used during initialization.
-        pub fn validate_availability_of_all_params(&self) -> StdResult<()> {
-            // Destructuring a struct’s fields into separate variables in order to force
-            // compile error if we add more params
-            let InitOrUpdateAssetParams {
-                borrow_slope,
-                loan_to_value,
-                reserve_factor,
-                liquidation_threshold,
-                liquidation_bonus,
-            } = self;
-
-            // All fields should be available
-            let available = borrow_slope.is_some()
-                && loan_to_value.is_some()
-                && reserve_factor.is_some()
-                && liquidation_threshold.is_some()
-                && liquidation_bonus.is_some();
-
-            if !available {
-                Err(StdError::generic_err(
-                    "All params should be available during initialization",
-                ))
-            } else {
-                Ok(())
-            }
-        }
-
-        /// Validate params used during initialization.
-        pub fn validate_for_initialization(&self) -> StdResult<()> {
-            self.validate(Decimal256::zero(), Decimal256::zero())
-        }
-
-        /// Validate params used during update.
-        pub fn validate_for_update(
-            &self,
-            old_ltv: Decimal256,
-            old_liquidation_threshold: Decimal256,
-        ) -> StdResult<()> {
-            self.validate(old_ltv, old_liquidation_threshold)
-        }
-
-        fn validate(
-            &self,
-            old_ltv: Decimal256,
-            old_liquidation_threshold: Decimal256,
-        ) -> StdResult<()> {
-            // Destructuring a struct’s fields into separate variables in order to force
-            // compile error if we add more params
-            let InitOrUpdateAssetParams {
-                borrow_slope: _,
-                loan_to_value,
-                reserve_factor,
-                liquidation_threshold,
-                liquidation_bonus,
-            } = self;
-
-            // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
-            let conditions_and_names = vec![
-                (Self::less_or_equal_one(loan_to_value), "loan_to_value"),
-                (Self::less_or_equal_one(reserve_factor), "reserve_factor"),
-                (
-                    Self::less_or_equal_one(liquidation_threshold),
-                    "liquidation_threshold",
-                ),
-                (
-                    Self::less_or_equal_one(liquidation_bonus),
-                    "liquidation_bonus",
-                ),
-            ];
-            all_conditions_valid(conditions_and_names)?;
-
-            // liquidation_threshold should be greater than loan_to_value
-            let new_ltv = loan_to_value.unwrap_or(old_ltv);
-            let new_liquidation_threshold =
-                liquidation_threshold.unwrap_or(old_liquidation_threshold);
-            if new_liquidation_threshold <= new_ltv {
-                return Err(StdError::generic_err(format!(
-                    "liquidation_threshold should be greater than loan_to_value. \
-                    old_liquidation_threshold: {}, \
-                    old_loan_to_value: {}, \
-                    new_liquidation_threshold: {}, \
-                    new_loan_to_value: {}",
-                    old_liquidation_threshold, old_ltv, new_liquidation_threshold, new_ltv
-                )));
-            }
-
-            Ok(())
-        }
-
-        fn less_or_equal_one(value: &Option<Decimal256>) -> bool {
-            value.unwrap_or(Decimal256::zero()).le(&Decimal256::one())
-        }
+        /// One of the PID parameter
+        pub kp: Option<Decimal256>,
+        /// Optimal utilization
+        pub optimal_utilization_rate: Option<Decimal256>,
+        /// Min error that triggers Kp augmentation
+        pub kp_augmentation_threshold: Option<Decimal256>,
+        /// Kp multiplier when error threshold is exceeded
+        pub kp_multiplier: Option<Decimal256>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
