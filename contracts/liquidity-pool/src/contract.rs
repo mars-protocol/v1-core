@@ -3284,8 +3284,11 @@ mod tests {
         let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
         let reserve_factor = Decimal256::from_ratio(1, 10);
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: Decimal256::from_ratio(11, 10),
             loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
@@ -3379,8 +3382,11 @@ mod tests {
         let cw20_addr = HumanAddr::from("somecontract");
         let contract_addr_raw = deps.api.canonical_address(&cw20_addr).unwrap();
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: Decimal256::from_ratio(11, 10),
             loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
@@ -3509,8 +3515,11 @@ mod tests {
         let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: initial_liquidity_index,
             borrow_index: Decimal256::from_ratio(2, 1),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -3644,8 +3653,11 @@ mod tests {
         );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: initial_liquidity_index,
             borrow_index: Decimal256::from_ratio(2, 1),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -3762,8 +3774,11 @@ mod tests {
     fn withdraw_cannot_exceed_balance() {
         let mut deps = th_setup(&[]);
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: Decimal256::from_ratio(15, 10),
             ..Default::default()
         };
@@ -3794,8 +3809,11 @@ mod tests {
         let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: initial_liquidity_index,
             borrow_index: Decimal256::from_ratio(2, 1),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -3938,8 +3956,11 @@ mod tests {
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
-        let mock_reserve_1 = MockReserve {
-            ma_token_address: "matoken1",
+        let mock_reserve_1 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken1"))
+                .unwrap(),
             borrow_index: Decimal256::from_ratio(12, 10),
             liquidity_index: Decimal256::from_ratio(8, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -3950,15 +3971,21 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = MockReserve {
-            ma_token_address: "matoken2",
+        let mock_reserve_2 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken2"))
+                .unwrap(),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let mock_reserve_3 = MockReserve {
-            ma_token_address: "matoken3",
+        let mock_reserve_3 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken3"))
+                .unwrap(),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::from_ratio(11, 10),
             loan_to_value: Decimal256::from_ratio(7, 10),
@@ -4549,8 +4576,11 @@ mod tests {
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
         let ltv = Decimal256::from_ratio(7, 10);
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             liquidity_index: Decimal256::one(),
             loan_to_value: ltv,
             borrow_index: Decimal256::one(),
@@ -4679,8 +4709,11 @@ mod tests {
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
-        let mock_reserve_1 = MockReserve {
-            ma_token_address: "matoken1",
+        let mock_reserve_1 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken1"))
+                .unwrap(),
             loan_to_value: Decimal256::from_ratio(8, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
@@ -4688,8 +4721,11 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = MockReserve {
-            ma_token_address: "matoken2",
+        let mock_reserve_2 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken2"))
+                .unwrap(),
             loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
@@ -4697,8 +4733,11 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let mock_reserve_3 = MockReserve {
-            ma_token_address: "matoken3",
+        let mock_reserve_3 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken3"))
+                .unwrap(),
             loan_to_value: Decimal256::from_ratio(4, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
@@ -4856,8 +4895,12 @@ mod tests {
             &[("collateral".to_string(), collateral_price)],
         );
 
-        let collateral_reserve = MockReserve {
-            ma_token_address: "ma_collateral",
+        let collateral_reserve_ma_token_human_addr = HumanAddr::from("ma_collateral");
+        let collateral_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&collateral_reserve_ma_token_human_addr)
+                .unwrap(),
             loan_to_value: collateral_max_ltv,
             liquidation_threshold: collateral_liquidation_threshold,
             liquidation_bonus: collateral_liquidation_bonus,
@@ -4872,7 +4915,7 @@ mod tests {
             ..Default::default()
         };
 
-        let debt_reserve = MockReserve {
+        let debt_reserve = Reserve {
             loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: expected_global_debt_scaled,
             liquidity_index: Decimal256::one(),
@@ -4919,7 +4962,7 @@ mod tests {
         // trying to liquidate user with zero collateral balance should fail
         {
             deps.querier.set_cw20_balances(
-                HumanAddr::from(collateral_reserve.ma_token_address),
+                collateral_reserve_ma_token_human_addr,
                 &[(user_address.clone(), Uint128::zero())],
             );
 
@@ -5557,8 +5600,11 @@ mod tests {
         let collateral_liquidation_threshold = Decimal256::from_ratio(7, 10);
         let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
 
-        let collateral_reserve = MockReserve {
-            ma_token_address: "collateral",
+        let collateral_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("collateral"))
+                .unwrap(),
             loan_to_value: collateral_ltv,
             liquidation_threshold: collateral_liquidation_threshold,
             liquidation_bonus: collateral_liquidation_bonus,
@@ -5568,8 +5614,11 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let debt_reserve = MockReserve {
-            ma_token_address: "debt",
+        let debt_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("debt"))
+                .unwrap(),
             loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: Uint256::from(20_000_000u64),
             liquidity_index: Decimal256::one(),
@@ -5673,14 +5722,17 @@ mod tests {
         let mut deps = th_setup(&[]);
         let env_matoken = cosmwasm_std::testing::mock_env(HumanAddr::from("masomecoin"), &[]);
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "masomecoin",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("masomecoin"))
+                .unwrap(),
             liquidity_index: Decimal256::one(),
             liquidation_threshold: Decimal256::from_ratio(5, 10),
             ..Default::default()
         };
         let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
-        let debt_mock_reserve = MockReserve {
+        let debt_mock_reserve = Reserve {
             borrow_index: Decimal256::one(),
             ..Default::default()
         };
@@ -5839,8 +5891,11 @@ mod tests {
         let available_liquidity = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
 
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             borrow_index: Decimal256::from_ratio(12, 10),
             liquidity_index: Decimal256::from_ratio(8, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -6053,13 +6108,16 @@ mod tests {
         let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
 
         let ma_token_address_1 = HumanAddr::from("matoken1");
-        let mock_reserve_1 = MockReserve {
-            ma_token_address: ma_token_address_1.as_str(),
+        let mock_reserve_1 = Reserve {
+            ma_token_address: deps.api.canonical_address(&ma_token_address_1).unwrap(),
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = MockReserve {
-            ma_token_address: "matoken2",
+        let mock_reserve_2 = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken2"))
+                .unwrap(),
             ..Default::default()
         };
         let cw20_contract_addr = HumanAddr::from("depositedcoin1");
@@ -6162,8 +6220,11 @@ mod tests {
         let protocol_income_to_distribute = Uint256::from(1_000_000_u64);
 
         // initialize reserve with non-zero amount of protocol_income_to_distribute
-        let mock_reserve = MockReserve {
-            ma_token_address: "matoken",
+        let mock_reserve = Reserve {
+            ma_token_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("matoken"))
+                .unwrap(),
             borrow_index: Decimal256::from_ratio(12, 10),
             liquidity_index: Decimal256::from_ratio(8, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -6393,38 +6454,11 @@ mod tests {
         deps
     }
 
-    #[derive(Debug)]
-    struct MockReserve<'a> {
-        ma_token_address: &'a str,
-        liquidity_index: Decimal256,
-        borrow_index: Decimal256,
-
-        borrow_rate: Decimal256,
-        min_borrow_rate: Decimal256,
-        max_borrow_rate: Decimal256,
-        liquidity_rate: Decimal256,
-
-        loan_to_value: Decimal256,
-
-        reserve_factor: Decimal256,
-
-        interests_last_updated: u64,
-        debt_total_scaled: Uint256,
-
-        asset_type: AssetType,
-
-        liquidation_threshold: Decimal256,
-        liquidation_bonus: Decimal256,
-
-        protocol_income_to_distribute: Uint256,
-
-        pid_parameters: PidParameters,
-    }
-
-    impl Default for MockReserve<'_> {
+    impl Default for Reserve {
         fn default() -> Self {
-            MockReserve {
-                ma_token_address: "defaultmatoken",
+            Reserve {
+                index: 0,
+                ma_token_address: Default::default(),
                 liquidity_index: Default::default(),
                 borrow_index: Default::default(),
                 borrow_rate: Default::default(),
@@ -6450,10 +6484,10 @@ mod tests {
     }
 
     fn th_init_reserve<S: Storage, A: Api>(
-        api: &A,
+        _api: &A,
         storage: &mut S,
         key: &[u8],
-        reserve: &MockReserve,
+        reserve: &Reserve,
     ) -> Reserve {
         let mut index = 0;
 
@@ -6465,29 +6499,11 @@ mod tests {
             })
             .unwrap();
 
-        let ma_token_canonical_address = api
-            .canonical_address(&HumanAddr::from(reserve.ma_token_address))
-            .unwrap();
-
         let mut reserve_bucket = reserves_state(storage);
+
         let new_reserve = Reserve {
-            ma_token_address: ma_token_canonical_address.clone(),
             index,
-            borrow_index: reserve.borrow_index,
-            liquidity_index: reserve.liquidity_index,
-            borrow_rate: reserve.borrow_rate,
-            min_borrow_rate: reserve.min_borrow_rate,
-            max_borrow_rate: reserve.max_borrow_rate,
-            liquidity_rate: reserve.liquidity_rate,
-            loan_to_value: reserve.loan_to_value,
-            reserve_factor: reserve.reserve_factor,
-            interests_last_updated: reserve.interests_last_updated,
-            debt_total_scaled: reserve.debt_total_scaled,
-            asset_type: reserve.asset_type.clone(),
-            liquidation_threshold: reserve.liquidation_threshold,
-            liquidation_bonus: reserve.liquidation_bonus,
-            protocol_income_to_distribute: reserve.protocol_income_to_distribute,
-            pid_parameters: reserve.pid_parameters.clone(),
+            ..reserve.clone()
         };
 
         reserve_bucket.save(key, &new_reserve).unwrap();
@@ -6502,7 +6518,7 @@ mod tests {
             .unwrap();
 
         reserve_ma_tokens_state(storage)
-            .save(ma_token_canonical_address.as_slice(), &key.to_vec())
+            .save(new_reserve.ma_token_address.as_slice(), &key.to_vec())
             .unwrap();
 
         new_reserve
