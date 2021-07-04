@@ -668,7 +668,7 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let proposals = state::proposals_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
-        .range(Option::from(&start[..]), None, Order::Ascending)
+        .range(Option::from(&start[..]), None, Order::Descending)
         .take(limit)
         .map(|item| {
             let (k, v) = item?;
@@ -1731,6 +1731,54 @@ mod tests {
             .unwrap();
         assert_eq!(proposal.for_votes, Uint128(100 + 300));
         assert_eq!(proposal.against_votes, Uint128(200 + 400));
+    }
+
+    #[test]
+    fn test_query_proposals() {
+        // Arrange
+        let mut deps = th_setup(&[]);
+
+        let active_proposal_1_id = 1_u64;
+        let active_proposal_1 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_1_id,
+                status: ProposalStatus::Active,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_1_id.to_be_bytes(), &active_proposal_1)
+            .unwrap();
+
+        let active_proposal_2_id = 2_u64;
+        let active_proposal_2 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_2_id,
+                status: ProposalStatus::Active,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_2_id.to_be_bytes(), &active_proposal_2)
+            .unwrap();
+
+        let council = Council {
+            proposal_count: 2_u64,
+        };
+        state::council(&mut deps.storage).save(&council).unwrap();
+
+        //Assert
+        let res = query_proposals(&deps, Option::None, Option::None).unwrap();
+        assert_eq!(res.proposal_count, 2);
+        assert_eq!(res.proposal_list.len(), 2);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
+        assert_eq!(res.proposal_list[1].proposal_id, active_proposal_1_id);
     }
 
     #[test]
