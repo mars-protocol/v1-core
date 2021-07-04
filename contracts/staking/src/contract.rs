@@ -85,10 +85,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             offer_asset_info,
             amount,
         } => handle_swap_asset_to_uusd(deps, env, offer_asset_info, amount),
-        HandleMsg::SwapAssetToMars {
-            offer_asset_info,
-            amount,
-        } => handle_swap_asset_to_mars(deps, env, offer_asset_info, amount),
+        HandleMsg::SwapUusdToMars { amount } => handle_swap_uusd_to_mars(deps, env, amount),
     }
 }
 
@@ -435,14 +432,17 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     )
 }
 
-/// Swap any asset on the contract to Mars
-pub fn handle_swap_asset_to_mars<S: Storage, A: Api, Q: Querier>(
+/// Swap uusd on the contract to Mars
+pub fn handle_swap_uusd_to_mars<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<HandleResponse> {
     let config = state::config_read(&deps.storage).load()?;
+
+    let offer_asset_info = AssetInfo::NativeToken {
+        denom: "uusd".to_string(),
+    };
 
     let mars_token_human_addr = deps.api.human_address(&config.mars_token_address)?;
     let ask_asset_info = AssetInfo::Token {
@@ -1233,26 +1233,13 @@ mod tests {
         // *
         let msg = HandleMsg::SwapAssetToUusd {
             offer_asset_info: AssetInfo::Token {
-                contract_addr: config_mars_token_human_addr.clone(),
-            },
-            amount: None,
-        };
-        let env = mock_env("owner", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Cannot swap Mars");
-
-        // *
-        // can't swap Mars with SwapAssetToMars (it doesn't have any sense)
-        // *
-        let msg = HandleMsg::SwapAssetToMars {
-            offer_asset_info: AssetInfo::Token {
                 contract_addr: config_mars_token_human_addr,
             },
             amount: None,
         };
         let env = mock_env("owner", MockEnvParams::default());
         let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Cannot swap an asset into itself. Both offer and ask assets were specified as mars_token");
+        assert_generic_error_message(response, "Cannot swap Mars");
     }
 
     // TEST HELPERS
