@@ -41,11 +41,8 @@ pub mod msg {
             offer_asset_info: AssetInfo,
             amount: Option<Uint128>,
         },
-        /// swap any asset on the contract to Mars
-        SwapAssetToMars {
-            offer_asset_info: AssetInfo,
-            amount: Option<Uint128>,
-        },
+        /// Swap uusd on the contract to Mars
+        SwapUusdToMars { amount: Option<Uint128> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
