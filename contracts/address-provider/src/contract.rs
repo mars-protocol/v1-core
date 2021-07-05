@@ -7,7 +7,7 @@ use crate::state;
 use crate::state::Config;
 
 use mars::address_provider::msg::{
-    ConfigResponse, HandleMsg, InitMsg, MarsContract, MigrateMsg, QueryMsg,
+    ConfigParams, ConfigResponse, HandleMsg, InitMsg, MarsContract, MigrateMsg, QueryMsg,
 };
 
 use mars::helpers::human_addr_into_canonical;
@@ -46,28 +46,8 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     match msg {
         HandleMsg::UpdateConfig {
-            owner,
-            council_address,
-            incentives_address,
-            insurance_fund_address,
-            mars_token_address,
-            red_bank_address,
-            staking_address,
-            treasury_address,
-            xmars_token_address,
-        } => handle_update_config(
-            deps,
-            env,
-            owner,
-            council_address,
-            incentives_address,
-            insurance_fund_address,
-            mars_token_address,
-            red_bank_address,
-            staking_address,
-            treasury_address,
-            xmars_token_address,
-        ),
+            config: config_params,
+        } => handle_update_config(deps, env, config_params),
     }
 }
 
@@ -75,21 +55,25 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     deps: &mut Extern<S, A, Q>,
     env: Env,
-    owner: Option<HumanAddr>,
-    council_address: Option<HumanAddr>,
-    incentives_address: Option<HumanAddr>,
-    insurance_fund_address: Option<HumanAddr>,
-    mars_token_address: Option<HumanAddr>,
-    red_bank_address: Option<HumanAddr>,
-    staking_address: Option<HumanAddr>,
-    treasury_address: Option<HumanAddr>,
-    xmars_token_address: Option<HumanAddr>,
+    config_params: ConfigParams,
 ) -> StdResult<HandleResponse> {
     let mut config = state::config_read(&deps.storage).load()?;
 
     if deps.api.canonical_address(&env.message.sender)? != config.owner {
         return Err(StdError::unauthorized());
     }
+
+    let ConfigParams {
+        owner,
+        council_address,
+        incentives_address,
+        insurance_fund_address,
+        mars_token_address,
+        red_bank_address,
+        staking_address,
+        treasury_address,
+        xmars_token_address,
+    } = config_params;
 
     // Update config
     config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
@@ -234,15 +218,7 @@ mod tests {
         // *
         {
             let msg = HandleMsg::UpdateConfig {
-                owner: None,
-                council_address: None,
-                incentives_address: Some(HumanAddr::from("incentives")),
-                insurance_fund_address: None,
-                mars_token_address: Some(HumanAddr::from("mars-token")),
-                red_bank_address: None,
-                staking_address: None,
-                treasury_address: Some(HumanAddr::from("treasury")),
-                xmars_token_address: None,
+                config: ConfigParams::default(),
             };
             let env = cosmwasm_std::testing::mock_env("somebody", &[]);
             let error_res = handle(&mut deps, env, msg).unwrap_err();
@@ -254,15 +230,12 @@ mod tests {
         // *
         {
             let msg = HandleMsg::UpdateConfig {
-                owner: None,
-                council_address: None,
-                incentives_address: Some(HumanAddr::from("incentives")),
-                insurance_fund_address: None,
-                mars_token_address: Some(HumanAddr::from("mars-token")),
-                red_bank_address: None,
-                staking_address: None,
-                treasury_address: Some(HumanAddr::from("treasury")),
-                xmars_token_address: None,
+                config: ConfigParams {
+                    incentives_address: Some(HumanAddr::from("incentives")),
+                    mars_token_address: Some(HumanAddr::from("mars-token")),
+                    treasury_address: Some(HumanAddr::from("treasury")),
+                    ..Default::default()
+                },
             };
             let env = cosmwasm_std::testing::mock_env("owner", &[]);
             // we can just call .unwrap() to assert this was a success

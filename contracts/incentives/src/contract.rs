@@ -245,17 +245,26 @@ pub fn handle_claim_rewards<S: Storage, A: Api, Q: Querier>(
         .save(&user_canonical_address.as_slice(), &Uint128::zero())?;
 
     let config = state::config_read(&deps.storage).load()?;
-    let mut addresses_query = address_provider::helpers::get_addresses(
+    let mars_contracts = vec![MarsContract::MarsToken, MarsContract::Staking];
+    let expected_len = mars_contracts.len();
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps,
         &config.address_provider_address,
-        vec![MarsContract::MarsToken, MarsContract::Staking],
+        mars_contracts,
     )?;
+    if addresses_query.len() != expected_len {
+        return Err(StdError::generic_err(format!(
+            "Incorrect number of addresses, expected {} got {}",
+            expected_len,
+            addresses_query.len()
+        )));
+    }
     let staking_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("staking address not found"))?;
+        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
     let mars_token_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
+        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
 
     let messages = if accrued_rewards > Uint128::zero() {
         vec![CosmosMsg::Wasm(WasmMsg::Execute {

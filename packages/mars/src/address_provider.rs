@@ -3,12 +3,12 @@ pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     /// Only owner can be set on initialization (the EOA doing all the deployments)
     /// as all other contracts are supposed to be initialized after this one with its address
     /// passed as a param.
-    /// After initializing all contracts. An update config call should be done council as the
+    /// After initializing all contracts. An update config call should be done setting council as the
     /// owner and submiting all the contract addresses
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
         pub owner: HumanAddr,
     }
@@ -17,17 +17,20 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
         /// Update address provider config
-        UpdateConfig {
-            owner: Option<HumanAddr>,
-            council_address: Option<HumanAddr>,
-            incentives_address: Option<HumanAddr>,
-            insurance_fund_address: Option<HumanAddr>,
-            mars_token_address: Option<HumanAddr>,
-            red_bank_address: Option<HumanAddr>,
-            staking_address: Option<HumanAddr>,
-            treasury_address: Option<HumanAddr>,
-            xmars_token_address: Option<HumanAddr>,
-        },
+        UpdateConfig { config: ConfigParams },
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
+    pub struct ConfigParams {
+        pub owner: Option<HumanAddr>,
+        pub council_address: Option<HumanAddr>,
+        pub incentives_address: Option<HumanAddr>,
+        pub insurance_fund_address: Option<HumanAddr>,
+        pub mars_token_address: Option<HumanAddr>,
+        pub red_bank_address: Option<HumanAddr>,
+        pub staking_address: Option<HumanAddr>,
+        pub treasury_address: Option<HumanAddr>,
+        pub xmars_token_address: Option<HumanAddr>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -79,7 +82,7 @@ pub mod helpers {
         Storage, WasmQuery,
     };
 
-    pub fn get_address<S: Storage, A: Api, Q: Querier>(
+    pub fn query_address<S: Storage, A: Api, Q: Querier>(
         deps: &Extern<S, A, Q>,
         address_provider_canonical_address: &CanonicalAddr,
         contract: MarsContract,
@@ -94,7 +97,7 @@ pub mod helpers {
         Ok(query)
     }
 
-    pub fn get_addresses<S: Storage, A: Api, Q: Querier>(
+    pub fn query_addresses<S: Storage, A: Api, Q: Querier>(
         deps: &Extern<S, A, Q>,
         address_provider_canonical_address: &CanonicalAddr,
         contracts: Vec<MarsContract>,
