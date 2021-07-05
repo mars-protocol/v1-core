@@ -10,7 +10,7 @@ pub static CONFIG_KEY: &[u8] = b"config";
 // namespaces (for buckets)
 pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
 
-/// Treasury global configuration
+/// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner

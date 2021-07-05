@@ -315,7 +315,7 @@ pub fn handle_cooldown<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let config = state::config_read(&deps.storage).load()?;
 
-    let xmars_token_address = address_provider::helpers::get_address(
+    let xmars_token_address = address_provider::helpers::query_address(
         &deps,
         &config.address_provider_address,
         MarsContract::XMarsToken,
@@ -408,7 +408,7 @@ pub fn handle_swap_asset_to_uusd<S: Storage, A: Api, Q: Querier>(
     let config = state::config_read(&deps.storage).load()?;
 
     // throw error if the user tries to swap Mars
-    let mars_token_address = address_provider::helpers::get_address(
+    let mars_token_address = address_provider::helpers::query_address(
         &deps,
         &config.address_provider_address,
         MarsContract::MarsToken,
@@ -449,7 +449,7 @@ pub fn handle_swap_uusd_to_mars<S: Storage, A: Api, Q: Querier>(
         denom: "uusd".to_string(),
     };
 
-    let mars_token_address = address_provider::helpers::get_address(
+    let mars_token_address = address_provider::helpers::query_address(
         &deps,
         &config.address_provider_address,
         MarsContract::MarsToken,
@@ -530,7 +530,7 @@ fn get_token_addresses<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     config: &Config,
 ) -> StdResult<(HumanAddr, HumanAddr)> {
-    let mut addresses_query = address_provider::helpers::get_addresses(
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps,
         &config.address_provider_address,
         vec![MarsContract::MarsToken, MarsContract::XMarsToken],

@@ -179,7 +179,7 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let mars_token_address = address_provider::helpers::get_address(
+    let mars_token_address = address_provider::helpers::query_address(
         &deps,
         &config.address_provider_address,
         MarsContract::MarsToken,
@@ -274,7 +274,7 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let xmars_token_address = address_provider::helpers::get_address(
+    let xmars_token_address = address_provider::helpers::query_address(
         &deps,
         &config.address_provider_address,
         MarsContract::XMarsToken,
@@ -340,24 +340,34 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     }
 
     let config = state::config_read(&deps.storage).load()?;
-    let mut addresses_query = address_provider::helpers::get_addresses(
+    let mars_contracts = vec![
+        MarsContract::MarsToken,
+        MarsContract::Staking,
+        MarsContract::XMarsToken,
+    ];
+    let expected_len = mars_contracts.len();
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps,
         &config.address_provider_address,
-        vec![
-            MarsContract::MarsToken,
-            MarsContract::Staking,
-            MarsContract::XMarsToken,
-        ],
+        mars_contracts,
     )?;
+
+    if addresses_query.len() != expected_len {
+        return Err(StdError::generic_err(format!(
+            "Incorrect number of addresses, expected {} got {}",
+            expected_len,
+            addresses_query.len()
+        )));
+    }
     let xmars_token_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("xmars token address not found"))?;
+        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
     let staking_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("staking address not found"))?;
+        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
     let mars_token_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
+        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
 
     // Compute proposal quorum and threshold
     let for_votes = proposal.for_votes;

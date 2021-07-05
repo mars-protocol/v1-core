@@ -24,11 +24,11 @@
         "address": {
           "type": "object",
           "required": [
-            "address"
+            "contract"
           ],
           "properties": {
-            "address": {
-              "$ref": "#/definitions/MarsAddress"
+            "contract": {
+              "$ref": "#/definitions/MarsContract"
             }
           }
         }
@@ -44,13 +44,13 @@
         "addresses": {
           "type": "object",
           "required": [
-            "addresses"
+            "contracts"
           ],
           "properties": {
-            "addresses": {
+            "contracts": {
               "type": "array",
               "items": {
-                "$ref": "#/definitions/MarsAddress"
+                "$ref": "#/definitions/MarsContract"
               }
             }
           }
@@ -59,7 +59,8 @@
     }
   ],
   "definitions": {
-    "MarsAddress": {
+    "MarsContract": {
+      "description": "Contracts from mars protocol",
       "type": "string",
       "enum": [
         "Council",
