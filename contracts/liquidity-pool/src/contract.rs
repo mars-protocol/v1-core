@@ -312,7 +312,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     let withdrawer_addr = env.message.sender.clone();
 
-    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
+    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
     let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
     let asset_ma_human_addr = deps.api.human_address(&reserve.ma_token_address)?;
@@ -349,6 +349,54 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             (withdrawer_balance, withdrawer_balance_scaled)
         }
     };
+
+    let withdrawer_canonical_address = deps.api.canonical_address(&withdrawer_addr)?;
+    let mut withdrawer =
+        users_state_read(&deps.storage).load(withdrawer_canonical_address.as_slice())?;
+    let asset_as_collateral = get_bit(withdrawer.collateral_assets, reserve.index)?;
+    let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
+
+    // asset is used as collateral and user is borrowing so need to validate health factor after withdraw,
+    // otherwise no reasons to block the withdraw
+    if asset_as_collateral && user_is_borrowing {
+        let money_market = money_market_state_read(&deps.storage).load()?;
+
+        let mut native_asset_prices_to_query: Vec<String> = match asset {
+            Asset::Native { .. } if asset_label != "uusd" => vec![asset_label.clone()],
+            _ => vec![],
+        };
+
+        let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
+            deps,
+            env.block.time,
+            &withdrawer_canonical_address,
+            &withdrawer,
+            &money_market,
+            &mut native_asset_prices_to_query,
+        )?;
+
+        let withdraw_asset_price =
+            asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+        let withdraw_amount_in_uusd =
+            Decimal256::from_uint256(withdraw_amount) * withdraw_asset_price;
+
+        let health_factor_after_withdraw = (user_account_settlement
+            .weighted_liquidation_threshold_in_uusd
+            - (withdraw_amount_in_uusd * reserve.liquidation_threshold))
+            / user_account_settlement.total_debt_in_uusd;
+        if health_factor_after_withdraw > Decimal256::one() {
+            return Err(StdError::generic_err(
+                "User's health factor is not less than 1 after withdraw",
+            ));
+        }
+    }
+
+    // if max collateral to withdraw equals the user's balance then unset collateral bit
+    if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
+        unset_bit(&mut withdrawer.collateral_assets, reserve.index)?;
+        users_state(&mut deps.storage)
+            .save(withdrawer_canonical_address.as_slice(), &withdrawer)?;
+    }
 
     reserve_apply_accumulated_interests(&env, &mut reserve);
     reserve_update_interest_rates(
@@ -661,34 +709,21 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
             _ => vec![],
         };
 
-        // Get debt and ltv values for user's position
-        // Vec<(reference, debt_amount, max_borrow, asset_type)>
-        let user_balances = user_get_balances(
-            &deps,
-            &money_market,
-            &user,
-            &borrower_canonical_addr,
-            |collateral, reserve| collateral * reserve.loan_to_value,
-            &mut native_asset_prices_to_query,
+        let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
+            deps,
             env.block.time,
+            &borrower_canonical_addr,
+            &user,
+            &money_market,
+            &mut native_asset_prices_to_query,
         )?;
 
-        let asset_prices = get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
+        let borrow_asset_price =
+            asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+        let borrow_amount_in_uusd = Decimal256::from_uint256(borrow_amount) * borrow_asset_price;
 
-        let mut total_debt_in_uusd = Uint256::zero();
-        let mut max_borrow_in_uusd = Decimal256::zero();
-
-        for (asset_label, debt, max_borrow, asset_type) in user_balances {
-            let asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
-
-            total_debt_in_uusd += debt * asset_price;
-            max_borrow_in_uusd += max_borrow * asset_price;
-        }
-
-        let borrow_asset_price = asset_get_price(asset_label.as_str(), &asset_prices, &asset_type)?;
-        let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
-
-        if Decimal256::from_uint256(total_debt_in_uusd + borrow_amount_in_uusd) > max_borrow_in_uusd
+        if user_account_settlement.total_debt_in_uusd + borrow_amount_in_uusd
+            > user_account_settlement.max_debt_in_uusd
         {
             return Err(StdError::generic_err(
                 "borrow amount exceeds maximum allowed given current collateral value",
@@ -947,15 +982,16 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
     let money_market = money_market_state_read(&deps.storage).load()?;
     let user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
-    let (user_health_status, native_asset_prices) = user_get_health_status(
+    let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
         &deps,
-        &money_market,
-        &user,
-        &user_canonical_address,
         block_time,
+        &user_canonical_address,
+        &user,
+        &money_market,
+        &mut vec![],
     )?;
 
-    let health_factor = match user_health_status {
+    let health_factor = match user_account_settlement.health_status {
         // NOTE: Should not get in practice as it would fail on the debt asset check
         UserHealthStatus::NotBorrowing => {
             return Err(StdError::generic_err(
@@ -1237,14 +1273,15 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     let from_canonical_address = deps.api.canonical_address(&from_address)?;
     let money_market = money_market_state_read(&deps.storage).load()?;
     let mut from_user = users_state_read(&deps.storage).load(from_canonical_address.as_slice())?;
-    let (user_health_status, _) = user_get_health_status(
+    let (user_account_settlement, _) = prepare_user_account_settlement(
         &deps,
-        &money_market,
-        &from_user,
-        &from_canonical_address,
         env.block.time,
+        &from_canonical_address,
+        &from_user,
+        &money_market,
+        &mut vec![],
     )?;
-    if let UserHealthStatus::Borrowing(health_factor) = user_health_status {
+    if let UserHealthStatus::Borrowing(health_factor) = user_account_settlement.health_status {
         if health_factor < Decimal256::one() {
             return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender"));
         }
@@ -1929,27 +1966,30 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Rese
     logs.append(&mut interest_logs);
 }
 
+/// User asset settlement
+struct UserAssetSettlement {
+    asset_label: String,
+    asset_type: AssetType,
+    collateral_amount: Decimal256,
+    debt_amount: Decimal256,
+    ltv: Decimal256,
+    liquidation_threshold: Decimal256,
+}
+
 /// Goes through assets user has a position in and returns a vec containing the scaled debt
 /// (denominated in the asset), a result from a specified computation for the current collateral
 /// (denominated in asset) and some metadata to be used by the caller.
 /// Also adds the price to native_assets_prices_to_query in case the prices in uusd need to
 /// be retrieved by the caller later
-fn user_get_balances<S, A, Q, F>(
+fn user_get_balances<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     money_market: &MoneyMarket,
     user: &User,
     user_canonical_address: &CanonicalAddr,
-    get_target_collateral_amount: F,
     native_asset_prices_to_query: &mut Vec<String>,
     block_time: u64,
-) -> StdResult<Vec<(String, Uint256, Decimal256, AssetType)>>
-where
-    S: Storage,
-    A: Api,
-    Q: Querier,
-    F: Fn(Decimal256, &Reserve) -> Decimal256,
-{
-    let mut ret: Vec<(String, Uint256, Decimal256, AssetType)> = vec![];
+) -> StdResult<Vec<UserAssetSettlement>> {
+    let mut ret: Vec<UserAssetSettlement> = vec![];
 
     for i in 0_u32..money_market.reserve_count {
         let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
@@ -1960,7 +2000,7 @@ where
 
         let (asset_reference_vec, reserve) = reserve_get_from_index(&deps.storage, i)?;
 
-        let target_collateral_amount = if user_is_using_as_collateral {
+        let (collateral_amount, ltv, liquidation_threshold) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance = cw20_get_balance(
                 &deps.querier,
@@ -1969,12 +2009,16 @@ where
             )?;
 
             let liquidity_index = get_updated_liquidity_index(&reserve, block_time);
-
-            let collateral =
+            let collateral_amount =
                 Decimal256::from_uint256(Uint256::from(asset_balance)) * liquidity_index;
-            get_target_collateral_amount(collateral, &reserve)
+
+            (
+                collateral_amount,
+                reserve.loan_to_value,
+                reserve.liquidation_threshold,
+            )
         } else {
-            Decimal256::zero()
+            (Decimal256::zero(), Decimal256::zero(), Decimal256::zero())
         };
 
         let debt_amount = if user_is_borrowing {
@@ -1984,9 +2028,9 @@ where
 
             let borrow_index = get_updated_borrow_index(&reserve, block_time);
 
-            user_debt.amount_scaled * borrow_index
+            Decimal256::from_uint256(user_debt.amount_scaled) * borrow_index
         } else {
-            Uint256::zero()
+            Decimal256::zero()
         };
 
         // get asset label
@@ -2007,15 +2051,27 @@ where
             native_asset_prices_to_query.push(asset_label.clone());
         }
 
-        ret.push((
+        let user_asset_settlement = UserAssetSettlement {
             asset_label,
+            asset_type: reserve.asset_type,
+            collateral_amount,
             debt_amount,
-            target_collateral_amount,
-            reserve.asset_type,
-        ));
+            ltv,
+            liquidation_threshold,
+        };
+        ret.push(user_asset_settlement);
     }
 
     Ok(ret)
+}
+
+/// User account settlement
+struct UserAccountSettlement {
+    total_collateral_in_uusd: Decimal256,
+    total_debt_in_uusd: Decimal256,
+    max_debt_in_uusd: Decimal256,
+    weighted_liquidation_threshold_in_uusd: Decimal256,
+    health_status: UserHealthStatus,
 }
 
 enum UserHealthStatus {
@@ -2023,57 +2079,67 @@ enum UserHealthStatus {
     Borrowing(Decimal256),
 }
 
-/// Computes user health status and returns it among the list of prices that were
-/// used during the computation
-fn user_get_health_status<S: Storage, A: Api, Q: Querier>(
+/// Calculates the user data across the reserves.
+/// This includes the total debt/collateral balances in uusd,
+/// the average LTV, the average Liquidation threshold, and the Health factor.
+/// Moreover returns the list of asset prices that were used during the computation.
+fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    money_market: &MoneyMarket,
-    user: &User,
-    user_canonical_address: &CanonicalAddr,
     block_time: u64,
-) -> StdResult<(UserHealthStatus, Vec<(String, Decimal256)>)> {
-    let mut native_asset_prices_to_query: Vec<String> = vec![];
-    // Get debt and weighted_liquidation_threshold values for user's position
-    // Vec<(reference, debt_amount, weighted_liquidation_threshold, asset_type)>
+    user_canonical_address: &CanonicalAddr,
+    user: &User,
+    money_market: &MoneyMarket,
+    native_asset_prices_to_query: &mut Vec<String>,
+) -> StdResult<(UserAccountSettlement, Vec<(String, Decimal256)>)> {
     let user_balances = user_get_balances(
         &deps,
         &money_market,
         user,
         user_canonical_address,
-        |collateral, reserve| collateral * reserve.liquidation_threshold,
-        &mut native_asset_prices_to_query,
+        native_asset_prices_to_query,
         block_time,
     )?;
     let native_asset_prices =
         get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
 
+    let mut total_collateral_in_uusd = Decimal256::zero();
     let mut total_debt_in_uusd = Decimal256::zero();
-    let mut weighted_liquidation_threshold_sum = Decimal256::zero();
+    let mut weighted_ltv_in_uusd = Decimal256::zero();
+    let mut weighted_liquidation_threshold_in_uusd = Decimal256::zero();
 
-    // calculate user's health factor
-    for (asset_label, debt_amount_in_asset, weighted_liquidation_threshold_in_asset, asset_type) in
-        user_balances
-    {
-        let asset_price = asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+    for user_asset_settlement in user_balances {
+        let asset_price = asset_get_price(
+            user_asset_settlement.asset_label.as_str(),
+            &native_asset_prices,
+            &user_asset_settlement.asset_type,
+        )?;
 
-        let weighted_liquidation_threshold_in_uusd =
-            asset_price * weighted_liquidation_threshold_in_asset;
-        weighted_liquidation_threshold_sum += weighted_liquidation_threshold_in_uusd;
+        let collateral_in_uusd = user_asset_settlement.collateral_amount * asset_price;
+        total_collateral_in_uusd += collateral_in_uusd;
 
-        let debt_balance_in_uusd = asset_price * debt_amount_in_asset;
-        total_debt_in_uusd += Decimal256::from_uint256(debt_balance_in_uusd);
+        weighted_ltv_in_uusd += collateral_in_uusd * user_asset_settlement.ltv;
+        weighted_liquidation_threshold_in_uusd +=
+            collateral_in_uusd * user_asset_settlement.liquidation_threshold;
+
+        total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
     }
 
-    // ensure user's total debt across all reserves is not zero
-    if total_debt_in_uusd.is_zero() {
-        return Ok((UserHealthStatus::NotBorrowing, native_asset_prices));
-    }
+    let health_status = if total_debt_in_uusd.is_zero() {
+        UserHealthStatus::NotBorrowing
+    } else {
+        let health_factor = weighted_liquidation_threshold_in_uusd / total_debt_in_uusd;
+        UserHealthStatus::Borrowing(health_factor)
+    };
 
-    let health_factor = weighted_liquidation_threshold_sum / total_debt_in_uusd;
-    Ok((
-        UserHealthStatus::Borrowing(health_factor),
-        native_asset_prices,
-    ))
+    let use_account_settlement = UserAccountSettlement {
+        total_collateral_in_uusd,
+        total_debt_in_uusd,
+        max_debt_in_uusd: weighted_ltv_in_uusd,
+        weighted_liquidation_threshold_in_uusd,
+        health_status,
+    };
+
+    Ok((use_account_settlement, native_asset_prices))
 }
 
 // HELPERS
