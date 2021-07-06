@@ -2067,7 +2067,8 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 
 /// User account settlement
 struct UserAccountSettlement {
-    total_collateral_in_uusd: Decimal256,
+    /// NOTE: Not used yet
+    _total_collateral_in_uusd: Decimal256,
     total_debt_in_uusd: Decimal256,
     max_debt_in_uusd: Decimal256,
     weighted_liquidation_threshold_in_uusd: Decimal256,
@@ -2132,7 +2133,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     };
 
     let use_account_settlement = UserAccountSettlement {
-        total_collateral_in_uusd,
+        _total_collateral_in_uusd: total_collateral_in_uusd,
         total_debt_in_uusd,
         max_debt_in_uusd: weighted_ltv_in_uusd,
         weighted_liquidation_threshold_in_uusd,
@@ -3588,6 +3589,16 @@ mod tests {
             )
             .unwrap();
 
+        let user = User::default();
+        let mut users_bucket = users_state(&mut deps.storage);
+        let withdrawer_canonical_addr = deps
+            .api
+            .canonical_address(&HumanAddr::from("withdrawer"))
+            .unwrap();
+        users_bucket
+            .save(withdrawer_canonical_addr.as_slice(), &user)
+            .unwrap();
+
         let msg = HandleMsg::Withdraw {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
@@ -3727,6 +3738,13 @@ mod tests {
 
         let withdrawer_addr = HumanAddr::from("withdrawer");
 
+        let user = User::default();
+        let mut users_bucket = users_state(&mut deps.storage);
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
+        users_bucket
+            .save(withdrawer_canonical_addr.as_slice(), &user)
+            .unwrap();
+
         let msg = HandleMsg::Withdraw {
             asset: Asset::Cw20 {
                 contract_addr: cw20_contract_addr.clone(),
@@ -3809,7 +3827,7 @@ mod tests {
     }
 
     #[test]
-    fn withdraw_cannot_exceed_balance() {
+    fn test_withdraw_cannot_exceed_balance() {
         let mut deps = th_setup(&[]);
 
         let mock_reserve = Reserve {
@@ -3884,6 +3902,20 @@ mod tests {
                 &(b"somecoin".to_vec()),
             )
             .unwrap();
+
+        // Mark the reserve as collateral for the user
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, reserve_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        let withdrawer_canonical_addr = deps
+            .api
+            .canonical_address(&HumanAddr::from("withdrawer"))
+            .unwrap();
+        users_bucket
+            .save(withdrawer_canonical_addr.as_slice(), &user)
+            .unwrap();
+        // Check if user has set bit for collateral
+        assert!(get_bit(user.collateral_assets, reserve_initial.index).unwrap());
 
         let msg = HandleMsg::Withdraw {
             asset: Asset::Native {
@@ -3967,6 +3999,12 @@ mod tests {
             reserve.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
+
+        // User should have unset bit for collateral after full withdraw
+        let user = users_state_read(&deps.storage)
+            .load(&withdrawer_canonical_addr.as_slice())
+            .unwrap();
+        assert!(!get_bit(user.collateral_assets, reserve_initial.index).unwrap());
     }
 
     #[test]
