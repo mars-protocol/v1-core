@@ -356,7 +356,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let asset_as_collateral = get_bit(withdrawer.collateral_assets, reserve.index)?;
     let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
 
-    // asset is used as collateral and user is borrowing so need to validate health factor after withdraw,
+    // if asset is used as collateral and user is borrowing we need to validate health factor after withdraw,
     // otherwise no reasons to block the withdraw
     if asset_as_collateral && user_is_borrowing {
         let money_market = money_market_state_read(&deps.storage).load()?;
@@ -384,9 +384,9 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             .weighted_liquidation_threshold_in_uusd
             - (withdraw_amount_in_uusd * reserve.liquidation_threshold))
             / user_account_settlement.total_debt_in_uusd;
-        if health_factor_after_withdraw > Decimal256::one() {
+        if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
-                "User's health factor is not less than 1 after withdraw",
+                "User's health factor can't be less than 1 after withdraw",
             ));
         }
     }
@@ -3856,6 +3856,139 @@ mod tests {
         let env = cosmwasm_std::testing::mock_env("withdrawer", &[]);
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(response, "Withdraw amount must be greater than 0 and less or equal user balance (asset: somecoin)");
+    }
+
+    #[test]
+    fn test_withdraw_if_health_factor_not_met() {
+        let mut deps = th_setup(&[]);
+
+        let withdrawer_addr = HumanAddr::from("withdrawer");
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
+
+        // Initialize reserves
+        let ma_token_1_addr = HumanAddr::from("matoken1");
+        let reserve_1 = Reserve {
+            ma_token_address: deps.api.canonical_address(&ma_token_1_addr).unwrap(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            loan_to_value: Decimal256::from_ratio(40, 100),
+            liquidation_threshold: Decimal256::from_ratio(60, 100),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let ma_token_2_addr = HumanAddr::from("matoken2");
+        let reserve_2 = Reserve {
+            ma_token_address: deps.api.canonical_address(&ma_token_2_addr).unwrap(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            loan_to_value: Decimal256::from_ratio(50, 100),
+            liquidation_threshold: Decimal256::from_ratio(80, 100),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let ma_token_3_addr = HumanAddr::from("matoken3");
+        let reserve_3 = Reserve {
+            ma_token_address: deps.api.canonical_address(&ma_token_3_addr).unwrap(),
+            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal256::one(),
+            loan_to_value: Decimal256::from_ratio(20, 100),
+            liquidation_threshold: Decimal256::from_ratio(40, 100),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let reserve_1_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"token1", &reserve_1);
+        let reserve_2_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"token2", &reserve_2);
+        let reserve_3_initial =
+            th_init_reserve(&deps.api, &mut deps.storage, b"token3", &reserve_3);
+
+        // Initialize user with reserve_1 and reserve_3 as collaterals
+        // User borrows reserve_2
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, reserve_3_initial.index).unwrap();
+        set_bit(&mut user.borrowed_assets, reserve_2_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(withdrawer_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Set the querier to return collateral balances (ma_token_1 and ma_token_3)
+        let ma_token_1_balance_scaled = Uint128(100000);
+        deps.querier.set_cw20_balances(
+            ma_token_1_addr,
+            &[(withdrawer_addr.clone(), ma_token_1_balance_scaled)],
+        );
+        let ma_token_3_balance_scaled = Uint128(600000);
+        deps.querier.set_cw20_balances(
+            ma_token_3_addr,
+            &[(withdrawer_addr, ma_token_3_balance_scaled)],
+        );
+
+        // Set user to have positive debt amount in debt asset
+        let token_2_debt_scaled = Uint256::from(200000u128);
+        let debt = Debt {
+            amount_scaled: token_2_debt_scaled,
+        };
+        debts_asset_state(&mut deps.storage, b"token2")
+            .save(withdrawer_canonical_addr.as_slice(), &debt)
+            .unwrap();
+
+        // Set the querier to return native exchange rates
+        let token_1_exchange_rate = Decimal::from_ratio(3u128, 1u128);
+        let token_2_exchange_rate = Decimal::from_ratio(2u128, 1u128);
+        let token_3_exchange_rate = Decimal::from_ratio(1u128, 1u128);
+        let exchange_rates = [
+            (String::from("token1"), token_1_exchange_rate),
+            (String::from("token2"), token_2_exchange_rate),
+            (String::from("token3"), token_3_exchange_rate),
+        ];
+        deps.querier
+            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
+
+        // Calculate how much to withdraw to have health factor less than one
+        let env = cosmwasm_std::testing::mock_env("withdrawer", &[]);
+        let how_much_to_withdraw = {
+            let token_1_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_1_balance_scaled)
+                * get_updated_liquidity_index(&reserve_1_initial, env.block.time)
+                * reserve_1_initial.liquidation_threshold
+                * Decimal256::from(token_1_exchange_rate);
+            let token_3_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_3_balance_scaled)
+                * get_updated_liquidity_index(&reserve_3_initial, env.block.time)
+                * reserve_3_initial.liquidation_threshold
+                * Decimal256::from(token_3_exchange_rate);
+            let weighted_liquidation_threshold_in_uusd =
+                token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
+
+            let total_debt_in_uusd = Decimal256::from_uint256(token_2_debt_scaled)
+                * get_updated_borrow_index(&reserve_2_initial, env.block.time)
+                * Decimal256::from(token_2_exchange_rate);
+
+            // How much to withdraw in uusd to have health factor equal to one
+            let how_much_to_withdraw_in_uusd = (weighted_liquidation_threshold_in_uusd
+                - total_debt_in_uusd)
+                / reserve_3_initial.liquidation_threshold;
+            let how_much_to_withdraw =
+                how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate);
+            let how_much_to_withdraw = Uint256::one() * how_much_to_withdraw;
+
+            // Need to withdraw a little bit more to have health factor less than one
+            how_much_to_withdraw + Uint256::one()
+        };
+
+        // Withdraw token3
+        let msg = HandleMsg::Withdraw {
+            asset: Asset::Native {
+                denom: "token3".to_string(),
+            },
+            amount: Some(how_much_to_withdraw),
+        };
+        let response = handle(&mut deps, env, msg);
+        assert_generic_error_message(
+            response,
+            "User's health factor can't be less than 1 after withdraw",
+        );
     }
 
     #[test]
