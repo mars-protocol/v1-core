@@ -361,18 +361,13 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     if asset_as_collateral && user_is_borrowing {
         let money_market = money_market_state_read(&deps.storage).load()?;
 
-        let mut native_asset_prices_to_query: Vec<String> = match asset {
-            Asset::Native { .. } if asset_label != "uusd" => vec![asset_label.clone()],
-            _ => vec![],
-        };
-
         let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
             deps,
             env.block.time,
             &withdrawer_canonical_address,
             &withdrawer,
             &money_market,
-            &mut native_asset_prices_to_query,
+            &mut vec![],
         )?;
 
         let withdraw_asset_price =
