@@ -3855,7 +3855,8 @@ mod tests {
 
     #[test]
     fn test_withdraw_if_health_factor_not_met() {
-        let mut deps = th_setup(&[]);
+        let initial_available_liquidity = 10000000u128;
+        let mut deps = th_setup(&[coin(initial_available_liquidity, "token3")]);
 
         let withdrawer_addr = HumanAddr::from("withdrawer");
         let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
@@ -3918,7 +3919,7 @@ mod tests {
         let ma_token_3_balance_scaled = Uint128(600000);
         deps.querier.set_cw20_balances(
             ma_token_3_addr,
-            &[(withdrawer_addr, ma_token_3_balance_scaled)],
+            &[(withdrawer_addr.clone(), ma_token_3_balance_scaled)],
         );
 
         // Set user to have positive debt amount in debt asset
@@ -3942,8 +3943,9 @@ mod tests {
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
-        // Calculate how much to withdraw to have health factor less than one
         let env = cosmwasm_std::testing::mock_env("withdrawer", &[]);
+
+        // Calculate how much to withdraw to have health factor equal to one
         let how_much_to_withdraw = {
             let token_1_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_1_balance_scaled)
                 * get_updated_liquidity_index(&reserve_1_initial, env.block.time)
@@ -3966,24 +3968,63 @@ mod tests {
                 / reserve_3_initial.liquidation_threshold;
             let how_much_to_withdraw =
                 how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate);
-            let how_much_to_withdraw = Uint256::one() * how_much_to_withdraw;
-
-            // Need to withdraw a little bit more to have health factor less than one
-            how_much_to_withdraw + Uint256::one()
+            Uint256::one() * how_much_to_withdraw
         };
 
-        // Withdraw token3
-        let msg = HandleMsg::Withdraw {
-            asset: Asset::Native {
-                denom: "token3".to_string(),
-            },
-            amount: Some(how_much_to_withdraw),
-        };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "User's health factor can't be less than 1 after withdraw",
-        );
+        // Withdraw token3 with failure
+        // The withdraw amount needs to be a little bit greater to have health factor less than one
+        {
+            let withdraw_amount = how_much_to_withdraw + Uint256::one();
+            let msg = HandleMsg::Withdraw {
+                asset: Asset::Native {
+                    denom: "token3".to_string(),
+                },
+                amount: Some(withdraw_amount),
+            };
+            let response = handle(&mut deps, env.clone(), msg);
+            assert_generic_error_message(
+                response,
+                "User's health factor can't be less than 1 after withdraw",
+            );
+        }
+
+        // Withdraw token3 with success
+        // The withdraw amount needs to be a little bit smaller to have health factor greater than one
+        {
+            let withdraw_amount = how_much_to_withdraw - Uint256::one();
+            let msg = HandleMsg::Withdraw {
+                asset: Asset::Native {
+                    denom: "token3".to_string(),
+                },
+                amount: Some(withdraw_amount),
+            };
+            let res = handle(&mut deps, env.clone(), msg).unwrap();
+
+            let withdraw_amount_scaled =
+                withdraw_amount / get_updated_liquidity_index(&reserve_3_initial, env.block.time);
+
+            assert_eq!(
+                res.messages,
+                vec![
+                    CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: HumanAddr::from("matoken3"),
+                        send: vec![],
+                        msg: to_binary(&Cw20HandleMsg::Burn {
+                            amount: withdraw_amount_scaled.into(),
+                        })
+                        .unwrap(),
+                    }),
+                    CosmosMsg::Bank(BankMsg::Send {
+                        from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        to_address: withdrawer_addr,
+                        amount: vec![Coin {
+                            denom: String::from("token3"),
+                            amount: withdraw_amount.into(),
+                        }],
+                    }),
+                ]
+            );
+        }
     }
 
     #[test]
