@@ -1979,8 +1979,8 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, market: &Marke
 struct UserAssetSettlement {
     asset_label: String,
     asset_type: AssetType,
-    collateral_amount: Decimal256,
-    debt_amount: Decimal256,
+    collateral_amount: Uint256,
+    debt_amount: Uint256,
     ltv: Decimal256,
     maintenance_margin: Decimal256,
 }
@@ -2018,8 +2018,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             )?;
 
             let liquidity_index = get_updated_liquidity_index(&market, block_time);
-            let collateral_amount =
-                Decimal256::from_uint256(Uint256::from(asset_balance)) * liquidity_index;
+            let collateral_amount = Uint256::from(asset_balance) * liquidity_index;
 
             (
                 collateral_amount,
@@ -2027,7 +2026,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
                 market.maintenance_margin,
             )
         } else {
-            (Decimal256::zero(), Decimal256::zero(), Decimal256::zero())
+            (Uint256::zero(), Decimal256::zero(), Decimal256::zero())
         };
 
         let debt_amount = if user_is_borrowing {
@@ -2037,9 +2036,9 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 
             let borrow_index = get_updated_borrow_index(&market, block_time);
 
-            Decimal256::from_uint256(user_debt.amount_scaled) * borrow_index
+            user_debt.amount_scaled * borrow_index
         } else {
-            Decimal256::zero()
+            Uint256::zero()
         };
 
         // get asset label
@@ -2124,14 +2123,16 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
             &user_asset_settlement.asset_type,
         )?;
 
-        let collateral_in_uusd = user_asset_settlement.collateral_amount * asset_price;
+        let collateral_in_uusd =
+            Decimal256::from_uint256(user_asset_settlement.collateral_amount) * asset_price;
         total_collateral_in_uusd += collateral_in_uusd;
 
         weighted_ltv_in_uusd += collateral_in_uusd * user_asset_settlement.ltv;
         weighted_maintenance_margin_in_uusd +=
             collateral_in_uusd * user_asset_settlement.maintenance_margin;
 
-        total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
+        total_debt_in_uusd +=
+            Decimal256::from_uint256(user_asset_settlement.debt_amount) * asset_price;
     }
 
     let health_status = if total_debt_in_uusd.is_zero() {
