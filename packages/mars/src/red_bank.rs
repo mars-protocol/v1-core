@@ -173,11 +173,11 @@ pub mod msg {
         pub liquidity_index: Decimal256,
         pub borrow_rate: Decimal256,
         pub liquidity_rate: Decimal256,
-        pub loan_to_value: Decimal256,
+        pub max_loan_to_value: Decimal256,
         pub interests_last_updated: u64,
         pub debt_total_scaled: Uint256,
         pub asset_type: AssetType,
-        pub liquidation_threshold: Decimal256,
+        pub maintenance_margin: Decimal256,
         pub liquidation_bonus: Decimal256,
     }
 
@@ -221,11 +221,11 @@ pub mod msg {
         /// Max borrow rate
         pub max_borrow_rate: Option<Decimal256>,
         /// Max percentage of collateral that can be borrowed
-        pub loan_to_value: Option<Decimal256>,
+        pub max_loan_to_value: Option<Decimal256>,
         /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
         pub reserve_factor: Option<Decimal256>,
         /// Percentage at which the loan is defined as under-collateralized
-        pub liquidation_threshold: Option<Decimal256>,
+        pub maintenance_margin: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
         /// One of the PID parameter

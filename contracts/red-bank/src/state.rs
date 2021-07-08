@@ -8,7 +8,7 @@ use cosmwasm_storage::{
     Singleton,
 };
 use mars::helpers::all_conditions_valid;
-use mars::liquidity_pool::msg::{AssetType, InitOrUpdateAssetParams};
+use mars::red_bank::msg::{AssetType, InitOrUpdateAssetParams};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
@@ -115,7 +115,7 @@ pub struct Reserve {
     pub liquidity_rate: Decimal256,
 
     /// Max percentage of collateral that can be borrowed
-    pub loan_to_value: Decimal256,
+    pub max_loan_to_value: Decimal256,
 
     /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
     pub reserve_factor: Decimal256,
@@ -129,7 +129,7 @@ pub struct Reserve {
     pub asset_type: AssetType,
 
     /// Percentage at which the loan is defined as under-collateralized
-    pub liquidation_threshold: Decimal256,
+    pub maintenance_margin: Decimal256,
     /// Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Decimal256,
 
@@ -167,9 +167,9 @@ impl Reserve {
             initial_borrow_rate: borrow_rate,
             min_borrow_rate,
             max_borrow_rate,
-            loan_to_value,
+            max_loan_to_value,
             reserve_factor,
-            liquidation_threshold,
+            maintenance_margin,
             liquidation_bonus,
             kp,
             optimal_utilization_rate: u_optimal,
@@ -181,9 +181,9 @@ impl Reserve {
         let available = borrow_rate.is_some()
             && min_borrow_rate.is_some()
             && max_borrow_rate.is_some()
-            && loan_to_value.is_some()
+            && max_loan_to_value.is_some()
             && reserve_factor.is_some()
-            && liquidation_threshold.is_some()
+            && maintenance_margin.is_some()
             && liquidation_bonus.is_some()
             && kp.is_some()
             && u_optimal.is_some()
@@ -213,11 +213,11 @@ impl Reserve {
             min_borrow_rate: min_borrow_rate.unwrap(),
             max_borrow_rate: max_borrow_rate.unwrap(),
             liquidity_rate: Decimal256::zero(),
-            loan_to_value: loan_to_value.unwrap(),
+            max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
             interests_last_updated: block_time,
             debt_total_scaled: Uint256::zero(),
-            liquidation_threshold: liquidation_threshold.unwrap(),
+            maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint256::zero(),
             pid_parameters: new_pid_params,
@@ -244,13 +244,16 @@ impl Reserve {
             ));
         }
 
-        // loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
+        // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
         let conditions_and_names = vec![
-            (self.loan_to_value.le(&Decimal256::one()), "loan_to_value"),
+            (
+                self.max_loan_to_value.le(&Decimal256::one()),
+                "max_loan_to_value",
+            ),
             (self.reserve_factor.le(&Decimal256::one()), "reserve_factor"),
             (
-                self.liquidation_threshold.le(&Decimal256::one()),
-                "liquidation_threshold",
+                self.maintenance_margin.le(&Decimal256::one()),
+                "maintenance_margin",
             ),
             (
                 self.liquidation_bonus.le(&Decimal256::one()),
@@ -259,13 +262,13 @@ impl Reserve {
         ];
         all_conditions_valid(conditions_and_names)?;
 
-        // liquidation_threshold should be greater than loan_to_value
-        if self.liquidation_threshold <= self.loan_to_value {
+        // maintenance_margin should be greater than max_loan_to_value
+        if self.maintenance_margin <= self.max_loan_to_value {
             return Err(StdError::generic_err(format!(
-                "liquidation_threshold should be greater than loan_to_value. \
-                    liquidation_threshold: {}, \
-                    loan_to_value: {}",
-                self.liquidation_threshold, self.loan_to_value
+                "maintenance_margin should be greater than max_loan_to_value. \
+                    maintenance_margin: {}, \
+                    max_loan_to_value: {}",
+                self.maintenance_margin, self.max_loan_to_value
             )));
         }
 
@@ -280,9 +283,9 @@ impl Reserve {
             initial_borrow_rate: _,
             min_borrow_rate,
             max_borrow_rate,
-            loan_to_value,
+            max_loan_to_value,
             reserve_factor,
-            liquidation_threshold,
+            maintenance_margin,
             liquidation_bonus,
             kp,
             optimal_utilization_rate: u_optimal,
@@ -301,9 +304,9 @@ impl Reserve {
         let updated_reserve = Reserve {
             min_borrow_rate: min_borrow_rate.unwrap_or(self.min_borrow_rate),
             max_borrow_rate: max_borrow_rate.unwrap_or(self.max_borrow_rate),
-            loan_to_value: loan_to_value.unwrap_or(self.loan_to_value),
+            max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
             reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
-            liquidation_threshold: liquidation_threshold.unwrap_or(self.liquidation_threshold),
+            maintenance_margin: maintenance_margin.unwrap_or(self.maintenance_margin),
             liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
             pid_parameters: updated_pid_params,
             ..self
