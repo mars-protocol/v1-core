@@ -447,7 +447,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: HumanAddr::from("red_bank"),
                     msg: to_binary(
-                        &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                        &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: owner.clone(),
                             recipient_address: rcpt.clone(),
                             sender_previous_balance: start_balance,

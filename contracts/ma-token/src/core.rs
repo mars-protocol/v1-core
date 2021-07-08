@@ -79,7 +79,7 @@ pub fn finalize_transfer_msg<A: Api>(
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: api.human_address(red_bank_canonical_address)?,
         msg: to_binary(
-            &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+            &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                 sender_address,
                 recipient_address,
                 sender_previous_balance,

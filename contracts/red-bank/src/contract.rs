@@ -12,12 +12,12 @@ use terra_cosmwasm::TerraQuerier;
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
-use mars::liquidity_pool::msg::{
+use mars::ma_token;
+use mars::red_bank::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
     InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
     ReserveResponse, ReservesListResponse, UncollateralizedLoanLimitResponse,
 };
-use mars::ma_token;
 
 use crate::state::{
     config_state, config_state_read, debts_asset_state, debts_asset_state_read, money_market_state,
@@ -376,8 +376,8 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             Decimal256::from_uint256(withdraw_amount) * withdraw_asset_price;
 
         let health_factor_after_withdraw = (user_account_settlement
-            .weighted_liquidation_threshold_in_uusd
-            - (withdraw_amount_in_uusd * reserve.liquidation_threshold))
+            .weighted_maintenance_margin_in_uusd
+            - (withdraw_amount_in_uusd * reserve.maintenance_margin))
             / user_account_settlement.total_debt_in_uusd;
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
@@ -1579,11 +1579,11 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
         liquidity_index: reserve.liquidity_index,
         borrow_rate: reserve.borrow_rate,
         liquidity_rate: reserve.liquidity_rate,
-        loan_to_value: reserve.loan_to_value,
+        max_loan_to_value: reserve.max_loan_to_value,
         interests_last_updated: reserve.interests_last_updated,
         debt_total_scaled: reserve.debt_total_scaled,
         asset_type: reserve.asset_type,
-        liquidation_threshold: reserve.liquidation_threshold,
+        maintenance_margin: reserve.maintenance_margin,
         liquidation_bonus: reserve.liquidation_bonus,
     })
 }
@@ -1968,7 +1968,7 @@ struct UserAssetSettlement {
     collateral_amount: Decimal256,
     debt_amount: Decimal256,
     ltv: Decimal256,
-    liquidation_threshold: Decimal256,
+    maintenance_margin: Decimal256,
 }
 
 /// Goes through assets user has a position in and returns a vec containing the scaled debt
@@ -1995,7 +1995,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 
         let (asset_reference_vec, reserve) = reserve_get_from_index(&deps.storage, i)?;
 
-        let (collateral_amount, ltv, liquidation_threshold) = if user_is_using_as_collateral {
+        let (collateral_amount, ltv, maintenance_margin) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance = cw20_get_balance(
                 &deps.querier,
@@ -2009,8 +2009,8 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 
             (
                 collateral_amount,
-                reserve.loan_to_value,
-                reserve.liquidation_threshold,
+                reserve.max_loan_to_value,
+                reserve.maintenance_margin,
             )
         } else {
             (Decimal256::zero(), Decimal256::zero(), Decimal256::zero())
@@ -2052,7 +2052,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             collateral_amount,
             debt_amount,
             ltv,
-            liquidation_threshold,
+            maintenance_margin,
         };
         ret.push(user_asset_settlement);
     }
@@ -2066,7 +2066,7 @@ struct UserAccountSettlement {
     _total_collateral_in_uusd: Decimal256,
     total_debt_in_uusd: Decimal256,
     max_debt_in_uusd: Decimal256,
-    weighted_liquidation_threshold_in_uusd: Decimal256,
+    weighted_maintenance_margin_in_uusd: Decimal256,
     health_status: UserHealthStatus,
 }
 
@@ -2101,7 +2101,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     let mut total_collateral_in_uusd = Decimal256::zero();
     let mut total_debt_in_uusd = Decimal256::zero();
     let mut weighted_ltv_in_uusd = Decimal256::zero();
-    let mut weighted_liquidation_threshold_in_uusd = Decimal256::zero();
+    let mut weighted_maintenance_margin_in_uusd = Decimal256::zero();
 
     for user_asset_settlement in user_balances {
         let asset_price = asset_get_price(
@@ -2114,8 +2114,8 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
         total_collateral_in_uusd += collateral_in_uusd;
 
         weighted_ltv_in_uusd += collateral_in_uusd * user_asset_settlement.ltv;
-        weighted_liquidation_threshold_in_uusd +=
-            collateral_in_uusd * user_asset_settlement.liquidation_threshold;
+        weighted_maintenance_margin_in_uusd +=
+            collateral_in_uusd * user_asset_settlement.maintenance_margin;
 
         total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
     }
@@ -2123,7 +2123,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     let health_status = if total_debt_in_uusd.is_zero() {
         UserHealthStatus::NotBorrowing
     } else {
-        let health_factor = weighted_liquidation_threshold_in_uusd / total_debt_in_uusd;
+        let health_factor = weighted_maintenance_margin_in_uusd / total_debt_in_uusd;
         UserHealthStatus::Borrowing(health_factor)
     };
 
@@ -2131,7 +2131,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
         _total_collateral_in_uusd: total_collateral_in_uusd,
         total_debt_in_uusd,
         max_debt_in_uusd: weighted_ltv_in_uusd,
-        weighted_liquidation_threshold_in_uusd,
+        weighted_maintenance_margin_in_uusd,
         health_status,
     };
 
@@ -2322,7 +2322,7 @@ mod tests {
     use crate::state::{debts_asset_state_read, users_state_read, PidParameters};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, Extern};
-    use mars::liquidity_pool::msg::HandleMsg::UpdateConfig;
+    use mars::red_bank::msg::HandleMsg::UpdateConfig;
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, MarsMockQuerier, MockEnvParams,
     };
@@ -2357,12 +2357,12 @@ mod tests {
             borrow_index: Default::default(),
             liquidity_index: Default::default(),
             liquidity_rate: Default::default(),
-            loan_to_value: Default::default(),
+            max_loan_to_value: Default::default(),
             reserve_factor: Default::default(),
             interests_last_updated: 0,
             debt_total_scaled: Default::default(),
             asset_type: AssetType::Cw20,
-            liquidation_threshold: Default::default(),
+            maintenance_margin: Default::default(),
             liquidation_bonus: Default::default(),
             protocol_income_to_distribute: Default::default(),
         };
@@ -2705,9 +2705,9 @@ mod tests {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
             max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
-            loan_to_value: Some(Decimal256::from_ratio(8, 10)),
+            max_loan_to_value: Some(Decimal256::from_ratio(8, 10)),
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
-            liquidation_threshold: Some(Decimal256::one()),
+            maintenance_margin: Some(Decimal256::one()),
             liquidation_bonus: Some(Decimal256::zero()),
             kp: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
@@ -2728,8 +2728,8 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let empty_asset_params = InitOrUpdateAssetParams {
-            loan_to_value: None,
-            liquidation_threshold: None,
+            max_loan_to_value: None,
+            maintenance_margin: None,
             liquidation_bonus: None,
             ..asset_params
         };
@@ -2750,7 +2750,7 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
-            loan_to_value: Some(Decimal256::from_ratio(110, 10)),
+            max_loan_to_value: Some(Decimal256::from_ratio(110, 10)),
             reserve_factor: Some(Decimal256::from_ratio(120, 100)),
             ..asset_params
         };
@@ -2761,16 +2761,16 @@ mod tests {
             asset_params: invalid_asset_params,
         };
         let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [loan_to_value, reserve_factor]");
+        assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
+                Invalid params: [max_loan_to_value, reserve_factor]");
 
         // *
         // init asset where LTV >= liquidity threshold
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
-            loan_to_value: Some(Decimal256::from_ratio(5, 10)),
-            liquidation_threshold: Some(Decimal256::from_ratio(5, 10)),
+            max_loan_to_value: Some(Decimal256::from_ratio(5, 10)),
+            maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
             ..asset_params
         };
         let msg = HandleMsg::InitAsset {
@@ -2782,9 +2782,9 @@ mod tests {
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(
             response,
-            "liquidation_threshold should be greater than loan_to_value. \
-                    liquidation_threshold: 0.5, \
-                    loan_to_value: 0.5",
+            "maintenance_margin should be greater than max_loan_to_value. \
+                    maintenance_margin: 0.5, \
+                    max_loan_to_value: 0.5",
         );
 
         // *
@@ -3042,9 +3042,9 @@ mod tests {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
             max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
-            loan_to_value: Some(Decimal256::from_ratio(50, 100)),
+            max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
-            liquidation_threshold: Some(Decimal256::from_ratio(80, 100)),
+            maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
             kp: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
@@ -3090,7 +3090,7 @@ mod tests {
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
-            liquidation_threshold: Some(Decimal256::from_ratio(110, 10)),
+            maintenance_margin: Some(Decimal256::from_ratio(110, 10)),
             ..asset_params
         };
         let msg = HandleMsg::UpdateAsset {
@@ -3100,16 +3100,16 @@ mod tests {
             asset_params: invalid_asset_params,
         };
         let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "[loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [liquidation_threshold]");
+        assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
+                Invalid params: [maintenance_margin]");
 
         // *
         // update asset where LTV >= liquidity threshold
         // *
         let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
-            loan_to_value: Some(Decimal256::from_ratio(6, 10)),
-            liquidation_threshold: Some(Decimal256::from_ratio(5, 10)),
+            max_loan_to_value: Some(Decimal256::from_ratio(6, 10)),
+            maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
             ..asset_params
         };
         let msg = HandleMsg::UpdateAsset {
@@ -3121,9 +3121,9 @@ mod tests {
         let response = handle(&mut deps, env, msg);
         assert_generic_error_message(
             response,
-            "liquidation_threshold should be greater than loan_to_value. \
-                    liquidation_threshold: 0.5, \
-                    loan_to_value: 0.6",
+            "maintenance_margin should be greater than max_loan_to_value. \
+                    maintenance_margin: 0.5, \
+                    max_loan_to_value: 0.6",
         );
 
         // *
@@ -3175,9 +3175,9 @@ mod tests {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
             max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
-            loan_to_value: Some(Decimal256::from_ratio(60, 100)),
+            max_loan_to_value: Some(Decimal256::from_ratio(60, 100)),
             reserve_factor: Some(Decimal256::from_ratio(10, 100)),
-            liquidation_threshold: Some(Decimal256::from_ratio(90, 100)),
+            maintenance_margin: Some(Decimal256::from_ratio(90, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
             kp: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
@@ -3197,16 +3197,16 @@ mod tests {
             .unwrap();
         assert_eq!(0, new_reserve.index);
         assert_eq!(
-            asset_params.loan_to_value.unwrap(),
-            new_reserve.loan_to_value
+            asset_params.max_loan_to_value.unwrap(),
+            new_reserve.max_loan_to_value
         );
         assert_eq!(
             asset_params.reserve_factor.unwrap(),
             new_reserve.reserve_factor
         );
         assert_eq!(
-            asset_params.liquidation_threshold.unwrap(),
-            new_reserve.liquidation_threshold
+            asset_params.maintenance_margin.unwrap(),
+            new_reserve.maintenance_margin
         );
         assert_eq!(
             asset_params.liquidation_bonus.unwrap(),
@@ -3236,9 +3236,9 @@ mod tests {
             initial_borrow_rate: None,
             min_borrow_rate: None,
             max_borrow_rate: None,
-            loan_to_value: None,
+            max_loan_to_value: None,
             reserve_factor: None,
-            liquidation_threshold: None,
+            maintenance_margin: None,
             liquidation_bonus: None,
             kp: None,
             optimal_utilization_rate: None,
@@ -3271,16 +3271,16 @@ mod tests {
             new_reserve.max_borrow_rate
         );
         assert_eq!(
-            asset_params.loan_to_value.unwrap(),
-            new_reserve.loan_to_value
+            asset_params.max_loan_to_value.unwrap(),
+            new_reserve.max_loan_to_value
         );
         assert_eq!(
             asset_params.reserve_factor.unwrap(),
             new_reserve.reserve_factor
         );
         assert_eq!(
-            asset_params.liquidation_threshold.unwrap(),
-            new_reserve.liquidation_threshold
+            asset_params.maintenance_margin.unwrap(),
+            new_reserve.maintenance_margin
         );
         assert_eq!(
             asset_params.liquidation_bonus.unwrap(),
@@ -3306,10 +3306,7 @@ mod tests {
             reference: "uluna".into(),
         };
         let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::not_found("liquidity_pool::state::Reserve")
-        );
+        assert_eq!(error_res, StdError::not_found("red_bank::state::Reserve"));
     }
 
     #[test]
@@ -3324,7 +3321,7 @@ mod tests {
                 .canonical_address(&HumanAddr::from("matoken"))
                 .unwrap(),
             liquidity_index: Decimal256::from_ratio(11, 10),
-            loan_to_value: Decimal256::one(),
+            max_loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
             borrow_rate: Decimal256::from_ratio(10, 100),
             liquidity_rate: Decimal256::from_ratio(10, 100),
@@ -3422,7 +3419,7 @@ mod tests {
                 .canonical_address(&HumanAddr::from("matoken"))
                 .unwrap(),
             liquidity_index: Decimal256::from_ratio(11, 10),
-            loan_to_value: Decimal256::one(),
+            max_loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
             liquidity_rate: Decimal256::from_ratio(10, 100),
             reserve_factor: Decimal256::from_ratio(4, 100),
@@ -3521,10 +3518,7 @@ mod tests {
             amount: Uint128(deposit_amount),
         });
         let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(
-            res_error,
-            StdError::not_found("liquidity_pool::state::Reserve")
-        );
+        assert_eq!(res_error, StdError::not_found("red_bank::state::Reserve"));
     }
 
     #[test]
@@ -3536,10 +3530,7 @@ mod tests {
             denom: String::from("somecoin"),
         };
         let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(
-            res_error,
-            StdError::not_found("liquidity_pool::state::Reserve")
-        );
+        assert_eq!(res_error, StdError::not_found("red_bank::state::Reserve"));
     }
 
     #[test]
@@ -3867,8 +3858,8 @@ mod tests {
             ma_token_address: deps.api.canonical_address(&ma_token_1_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
-            loan_to_value: Decimal256::from_ratio(40, 100),
-            liquidation_threshold: Decimal256::from_ratio(60, 100),
+            max_loan_to_value: Decimal256::from_ratio(40, 100),
+            maintenance_margin: Decimal256::from_ratio(60, 100),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3877,8 +3868,8 @@ mod tests {
             ma_token_address: deps.api.canonical_address(&ma_token_2_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
-            loan_to_value: Decimal256::from_ratio(50, 100),
-            liquidation_threshold: Decimal256::from_ratio(80, 100),
+            max_loan_to_value: Decimal256::from_ratio(50, 100),
+            maintenance_margin: Decimal256::from_ratio(80, 100),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3887,8 +3878,8 @@ mod tests {
             ma_token_address: deps.api.canonical_address(&ma_token_3_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
-            loan_to_value: Decimal256::from_ratio(20, 100),
-            liquidation_threshold: Decimal256::from_ratio(40, 100),
+            max_loan_to_value: Decimal256::from_ratio(20, 100),
+            maintenance_margin: Decimal256::from_ratio(40, 100),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3949,13 +3940,13 @@ mod tests {
         let how_much_to_withdraw = {
             let token_1_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_1_balance_scaled)
                 * get_updated_liquidity_index(&reserve_1_initial, env.block.time)
-                * reserve_1_initial.liquidation_threshold
+                * reserve_1_initial.maintenance_margin
                 * Decimal256::from(token_1_exchange_rate);
             let token_3_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_3_balance_scaled)
                 * get_updated_liquidity_index(&reserve_3_initial, env.block.time)
-                * reserve_3_initial.liquidation_threshold
+                * reserve_3_initial.maintenance_margin
                 * Decimal256::from(token_3_exchange_rate);
-            let weighted_liquidation_threshold_in_uusd =
+            let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
             let total_debt_in_uusd = Decimal256::from_uint256(token_2_debt_scaled)
@@ -3963,9 +3954,9 @@ mod tests {
                 * Decimal256::from(token_2_exchange_rate);
 
             // How much to withdraw in uusd to have health factor equal to one
-            let how_much_to_withdraw_in_uusd = (weighted_liquidation_threshold_in_uusd
+            let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
                 - total_debt_in_uusd)
-                / reserve_3_initial.liquidation_threshold;
+                / reserve_3_initial.maintenance_margin;
             let how_much_to_withdraw =
                 how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate);
             Uint256::one() * how_much_to_withdraw
@@ -4233,7 +4224,7 @@ mod tests {
                 .unwrap(),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::from_ratio(11, 10),
-            loan_to_value: Decimal256::from_ratio(7, 10),
+            max_loan_to_value: Decimal256::from_ratio(7, 10),
             borrow_rate: Decimal256::from_ratio(30, 100),
             reserve_factor: Decimal256::from_ratio(3, 100),
             liquidity_rate: Decimal256::from_ratio(20, 100),
@@ -4827,7 +4818,7 @@ mod tests {
                 .canonical_address(&HumanAddr::from("matoken"))
                 .unwrap(),
             liquidity_index: Decimal256::one(),
-            loan_to_value: ltv,
+            max_loan_to_value: ltv,
             borrow_index: Decimal256::one(),
             borrow_rate: Decimal256::one(),
             liquidity_rate: Decimal256::one(),
@@ -4959,7 +4950,7 @@ mod tests {
                 .api
                 .canonical_address(&HumanAddr::from("matoken1"))
                 .unwrap(),
-            loan_to_value: Decimal256::from_ratio(8, 10),
+            max_loan_to_value: Decimal256::from_ratio(8, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -4971,7 +4962,7 @@ mod tests {
                 .api
                 .canonical_address(&HumanAddr::from("matoken2"))
                 .unwrap(),
-            loan_to_value: Decimal256::from_ratio(6, 10),
+            max_loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -4983,7 +4974,7 @@ mod tests {
                 .api
                 .canonical_address(&HumanAddr::from("matoken3"))
                 .unwrap(),
-            loan_to_value: Decimal256::from_ratio(4, 10),
+            max_loan_to_value: Decimal256::from_ratio(4, 10),
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -5044,13 +5035,13 @@ mod tests {
         deps.querier
             .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3)]);
 
-        let max_borrow_allowed_in_uusd = (reserve_1_initial.loan_to_value
+        let max_borrow_allowed_in_uusd = (reserve_1_initial.max_loan_to_value
             * Uint256::from(balance_1)
             * Decimal256::from(exchange_rate_1))
-            + (reserve_2_initial.loan_to_value
+            + (reserve_2_initial.max_loan_to_value
                 * Uint256::from(balance_2)
                 * Decimal256::from(exchange_rate_2))
-            + (reserve_3_initial.loan_to_value
+            + (reserve_3_initial.max_loan_to_value
                 * Uint256::from(balance_3)
                 * Decimal256::from(exchange_rate_3));
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
@@ -5100,7 +5091,7 @@ mod tests {
         let liquidator_address = HumanAddr::from("liquidator");
 
         let collateral_max_ltv = Decimal256::from_ratio(5, 10);
-        let collateral_liquidation_threshold = Decimal256::from_ratio(6, 10);
+        let collateral_maintenance_margin = Decimal256::from_ratio(6, 10);
         let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
         let collateral_price = Decimal::from_ratio(2_u128, 1_u128);
         let debt_price = Decimal::from_ratio(1_u128, 1_u128);
@@ -5146,8 +5137,8 @@ mod tests {
                 .api
                 .canonical_address(&collateral_reserve_ma_token_human_addr)
                 .unwrap(),
-            loan_to_value: collateral_max_ltv,
-            liquidation_threshold: collateral_liquidation_threshold,
+            max_loan_to_value: collateral_max_ltv,
+            maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
             debt_total_scaled: Uint256::from(800_000_000_u64),
             liquidity_index: Decimal256::one(),
@@ -5161,7 +5152,7 @@ mod tests {
         };
 
         let debt_reserve = Reserve {
-            loan_to_value: Decimal256::from_ratio(6, 10),
+            max_loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: expected_global_debt_scaled,
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -5842,7 +5833,7 @@ mod tests {
         );
 
         let collateral_ltv = Decimal256::from_ratio(5, 10);
-        let collateral_liquidation_threshold = Decimal256::from_ratio(7, 10);
+        let collateral_maintenance_margin = Decimal256::from_ratio(7, 10);
         let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
 
         let collateral_reserve = Reserve {
@@ -5850,8 +5841,8 @@ mod tests {
                 .api
                 .canonical_address(&HumanAddr::from("collateral"))
                 .unwrap(),
-            loan_to_value: collateral_ltv,
-            liquidation_threshold: collateral_liquidation_threshold,
+            max_loan_to_value: collateral_ltv,
+            maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
             debt_total_scaled: Uint256::zero(),
             liquidity_index: Decimal256::one(),
@@ -5864,7 +5855,7 @@ mod tests {
                 .api
                 .canonical_address(&HumanAddr::from("debt"))
                 .unwrap(),
-            loan_to_value: Decimal256::from_ratio(6, 10),
+            max_loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: Uint256::from(20_000_000u64),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -5925,7 +5916,7 @@ mod tests {
         );
 
         let healthy_user_debt_amount =
-            Uint256::from(healthy_user_collateral_balance) * collateral_liquidation_threshold;
+            Uint256::from(healthy_user_collateral_balance) * collateral_maintenance_margin;
         let healthy_user_debt = Debt {
             amount_scaled: healthy_user_debt_amount,
         };
@@ -5973,7 +5964,7 @@ mod tests {
                 .canonical_address(&HumanAddr::from("masomecoin"))
                 .unwrap(),
             liquidity_index: Decimal256::one(),
-            liquidation_threshold: Decimal256::from_ratio(5, 10),
+            maintenance_margin: Decimal256::from_ratio(5, 10),
             ..Default::default()
         };
         let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
@@ -6689,12 +6680,12 @@ mod tests {
                 min_borrow_rate: Decimal256::zero(),
                 max_borrow_rate: Decimal256::one(),
                 liquidity_rate: Default::default(),
-                loan_to_value: Default::default(),
+                max_loan_to_value: Default::default(),
                 reserve_factor: Default::default(),
                 interests_last_updated: 0,
                 debt_total_scaled: Default::default(),
                 asset_type: AssetType::Native,
-                liquidation_threshold: Decimal256::one(),
+                maintenance_margin: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
                 protocol_income_to_distribute: Uint256::zero(),
                 pid_parameters: PidParameters {
