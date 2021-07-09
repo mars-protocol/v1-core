@@ -104,7 +104,7 @@ pub mod msg {
 
         /// Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts
         DistributeProtocolIncome {
-            /// Asset reserve fees to distribute
+            /// Asset market fees to distribute
             asset: Asset,
             /// Amount to distribute to protocol contracts, defaults to full amount if not specified
             amount: Option<Uint256>,
@@ -141,10 +141,10 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
         Config {},
-        Reserve {
+        Market {
             asset: Asset,
         },
-        ReservesList {},
+        MarketsList {},
         Debt {
             address: HumanAddr,
         },
@@ -162,12 +162,12 @@ pub mod msg {
         pub insurance_fund_fee_share: Decimal256,
         pub treasury_fee_share: Decimal256,
         pub ma_token_code_id: u64,
-        pub reserve_count: u32,
+        pub market_count: u32,
         pub close_factor: Decimal256,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ReserveResponse {
+    pub struct MarketResponse {
         pub ma_token_address: HumanAddr,
         pub borrow_index: Decimal256,
         pub liquidity_index: Decimal256,
@@ -182,12 +182,12 @@ pub mod msg {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ReservesListResponse {
-        pub reserves_list: Vec<ReserveInfo>,
+    pub struct MarketsListResponse {
+        pub markets_list: Vec<MarketInfo>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ReserveInfo {
+    pub struct MarketInfo {
         pub denom: String,
         pub ma_token_address: HumanAddr,
     }
