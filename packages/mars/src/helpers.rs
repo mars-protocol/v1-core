@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    to_binary, Api, CanonicalAddr, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128,
+    to_binary, Api, Addr, Querier, QueryRequest, StdError, StdResult, Uint128,
     WasmQuery,
 };
 
@@ -7,40 +7,41 @@ use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
 
 // CW20
-pub fn cw20_get_balance<Q: Querier>(
-    querier: &Q,
-    token_address: HumanAddr,
-    balance_address: HumanAddr,
+pub fn cw20_get_balance(
+    querier: &dyn Querier,
+    token_address: Addr,
+    balance_address: Addr,
 ) -> StdResult<Uint128> {
     let query: BalanceResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: token_address,
+        contract_addr: token_address.into(),
         msg: to_binary(&Cw20QueryMsg::Balance {
-            address: balance_address,
+            address: balance_address.into(),
         })?,
     }))?;
 
     Ok(query.balance)
 }
 
-pub fn cw20_get_total_supply<Q: Querier>(
-    querier: &Q,
-    token_address: HumanAddr,
+pub fn cw20_get_total_supply(
+    querier: &dyn Querier,
+    token_address: Addr,
 ) -> StdResult<Uint128> {
-    let query: TokenInfoResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: token_address,
-        msg: to_binary(&Cw20QueryMsg::TokenInfo {})?,
-    }))?;
-
+    let query = cw20_get_info(querier, token_address);
     Ok(query.total_supply)
 }
 
-pub fn cw20_get_symbol<Q: Querier>(querier: &Q, token_address: HumanAddr) -> StdResult<String> {
+pub fn cw20_get_symbol(querier: &dyn Querier, token_address: Addr) -> StdResult<String> {
+    let query = cw20_get_info(querier, token_address);
+    Ok(query.symbol)
+}
+
+pub fn cw20_get_info(querier: &dyn Querier, token_address: Addr) -> StdResult<TokenInfoResponse> {
     let query: TokenInfoResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: token_address,
+        contract_addr: token_address.into,
         msg: to_binary(&Cw20QueryMsg::TokenInfo {})?,
     }))?;
 
-    Ok(query.symbol)
+    Ok(query)
 }
 
 pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
@@ -63,14 +64,15 @@ pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
     }
 }
 
-/// Converts human addr into canonical addr if present, otherwise use default
-pub fn human_addr_into_canonical<A: Api>(
-    api: A,
-    human_addr: Option<HumanAddr>,
-    default: CanonicalAddr,
-) -> StdResult<CanonicalAddr> {
-    match human_addr {
-        Some(human_addr) => api.canonical_address(&human_addr),
+/// Used when unwrapping an optional address sent in a contract call by a user.
+/// Validates addreess if present, otherwise uses a given default value.
+pub fn unwrap_option_unchecked_addr(
+    api: &dyn Api,
+    option_input_addr: Option<String>,
+    default: Addr,
+) -> StdResult<Addr> {
+    match option_input_addr {
+        Some(input_addr) => api.addr_validate(&input_addr)?,
         None => Ok(default),
     }
 }

@@ -5,9 +5,9 @@ pub use helpers::*;
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, BlockInfo, Coin, ContractInfo, Decimal, Env, Extern,
-    HumanAddr, MessageInfo, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
-    Uint128, WasmQuery,
+    from_binary, from_slice, to_binary, BlockInfo, Coin, ContractInfo, Decimal, Env, OwnedDeps,
+    Addr, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
+    Uint128, WasmQuery, Timestamp
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -24,7 +24,7 @@ use terraswap::factory::QueryMsg;
 
 pub struct MockEnvParams<'a> {
     pub sent_funds: &'a [Coin],
-    pub block_time: u64,
+    pub block_time: Timestamp,
     pub block_height: u64,
 }
 
@@ -32,26 +32,22 @@ impl<'a> Default for MockEnvParams<'a> {
     fn default() -> Self {
         MockEnvParams {
             sent_funds: &[],
-            block_time: 1_571_797_419,
+            block_time: Timestamp::from_nanos(1_571_797_419_879_305_533),
             block_height: 1,
         }
     }
 }
 
 /// mock_env replacement for cosmwasm_std::testing::mock_env
-pub fn mock_env(sender: &str, mock_env_params: MockEnvParams) -> Env {
+pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
     Env {
         block: BlockInfo {
             height: mock_env_params.block_height,
             time: mock_env_params.block_time,
             chain_id: "cosmos-testnet-14002".to_string(),
         },
-        message: MessageInfo {
-            sender: HumanAddr::from(sender),
-            sent_funds: mock_env_params.sent_funds.to_vec(),
-        },
         contract: ContractInfo {
-            address: HumanAddr::from(MOCK_CONTRACT_ADDR),
+            address: Addr::unchecked(MOCK_CONTRACT_ADDR),
         },
     }
 }
@@ -60,12 +56,12 @@ pub fn mock_env(sender: &str, mock_env_params: MockEnvParams) -> Env {
 pub fn mock_dependencies(
     canonical_length: usize,
     contract_balance: &[Coin],
-) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
-    let contract_addr = HumanAddr::from(MOCK_CONTRACT_ADDR);
+) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
+    let contract_addr = Addr::unchecked(MOCK_CONTRACT_ADDR);
     let custom_querier: MarsMockQuerier =
         MarsMockQuerier::new(MockQuerier::new(&[(&contract_addr, contract_balance)]));
 
-    Extern {
+    OwnedDeps {
         storage: MockStorage::default(),
         api: MockApi::new(canonical_length),
         querier: custom_querier,
@@ -86,13 +82,13 @@ pub struct NativeQuerier {
 #[derive(Clone, Debug)]
 pub struct Cw20Querier {
     /// maps cw20 contract address to user balances
-    pub balances: HashMap<HumanAddr, HashMap<HumanAddr, Uint128>>,
+    pub balances: HashMap<Addr, HashMap<Addr, Uint128>>,
     /// maps cw20 contract address to token info response
-    pub token_info_responses: HashMap<HumanAddr, TokenInfoResponse>,
+    pub token_info_responses: HashMap<Addr, TokenInfoResponse>,
 }
 
 impl Cw20Querier {
-    fn handle_cw20_query(&self, contract_addr: &HumanAddr, query: Cw20QueryMsg) -> QuerierResult {
+    fn handle_cw20_query(&self, contract_addr: &Addr, query: Cw20QueryMsg) -> QuerierResult {
         match query {
             Cw20QueryMsg::Balance { address } => {
                 let contract_balances = match self.balances.get(&contract_addr) {
@@ -152,7 +148,7 @@ impl Cw20Querier {
 
     fn handle_ma_token_query(
         &self,
-        contract_addr: &HumanAddr,
+        contract_addr: &Addr,
         query: ma_token::msg::QueryMsg,
     ) -> QuerierResult {
         match query {
@@ -221,9 +217,9 @@ impl Default for Cw20Querier {
 #[derive(Clone, Debug)]
 pub struct XMarsQuerier {
     /// xmars token address to be used in queries
-    pub xmars_address: HumanAddr,
+    pub xmars_address: Addr,
     /// maps human address and a block to a specific xmars balance
-    pub balances_at: HashMap<(HumanAddr, u64), Uint128>,
+    pub balances_at: HashMap<(Addr, u64), Uint128>,
     /// maps block to a specific xmars balance
     pub total_supplies_at: HashMap<u64, Uint128>,
 }
@@ -231,7 +227,7 @@ pub struct XMarsQuerier {
 impl XMarsQuerier {
     fn handle_query(
         &self,
-        contract_addr: &HumanAddr,
+        contract_addr: &Addr,
         query: xmars_token::msg::QueryMsg,
     ) -> QuerierResult {
         if contract_addr != &self.xmars_address {
@@ -278,7 +274,7 @@ impl XMarsQuerier {
 impl Default for XMarsQuerier {
     fn default() -> Self {
         XMarsQuerier {
-            xmars_address: HumanAddr::default(),
+            xmars_address: Addr::default(),
             balances_at: HashMap::new(),
             total_supplies_at: HashMap::new(),
         }
@@ -349,8 +345,8 @@ impl MarsMockQuerier {
     /// Set mock querier balances results for a given cw20 token
     pub fn set_cw20_balances(
         &mut self,
-        cw20_address: HumanAddr,
-        balances: &[(HumanAddr, Uint128)],
+        cw20_address: Addr,
+        balances: &[(Addr, Uint128)],
     ) {
         self.cw20_querier
             .balances
@@ -361,7 +357,7 @@ impl MarsMockQuerier {
     /// for a given cw20 token (note this will override existing token info with default
     /// values for the rest of the fields)
     #[allow(clippy::or_fun_call)]
-    pub fn set_cw20_total_supply(&mut self, cw20_address: HumanAddr, total_supply: Uint128) {
+    pub fn set_cw20_total_supply(&mut self, cw20_address: Addr, total_supply: Uint128) {
         let token_info = self
             .cw20_querier
             .token_info_responses
@@ -372,7 +368,7 @@ impl MarsMockQuerier {
     }
 
     #[allow(clippy::or_fun_call)]
-    pub fn set_cw20_symbol(&mut self, cw20_address: HumanAddr, symbol: String) {
+    pub fn set_cw20_symbol(&mut self, cw20_address: Addr, symbol: String) {
         let token_info = self
             .cw20_querier
             .token_info_responses
@@ -382,11 +378,11 @@ impl MarsMockQuerier {
         token_info.symbol = symbol;
     }
 
-    pub fn set_xmars_address(&mut self, address: HumanAddr) {
+    pub fn set_xmars_address(&mut self, address: Addr) {
         self.xmars_querier.xmars_address = address;
     }
 
-    pub fn set_xmars_balance_at(&mut self, address: HumanAddr, block: u64, balance: Uint128) {
+    pub fn set_xmars_balance_at(&mut self, address: Addr, block: u64, balance: Uint128) {
         self.xmars_querier
             .balances_at
             .insert((address, block), balance);
@@ -488,12 +484,13 @@ impl MarsMockQuerier {
             }
 
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
+                let contract_addr = Addr::unchecked(contract_addr);
                 // Cw20 Queries
                 let parse_cw20_query: StdResult<Cw20QueryMsg> = from_binary(&msg);
                 if let Ok(cw20_query) = parse_cw20_query {
                     return self
                         .cw20_querier
-                        .handle_cw20_query(contract_addr, cw20_query);
+                        .handle_cw20_query(&contract_addr, cw20_query);
                 }
 
                 // MaToken Queries
@@ -501,13 +498,13 @@ impl MarsMockQuerier {
                 if let Ok(ma_token_query) = parse_ma_token_query {
                     return self
                         .cw20_querier
-                        .handle_ma_token_query(contract_addr, ma_token_query);
+                        .handle_ma_token_query(&contract_addr, ma_token_query);
                 }
 
                 // XMars Queries
                 let parse_xmars_query: StdResult<xmars_token::msg::QueryMsg> = from_binary(&msg);
                 if let Ok(xmars_query) = parse_xmars_query {
-                    return self.xmars_querier.handle_query(contract_addr, xmars_query);
+                    return self.xmars_querier.handle_query(&contract_addr, xmars_query);
                 }
 
                 // Address Provider Queries
@@ -515,7 +512,7 @@ impl MarsMockQuerier {
                     from_binary(&msg);
                 if let Ok(address_provider_query) = parse_address_provider_query {
                     return mock_address_provider::handle_query(
-                        contract_addr,
+                        &contract_addr,
                         address_provider_query,
                     );
                 }
@@ -542,18 +539,21 @@ pub struct TerraswapPairQuerier {
 
 impl TerraswapPairQuerier {
     pub fn handle_query(&self, request: &terraswap::factory::QueryMsg) -> QuerierResult {
-        match &request {
-            QueryMsg::Pair { asset_infos } => {
-                let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
-                match self.pairs.get(&key) {
-                    Some(pair_info) => Ok(to_binary(&pair_info)),
-                    None => Err(SystemError::InvalidRequest {
-                        error: format!("PairInfo is not found for {}", key),
-                        request: Default::default(),
-                    }),
+        let ret: ContractResult<Binary> =
+            match &request {
+                QueryMsg::Pair { asset_infos } => {
+                    let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
+                    match self.pairs.get(&key) {
+                        Some(pair_info) => to_binary(&pair_info).into(),
+                        None => Err(SystemError::InvalidRequest {
+                            error: format!("PairInfo is not found for {}", key),
+                            request: Default::default(),
+                        }).into(),
+                    }
                 }
-            }
-            _ => panic!("[mock]: Unsupported Terraswap Pair query"),
-        }
+                _ => panic!("[mock]: Unsupported Terraswap Pair query"),
+            };
+
+        Ok(ret).into()
     }
 }

@@ -1,24 +1,24 @@
 pub mod msg {
-    use cosmwasm_std::{Binary, HumanAddr, StdError, StdResult, Uint128};
-    use cw20::{Cw20CoinHuman, Expiration, MinterResponse};
+    use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
+    use cw20::{Cw20CoinVerified, Expiration, MinterResponse};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     const TOKEN_MAX_DECIMALS: u8 = 18;
 
     #[derive(Serialize, Deserialize, JsonSchema)]
-    pub struct InitMsg {
+    pub struct InstantiateMsg {
         pub name: String,
         pub symbol: String,
         pub decimals: u8,
-        pub initial_balances: Vec<Cw20CoinHuman>,
+        pub initial_balances: Vec<Cw20CoinVerified>,
         pub mint: Option<MinterResponse>,
         pub init_hook: Option<InitHook>,
-        pub red_bank_address: HumanAddr,
-        pub incentives_address: HumanAddr,
+        pub red_bank_address: String,
+        pub incentives_address: String,
     }
 
-    impl InitMsg {
+    impl InstantiateMsg {
         pub fn get_cap(&self) -> Option<Uint128> {
             self.mint.as_ref().and_then(|v| v.cap)
         }
@@ -64,45 +64,50 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitHook {
         pub msg: Binary,
-        pub contract_addr: HumanAddr,
+        pub contract_addr: String,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
-    pub enum HandleMsg {
+    pub enum ExecuteMsg {
         /// Transfer is a base message to move tokens to another account. Requires to be finalized
         /// by the money market.
         Transfer {
-            recipient: HumanAddr,
+            recipient: String,
             amount: Uint128,
         },
+
         /// Forced transfer called by the money market when an account is being liquidated
         TransferOnLiquidation {
-            sender: HumanAddr,
-            recipient: HumanAddr,
+            sender: String,
+            recipient: String,
             amount: Uint128,
         },
+
         /// Burns tokens from user. Only money market can call this.
         /// Used when user is being liquidated
-        Burn { user: HumanAddr, amount: Uint128 },
+        Burn { user: String, amount: Uint128 },
+
         /// Send is a base message to transfer tokens to a contract and trigger an action
         /// on the receiving contract.
         Send {
-            contract: HumanAddr,
+            contract: String,
             amount: Uint128,
             msg: Option<Binary>,
         },
+
         /// Only with the "mintable" extension. If authorized, creates amount new tokens
         /// and adds to the recipient balance.
         Mint {
-            recipient: HumanAddr,
+            recipient: String,
             amount: Uint128,
         },
+
         /// Only with "approval" extension. Allows spender to access an additional amount tokens
         /// from the owner's (env.sender) account. If expires is Some(), overwrites current allowance
         /// expiration with this one.
         IncreaseAllowance {
-            spender: HumanAddr,
+            spender: String,
             amount: Uint128,
             expires: Option<Expiration>,
         },
@@ -110,15 +115,15 @@ pub mod msg {
         /// from the owner's (env.sender) account by amount. If expires is Some(), overwrites current
         /// allowance expiration with this one.
         DecreaseAllowance {
-            spender: HumanAddr,
+            spender: String,
             amount: Uint128,
             expires: Option<Expiration>,
         },
         /// Only with "approval" extension. Transfers amount tokens from owner -> recipient
         /// if `env.sender` has sufficient pre-approval.
         TransferFrom {
-            owner: HumanAddr,
-            recipient: HumanAddr,
+            owner: String,
+            recipient: String,
             amount: Uint128,
         },
     }
@@ -129,13 +134,13 @@ pub mod msg {
         /// Returns the current balance of the given address, 0 if unset.
         /// Return type: BalanceResponse.
         Balance {
-            address: HumanAddr,
+            address: String,
         },
         /// Returns both balance (0 if unset) and total supply
         /// Used by incentives contract when computing unclaimed rewards
         /// Return type: BalanceAndTotalSupplyResponse
         BalanceAndTotalSupply {
-            address: HumanAddr,
+            address: String,
         },
         /// Returns metadata on the contract - name, decimals, supply, etc.
         /// Return type: TokenInfoResponse.
@@ -145,22 +150,22 @@ pub mod msg {
         /// Returns how much spender can use from owner account, 0 if unset.
         /// Return type: AllowanceResponse.
         Allowance {
-            owner: HumanAddr,
-            spender: HumanAddr,
+            owner: String,
+            spender: String,
         },
         /// Only with "enumerable" extension (and "allowances")
         /// Returns all allowances this owner has approved. Supports pagination.
         /// Return type: AllAllowancesResponse.
         AllAllowances {
-            owner: HumanAddr,
-            start_after: Option<HumanAddr>,
+            owner: String,
+            start_after: Option<String>,
             limit: Option<u32>,
         },
         /// Only with "enumerable" extension
         /// Returns all accounts that have balances. Supports pagination.
         /// Return type: AllAccountsResponse.
         AllAccounts {
-            start_after: Option<HumanAddr>,
+            start_after: Option<String>,
             limit: Option<u32>,
         },
     }

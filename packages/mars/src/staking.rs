@@ -1,5 +1,5 @@
 pub mod msg {
-    use cosmwasm_std::{CosmosMsg, Decimal, HumanAddr, Uint128};
+    use cosmwasm_std::{CosmosMsg, Decimal, Addr, Uint128};
 
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
@@ -7,15 +7,15 @@ pub mod msg {
     use terraswap::asset::AssetInfo;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct InitMsg {
+    pub struct InstantiateMsg {
         pub config: CreateOrUpdateConfig,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CreateOrUpdateConfig {
-        pub owner: Option<HumanAddr>,
-        pub address_provider_address: Option<HumanAddr>,
-        pub terraswap_factory_address: Option<HumanAddr>,
+        pub owner: Option<String>,
+        pub address_provider_address: Option<String>,
+        pub terraswap_factory_address: Option<String>,
         pub terraswap_max_spread: Option<Decimal>,
         pub cooldown_duration: Option<u64>,
         pub unstake_window: Option<u64>,
@@ -23,7 +23,7 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
-    pub enum HandleMsg {
+    pub enum ExecuteMsg {
         /// Update staking config
         UpdateConfig { config: CreateOrUpdateConfig },
         /// Implementation cw20 receive msg
@@ -46,25 +46,25 @@ pub mod msg {
     pub enum ReceiveMsg {
         /// Stake Mars and mint xMars in return
         /// - recipient: address to receive the xMars tokens. Set to sender if not specified
-        Stake { recipient: Option<HumanAddr> },
+        Stake { recipient: Option<String> },
 
         /// Unstake Mars and burn xMars
         /// - recipient: address to receive the Mars tokens. Set to sender if not specified
-        Unstake { recipient: Option<HumanAddr> },
+        Unstake { recipient: Option<String> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
         Config {},
-        Cooldown { sender_address: HumanAddr },
+        Cooldown { sender_address: String },
     }
 
     // We define a custom struct for each query response
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
-        pub owner: HumanAddr,
-        pub address_provider_address: HumanAddr,
+        pub owner: Addr,
+        pub address_provider_address: String,
         pub terraswap_max_spread: Decimal,
         pub cooldown_duration: u64,
         pub unstake_window: u64,

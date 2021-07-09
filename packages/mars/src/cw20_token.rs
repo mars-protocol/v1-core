@@ -2,11 +2,11 @@ pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use cosmwasm_std::{Binary, HumanAddr, StdError, StdResult, Uint128};
+    use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
     use cw20::{Cw20CoinHuman, MinterResponse};
     /// TokenContract InitMsg
     #[derive(Serialize, Deserialize, JsonSchema)]
-    pub struct InitMsg {
+    pub struct InstantiateMsg {
         pub name: String,
         pub symbol: String,
         pub decimals: u8,
@@ -15,7 +15,7 @@ pub mod msg {
         pub init_hook: Option<InitHook>,
     }
 
-    impl InitMsg {
+    impl InstantiateMsg {
         pub fn get_cap(&self) -> Option<Uint128> {
             self.mint.as_ref().and_then(|v| v.cap)
         }
@@ -43,7 +43,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitHook {
         pub msg: Binary,
-        pub contract_addr: HumanAddr,
+        pub contract_addr: String,
     }
 
     fn is_valid_name(name: &str) -> bool {
