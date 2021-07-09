@@ -373,13 +373,13 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 
         let withdraw_asset_price =
             asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
-        let withdraw_amount_in_uusd =
-            Decimal256::from_uint256(withdraw_amount) * withdraw_asset_price;
+        let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
-        let health_factor_after_withdraw = (user_account_settlement
-            .weighted_maintenance_margin_in_uusd
-            - (withdraw_amount_in_uusd * market.maintenance_margin))
-            / user_account_settlement.total_debt_in_uusd;
+        let health_factor_after_withdraw =
+            Decimal256::from_uint256(
+                user_account_settlement.weighted_maintenance_margin_in_uusd
+                    - (withdraw_amount_in_uusd * market.maintenance_margin),
+            ) / Decimal256::from_uint256(user_account_settlement.total_debt_in_uusd);
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
@@ -716,7 +716,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
         let borrow_asset_price =
             asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
-        let borrow_amount_in_uusd = Decimal256::from_uint256(borrow_amount) * borrow_asset_price;
+        let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
         if user_account_settlement.total_debt_in_uusd + borrow_amount_in_uusd
             > user_account_settlement.max_debt_in_uusd
@@ -2076,10 +2076,10 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 /// User account settlement
 struct UserAccountSettlement {
     /// NOTE: Not used yet
-    _total_collateral_in_uusd: Decimal256,
-    total_debt_in_uusd: Decimal256,
-    max_debt_in_uusd: Decimal256,
-    weighted_maintenance_margin_in_uusd: Decimal256,
+    _total_collateral_in_uusd: Uint256,
+    total_debt_in_uusd: Uint256,
+    max_debt_in_uusd: Uint256,
+    weighted_maintenance_margin_in_uusd: Uint256,
     health_status: UserHealthStatus,
 }
 
@@ -2111,10 +2111,10 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     let native_asset_prices =
         get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
 
-    let mut total_collateral_in_uusd = Decimal256::zero();
-    let mut total_debt_in_uusd = Decimal256::zero();
-    let mut weighted_ltv_in_uusd = Decimal256::zero();
-    let mut weighted_maintenance_margin_in_uusd = Decimal256::zero();
+    let mut total_collateral_in_uusd = Uint256::zero();
+    let mut total_debt_in_uusd = Uint256::zero();
+    let mut weighted_ltv_in_uusd = Uint256::zero();
+    let mut weighted_maintenance_margin_in_uusd = Uint256::zero();
 
     for user_asset_settlement in user_balances {
         let asset_price = asset_get_price(
@@ -2123,22 +2123,21 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
             &user_asset_settlement.asset_type,
         )?;
 
-        let collateral_in_uusd =
-            Decimal256::from_uint256(user_asset_settlement.collateral_amount) * asset_price;
+        let collateral_in_uusd = user_asset_settlement.collateral_amount * asset_price;
         total_collateral_in_uusd += collateral_in_uusd;
 
         weighted_ltv_in_uusd += collateral_in_uusd * user_asset_settlement.ltv;
         weighted_maintenance_margin_in_uusd +=
             collateral_in_uusd * user_asset_settlement.maintenance_margin;
 
-        total_debt_in_uusd +=
-            Decimal256::from_uint256(user_asset_settlement.debt_amount) * asset_price;
+        total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
     }
 
     let health_status = if total_debt_in_uusd.is_zero() {
         UserHealthStatus::NotBorrowing
     } else {
-        let health_factor = weighted_maintenance_margin_in_uusd / total_debt_in_uusd;
+        let health_factor = Decimal256::from_uint256(weighted_maintenance_margin_in_uusd)
+            / Decimal256::from_uint256(total_debt_in_uusd);
         UserHealthStatus::Borrowing(health_factor)
     };
 
@@ -3970,18 +3969,18 @@ mod tests {
 
         // Calculate how much to withdraw to have health factor equal to one
         let how_much_to_withdraw = {
-            let token_1_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_1_balance_scaled)
+            let token_1_weighted_lt_in_uusd = Uint256::from(ma_token_1_balance_scaled)
                 * get_updated_liquidity_index(&market_1_initial, env.block.time)
                 * market_1_initial.maintenance_margin
                 * Decimal256::from(token_1_exchange_rate);
-            let token_3_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_3_balance_scaled)
+            let token_3_weighted_lt_in_uusd = Uint256::from(ma_token_3_balance_scaled)
                 * get_updated_liquidity_index(&market_3_initial, env.block.time)
                 * market_3_initial.maintenance_margin
                 * Decimal256::from(token_3_exchange_rate);
             let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
-            let total_debt_in_uusd = Decimal256::from_uint256(token_2_debt_scaled)
+            let total_debt_in_uusd = token_2_debt_scaled
                 * get_updated_borrow_index(&market_2_initial, env.block.time)
                 * Decimal256::from(token_2_exchange_rate);
 
@@ -3989,15 +3988,13 @@ mod tests {
             let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
                 - total_debt_in_uusd)
                 / market_3_initial.maintenance_margin;
-            let how_much_to_withdraw =
-                how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate);
-            Uint256::one() * how_much_to_withdraw
+            how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate)
         };
 
         // Withdraw token3 with failure
         // The withdraw amount needs to be a little bit greater to have health factor less than one
         {
-            let withdraw_amount = how_much_to_withdraw + Uint256::one();
+            let withdraw_amount = how_much_to_withdraw + Uint256::from(10u128);
             let msg = HandleMsg::Withdraw {
                 asset: Asset::Native {
                     denom: "token3".to_string(),
@@ -4014,7 +4011,7 @@ mod tests {
         // Withdraw token3 with success
         // The withdraw amount needs to be a little bit smaller to have health factor greater than one
         {
-            let withdraw_amount = how_much_to_withdraw - Uint256::one();
+            let withdraw_amount = how_much_to_withdraw - Uint256::from(10u128);
             let msg = HandleMsg::Withdraw {
                 asset: Asset::Native {
                     denom: "token3".to_string(),
