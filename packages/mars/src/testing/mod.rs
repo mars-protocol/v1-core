@@ -12,7 +12,8 @@ use cosmwasm_std::{
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
 use terra_cosmwasm::{
-    ExchangeRateItem, ExchangeRatesResponse, TerraQuery, TerraQueryWrapper, TerraRoute,
+    ExchangeRateItem, ExchangeRatesResponse, TaxCapResponse, TaxRateResponse, TerraQuery,
+    TerraQueryWrapper, TerraRoute,
 };
 
 use crate::address_provider;
@@ -75,6 +76,11 @@ pub fn mock_dependencies(
 pub struct NativeQuerier {
     /// maps denom to exchange rates
     pub exchange_rates: HashMap<String, HashMap<String, Decimal>>,
+
+    /// maps denom to tax caps
+    pub tax_caps: HashMap<String, Uint128>,
+
+    pub tax_rate: Decimal,
 }
 
 #[derive(Clone, Debug)]
@@ -334,6 +340,12 @@ impl MarsMockQuerier {
             .insert(base_denom, exchange_rates.iter().cloned().collect());
     }
 
+    /// Set mock querier for tax data
+    pub fn set_native_tax(&mut self, tax_rate: Decimal, tax_caps: &[(String, Uint128)]) {
+        self.native_querier.tax_rate = tax_rate;
+        self.native_querier.tax_caps = tax_caps.iter().cloned().collect();
+    }
+
     /// Set mock querier balances results for a given cw20 token
     pub fn set_cw20_balances(
         &mut self,
@@ -436,6 +448,31 @@ impl MarsMockQuerier {
                                 exchange_rates: exchange_rate_items.unwrap(),
                             };
                             Ok(to_binary(&res))
+                        }
+                        _ => panic!(
+                            "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
+                            query_data
+                        ),
+                    }
+                } else if &TerraRoute::Treasury == route {
+                    match query_data {
+                        TerraQuery::TaxRate {} => {
+                            let res = TaxRateResponse {
+                                rate: self.native_querier.tax_rate,
+                            };
+                            Ok(to_binary(&res))
+                        }
+                        TerraQuery::TaxCap { denom } => {
+                            match self.native_querier.tax_caps.get(denom) {
+                                Some(cap) => {
+                                    let res = TaxCapResponse { cap: *cap };
+                                    Ok(to_binary(&res))
+                                }
+                                None => Err(SystemError::InvalidRequest {
+                                    error: "no tax cap available for provided denom".to_string(),
+                                    request: Default::default(),
+                                }),
+                            }
                         }
                         _ => panic!(
                             "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",

@@ -2214,6 +2214,10 @@ fn build_send_asset_msg<S: Storage, A: Api, Q: Querier>(
     }
 }
 
+/// Prepare BankMsg::Send message.
+/// When doing native transfers a "tax" is charged.
+/// The actual amount taken from the contract is: amount + tax.
+/// Instead of sending amount, send: amount - compute_tax(amount).
 fn build_send_native_asset_msg<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     sender: HumanAddr,
@@ -3562,6 +3566,12 @@ mod tests {
         let initial_available_liquidity = 12000000u128;
         let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
 
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("somecoin"), Uint128(100u128))],
+        );
+
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
         let mock_reserve = Reserve {
             ma_token_address: deps
@@ -3656,10 +3666,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("withdrawer"),
-                    amount: vec![Coin {
-                        denom: String::from("somecoin"),
-                        amount: withdraw_amount.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: String::from("somecoin"),
+                            amount: withdraw_amount.into(),
+                        }
+                    )
+                    .unwrap()],
                 }),
             ]
         );
@@ -3872,6 +3886,12 @@ mod tests {
         let initial_available_liquidity = 10000000u128;
         let mut deps = th_setup(&[coin(initial_available_liquidity, "token3")]);
 
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("token3"), Uint128(100u128))],
+        );
+
         let withdrawer_addr = HumanAddr::from("withdrawer");
         let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
 
@@ -4031,10 +4051,14 @@ mod tests {
                     CosmosMsg::Bank(BankMsg::Send {
                         from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         to_address: withdrawer_addr,
-                        amount: vec![Coin {
-                            denom: String::from("token3"),
-                            amount: withdraw_amount.into(),
-                        }],
+                        amount: vec![deduct_tax(
+                            &deps,
+                            Coin {
+                                denom: String::from("token3"),
+                                amount: withdraw_amount.into(),
+                            }
+                        )
+                        .unwrap()],
                     }),
                 ]
             );
@@ -4046,6 +4070,12 @@ mod tests {
         // Withdraw native token
         let initial_available_liquidity = 12000000u128;
         let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
+
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("somecoin"), Uint128(100u128))],
+        );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
         let mock_reserve = Reserve {
@@ -4152,10 +4182,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("withdrawer"),
-                    amount: vec![Coin {
-                        denom: String::from("somecoin"),
-                        amount: withdrawer_balance.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: String::from("somecoin"),
+                            amount: withdrawer_balance.into(),
+                        }
+                    )
+                    .unwrap()],
                 }),
             ]
         );
@@ -4214,6 +4248,10 @@ mod tests {
         ];
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("borrowedcoinnative"), Uint128(100u128))],
+        );
 
         let mock_reserve_1 = Reserve {
             ma_token_address: deps
@@ -4506,10 +4544,14 @@ mod tests {
             vec![CosmosMsg::Bank(BankMsg::Send {
                 from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                 to_address: HumanAddr::from("borrower"),
-                amount: vec![Coin {
-                    denom: String::from("borrowedcoinnative"),
-                    amount: borrow_amount.into(),
-                }],
+                amount: vec![deduct_tax(
+                    &deps,
+                    Coin {
+                        denom: String::from("borrowedcoinnative"),
+                        amount: borrow_amount.into(),
+                    }
+                )
+                .unwrap()],
             })]
         );
         assert_eq!(
@@ -4852,6 +4894,12 @@ mod tests {
         };
         let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"uusd", &mock_reserve);
 
+        // Set tax data for uusd
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("uusd"), Uint128(100u128))],
+        );
+
         // Set user as having the reserve_collateral deposited
         let deposit_amount = 110000u64;
         let mut user = User::default();
@@ -4949,6 +4997,12 @@ mod tests {
             coin(available_liquidity_2, "depositedcoin2"),
             coin(available_liquidity_3, "uusd"),
         ]);
+
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("depositedcoin2"), Uint128(100u128))],
+        );
 
         let cw20_contract_addr = HumanAddr::from("depositedcoin1");
         let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
@@ -5105,6 +5159,12 @@ mod tests {
         let available_liquidity_collateral = 1_000_000_000u128;
         let available_liquidity_debt = 2_000_000_000u128;
         let mut deps = th_setup(&[coin(available_liquidity_collateral, "collateral")]);
+
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("collateral"), Uint128(100u128))],
+        );
 
         let debt_contract_addr = HumanAddr::from("debt");
         let debt_contract_addr_canonical = deps.api.canonical_address(&debt_contract_addr).unwrap();
@@ -5558,10 +5618,14 @@ mod tests {
                     CosmosMsg::Bank(BankMsg::Send {
                         from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         to_address: liquidator_address.clone(),
-                        amount: vec![Coin {
-                            denom: String::from("collateral"),
-                            amount: expected_liquidated_collateral_amount.into(),
-                        }],
+                        amount: vec![deduct_tax(
+                            &deps,
+                            Coin {
+                                denom: String::from("collateral"),
+                                amount: expected_liquidated_collateral_amount.into(),
+                            }
+                        )
+                        .unwrap()],
                     }),
                     CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: HumanAddr::from("debt"),
@@ -5754,10 +5818,14 @@ mod tests {
                     CosmosMsg::Bank(BankMsg::Send {
                         from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                         to_address: liquidator_address.clone(),
-                        amount: vec![Coin {
-                            denom: String::from("collateral"),
-                            amount: user_collateral_balance.into(),
-                        }],
+                        amount: vec![deduct_tax(
+                            &deps,
+                            Coin {
+                                denom: String::from("collateral"),
+                                amount: user_collateral_balance.into(),
+                            }
+                        )
+                        .unwrap()],
                     }),
                     CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: HumanAddr::from("debt"),
@@ -6150,6 +6218,12 @@ mod tests {
         let available_liquidity = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
 
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("somecoin"), Uint128(100u128))],
+        );
+
         let mock_reserve = Reserve {
             ma_token_address: deps
                 .api
@@ -6253,10 +6327,14 @@ mod tests {
             vec![CosmosMsg::Bank(BankMsg::Send {
                 from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                 to_address: borrower_addr.clone(),
-                amount: vec![Coin {
-                    denom: String::from("somecoin"),
-                    amount: initial_borrow_amount,
-                }],
+                amount: vec![deduct_tax(
+                    &deps,
+                    Coin {
+                        denom: String::from("somecoin"),
+                        amount: initial_borrow_amount,
+                    }
+                )
+                .unwrap()],
             })]
         );
 
@@ -6473,6 +6551,12 @@ mod tests {
         let available_liquidity = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
 
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("somecoin"), Uint128(100u128))],
+        );
+
         let asset = Asset::Native {
             denom: String::from("somecoin"),
         };
@@ -6551,10 +6635,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("insurance_fund"),
-                    amount: vec![Coin {
-                        denom: "somecoin".to_string(),
-                        amount: expected_insurance_fund_amount.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: "somecoin".to_string(),
+                            amount: expected_insurance_fund_amount.into(),
+                        }
+                    )
+                    .unwrap()],
                 }),
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: deps
@@ -6571,10 +6659,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("staking"),
-                    amount: vec![Coin {
-                        denom: "somecoin".to_string(),
-                        amount: expected_staking_amount.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: "somecoin".to_string(),
+                            amount: expected_staking_amount.into(),
+                        }
+                    )
+                    .unwrap()],
                 })
             ]
         );
@@ -6627,10 +6719,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("insurance_fund"),
-                    amount: vec![Coin {
-                        denom: "somecoin".to_string(),
-                        amount: expected_insurance_fund_amount.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: "somecoin".to_string(),
+                            amount: expected_insurance_fund_amount.into(),
+                        }
+                    )
+                    .unwrap()],
                 }),
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: deps
@@ -6647,10 +6743,14 @@ mod tests {
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
                     to_address: HumanAddr::from("staking"),
-                    amount: vec![Coin {
-                        denom: "somecoin".to_string(),
-                        amount: expected_staking_amount.into(),
-                    }],
+                    amount: vec![deduct_tax(
+                        &deps,
+                        Coin {
+                            denom: "somecoin".to_string(),
+                            amount: expected_staking_amount.into(),
+                        }
+                    )
+                    .unwrap()],
                 })
             ]
         );
