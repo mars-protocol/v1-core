@@ -26,6 +26,7 @@ use crate::state::{
     uncollateralized_loan_limits, uncollateralized_loan_limits_read, users_state, users_state_read,
     Config, Debt, MoneyMarket, Reserve, ReserveReferences, User,
 };
+use mars::tax::deduct_tax;
 
 // CONSTANTS
 
@@ -412,6 +413,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     });
 
     let send_underlying_asset_msg = build_send_asset_msg(
+        deps,
         env.contract.address,
         withdrawer_addr.clone(),
         asset,
@@ -791,8 +793,13 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     append_indices_and_rates_to_logs(&mut log, &borrow_reserve);
 
     // Send borrow amount to borrower
-    let send_msg =
-        build_send_asset_msg(env.contract.address, borrower_address, asset, borrow_amount)?;
+    let send_msg = build_send_asset_msg(
+        deps,
+        env.contract.address,
+        borrower_address,
+        asset,
+        borrow_amount,
+    )?;
 
     Ok(HandleResponse {
         data: None,
@@ -829,7 +836,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     let repayer_canonical_address = deps.api.canonical_address(&repayer_address)?;
 
     // Check new debt
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
+    let debts_asset_bucket = debts_asset_state_read(&deps.storage, asset_reference);
     let mut debt = debts_asset_bucket.load(repayer_canonical_address.as_slice())?;
 
     if debt.amount_scaled.is_zero() {
@@ -849,11 +856,12 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
             * get_updated_borrow_index(&reserve, env.block.time);
         let refund_msg = match asset_type {
             AssetType::Native => build_send_native_asset_msg(
+                deps,
                 env.contract.address.clone(),
                 repayer_address.clone(),
                 asset_label,
                 refund_amount,
-            ),
+            )?,
             AssetType::Cw20 => {
                 let token_contract_addr = HumanAddr::from(asset_label);
                 build_send_cw20_token_msg(
@@ -868,6 +876,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     }
 
     debt.amount_scaled = debt.amount_scaled - repay_amount_scaled;
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
     debts_asset_bucket.save(repayer_canonical_address.as_slice(), &debt)?;
 
     if repay_amount_scaled > reserve.debt_total_scaled {
@@ -1115,6 +1124,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         });
 
         let send_underlying_asset_msg = build_send_asset_msg(
+            deps,
             env.contract.address.clone(),
             liquidator_address.clone(),
             collateral_asset,
@@ -1162,6 +1172,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // refund sent amount in excess of actual debt amount to liquidate
     if refund_amount > Uint256::zero() {
         let refund_msg = build_send_asset_msg(
+            deps,
             env.contract.address,
             liquidator_address.clone(),
             debt_asset,
@@ -1466,6 +1477,7 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     // only build and add send message if fee is non-zero
     if !insurance_fund_amount.is_zero() {
         let insurance_fund_msg = build_send_asset_msg(
+            deps,
             env.contract.address.clone(),
             insurance_fund_address,
             asset.clone(),
@@ -1489,8 +1501,13 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     }
 
     if !staking_amount.is_zero() {
-        let staking_msg =
-            build_send_asset_msg(env.contract.address, staking_address, asset, staking_amount)?;
+        let staking_msg = build_send_asset_msg(
+            deps,
+            env.contract.address,
+            staking_address,
+            asset,
+            staking_amount,
+        )?;
         messages.push(staking_msg);
     }
 
@@ -2176,7 +2193,8 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     Ok(())
 }
 
-fn build_send_asset_msg(
+fn build_send_asset_msg<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
     sender_address: HumanAddr,
     recipient_address: HumanAddr,
     asset: Asset,
@@ -2184,31 +2202,36 @@ fn build_send_asset_msg(
 ) -> StdResult<CosmosMsg> {
     match asset {
         Asset::Native { denom } => Ok(build_send_native_asset_msg(
+            deps,
             sender_address,
             recipient_address,
             denom.as_str(),
             amount,
-        )),
+        )?),
         Asset::Cw20 { contract_addr } => {
             build_send_cw20_token_msg(recipient_address, contract_addr, amount)
         }
     }
 }
 
-fn build_send_native_asset_msg(
+fn build_send_native_asset_msg<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
     sender: HumanAddr,
     recipient: HumanAddr,
     denom: &str,
     amount: Uint256,
-) -> CosmosMsg {
-    CosmosMsg::Bank(BankMsg::Send {
+) -> StdResult<CosmosMsg> {
+    Ok(CosmosMsg::Bank(BankMsg::Send {
         from_address: sender,
         to_address: recipient,
-        amount: vec![Coin {
-            denom: denom.to_string(),
-            amount: amount.into(),
-        }],
-    })
+        amount: vec![deduct_tax(
+            deps,
+            Coin {
+                denom: denom.to_string(),
+                amount: amount.into(),
+            },
+        )?],
+    }))
 }
 
 fn build_send_cw20_token_msg(
