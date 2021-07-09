@@ -12,14 +12,14 @@ use mars::red_bank::msg::{AssetType, InitOrUpdateAssetParams};
 
 // keys (for singleton)
 pub static CONFIG_KEY: &[u8] = b"config";
-pub static MONEY_MARKET_KEY: &[u8] = b"money_market";
+pub static RED_BANK_KEY: &[u8] = b"red_bank";
 
 // namespaces (for buckets)
-pub static RESERVES_NAMESPACE: &[u8] = b"reserves";
+pub static MARKETS_NAMESPACE: &[u8] = b"markets";
 pub static DEBTS_NAMESPACE: &[u8] = b"debts";
 pub static USERS_NAMESPACE: &[u8] = b"users";
-pub static RESERVE_REFERENCES_NAMESPACE: &[u8] = b"reserve_references";
-pub static RESERVE_MA_TOKENS_NAMESPACE: &[u8] = b"reserve_ma_tokens";
+pub static MARKET_REFERENCES_NAMESPACE: &[u8] = b"market_references";
+pub static MARKET_MA_TOKENS_NAMESPACE: &[u8] = b"market_ma_tokens";
 pub static UNCOLLATERALIZED_LOAN_LIMITS_NAMESPACE: &[u8] = b"uncollateralized_loan_limits";
 
 /// Lending pool global configuration
@@ -78,25 +78,25 @@ pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config
     singleton_read(storage, CONFIG_KEY)
 }
 
-/// MoneyMarket global state
+/// RedBank global state
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MoneyMarket {
-    /// Reserve count
-    pub reserve_count: u32,
+pub struct RedBank {
+    /// Market count
+    pub market_count: u32,
 }
 
-pub fn money_market_state<S: Storage>(storage: &mut S) -> Singleton<S, MoneyMarket> {
-    singleton(storage, MONEY_MARKET_KEY)
+pub fn money_market_state<S: Storage>(storage: &mut S) -> Singleton<S, RedBank> {
+    singleton(storage, RED_BANK_KEY)
 }
 
-pub fn money_market_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, MoneyMarket> {
-    singleton_read(storage, MONEY_MARKET_KEY)
+pub fn money_market_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, RedBank> {
+    singleton_read(storage, RED_BANK_KEY)
 }
 
-/// Asset reserves
+/// Asset markets
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct Reserve {
-    /// Reserve index (Bit position on data)
+pub struct Market {
+    /// Market index (Bit position on data)
     pub index: u32,
     /// maToken contract address
     pub ma_token_address: CanonicalAddr,
@@ -122,7 +122,7 @@ pub struct Reserve {
 
     /// Timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,
-    /// Total debt scaled for the reserve's currency
+    /// Total debt scaled for the market's currency
     pub debt_total_scaled: Uint256,
 
     /// Indicated whether the asset is native or a cw20 token
@@ -153,8 +153,8 @@ pub struct PidParameters {
     pub kp_multiplier: Decimal256,
 }
 
-impl Reserve {
-    /// Initialize new reserve
+impl Market {
+    /// Initialize new market
     pub fn create(
         block_time: u64,
         index: u32,
@@ -203,7 +203,7 @@ impl Reserve {
             kp_augmentation_threshold: kp_augmentation_threshold.unwrap(),
             kp_multiplier: kp_multiplier.unwrap(),
         };
-        let new_reserve = Reserve {
+        let new_market = Market {
             index,
             asset_type,
             ma_token_address: CanonicalAddr::default(),
@@ -223,9 +223,9 @@ impl Reserve {
             pid_parameters: new_pid_params,
         };
 
-        new_reserve.validate()?;
+        new_market.validate()?;
 
-        Ok(new_reserve)
+        Ok(new_market)
     }
 
     fn validate(&self) -> StdResult<()> {
@@ -275,7 +275,7 @@ impl Reserve {
         Ok(())
     }
 
-    /// Update reserve based on new params
+    /// Update market based on new params
     pub fn update_with(self, params: InitOrUpdateAssetParams) -> StdResult<Self> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
@@ -301,7 +301,7 @@ impl Reserve {
                 .unwrap_or(self.pid_parameters.kp_augmentation_threshold),
             kp_multiplier: kp_multiplier.unwrap_or(self.pid_parameters.kp_multiplier),
         };
-        let updated_reserve = Reserve {
+        let updated_market = Market {
             min_borrow_rate: min_borrow_rate.unwrap_or(self.min_borrow_rate),
             max_borrow_rate: max_borrow_rate.unwrap_or(self.max_borrow_rate),
             max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
@@ -312,18 +312,18 @@ impl Reserve {
             ..self
         };
 
-        updated_reserve.validate()?;
+        updated_market.validate()?;
 
-        Ok(updated_reserve)
+        Ok(updated_market)
     }
 }
 
-pub fn reserves_state<S: Storage>(storage: &mut S) -> Bucket<S, Reserve> {
-    bucket(RESERVES_NAMESPACE, storage)
+pub fn markets_state<S: Storage>(storage: &mut S) -> Bucket<S, Market> {
+    bucket(MARKETS_NAMESPACE, storage)
 }
 
-pub fn reserves_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Reserve> {
-    bucket_read(RESERVES_NAMESPACE, storage)
+pub fn markets_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Market> {
+    bucket_read(MARKETS_NAMESPACE, storage)
 }
 
 /// Data for individual users
@@ -374,27 +374,27 @@ pub fn debts_asset_state_read<'a, S: Storage>(
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 // TODO: If we do not use the struct for anything else this struct should be deleted and
 // the bucket should just store Vec<u8>
-pub struct ReserveReferences {
-    /// Reference of reserve
+pub struct MarketReferences {
+    /// Reference of market
     pub reference: Vec<u8>,
 }
 
-pub fn reserve_references_state<S: Storage>(storage: &mut S) -> Bucket<S, ReserveReferences> {
-    bucket(RESERVE_REFERENCES_NAMESPACE, storage)
+pub fn market_references_state<S: Storage>(storage: &mut S) -> Bucket<S, MarketReferences> {
+    bucket(MARKET_REFERENCES_NAMESPACE, storage)
 }
 
-pub fn reserve_references_state_read<S: Storage>(
+pub fn market_references_state_read<S: Storage>(
     storage: &S,
-) -> ReadonlyBucket<S, ReserveReferences> {
-    bucket_read(RESERVE_REFERENCES_NAMESPACE, storage)
+) -> ReadonlyBucket<S, MarketReferences> {
+    bucket_read(MARKET_REFERENCES_NAMESPACE, storage)
 }
 
-pub fn reserve_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, Vec<u8>> {
-    bucket(RESERVE_MA_TOKENS_NAMESPACE, storage)
+pub fn market_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, Vec<u8>> {
+    bucket(MARKET_MA_TOKENS_NAMESPACE, storage)
 }
 
-pub fn reserve_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Vec<u8>> {
-    bucket_read(RESERVE_MA_TOKENS_NAMESPACE, storage)
+pub fn market_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Vec<u8>> {
+    bucket_read(MARKET_MA_TOKENS_NAMESPACE, storage)
 }
 
 /// Uncollateralized loan limits

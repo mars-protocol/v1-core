@@ -15,16 +15,16 @@ use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical
 use mars::ma_token;
 use mars::red_bank::msg::{
     Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
-    InitMsg, InitOrUpdateAssetParams, MigrateMsg, QueryMsg, ReceiveMsg, ReserveInfo,
-    ReserveResponse, ReservesListResponse, UncollateralizedLoanLimitResponse,
+    InitMsg, InitOrUpdateAssetParams, MarketInfo, MarketResponse, MarketsListResponse, MigrateMsg,
+    QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
 
 use crate::state::{
-    config_state, config_state_read, debts_asset_state, debts_asset_state_read, money_market_state,
-    money_market_state_read, reserve_ma_tokens_state, reserve_ma_tokens_state_read,
-    reserve_references_state, reserve_references_state_read, reserves_state, reserves_state_read,
-    uncollateralized_loan_limits, uncollateralized_loan_limits_read, users_state, users_state_read,
-    Config, Debt, MoneyMarket, Reserve, ReserveReferences, User,
+    config_state, config_state_read, debts_asset_state, debts_asset_state_read,
+    market_ma_tokens_state, market_ma_tokens_state_read, market_references_state,
+    market_references_state_read, markets_state, markets_state_read, money_market_state,
+    money_market_state_read, uncollateralized_loan_limits, uncollateralized_loan_limits_read,
+    users_state, users_state_read, Config, Debt, Market, MarketReferences, RedBank, User,
 };
 use mars::tax::deduct_tax;
 
@@ -78,7 +78,7 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     config_state(&mut deps.storage).save(&config)?;
 
-    money_market_state(&mut deps.storage).save(&MoneyMarket { reserve_count: 0 })?;
+    money_market_state(&mut deps.storage).save(&RedBank { market_count: 0 })?;
 
     Ok(InitResponse::default())
 }
@@ -314,9 +314,9 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let withdrawer_addr = env.message.sender.clone();
 
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+    let mut market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
-    let asset_ma_human_addr = deps.api.human_address(&reserve.ma_token_address)?;
+    let asset_ma_human_addr = deps.api.human_address(&market.ma_token_address)?;
     let withdrawer_balance_scaled = Uint256::from(cw20_get_balance(
         &deps.querier,
         asset_ma_human_addr,
@@ -333,7 +333,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     // Check user has sufficient balance to send back
     let (withdraw_amount, withdraw_amount_scaled) = match amount {
         Some(amount) => {
-            let amount_scaled = amount / get_updated_liquidity_index(&reserve, env.block.time);
+            let amount_scaled = amount / get_updated_liquidity_index(&market, env.block.time);
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
                 return Err(StdError::generic_err(format!(
                     "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
@@ -346,7 +346,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             // NOTE: We prefer to just do one multiplication equation instead of two: division and multiplication.
             // This helps to avoid rounding errors if we want to be sure in burning total balance.
             let withdrawer_balance =
-                withdrawer_balance_scaled * get_updated_liquidity_index(&reserve, env.block.time);
+                withdrawer_balance_scaled * get_updated_liquidity_index(&market, env.block.time);
             (withdrawer_balance, withdrawer_balance_scaled)
         }
     };
@@ -354,7 +354,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let withdrawer_canonical_address = deps.api.canonical_address(&withdrawer_addr)?;
     let mut withdrawer =
         users_state_read(&deps.storage).load(withdrawer_canonical_address.as_slice())?;
-    let asset_as_collateral = get_bit(withdrawer.collateral_assets, reserve.index)?;
+    let asset_as_collateral = get_bit(withdrawer.collateral_assets, market.index)?;
     let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
 
     // if asset is used as collateral and user is borrowing we need to validate health factor after withdraw,
@@ -378,7 +378,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 
         let health_factor_after_withdraw = (user_account_settlement
             .weighted_maintenance_margin_in_uusd
-            - (withdraw_amount_in_uusd * reserve.maintenance_margin))
+            - (withdraw_amount_in_uusd * market.maintenance_margin))
             / user_account_settlement.total_debt_in_uusd;
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
@@ -389,23 +389,23 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 
     // if max collateral to withdraw equals the user's balance then unset collateral bit
     if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
-        unset_bit(&mut withdrawer.collateral_assets, reserve.index)?;
+        unset_bit(&mut withdrawer.collateral_assets, market.index)?;
         users_state(&mut deps.storage)
             .save(withdrawer_canonical_address.as_slice(), &withdrawer)?;
     }
 
-    reserve_apply_accumulated_interests(&env, &mut reserve);
-    reserve_update_interest_rates(
+    market_apply_accumulated_interests(&env, &mut market);
+    market_update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
-        &mut reserve,
+        &mut market,
         withdraw_amount,
     )?;
-    reserves_state(&mut deps.storage).save(asset_reference.as_slice(), &reserve)?;
+    markets_state(&mut deps.storage).save(asset_reference.as_slice(), &market)?;
 
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+        contract_addr: deps.api.human_address(&market.ma_token_address)?,
         send: vec![],
         msg: to_binary(&Cw20HandleMsg::Burn {
             amount: withdraw_amount_scaled.into(),
@@ -424,13 +424,13 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 
     let mut log = vec![
         log("action", "withdraw"),
-        log("reserve", asset_label.as_str()),
+        log("market", asset_label.as_str()),
         log("user", withdrawer_addr.as_str()),
         log("burn_amount", withdraw_amount_scaled),
         log("withdraw_amount", withdraw_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve);
+    append_indices_and_rates_to_logs(&mut log, &market);
 
     Ok(HandleResponse {
         messages,
@@ -457,27 +457,26 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
     let mut money_market = money_market_state_read(&deps.storage).load()?;
 
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut reserves = reserves_state(&mut deps.storage);
-    let reserve_option = reserves.may_load(asset_reference.as_slice())?;
-    match reserve_option {
+    let mut markets = markets_state(&mut deps.storage);
+    let market_option = markets.may_load(asset_reference.as_slice())?;
+    match market_option {
         None => {
-            let reserve_idx = money_market.reserve_count;
-            let new_reserve =
-                Reserve::create(env.block.time, reserve_idx, asset_type, asset_params)?;
+            let market_idx = money_market.market_count;
+            let new_market = Market::create(env.block.time, market_idx, asset_type, asset_params)?;
 
-            // Save new reserve
-            reserves.save(asset_reference.as_slice(), &new_reserve)?;
+            // Save new market
+            markets.save(asset_reference.as_slice(), &new_market)?;
 
             // Save index to reference mapping
-            reserve_references_state(&mut deps.storage).save(
-                &reserve_idx.to_be_bytes(),
-                &ReserveReferences {
+            market_references_state(&mut deps.storage).save(
+                &market_idx.to_be_bytes(),
+                &MarketReferences {
                     reference: asset_reference.to_vec(),
                 },
             )?;
 
-            // Increment reserve count
-            money_market.reserve_count += 1;
+            // Increment market count
+            money_market.market_count += 1;
             money_market_state(&mut deps.storage).save(&money_market)?;
 
             let symbol = match asset {
@@ -541,14 +540,14 @@ pub fn handle_update_asset<S: Storage, A: Api, Q: Querier>(
     }
 
     let (asset_label, asset_reference, _asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut reserves = reserves_state(&mut deps.storage);
-    let reserve_option = reserves.may_load(asset_reference.as_slice())?;
-    match reserve_option {
-        Some(reserve) => {
-            let updated_reserve = reserve.update_with(asset_params)?;
+    let mut markets = markets_state(&mut deps.storage);
+    let market_option = markets.may_load(asset_reference.as_slice())?;
+    match market_option {
+        Some(market) => {
+            let updated_market = market.update_with(asset_params)?;
 
-            // Save updated reserve
-            reserves.save(asset_reference.as_slice(), &updated_reserve)?;
+            // Save updated market
+            markets.save(asset_reference.as_slice(), &updated_market)?;
 
             Ok(HandleResponse {
                 log: vec![log("action", "update_asset"), log("asset", asset_label)],
@@ -565,17 +564,17 @@ pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
     env: Env,
     reference: Vec<u8>,
 ) -> StdResult<HandleResponse> {
-    let mut state = reserves_state(&mut deps.storage);
-    let mut reserve = state.load(reference.as_slice())?;
+    let mut state = markets_state(&mut deps.storage);
+    let mut market = state.load(reference.as_slice())?;
 
-    if reserve.ma_token_address == CanonicalAddr::default() {
+    if market.ma_token_address == CanonicalAddr::default() {
         let ma_contract_canonical_addr = deps.api.canonical_address(&env.message.sender)?;
 
-        reserve.ma_token_address = ma_contract_canonical_addr.clone();
-        state.save(reference.as_slice(), &reserve)?;
+        market.ma_token_address = ma_contract_canonical_addr.clone();
+        state.save(reference.as_slice(), &market)?;
 
         // save ma token contract to reference mapping
-        reserve_ma_tokens_state(&mut deps.storage)
+        market_ma_tokens_state(&mut deps.storage)
             .save(ma_contract_canonical_addr.as_slice(), &reference)?;
 
         Ok(HandleResponse::default())
@@ -594,7 +593,7 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
     asset_label: &str,
     deposit_amount: Uint256,
 ) -> StdResult<HandleResponse> {
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let mut market = markets_state_read(&deps.storage).load(asset_reference)?;
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
@@ -609,35 +608,35 @@ pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
         .may_load(depositor_canonical_addr.as_slice())?
         .unwrap_or_default();
 
-    let has_deposited_asset = get_bit(user.collateral_assets, reserve.index)?;
+    let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
-        set_bit(&mut user.collateral_assets, reserve.index)?;
+        set_bit(&mut user.collateral_assets, market.index)?;
         users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
     }
 
-    reserve_apply_accumulated_interests(&env, &mut reserve);
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
+    market_apply_accumulated_interests(&env, &mut market);
+    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint256::zero())?;
+    markets_state(&mut deps.storage).save(asset_reference, &market)?;
 
-    if reserve.liquidity_index.is_zero() {
+    if market.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
     }
-    let mint_amount = deposit_amount / get_updated_liquidity_index(&reserve, env.block.time);
+    let mint_amount = deposit_amount / get_updated_liquidity_index(&market, env.block.time);
 
     let mut log = vec![
         log("action", "deposit"),
-        log("reserve", asset_label),
+        log("market", asset_label),
         log("user", depositor_address.as_str()),
         log("amount", deposit_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve);
+    append_indices_and_rates_to_logs(&mut log, &market);
 
     Ok(HandleResponse {
         data: None,
         log,
         messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            contract_addr: deps.api.human_address(&market.ma_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: depositor_address,
@@ -667,16 +666,16 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     }
 
     let money_market = money_market_state_read(&deps.storage).load()?;
-    let mut borrow_reserve =
-        match reserves_state_read(&deps.storage).load(asset_reference.as_slice()) {
-            Ok(borrow_reserve) => borrow_reserve,
-            Err(_) => {
-                return Err(StdError::generic_err(format!(
-                    "no borrow reserve exists with asset reference: {}",
-                    String::from_utf8(asset_reference).expect("Found invalid UTF-8")
-                )));
-            }
-        };
+    let mut borrow_market = match markets_state_read(&deps.storage).load(asset_reference.as_slice())
+    {
+        Ok(borrow_market) => borrow_market,
+        Err(_) => {
+            return Err(StdError::generic_err(format!(
+                "no borrow market exists with asset reference: {}",
+                String::from_utf8(asset_reference).expect("Found invalid UTF-8")
+            )));
+        }
+    };
     let borrower_canonical_addr = deps.api.canonical_address(&borrower_address)?;
 
     let uncollateralized_loan_limits_bucket =
@@ -738,9 +737,9 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
                 Err(error) => return Err(error),
             };
 
-        let asset_reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+        let asset_market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
         let debt_amount =
-            borrower_debt.amount_scaled * get_updated_borrow_index(&asset_reserve, env.block.time);
+            borrower_debt.amount_scaled * get_updated_borrow_index(&asset_market, env.block.time);
         if borrow_amount + debt_amount > Uint256::from(uncollateralized_loan_limit) {
             return Err(StdError::generic_err(
                 "borrow amount exceeds uncollateralized loan limit given existing debt",
@@ -748,12 +747,12 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
     }
 
-    reserve_apply_accumulated_interests(&env, &mut borrow_reserve);
+    market_apply_accumulated_interests(&env, &mut borrow_market);
 
     // Set borrowing asset for user
-    let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_reserve.index)?;
+    let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
     if !is_borrowing_asset {
-        set_bit(&mut user.borrowed_assets, borrow_reserve.index)?;
+        set_bit(&mut user.borrowed_assets, borrow_market.index)?;
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket.save(borrower_canonical_addr.as_slice(), &user)?;
     }
@@ -768,29 +767,29 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         Err(error) => return Err(error),
     };
     let borrow_amount_scaled =
-        borrow_amount / get_updated_borrow_index(&borrow_reserve, env.block.time);
+        borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time);
     debt.amount_scaled += borrow_amount_scaled;
     debts_asset_bucket.save(borrower_canonical_addr.as_slice(), &debt)?;
 
-    borrow_reserve.debt_total_scaled += borrow_amount_scaled;
+    borrow_market.debt_total_scaled += borrow_amount_scaled;
 
-    reserve_update_interest_rates(
+    market_update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
-        &mut borrow_reserve,
+        &mut borrow_market,
         borrow_amount,
     )?;
-    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &borrow_reserve)?;
+    markets_state(&mut deps.storage).save(&asset_reference.as_slice(), &borrow_market)?;
 
     let mut log = vec![
         log("action", "borrow"),
-        log("reserve", asset_label.as_str()),
+        log("market", asset_label.as_str()),
         log("user", borrower_address.as_str()),
         log("amount", borrow_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &borrow_reserve);
+    append_indices_and_rates_to_logs(&mut log, &borrow_market);
 
     // Send borrow amount to borrower
     let send_msg = build_send_asset_msg(
@@ -820,7 +819,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<HandleResponse> {
     // TODO: assumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
     // but double check that's the case
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference)?;
+    let mut market = markets_state_read(&deps.storage).load(asset_reference)?;
 
     // Get repay amount
     // TODO: Evaluate refunding the rest of the coins sent (or failing if more
@@ -843,9 +842,9 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         return Err(StdError::generic_err("Cannot repay 0 debt"));
     }
 
-    reserve_apply_accumulated_interests(&env, &mut reserve);
+    market_apply_accumulated_interests(&env, &mut market);
 
-    let mut repay_amount_scaled = repay_amount / get_updated_borrow_index(&reserve, env.block.time);
+    let mut repay_amount_scaled = repay_amount / get_updated_borrow_index(&market, env.block.time);
 
     let mut messages: Vec<CosmosMsg> = vec![];
     let mut refund_amount = Uint256::zero();
@@ -853,7 +852,7 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
         // refund any excess amounts
         // TODO: Should we log this?
         refund_amount = (repay_amount_scaled - debt.amount_scaled)
-            * get_updated_borrow_index(&reserve, env.block.time);
+            * get_updated_borrow_index(&market, env.block.time);
         let refund_msg = match asset_type {
             AssetType::Native => build_send_native_asset_msg(
                 deps,
@@ -879,31 +878,31 @@ pub fn handle_repay<S: Storage, A: Api, Q: Querier>(
     let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference);
     debts_asset_bucket.save(repayer_canonical_address.as_slice(), &debt)?;
 
-    if repay_amount_scaled > reserve.debt_total_scaled {
+    if repay_amount_scaled > market.debt_total_scaled {
         return Err(StdError::generic_err(
             "Amount to repay is greater than total debt",
         ));
     }
-    reserve.debt_total_scaled = reserve.debt_total_scaled - repay_amount_scaled;
-    reserve_update_interest_rates(&deps, &env, asset_reference, &mut reserve, Uint256::zero())?;
-    reserves_state(&mut deps.storage).save(asset_reference, &reserve)?;
+    market.debt_total_scaled = market.debt_total_scaled - repay_amount_scaled;
+    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint256::zero())?;
+    markets_state(&mut deps.storage).save(asset_reference, &market)?;
 
     if debt.amount_scaled == Uint256::zero() {
         // Remove asset from borrowed assets
         let mut users_bucket = users_state(&mut deps.storage);
         let mut user = users_bucket.load(repayer_canonical_address.as_slice())?;
-        unset_bit(&mut user.borrowed_assets, reserve.index)?;
+        unset_bit(&mut user.borrowed_assets, market.index)?;
         users_bucket.save(repayer_canonical_address.as_slice(), &user)?;
     }
 
     let mut log = vec![
         log("action", "repay"),
-        log("reserve", asset_label),
+        log("market", asset_label),
         log("user", repayer_address),
         log("amount", repay_amount - refund_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &reserve);
+    append_indices_and_rates_to_logs(&mut log, &market);
 
     Ok(HandleResponse {
         data: None,
@@ -956,14 +955,14 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     let (collateral_asset_label, collateral_asset_reference, _) =
         asset_get_attributes(deps, &collateral_asset)?;
 
-    let mut collateral_reserve =
-        reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
+    let mut collateral_market =
+        markets_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
 
     // check if user has available collateral in specified collateral asset to be liquidated
     let collateral_ma_address = deps
         .api
-        .human_address(&collateral_reserve.ma_token_address)?;
-    let user_collateral_balance = get_updated_liquidity_index(&collateral_reserve, block_time)
+        .human_address(&collateral_market.ma_token_address)?;
+    let user_collateral_balance = get_updated_liquidity_index(&collateral_market, block_time)
         * Uint256::from(cw20_get_balance(
             &deps.querier,
             collateral_ma_address.clone(),
@@ -1012,25 +1011,25 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         ));
     }
 
-    let mut debt_reserve =
-        reserves_state_read(&deps.storage).load(debt_asset_reference.as_slice())?;
+    let mut debt_market =
+        markets_state_read(&deps.storage).load(debt_asset_reference.as_slice())?;
 
     // 3. Compute debt to repay and collateral to liquidate
     let collateral_price = asset_get_price(
         collateral_asset_label.as_str(),
         &native_asset_prices,
-        &collateral_reserve.asset_type,
+        &collateral_market.asset_type,
     )?;
     let debt_price = asset_get_price(
         debt_asset_label.as_str(),
         &native_asset_prices,
-        &debt_reserve.asset_type,
+        &debt_market.asset_type,
     )?;
 
-    reserve_apply_accumulated_interests(&env, &mut debt_reserve);
+    market_apply_accumulated_interests(&env, &mut debt_market);
 
     let user_debt_asset_total_debt =
-        user_debt.amount_scaled * get_updated_borrow_index(&debt_reserve, block_time);
+        user_debt.amount_scaled * get_updated_borrow_index(&debt_market, block_time);
 
     let (debt_amount_to_repay, collateral_amount_to_liquidate, refund_amount) =
         liquidation_compute_amounts(
@@ -1038,13 +1037,13 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             debt_price,
             config.close_factor,
             user_collateral_balance,
-            collateral_reserve.liquidation_bonus,
+            collateral_market.liquidation_bonus,
             user_debt_asset_total_debt,
             sent_debt_asset_amount,
         );
 
     let mut messages: Vec<CosmosMsg> = vec![];
-    // 4. Update collateral positions and reserve depending on whether the liquidator elects to
+    // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
         // Transfer ma tokens from user to liquidator
@@ -1056,15 +1055,15 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         // set liquidator's deposited bit to true if not already true
         // NOTE: previous checks should ensure this amount is not zero
         let liquidator_is_using_as_collateral =
-            get_bit(liquidator.collateral_assets, collateral_reserve.index)?;
+            get_bit(liquidator.collateral_assets, collateral_market.index)?;
         if !liquidator_is_using_as_collateral {
-            set_bit(&mut liquidator.collateral_assets, collateral_reserve.index)?;
+            set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
             users_state(&mut deps.storage)
                 .save(liquidator_canonical_addr.as_slice(), &liquidator)?;
         }
 
         let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
-            / get_updated_liquidity_index(&collateral_reserve, block_time);
+            / get_updated_liquidity_index(&collateral_market, block_time);
 
         messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_ma_address,
@@ -1094,7 +1093,7 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
             )?),
         };
         let contract_collateral_balance = contract_collateral_balance
-            * get_updated_liquidity_index(&collateral_reserve, block_time);
+            * get_updated_liquidity_index(&collateral_market, block_time);
         if contract_collateral_balance < collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1102,17 +1101,17 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         }
 
         // apply update collateral interest as liquidity is reduced
-        reserve_apply_accumulated_interests(&env, &mut collateral_reserve);
-        reserve_update_interest_rates(
+        market_apply_accumulated_interests(&env, &mut collateral_market);
+        market_update_interest_rates(
             &deps,
             &env,
             collateral_asset_reference.as_slice(),
-            &mut collateral_reserve,
+            &mut collateral_market,
             collateral_amount_to_liquidate,
         )?;
 
         let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
-            / get_updated_liquidity_index(&collateral_reserve, block_time);
+            / get_updated_liquidity_index(&collateral_market, block_time);
 
         let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_ma_address,
@@ -1137,36 +1136,36 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
     // if max collateral to liquidate equals the user's balance then unset collateral bit
     if collateral_amount_to_liquidate == user_collateral_balance {
         let mut user = users_state_read(&deps.storage).load(user_canonical_address.as_slice())?;
-        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+        unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
     }
 
-    // 5. Update debt reserve and positions
+    // 5. Update debt market and positions
 
     let debt_amount_to_repay_scaled =
-        debt_amount_to_repay / get_updated_borrow_index(&debt_reserve, block_time);
+        debt_amount_to_repay / get_updated_borrow_index(&debt_market, block_time);
 
-    // update user and reserve debt
+    // update user and market debt
     let mut debts_asset_bucket =
         debts_asset_state(&mut deps.storage, debt_asset_reference.as_slice());
     let mut debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
     debt.amount_scaled = debt.amount_scaled - debt_amount_to_repay_scaled;
     debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
-    debt_reserve.debt_total_scaled = debt_reserve.debt_total_scaled - debt_amount_to_repay_scaled;
+    debt_market.debt_total_scaled = debt_market.debt_total_scaled - debt_amount_to_repay_scaled;
 
-    reserve_update_interest_rates(
+    market_update_interest_rates(
         deps,
         &env,
         debt_asset_reference.as_slice(),
-        &mut debt_reserve,
+        &mut debt_market,
         refund_amount,
     )?;
 
-    // save reserves
-    reserves_state(&mut deps.storage).save(&debt_asset_reference.as_slice(), &debt_reserve)?;
-    reserves_state(&mut deps.storage)
-        .save(&collateral_asset_reference.as_slice(), &collateral_reserve)?;
+    // save markets
+    markets_state(&mut deps.storage).save(&debt_asset_reference.as_slice(), &debt_market)?;
+    markets_state(&mut deps.storage)
+        .save(&collateral_asset_reference.as_slice(), &collateral_market)?;
 
     // 6. Build response
     // refund sent amount in excess of actual debt amount to liquidate
@@ -1183,8 +1182,8 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
 
     let mut log = vec![
         log("action", "liquidate"),
-        log("collateral_reserve", collateral_asset_label),
-        log("debt_reserve", debt_asset_label),
+        log("collateral_market", collateral_asset_label),
+        log("debt_market", debt_asset_label),
         log("user", user_address.as_str()),
         log("liquidator", liquidator_address.as_str()),
         log(
@@ -1195,10 +1194,10 @@ pub fn handle_liquidate<S: Storage, A: Api, Q: Querier>(
         log("refund_amount", refund_amount),
     ];
 
-    // TODO: we should distinguish between collateral and reserve values in some way
-    append_indices_and_rates_to_logs(&mut log, &debt_reserve);
+    // TODO: we should distinguish between collateral and market values in some way
+    append_indices_and_rates_to_logs(&mut log, &debt_market);
     if !receive_ma_token {
-        append_indices_and_rates_to_logs(&mut log, &collateral_reserve);
+        append_indices_and_rates_to_logs(&mut log, &collateral_market);
     }
 
     Ok(HandleResponse {
@@ -1266,10 +1265,10 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     to_previous_balance: Uint128,
     amount: Uint128,
 ) -> StdResult<HandleResponse> {
-    // Get liquidity token reserve
-    let reserve_reference = reserve_ma_tokens_state_read(&deps.storage)
+    // Get liquidity token market
+    let market_reference = market_ma_tokens_state_read(&deps.storage)
         .load(deps.api.canonical_address(&env.message.sender)?.as_slice())?;
-    let reserve = reserves_state_read(&deps.storage).load(&reserve_reference)?;
+    let market = markets_state_read(&deps.storage).load(&market_reference)?;
 
     // Check user health factor is above 1
     // TODO: this assumes new balances are already in state as this call will be made
@@ -1297,7 +1296,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
         if (from_previous_balance - amount)? == Uint128::zero() {
-            unset_bit(&mut from_user.collateral_assets, reserve.index)?;
+            unset_bit(&mut from_user.collateral_assets, market.index)?;
             users_state(&mut deps.storage).save(from_canonical_address.as_slice(), &from_user)?;
         }
 
@@ -1307,7 +1306,7 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
             let mut to_user = users_bucket
                 .may_load(&to_canonical_address.as_slice())?
                 .unwrap_or_default();
-            set_bit(&mut to_user.collateral_assets, reserve.index)?;
+            set_bit(&mut to_user.collateral_assets, market.index)?;
             users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
         }
     }
@@ -1366,18 +1365,18 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
 
     let (collateral_asset_label, collateral_asset_reference, _) =
         asset_get_attributes(deps, &asset)?;
-    let collateral_reserve =
-        reserves_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
-    let has_collateral_asset = get_bit(user.collateral_assets, collateral_reserve.index)?;
+    let collateral_market =
+        markets_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
+    let has_collateral_asset = get_bit(user.collateral_assets, collateral_market.index)?;
     if !has_collateral_asset && enable {
         let collateral_ma_address = deps
             .api
-            .human_address(&collateral_reserve.ma_token_address)?;
+            .human_address(&collateral_market.ma_token_address)?;
         let user_collateral_balance =
             cw20_get_balance(&deps.querier, collateral_ma_address, user_address.clone())?;
         if user_collateral_balance > Uint128::zero() {
             // enable collateral asset
-            set_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+            set_bit(&mut user.collateral_assets, collateral_market.index)?;
             users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
         } else {
             return Err(StdError::generic_err(format!(
@@ -1388,7 +1387,7 @@ pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier
         }
     } else if has_collateral_asset && !enable {
         // disable collateral asset
-        unset_bit(&mut user.collateral_assets, collateral_reserve.index)?;
+        unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
     }
 
@@ -1416,22 +1415,22 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
 
     let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
-    let mut reserve = reserves_state_read(&deps.storage).load(asset_reference.as_slice())?;
+    let mut market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
 
     let amount_to_distribute = match amount {
         Some(amount) => amount,
-        None => reserve.protocol_income_to_distribute,
+        None => market.protocol_income_to_distribute,
     };
 
-    if amount_to_distribute > reserve.protocol_income_to_distribute {
+    if amount_to_distribute > market.protocol_income_to_distribute {
         return Err(StdError::generic_err(
-            "amount specified exceeds reserve's income to be distributed",
+            "amount specified exceeds market's income to be distributed",
         ));
     }
 
-    reserve.protocol_income_to_distribute =
-        reserve.protocol_income_to_distribute - amount_to_distribute;
-    reserves_state(&mut deps.storage).save(&asset_reference.as_slice(), &reserve)?;
+    market.protocol_income_to_distribute =
+        market.protocol_income_to_distribute - amount_to_distribute;
+    markets_state(&mut deps.storage).save(&asset_reference.as_slice(), &market)?;
 
     let mut messages = vec![];
 
@@ -1488,9 +1487,9 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
 
     if !treasury_amount.is_zero() {
         let scaled_mint_amount =
-            treasury_amount / get_updated_liquidity_index(&reserve, env.block.time);
+            treasury_amount / get_updated_liquidity_index(&market, env.block.time);
         let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&reserve.ma_token_address)?,
+            contract_addr: deps.api.human_address(&market.ma_token_address)?,
             send: vec![],
             msg: to_binary(&Cw20HandleMsg::Mint {
                 recipient: treasury_address,
@@ -1530,8 +1529,8 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Reserve { asset } => to_binary(&query_reserve(deps, asset)?),
-        QueryMsg::ReservesList {} => to_binary(&query_reserves_list(deps)?),
+        QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
+        QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
         QueryMsg::UncollateralizedLoanLimit {
             user_address,
@@ -1555,34 +1554,32 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
-        reserve_count: money_market.reserve_count,
+        market_count: money_market.market_count,
         close_factor: config.close_factor,
     })
 }
 
-fn query_reserve<S: Storage, A: Api, Q: Querier>(
+fn query_market<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     asset: Asset,
-) -> StdResult<ReserveResponse> {
-    let reserve = match asset {
-        Asset::Native { denom } => {
-            match reserves_state_read(&deps.storage).load(denom.as_bytes()) {
-                Ok(reserve) => reserve,
-                Err(_) => {
-                    return Err(StdError::generic_err(format!(
-                        "failed to load reserve for: {}",
-                        denom
-                    )))
-                }
+) -> StdResult<MarketResponse> {
+    let market = match asset {
+        Asset::Native { denom } => match markets_state_read(&deps.storage).load(denom.as_bytes()) {
+            Ok(market) => market,
+            Err(_) => {
+                return Err(StdError::generic_err(format!(
+                    "failed to load market for: {}",
+                    denom
+                )))
             }
-        }
+        },
         Asset::Cw20 { contract_addr } => {
             let cw20_canonical_address = deps.api.canonical_address(&contract_addr)?;
-            match reserves_state_read(&deps.storage).load(cw20_canonical_address.as_slice()) {
-                Ok(reserve) => reserve,
+            match markets_state_read(&deps.storage).load(cw20_canonical_address.as_slice()) {
+                Ok(market) => market,
                 Err(_) => {
                     return Err(StdError::generic_err(format!(
-                        "failed to load reserve for: {}",
+                        "failed to load market for: {}",
                         contract_addr
                     )))
                 }
@@ -1590,27 +1587,27 @@ fn query_reserve<S: Storage, A: Api, Q: Querier>(
         }
     };
 
-    Ok(ReserveResponse {
-        ma_token_address: deps.api.human_address(&reserve.ma_token_address)?,
-        borrow_index: reserve.borrow_index,
-        liquidity_index: reserve.liquidity_index,
-        borrow_rate: reserve.borrow_rate,
-        liquidity_rate: reserve.liquidity_rate,
-        max_loan_to_value: reserve.max_loan_to_value,
-        interests_last_updated: reserve.interests_last_updated,
-        debt_total_scaled: reserve.debt_total_scaled,
-        asset_type: reserve.asset_type,
-        maintenance_margin: reserve.maintenance_margin,
-        liquidation_bonus: reserve.liquidation_bonus,
+    Ok(MarketResponse {
+        ma_token_address: deps.api.human_address(&market.ma_token_address)?,
+        borrow_index: market.borrow_index,
+        liquidity_index: market.liquidity_index,
+        borrow_rate: market.borrow_rate,
+        liquidity_rate: market.liquidity_rate,
+        max_loan_to_value: market.max_loan_to_value,
+        interests_last_updated: market.interests_last_updated,
+        debt_total_scaled: market.debt_total_scaled,
+        asset_type: market.asset_type,
+        maintenance_margin: market.maintenance_margin,
+        liquidation_bonus: market.liquidation_bonus,
     })
 }
 
-fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
+fn query_markets_list<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-) -> StdResult<ReservesListResponse> {
-    let reserves = reserves_state_read(&deps.storage);
+) -> StdResult<MarketsListResponse> {
+    let markets = markets_state_read(&deps.storage);
 
-    let reserves_list: StdResult<Vec<_>> = reserves
+    let markets_list: StdResult<Vec<_>> = markets
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
@@ -1645,15 +1642,15 @@ fn query_reserves_list<S: Storage, A: Api, Q: Querier>(
                 }
             };
 
-            Ok(ReserveInfo {
+            Ok(MarketInfo {
                 denom,
                 ma_token_address: deps.api.human_address(&v.ma_token_address)?,
             })
         })
         .collect();
 
-    Ok(ReservesListResponse {
-        reserves_list: reserves_list?,
+    Ok(MarketsListResponse {
+        markets_list: markets_list?,
     })
 }
 
@@ -1661,14 +1658,14 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     address: HumanAddr,
 ) -> StdResult<DebtResponse> {
-    let reserves = reserves_state_read(&deps.storage);
+    let markets = markets_state_read(&deps.storage);
     let debtor_address = deps.api.canonical_address(&address)?;
     let users_bucket = users_state_read(&deps.storage);
     let user = users_bucket
         .may_load(debtor_address.as_slice())?
         .unwrap_or_default();
 
-    let debts: StdResult<Vec<_>> = reserves
+    let debts: StdResult<Vec<_>> = markets
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
@@ -1753,38 +1750,38 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 // INTEREST
 
-/// Updates reserve indices and protocol_income by applying current interest rates on the time between
+/// Updates market indices and protocol_income by applying current interest rates on the time between
 /// last interest update and current block.
-/// Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_apply_accumulated_interests(env: &Env, reserve: &mut Reserve) {
+/// Note it does not save the market to the store (that is left to the caller)
+pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
     let current_timestamp = env.block.time;
     // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
     // of the indices and subtracting them returns the accrued borrow interest for the period since
     // when the indices were last updated and the current point in time.
-    let previous_borrow_index = reserve.borrow_index;
+    let previous_borrow_index = market.borrow_index;
 
-    if reserve.interests_last_updated < current_timestamp {
-        let time_elapsed = current_timestamp - reserve.interests_last_updated;
+    if market.interests_last_updated < current_timestamp {
+        let time_elapsed = current_timestamp - market.interests_last_updated;
 
-        if reserve.borrow_rate > Decimal256::zero() {
-            reserve.borrow_index = calculate_applied_linear_interest_rate(
-                reserve.borrow_index,
-                reserve.borrow_rate,
+        if market.borrow_rate > Decimal256::zero() {
+            market.borrow_index = calculate_applied_linear_interest_rate(
+                market.borrow_index,
+                market.borrow_rate,
                 time_elapsed,
             );
         }
-        if reserve.liquidity_rate > Decimal256::zero() {
-            reserve.liquidity_index = calculate_applied_linear_interest_rate(
-                reserve.liquidity_index,
-                reserve.liquidity_rate,
+        if market.liquidity_rate > Decimal256::zero() {
+            market.liquidity_index = calculate_applied_linear_interest_rate(
+                market.liquidity_index,
+                market.liquidity_rate,
                 time_elapsed,
             );
         }
-        reserve.interests_last_updated = current_timestamp;
+        market.interests_last_updated = current_timestamp;
     }
 
-    let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
-    let new_debt_total = reserve.debt_total_scaled * reserve.borrow_index;
+    let previous_debt_total = market.debt_total_scaled * previous_borrow_index;
+    let new_debt_total = market.debt_total_scaled * market.borrow_index;
 
     let interest_accrued = if new_debt_total > previous_debt_total {
         new_debt_total - previous_debt_total
@@ -1792,48 +1789,48 @@ pub fn reserve_apply_accumulated_interests(env: &Env, reserve: &mut Reserve) {
         Uint256::zero()
     };
 
-    let new_protocol_income_to_distribute = interest_accrued * reserve.reserve_factor;
-    reserve.protocol_income_to_distribute += new_protocol_income_to_distribute;
+    let new_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
+    market.protocol_income_to_distribute += new_protocol_income_to_distribute;
 }
 
 /// Return applied interest rate for borrow index according to passed blocks
-/// NOTE: Calling this function when interests for the reserve are up to date with the current block
+/// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-fn get_updated_borrow_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
-    if reserve.interests_last_updated < block_time {
-        let time_elapsed = block_time - reserve.interests_last_updated;
+fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 {
+    if market.interests_last_updated < block_time {
+        let time_elapsed = block_time - market.interests_last_updated;
 
-        if reserve.borrow_rate > Decimal256::zero() {
+        if market.borrow_rate > Decimal256::zero() {
             let applied_interest_rate = calculate_applied_linear_interest_rate(
-                reserve.borrow_index,
-                reserve.borrow_rate,
+                market.borrow_index,
+                market.borrow_rate,
                 time_elapsed,
             );
             return applied_interest_rate;
         }
     }
 
-    reserve.borrow_index
+    market.borrow_index
 }
 
 /// Return applied interest rate for liquidity index according to passed blocks
-/// NOTE: Calling this function when interests for the reserve are up to date with the current block
+/// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-fn get_updated_liquidity_index(reserve: &Reserve, block_time: u64) -> Decimal256 {
-    if reserve.interests_last_updated < block_time {
-        let time_elapsed = block_time - reserve.interests_last_updated;
+fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal256 {
+    if market.interests_last_updated < block_time {
+        let time_elapsed = block_time - market.interests_last_updated;
 
-        if reserve.liquidity_rate > Decimal256::zero() {
+        if market.liquidity_rate > Decimal256::zero() {
             let applied_interest_rate = calculate_applied_linear_interest_rate(
-                reserve.liquidity_index,
-                reserve.liquidity_rate,
+                market.liquidity_index,
+                market.liquidity_rate,
                 time_elapsed,
             );
             return applied_interest_rate;
         }
     }
 
-    reserve.liquidity_index
+    market.liquidity_index
 }
 
 fn calculate_applied_linear_interest_rate(
@@ -1847,15 +1844,15 @@ fn calculate_applied_linear_interest_rate(
 }
 
 /// Update interest rates for current liquidity and debt levels
-/// Note it does not save the reserve to the store (that is left to the caller)
-pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
+/// Note it does not save the market to the store (that is left to the caller)
+pub fn market_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     env: &Env,
     reference: &[u8],
-    reserve: &mut Reserve,
+    market: &mut Market,
     liquidity_taken: Uint256,
 ) -> StdResult<()> {
-    let contract_balance_amount = match reserve.asset_type {
+    let contract_balance_amount = match market.asset_type {
         AssetType::Native => {
             let denom = str::from_utf8(reference);
             let denom = match denom {
@@ -1882,7 +1879,7 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     let config = config_state_read(&deps.storage).load()?;
     // NOTE: No check for underflow because this is done on config validations
     let protocol_income_minus_treasury_amount =
-        (Decimal256::one() - config.treasury_fee_share) * reserve.protocol_income_to_distribute;
+        (Decimal256::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
     let liquidity_to_deduct_from_current_balance =
         liquidity_taken + protocol_income_minus_treasury_amount;
 
@@ -1895,8 +1892,8 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     let available_liquidity = Decimal256::from_uint256(
         contract_current_balance - liquidity_to_deduct_from_current_balance,
     );
-    let total_debt = Decimal256::from_uint256(reserve.debt_total_scaled)
-        * get_updated_borrow_index(&reserve, env.block.time);
+    let total_debt = Decimal256::from_uint256(market.debt_total_scaled)
+        * get_updated_borrow_index(&market, env.block.time);
     let current_utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
     } else {
@@ -1904,20 +1901,20 @@ pub fn reserve_update_interest_rates<S: Storage, A: Api, Q: Querier>(
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
-        get_updated_interest_rates(reserve, current_utilization_rate);
-    reserve.borrow_rate = new_borrow_rate;
-    reserve.liquidity_rate = new_liquidity_rate;
+        get_updated_interest_rates(market, current_utilization_rate);
+    market.borrow_rate = new_borrow_rate;
+    market.liquidity_rate = new_liquidity_rate;
 
     Ok(())
 }
 
 /// Updates borrow and liquidity rates based on PID parameters
 fn get_updated_interest_rates(
-    reserve: &Reserve,
+    market: &Market,
     current_utilization_rate: Decimal256,
 ) -> (Decimal256, Decimal256) {
     // Use PID params for calculating borrow interest rate
-    let pid_params = reserve.pid_parameters.clone();
+    let pid_params = market.pid_parameters.clone();
 
     // error_value should be represented as integer number so we do this with help from boolean flag
     let (error_value, error_positive) =
@@ -1943,37 +1940,37 @@ fn get_updated_interest_rates(
     let mut new_borrow_rate = if error_positive {
         // error_positive = true (u_optimal > u) means we want utilization rate to go up
         // we lower interest rate so more people borrow
-        if reserve.borrow_rate > p {
-            reserve.borrow_rate - p
+        if market.borrow_rate > p {
+            market.borrow_rate - p
         } else {
             Decimal256::zero()
         }
     } else {
         // error_positive = false (u_optimal < u) means we want utilization rate to go down
         // we increase interest rate so less people borrow
-        reserve.borrow_rate + p
+        market.borrow_rate + p
     };
 
     // Check borrow rate conditions
-    if new_borrow_rate < reserve.min_borrow_rate {
-        new_borrow_rate = reserve.min_borrow_rate
-    } else if new_borrow_rate > reserve.max_borrow_rate {
-        new_borrow_rate = reserve.max_borrow_rate;
+    if new_borrow_rate < market.min_borrow_rate {
+        new_borrow_rate = market.min_borrow_rate
+    } else if new_borrow_rate > market.max_borrow_rate {
+        new_borrow_rate = market.max_borrow_rate;
     };
 
     // This operation should not underflow as reserve_factor is checked to be <= 1
     let new_liquidity_rate =
-        new_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve.reserve_factor);
+        new_borrow_rate * current_utilization_rate * (Decimal256::one() - market.reserve_factor);
 
     (new_borrow_rate, new_liquidity_rate)
 }
 
-fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, reserve: &Reserve) {
+fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, market: &Market) {
     let mut interest_logs = vec![
-        log("borrow_index", reserve.borrow_index),
-        log("liquidity_index", reserve.liquidity_index),
-        log("borrow_rate", reserve.borrow_rate),
-        log("liquidity_rate", reserve.liquidity_rate),
+        log("borrow_index", market.borrow_index),
+        log("liquidity_index", market.liquidity_index),
+        log("borrow_rate", market.borrow_rate),
+        log("liquidity_rate", market.liquidity_rate),
     ];
     logs.append(&mut interest_logs);
 }
@@ -1995,7 +1992,7 @@ struct UserAssetSettlement {
 /// be retrieved by the caller later
 fn user_get_balances<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    money_market: &MoneyMarket,
+    money_market: &RedBank,
     user: &User,
     user_canonical_address: &CanonicalAddr,
     native_asset_prices_to_query: &mut Vec<String>,
@@ -2003,31 +2000,31 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<Vec<UserAssetSettlement>> {
     let mut ret: Vec<UserAssetSettlement> = vec![];
 
-    for i in 0_u32..money_market.reserve_count {
+    for i in 0_u32..money_market.market_count {
         let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
         let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
         if !(user_is_using_as_collateral || user_is_borrowing) {
             continue;
         }
 
-        let (asset_reference_vec, reserve) = reserve_get_from_index(&deps.storage, i)?;
+        let (asset_reference_vec, market) = market_get_from_index(&deps.storage, i)?;
 
         let (collateral_amount, ltv, maintenance_margin) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance = cw20_get_balance(
                 &deps.querier,
-                deps.api.human_address(&reserve.ma_token_address)?,
+                deps.api.human_address(&market.ma_token_address)?,
                 deps.api.human_address(user_canonical_address)?,
             )?;
 
-            let liquidity_index = get_updated_liquidity_index(&reserve, block_time);
+            let liquidity_index = get_updated_liquidity_index(&market, block_time);
             let collateral_amount =
                 Decimal256::from_uint256(Uint256::from(asset_balance)) * liquidity_index;
 
             (
                 collateral_amount,
-                reserve.max_loan_to_value,
-                reserve.maintenance_margin,
+                market.max_loan_to_value,
+                market.maintenance_margin,
             )
         } else {
             (Decimal256::zero(), Decimal256::zero(), Decimal256::zero())
@@ -2038,7 +2035,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
             let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
 
-            let borrow_index = get_updated_borrow_index(&reserve, block_time);
+            let borrow_index = get_updated_borrow_index(&market, block_time);
 
             Decimal256::from_uint256(user_debt.amount_scaled) * borrow_index
         } else {
@@ -2046,7 +2043,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
         };
 
         // get asset label
-        let asset_label = match reserve.asset_type {
+        let asset_label = match market.asset_type {
             AssetType::Native => match String::from_utf8(asset_reference_vec) {
                 Ok(res) => res,
                 Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
@@ -2059,13 +2056,13 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
         };
 
         // Add price to query list
-        if reserve.asset_type == AssetType::Native && asset_label != "uusd" {
+        if market.asset_type == AssetType::Native && asset_label != "uusd" {
             native_asset_prices_to_query.push(asset_label.clone());
         }
 
         let user_asset_settlement = UserAssetSettlement {
             asset_label,
-            asset_type: reserve.asset_type,
+            asset_type: market.asset_type,
             collateral_amount,
             debt_amount,
             ltv,
@@ -2092,7 +2089,7 @@ enum UserHealthStatus {
     Borrowing(Decimal256),
 }
 
-/// Calculates the user data across the reserves.
+/// Calculates the user data across the markets.
 /// This includes the total debt/collateral balances in uusd,
 /// the average LTV, the average Liquidation threshold, and the Health factor.
 /// Moreover returns the list of asset prices that were used during the computation.
@@ -2101,7 +2098,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
     block_time: u64,
     user_canonical_address: &CanonicalAddr,
     user: &User,
-    money_market: &MoneyMarket,
+    money_market: &RedBank,
     native_asset_prices_to_query: &mut Vec<String>,
 ) -> StdResult<(UserAccountSettlement, Vec<(String, Decimal256)>)> {
     let user_balances = user_get_balances(
@@ -2320,22 +2317,22 @@ fn asset_get_attributes<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn reserve_get_from_index<S: Storage>(storage: &S, index: u32) -> StdResult<(Vec<u8>, Reserve)> {
+fn market_get_from_index<S: Storage>(storage: &S, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec =
-        match reserve_references_state_read(storage).load(&index.to_be_bytes()) {
+        match market_references_state_read(storage).load(&index.to_be_bytes()) {
             Ok(asset_reference_vec) => asset_reference_vec,
             Err(_) => {
                 return Err(StdError::generic_err(format!(
-                    "no reserve reference exists with index: {}",
+                    "no market reference exists with index: {}",
                     index
                 )))
             }
         }
         .reference;
-    match reserves_state_read(storage).load(&asset_reference_vec) {
-        Ok(asset_reserve) => Ok((asset_reference_vec, asset_reserve)),
+    match markets_state_read(storage).load(&asset_reference_vec) {
+        Ok(asset_market) => Ok((asset_reference_vec, asset_market)),
         Err(_) => Err(StdError::generic_err(format!(
-            "no asset reserve exists with asset reference: {}",
+            "no asset market exists with asset reference: {}",
             String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
         ))),
     }
@@ -2366,7 +2363,7 @@ mod tests {
 
     #[test]
     fn test_pid_interest_rates_calculation() {
-        let reserve = Reserve {
+        let market = Market {
             // Params used for new rates calculations
             borrow_rate: Decimal256::from_ratio(5, 100),
             min_borrow_rate: Decimal256::from_ratio(1, 100),
@@ -2399,16 +2396,15 @@ mod tests {
         // *
         let current_utilization_rate = Decimal256::from_ratio(61, 100);
         let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&reserve, current_utilization_rate);
+            get_updated_interest_rates(&market, current_utilization_rate);
 
         let expected_error =
-            current_utilization_rate - reserve.pid_parameters.optimal_utilization_rate;
+            current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate =
-            reserve.borrow_rate + (reserve.pid_parameters.kp * expected_error);
+        let expected_borrow_rate = market.borrow_rate + (market.pid_parameters.kp * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
-            * (Decimal256::one() - reserve.reserve_factor);
+            * (Decimal256::one() - market.reserve_factor);
 
         assert_eq!(new_borrow_rate, expected_borrow_rate);
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
@@ -2418,16 +2414,15 @@ mod tests {
         // *
         let current_utilization_rate = Decimal256::from_ratio(59, 100);
         let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&reserve, current_utilization_rate);
+            get_updated_interest_rates(&market, current_utilization_rate);
 
         let expected_error =
-            reserve.pid_parameters.optimal_utilization_rate - current_utilization_rate;
+            market.pid_parameters.optimal_utilization_rate - current_utilization_rate;
         // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate =
-            reserve.borrow_rate - (reserve.pid_parameters.kp * expected_error);
+        let expected_borrow_rate = market.borrow_rate - (market.pid_parameters.kp * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
-            * (Decimal256::one() - reserve.reserve_factor);
+            * (Decimal256::one() - market.reserve_factor);
 
         assert_eq!(new_borrow_rate, expected_borrow_rate);
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
@@ -2437,16 +2432,16 @@ mod tests {
         // *
         let current_utilization_rate = Decimal256::from_ratio(72, 100);
         let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&reserve, current_utilization_rate);
+            get_updated_interest_rates(&market, current_utilization_rate);
 
         let expected_error =
-            current_utilization_rate - reserve.pid_parameters.optimal_utilization_rate;
+            current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = reserve.borrow_rate
-            + (reserve.pid_parameters.kp * reserve.pid_parameters.kp_multiplier * expected_error);
+        let expected_borrow_rate = market.borrow_rate
+            + (market.pid_parameters.kp * market.pid_parameters.kp_multiplier * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
-            * (Decimal256::one() - reserve.reserve_factor);
+            * (Decimal256::one() - market.reserve_factor);
 
         assert_eq!(new_borrow_rate, expected_borrow_rate);
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
@@ -2456,13 +2451,13 @@ mod tests {
         // *
         let current_utilization_rate = Decimal256::from_ratio(10, 100);
         let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&reserve, current_utilization_rate);
+            get_updated_interest_rates(&market, current_utilization_rate);
 
         // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate = reserve.min_borrow_rate;
+        let expected_borrow_rate = market.min_borrow_rate;
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
-            * (Decimal256::one() - reserve.reserve_factor);
+            * (Decimal256::one() - market.reserve_factor);
 
         assert_eq!(new_borrow_rate, expected_borrow_rate);
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
@@ -2472,13 +2467,13 @@ mod tests {
         // *
         let current_utilization_rate = Decimal256::from_ratio(90, 100);
         let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&reserve, current_utilization_rate);
+            get_updated_interest_rates(&market, current_utilization_rate);
 
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = reserve.max_borrow_rate;
+        let expected_borrow_rate = market.max_borrow_rate;
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
-            * (Decimal256::one() - reserve.reserve_factor);
+            * (Decimal256::one() - market.reserve_factor);
 
         assert_eq!(new_borrow_rate, expected_borrow_rate);
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
@@ -2579,7 +2574,7 @@ mod tests {
         let res = query(&deps, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
-        assert_eq!(0, value.reserve_count);
+        assert_eq!(0, value.market_count);
         assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
         assert_eq!(treasury_fee_share, value.treasury_fee_share);
     }
@@ -2867,25 +2862,25 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
-        // should have asset reserve with Canonical default address
-        let reserve = reserves_state_read(&deps.storage)
+        // should have asset market with Canonical default address
+        let market = markets_state_read(&deps.storage)
             .load(b"someasset")
             .unwrap();
-        assert_eq!(CanonicalAddr::default(), reserve.ma_token_address);
+        assert_eq!(CanonicalAddr::default(), market.ma_token_address);
         // should have 0 index
-        assert_eq!(0, reserve.index);
+        assert_eq!(0, market.index);
         // should have asset_type Native
-        assert_eq!(AssetType::Native, reserve.asset_type);
+        assert_eq!(AssetType::Native, market.asset_type);
 
-        // should store reference in reserve index
-        let reserve_reference = reserve_references_state_read(&deps.storage)
+        // should store reference in market index
+        let market_reference = market_references_state_read(&deps.storage)
             .load(&0_u32.to_be_bytes())
             .unwrap();
-        assert_eq!(b"someasset", reserve_reference.reference.as_slice());
+        assert_eq!(b"someasset", market_reference.reference.as_slice());
 
-        // Should have reserve count of 1
+        // Should have market count of 1
         let money_market = money_market_state_read(&deps.storage).load().unwrap();
-        assert_eq!(money_market.reserve_count, 1);
+        assert_eq!(money_market.market_count, 1);
 
         // should instantiate a liquidity token
         assert_eq!(
@@ -2944,17 +2939,17 @@ mod tests {
         };
         handle(&mut deps, env, msg).unwrap();
 
-        // should have asset reserve with contract address
-        let reserve = reserves_state_read(&deps.storage)
+        // should have asset market with contract address
+        let market = markets_state_read(&deps.storage)
             .load(b"someasset")
             .unwrap();
         assert_eq!(
             deps.api
                 .canonical_address(&HumanAddr::from("mtokencontract"))
                 .unwrap(),
-            reserve.ma_token_address
+            market.ma_token_address
         );
-        assert_eq!(Decimal256::one(), reserve.liquidity_index);
+        assert_eq!(Decimal256::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
@@ -2983,31 +2978,31 @@ mod tests {
         let res = handle(&mut deps, env, msg).unwrap();
         let cw20_canonical_addr = deps.api.canonical_address(&cw20_addr).unwrap();
 
-        let reserve = reserves_state_read(&deps.storage)
+        let market = markets_state_read(&deps.storage)
             .load(&cw20_canonical_addr.as_slice())
             .unwrap();
-        // should have asset reserve with Canonical default address
-        assert_eq!(CanonicalAddr::default(), reserve.ma_token_address);
+        // should have asset market with Canonical default address
+        assert_eq!(CanonicalAddr::default(), market.ma_token_address);
         // should have index 1
-        assert_eq!(1, reserve.index);
+        assert_eq!(1, market.index);
         // should have asset_type Cw20
-        assert_eq!(AssetType::Cw20, reserve.asset_type);
+        assert_eq!(AssetType::Cw20, market.asset_type);
 
-        // should store reference in reserve index
-        let reserve_reference = reserve_references_state_read(&deps.storage)
+        // should store reference in market index
+        let market_reference = market_references_state_read(&deps.storage)
             .load(&1_u32.to_be_bytes())
             .unwrap();
         assert_eq!(
             cw20_canonical_addr.as_slice(),
-            reserve_reference.reference.as_slice()
+            market_reference.reference.as_slice()
         );
 
         // should have an asset_type of cw20
-        assert_eq!(AssetType::Cw20, reserve.asset_type);
+        assert_eq!(AssetType::Cw20, market.asset_type);
 
-        // Should have reserve count of 2
+        // Should have market count of 2
         let money_market = money_market_state_read(&deps.storage).load().unwrap();
-        assert_eq!(2, money_market.reserve_count);
+        assert_eq!(2, money_market.market_count);
 
         assert_eq!(
             res.log,
@@ -3022,17 +3017,17 @@ mod tests {
         };
         handle(&mut deps, env, msg).unwrap();
 
-        // should have asset reserve with contract address
-        let reserve = reserves_state_read(&deps.storage)
+        // should have asset market with contract address
+        let market = markets_state_read(&deps.storage)
             .load(cw20_canonical_addr.as_slice())
             .unwrap();
         assert_eq!(
             deps.api
                 .canonical_address(&HumanAddr::from("mtokencontract"))
                 .unwrap(),
-            reserve.ma_token_address
+            market.ma_token_address
         );
-        assert_eq!(Decimal256::one(), reserve.liquidity_index);
+        assert_eq!(Decimal256::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
@@ -3219,34 +3214,34 @@ mod tests {
         };
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let new_reserve = reserves_state_read(&deps.storage)
+        let new_market = markets_state_read(&deps.storage)
             .load(b"someasset")
             .unwrap();
-        assert_eq!(0, new_reserve.index);
+        assert_eq!(0, new_market.index);
         assert_eq!(
             asset_params.max_loan_to_value.unwrap(),
-            new_reserve.max_loan_to_value
+            new_market.max_loan_to_value
         );
         assert_eq!(
             asset_params.reserve_factor.unwrap(),
-            new_reserve.reserve_factor
+            new_market.reserve_factor
         );
         assert_eq!(
             asset_params.maintenance_margin.unwrap(),
-            new_reserve.maintenance_margin
+            new_market.maintenance_margin
         );
         assert_eq!(
             asset_params.liquidation_bonus.unwrap(),
-            new_reserve.liquidation_bonus
+            new_market.liquidation_bonus
         );
 
-        let new_reserve_reference = reserve_references_state_read(&deps.storage)
+        let new_market_reference = market_references_state_read(&deps.storage)
             .load(&0_u32.to_be_bytes())
             .unwrap();
-        assert_eq!(b"someasset", new_reserve_reference.reference.as_slice());
+        assert_eq!(b"someasset", new_market_reference.reference.as_slice());
 
         let new_money_market = money_market_state_read(&deps.storage).load().unwrap();
-        assert_eq!(new_money_market.reserve_count, 1);
+        assert_eq!(new_money_market.market_count, 1);
 
         assert_eq!(res.messages, vec![],);
 
@@ -3280,47 +3275,47 @@ mod tests {
         };
         let _res = handle(&mut deps, env, msg).unwrap();
 
-        let new_reserve = reserves_state_read(&deps.storage)
+        let new_market = markets_state_read(&deps.storage)
             .load(b"someasset")
             .unwrap();
-        assert_eq!(0, new_reserve.index);
+        assert_eq!(0, new_market.index);
         // should keep old params
         assert_eq!(
             asset_params.initial_borrow_rate.unwrap(),
-            new_reserve.borrow_rate
+            new_market.borrow_rate
         );
         assert_eq!(
             asset_params.min_borrow_rate.unwrap(),
-            new_reserve.min_borrow_rate
+            new_market.min_borrow_rate
         );
         assert_eq!(
             asset_params.max_borrow_rate.unwrap(),
-            new_reserve.max_borrow_rate
+            new_market.max_borrow_rate
         );
         assert_eq!(
             asset_params.max_loan_to_value.unwrap(),
-            new_reserve.max_loan_to_value
+            new_market.max_loan_to_value
         );
         assert_eq!(
             asset_params.reserve_factor.unwrap(),
-            new_reserve.reserve_factor
+            new_market.reserve_factor
         );
         assert_eq!(
             asset_params.maintenance_margin.unwrap(),
-            new_reserve.maintenance_margin
+            new_market.maintenance_margin
         );
         assert_eq!(
             asset_params.liquidation_bonus.unwrap(),
-            new_reserve.liquidation_bonus
+            new_market.liquidation_bonus
         );
-        assert_eq!(asset_params.kp.unwrap(), new_reserve.pid_parameters.kp);
+        assert_eq!(asset_params.kp.unwrap(), new_market.pid_parameters.kp);
         assert_eq!(
             asset_params.kp_augmentation_threshold.unwrap(),
-            new_reserve.pid_parameters.kp_augmentation_threshold
+            new_market.pid_parameters.kp_augmentation_threshold
         );
         assert_eq!(
             asset_params.kp_multiplier.unwrap(),
-            new_reserve.pid_parameters.kp_multiplier
+            new_market.pid_parameters.kp_multiplier
         );
     }
 
@@ -3333,7 +3328,7 @@ mod tests {
             reference: "uluna".into(),
         };
         let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::not_found("red_bank::state::Reserve"));
+        assert_eq!(error_res, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
@@ -3342,7 +3337,7 @@ mod tests {
         let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
         let reserve_factor = Decimal256::from_ratio(1, 10);
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -3357,7 +3352,7 @@ mod tests {
             interests_last_updated: 10000000,
             ..Default::default()
         };
-        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let market = th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
 
         let deposit_amount = 110000;
         let env = mars::testing::mock_env(
@@ -3375,7 +3370,7 @@ mod tests {
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve,
+            &market,
             env.block.time,
             initial_liquidity,
             Default::default(),
@@ -3401,7 +3396,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "deposit"),
-                log("reserve", "somecoin"),
+                log("market", "somecoin"),
                 log("user", "depositor"),
                 log("amount", deposit_amount),
                 log("borrow_index", expected_params.borrow_index),
@@ -3411,15 +3406,13 @@ mod tests {
             ]
         );
 
-        let reserve = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
-        assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
-        assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
-        assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
-        assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        let market = markets_state_read(&deps.storage).load(b"somecoin").unwrap();
+        assert_eq!(market.borrow_rate, expected_params.borrow_rate);
+        assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
+        assert_eq!(market.liquidity_index, expected_params.liquidity_index);
+        assert_eq!(market.borrow_index, expected_params.borrow_index);
         assert_eq!(
-            reserve.protocol_income_to_distribute,
+            market.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
 
@@ -3440,7 +3433,7 @@ mod tests {
         let cw20_addr = HumanAddr::from("somecontract");
         let contract_addr_raw = deps.api.canonical_address(&cw20_addr).unwrap();
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -3455,11 +3448,11 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let reserve = th_init_reserve(
+        let market = th_init_market(
             &deps.api,
             &mut deps.storage,
             contract_addr_raw.as_slice(),
-            &mock_reserve,
+            &mock_market,
         );
 
         // set initial balance on cw20 contract
@@ -3493,7 +3486,7 @@ mod tests {
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve,
+            &market,
             env.block.time,
             initial_liquidity,
             Default::default(),
@@ -3502,7 +3495,7 @@ mod tests {
         let expected_mint_amount: Uint256 =
             Uint256::from(deposit_amount) / expected_params.liquidity_index;
 
-        let reserve = reserves_state_read(&deps.storage)
+        let market = markets_state_read(&deps.storage)
             .load(contract_addr_raw.as_slice())
             .unwrap();
 
@@ -3523,7 +3516,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "deposit"),
-                log("reserve", cw20_addr),
+                log("market", cw20_addr),
                 log("user", "depositor"),
                 log("amount", deposit_amount),
                 log("borrow_index", expected_params.borrow_index),
@@ -3533,7 +3526,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            reserve.protocol_income_to_distribute,
+            market.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
 
@@ -3545,11 +3538,11 @@ mod tests {
             amount: Uint128(deposit_amount),
         });
         let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::not_found("red_bank::state::Reserve"));
+        assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
-    fn test_cannot_deposit_if_no_reserve() {
+    fn test_cannot_deposit_if_no_market() {
         let mut deps = th_setup(&[]);
 
         let env = cosmwasm_std::testing::mock_env("depositer", &[coin(110000, "somecoin")]);
@@ -3557,7 +3550,7 @@ mod tests {
             denom: String::from("somecoin"),
         };
         let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::not_found("red_bank::state::Reserve"));
+        assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
@@ -3573,7 +3566,7 @@ mod tests {
         );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -3596,9 +3589,9 @@ mod tests {
             &[(HumanAddr::from("withdrawer"), Uint128(2000000u128))],
         );
 
-        let reserve_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
-        reserve_ma_tokens_state(&mut deps.storage)
+        let market_initial =
+            th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
+        market_ma_tokens_state(&mut deps.storage)
             .save(
                 deps.api
                     .canonical_address(&HumanAddr::from("matoken"))
@@ -3629,20 +3622,18 @@ mod tests {
             "withdrawer",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                block_time: mock_market.interests_last_updated + seconds_elapsed,
                 ..Default::default()
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let reserve = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
+        let market = markets_state_read(&deps.storage).load(b"somecoin").unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_initial,
-            mock_reserve.interests_last_updated + seconds_elapsed,
+            &market_initial,
+            mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
                 less_liquidity: withdraw_amount.into(),
@@ -3681,7 +3672,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "withdraw"),
-                log("reserve", "somecoin"),
+                log("market", "somecoin"),
                 log("user", "withdrawer"),
                 log("burn_amount", withdraw_amount_scaled),
                 log("withdraw_amount", withdraw_amount),
@@ -3692,12 +3683,12 @@ mod tests {
             ]
         );
 
-        assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
-        assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
-        assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
-        assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(market.borrow_rate, expected_params.borrow_rate);
+        assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
+        assert_eq!(market.liquidity_index, expected_params.liquidity_index);
+        assert_eq!(market.borrow_index, expected_params.borrow_index);
         assert_eq!(
-            reserve.protocol_income_to_distribute,
+            market.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
     }
@@ -3725,7 +3716,7 @@ mod tests {
         );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -3743,13 +3734,13 @@ mod tests {
         let withdraw_amount = Uint256::from(20000u128);
         let seconds_elapsed = 2000u64;
 
-        let reserve_initial = th_init_reserve(
+        let market_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             cw20_contract_canonical_addr.as_slice(),
-            &mock_reserve,
+            &mock_market,
         );
-        reserve_ma_tokens_state(&mut deps.storage)
+        market_ma_tokens_state(&mut deps.storage)
             .save(
                 deps.api
                     .canonical_address(&ma_token_addr)
@@ -3779,20 +3770,20 @@ mod tests {
             "withdrawer",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                block_time: mock_market.interests_last_updated + seconds_elapsed,
                 ..Default::default()
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let reserve = reserves_state_read(&deps.storage)
+        let market = markets_state_read(&deps.storage)
             .load(cw20_contract_canonical_addr.as_slice())
             .unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_initial,
-            mock_reserve.interests_last_updated + seconds_elapsed,
+            &market_initial,
+            mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
                 less_liquidity: withdraw_amount.into(),
@@ -3828,7 +3819,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "withdraw"),
-                log("reserve", "somecontract"),
+                log("market", "somecontract"),
                 log("user", "withdrawer"),
                 log("burn_amount", withdraw_amount_scaled),
                 log("withdraw_amount", withdraw_amount),
@@ -3839,12 +3830,12 @@ mod tests {
             ]
         );
 
-        assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
-        assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
-        assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
-        assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(market.borrow_rate, expected_params.borrow_rate);
+        assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
+        assert_eq!(market.liquidity_index, expected_params.liquidity_index);
+        assert_eq!(market.borrow_index, expected_params.borrow_index);
         assert_eq!(
-            reserve.protocol_income_to_distribute,
+            market.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
     }
@@ -3853,7 +3844,7 @@ mod tests {
     fn test_withdraw_cannot_exceed_balance() {
         let mut deps = th_setup(&[]);
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -3867,7 +3858,7 @@ mod tests {
             &[(HumanAddr::from("withdrawer"), Uint128(200u128))],
         );
 
-        th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
 
         let msg = HandleMsg::Withdraw {
             asset: Asset::Native {
@@ -3895,9 +3886,9 @@ mod tests {
         let withdrawer_addr = HumanAddr::from("withdrawer");
         let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
 
-        // Initialize reserves
+        // Initialize markets
         let ma_token_1_addr = HumanAddr::from("matoken1");
-        let reserve_1 = Reserve {
+        let market_1 = Market {
             ma_token_address: deps.api.canonical_address(&ma_token_1_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -3907,7 +3898,7 @@ mod tests {
             ..Default::default()
         };
         let ma_token_2_addr = HumanAddr::from("matoken2");
-        let reserve_2 = Reserve {
+        let market_2 = Market {
             ma_token_address: deps.api.canonical_address(&ma_token_2_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -3917,7 +3908,7 @@ mod tests {
             ..Default::default()
         };
         let ma_token_3_addr = HumanAddr::from("matoken3");
-        let reserve_3 = Reserve {
+        let market_3 = Market {
             ma_token_address: deps.api.canonical_address(&ma_token_3_addr).unwrap(),
             liquidity_index: Decimal256::one(),
             borrow_index: Decimal256::one(),
@@ -3926,19 +3917,16 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let reserve_1_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"token1", &reserve_1);
-        let reserve_2_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"token2", &reserve_2);
-        let reserve_3_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"token3", &reserve_3);
+        let market_1_initial = th_init_market(&deps.api, &mut deps.storage, b"token1", &market_1);
+        let market_2_initial = th_init_market(&deps.api, &mut deps.storage, b"token2", &market_2);
+        let market_3_initial = th_init_market(&deps.api, &mut deps.storage, b"token3", &market_3);
 
-        // Initialize user with reserve_1 and reserve_3 as collaterals
-        // User borrows reserve_2
+        // Initialize user with market_1 and market_3 as collaterals
+        // User borrows market_2
         let mut user = User::default();
-        set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
-        set_bit(&mut user.collateral_assets, reserve_3_initial.index).unwrap();
-        set_bit(&mut user.borrowed_assets, reserve_2_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_3_initial.index).unwrap();
+        set_bit(&mut user.borrowed_assets, market_2_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(withdrawer_canonical_addr.as_slice(), &user)
@@ -3982,24 +3970,24 @@ mod tests {
         // Calculate how much to withdraw to have health factor equal to one
         let how_much_to_withdraw = {
             let token_1_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_1_balance_scaled)
-                * get_updated_liquidity_index(&reserve_1_initial, env.block.time)
-                * reserve_1_initial.maintenance_margin
+                * get_updated_liquidity_index(&market_1_initial, env.block.time)
+                * market_1_initial.maintenance_margin
                 * Decimal256::from(token_1_exchange_rate);
             let token_3_weighted_lt_in_uusd = Decimal256::from_uint256(ma_token_3_balance_scaled)
-                * get_updated_liquidity_index(&reserve_3_initial, env.block.time)
-                * reserve_3_initial.maintenance_margin
+                * get_updated_liquidity_index(&market_3_initial, env.block.time)
+                * market_3_initial.maintenance_margin
                 * Decimal256::from(token_3_exchange_rate);
             let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
             let total_debt_in_uusd = Decimal256::from_uint256(token_2_debt_scaled)
-                * get_updated_borrow_index(&reserve_2_initial, env.block.time)
+                * get_updated_borrow_index(&market_2_initial, env.block.time)
                 * Decimal256::from(token_2_exchange_rate);
 
             // How much to withdraw in uusd to have health factor equal to one
             let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
                 - total_debt_in_uusd)
-                / reserve_3_initial.maintenance_margin;
+                / market_3_initial.maintenance_margin;
             let how_much_to_withdraw =
                 how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate);
             Uint256::one() * how_much_to_withdraw
@@ -4035,7 +4023,7 @@ mod tests {
             let res = handle(&mut deps, env.clone(), msg).unwrap();
 
             let withdraw_amount_scaled =
-                withdraw_amount / get_updated_liquidity_index(&reserve_3_initial, env.block.time);
+                withdraw_amount / get_updated_liquidity_index(&market_3_initial, env.block.time);
 
             assert_eq!(
                 res.messages,
@@ -4078,7 +4066,7 @@ mod tests {
         );
 
         let initial_liquidity_index = Decimal256::from_ratio(15, 10);
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -4104,9 +4092,9 @@ mod tests {
             )],
         );
 
-        let reserve_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
-        reserve_ma_tokens_state(&mut deps.storage)
+        let market_initial =
+            th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
+        market_ma_tokens_state(&mut deps.storage)
             .save(
                 deps.api
                     .canonical_address(&HumanAddr::from("matoken"))
@@ -4116,9 +4104,9 @@ mod tests {
             )
             .unwrap();
 
-        // Mark the reserve as collateral for the user
+        // Mark the market as collateral for the user
         let mut user = User::default();
-        set_bit(&mut user.collateral_assets, reserve_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         let withdrawer_canonical_addr = deps
             .api
@@ -4128,7 +4116,7 @@ mod tests {
             .save(withdrawer_canonical_addr.as_slice(), &user)
             .unwrap();
         // Check if user has set bit for collateral
-        assert!(get_bit(user.collateral_assets, reserve_initial.index).unwrap());
+        assert!(get_bit(user.collateral_assets, market_initial.index).unwrap());
 
         let msg = HandleMsg::Withdraw {
             asset: Asset::Native {
@@ -4141,26 +4129,24 @@ mod tests {
             "withdrawer",
             MockEnvParams {
                 sent_funds: &[],
-                block_time: mock_reserve.interests_last_updated + seconds_elapsed,
+                block_time: mock_market.interests_last_updated + seconds_elapsed,
                 ..Default::default()
             },
         );
         let res = handle(&mut deps, env, msg).unwrap();
 
-        let reserve = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
+        let market = markets_state_read(&deps.storage).load(b"somecoin").unwrap();
 
         let withdrawer_balance = withdrawer_balance_scaled
             * get_updated_liquidity_index(
-                &reserve_initial,
-                reserve_initial.interests_last_updated + seconds_elapsed,
+                &market_initial,
+                market_initial.interests_last_updated + seconds_elapsed,
             );
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_initial,
-            mock_reserve.interests_last_updated + seconds_elapsed,
+            &market_initial,
+            mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
             TestUtilizationDeltas {
                 less_liquidity: withdrawer_balance.into(),
@@ -4197,7 +4183,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "withdraw"),
-                log("reserve", "somecoin"),
+                log("market", "somecoin"),
                 log("user", "withdrawer"),
                 log("burn_amount", withdrawer_balance_scaled),
                 log("withdraw_amount", withdrawer_balance),
@@ -4208,12 +4194,12 @@ mod tests {
             ]
         );
 
-        assert_eq!(reserve.borrow_rate, expected_params.borrow_rate);
-        assert_eq!(reserve.liquidity_rate, expected_params.liquidity_rate);
-        assert_eq!(reserve.liquidity_index, expected_params.liquidity_index);
-        assert_eq!(reserve.borrow_index, expected_params.borrow_index);
+        assert_eq!(market.borrow_rate, expected_params.borrow_rate);
+        assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
+        assert_eq!(market.liquidity_index, expected_params.liquidity_index);
+        assert_eq!(market.borrow_index, expected_params.borrow_index);
         assert_eq!(
-            reserve.protocol_income_to_distribute,
+            market.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
 
@@ -4221,7 +4207,7 @@ mod tests {
         let user = users_state_read(&deps.storage)
             .load(&withdrawer_canonical_addr.as_slice())
             .unwrap();
-        assert!(!get_bit(user.collateral_assets, reserve_initial.index).unwrap());
+        assert!(!get_bit(user.collateral_assets, market_initial.index).unwrap());
     }
 
     #[test]
@@ -4253,7 +4239,7 @@ mod tests {
             &[(String::from("borrowedcoinnative"), Uint128(100u128))],
         );
 
-        let mock_reserve_1 = Reserve {
+        let mock_market_1 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken1"))
@@ -4268,7 +4254,7 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = Reserve {
+        let mock_market_2 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken2"))
@@ -4278,7 +4264,7 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let mock_reserve_3 = Reserve {
+        let mock_market_3 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken3"))
@@ -4296,34 +4282,34 @@ mod tests {
         };
 
         // should get index 0
-        let reserve_1_initial = th_init_reserve(
+        let market_1_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             cw20_contract_addr_canonical.as_slice(),
-            &mock_reserve_1,
+            &mock_market_1,
         );
         // should get index 1
-        let reserve_2_initial = th_init_reserve(
+        let market_2_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"borrowedcoinnative",
-            &mock_reserve_2,
+            &mock_market_2,
         );
         // should get index 2
-        let reserve_collateral = th_init_reserve(
+        let market_collateral = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"depositedcoin",
-            &mock_reserve_3,
+            &mock_market_3,
         );
 
         let borrower_addr = HumanAddr::from("borrower");
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
 
-        // Set user as having the reserve_collateral deposited
+        // Set user as having the market_collateral deposited
         let mut user = User::default();
 
-        set_bit(&mut user.collateral_assets, reserve_collateral.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_collateral.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -4341,7 +4327,7 @@ mod tests {
         // *
         // Borrow cw20 token
         // *
-        let block_time = mock_reserve_1.interests_last_updated + 10000u64;
+        let block_time = mock_market_1.interests_last_updated + 10000u64;
         let borrow_amount = 2400u128;
 
         let msg = HandleMsg::Borrow {
@@ -4364,7 +4350,7 @@ mod tests {
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_1_initial,
+            &market_1_initial,
             block_time,
             available_liquidity_cw20,
             TestUtilizationDeltas {
@@ -4391,7 +4377,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "borrow"),
-                log("reserve", "borrowedcoincw20"),
+                log("market", "borrowedcoincw20"),
                 log("user", "borrower"),
                 log("amount", borrow_amount),
                 log("borrow_index", expected_params_cw20.borrow_index),
@@ -4413,29 +4399,29 @@ mod tests {
         let expected_debt_scaled_1_after_borrow =
             Uint256::from(borrow_amount) / expected_params_cw20.borrow_index;
 
-        let reserve_1_after_borrow = reserves_state_read(&deps.storage)
+        let market_1_after_borrow = markets_state_read(&deps.storage)
             .load(cw20_contract_addr_canonical.as_slice())
             .unwrap();
 
         assert_eq!(expected_debt_scaled_1_after_borrow, debt.amount_scaled);
         assert_eq!(
             expected_debt_scaled_1_after_borrow,
-            reserve_1_after_borrow.debt_total_scaled
+            market_1_after_borrow.debt_total_scaled
         );
         assert_eq!(
             expected_params_cw20.borrow_rate,
-            reserve_1_after_borrow.borrow_rate
+            market_1_after_borrow.borrow_rate
         );
         assert_eq!(
             expected_params_cw20.liquidity_rate,
-            reserve_1_after_borrow.liquidity_rate
+            market_1_after_borrow.liquidity_rate
         );
 
         // *
         // Borrow cw20 token (again)
         // *
         let borrow_amount = 1200u128;
-        let block_time = reserve_1_after_borrow.interests_last_updated + 20000u64;
+        let block_time = market_1_after_borrow.interests_last_updated + 20000u64;
 
         let msg = HandleMsg::Borrow {
             asset: Asset::Cw20 {
@@ -4463,7 +4449,7 @@ mod tests {
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_1_after_borrow,
+            &market_1_after_borrow,
             block_time,
             available_liquidity_cw20,
             TestUtilizationDeltas {
@@ -4475,7 +4461,7 @@ mod tests {
         let debt = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        let reserve_1_after_borrow_again = reserves_state_read(&deps.storage)
+        let market_1_after_borrow_again = markets_state_read(&deps.storage)
             .load(cw20_contract_addr_canonical.as_slice())
             .unwrap();
 
@@ -4487,15 +4473,15 @@ mod tests {
         );
         assert_eq!(
             expected_debt_scaled_1_after_borrow_again,
-            reserve_1_after_borrow_again.debt_total_scaled
+            market_1_after_borrow_again.debt_total_scaled
         );
         assert_eq!(
             expected_params_cw20.borrow_rate,
-            reserve_1_after_borrow_again.borrow_rate
+            market_1_after_borrow_again.borrow_rate
         );
         assert_eq!(
             expected_params_cw20.liquidity_rate,
-            reserve_1_after_borrow_again.liquidity_rate
+            market_1_after_borrow_again.liquidity_rate
         );
 
         // *
@@ -4503,7 +4489,7 @@ mod tests {
         // *
 
         let borrow_amount = 4000u128;
-        let block_time = reserve_1_after_borrow_again.interests_last_updated + 3000u64;
+        let block_time = market_1_after_borrow_again.interests_last_updated + 3000u64;
         let env = mars::testing::mock_env(
             "borrower",
             MockEnvParams {
@@ -4528,7 +4514,7 @@ mod tests {
 
         let expected_params_native = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_2_initial,
+            &market_2_initial,
             block_time,
             available_liquidity_native,
             TestUtilizationDeltas {
@@ -4558,7 +4544,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "borrow"),
-                log("reserve", "borrowedcoinnative"),
+                log("market", "borrowedcoinnative"),
                 log("user", "borrower"),
                 log("amount", borrow_amount),
                 log("borrow_index", expected_params_native.borrow_index),
@@ -4571,7 +4557,7 @@ mod tests {
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        let reserve_2_after_borrow_2 = reserves_state_read(&deps.storage)
+        let market_2_after_borrow_2 = markets_state_read(&deps.storage)
             .load(b"borrowedcoinnative")
             .unwrap();
 
@@ -4580,15 +4566,15 @@ mod tests {
         assert_eq!(expected_debt_scaled_2_after_borrow_2, debt2.amount_scaled);
         assert_eq!(
             expected_debt_scaled_2_after_borrow_2,
-            reserve_2_after_borrow_2.debt_total_scaled
+            market_2_after_borrow_2.debt_total_scaled
         );
         assert_eq!(
             expected_params_native.borrow_rate,
-            reserve_2_after_borrow_2.borrow_rate
+            market_2_after_borrow_2.borrow_rate
         );
         assert_eq!(
             expected_params_native.liquidity_rate,
-            reserve_2_after_borrow_2.liquidity_rate
+            market_2_after_borrow_2.liquidity_rate
         );
 
         // *
@@ -4632,7 +4618,7 @@ mod tests {
         // Repay some native debt
         // *
         let repay_amount = 2000u128;
-        let block_time = reserve_2_after_borrow_2.interests_last_updated + 8000u64;
+        let block_time = market_2_after_borrow_2.interests_last_updated + 8000u64;
         let env = mars::testing::mock_env(
             "borrower",
             MockEnvParams {
@@ -4648,7 +4634,7 @@ mod tests {
 
         let expected_params_native = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_2_after_borrow_2,
+            &market_2_after_borrow_2,
             block_time,
             available_liquidity_native,
             TestUtilizationDeltas {
@@ -4662,7 +4648,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "repay"),
-                log("reserve", "borrowedcoinnative"),
+                log("market", "borrowedcoinnative"),
                 log("user", "borrower"),
                 log("amount", repay_amount),
                 log("borrow_index", expected_params_native.borrow_index),
@@ -4681,7 +4667,7 @@ mod tests {
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        let reserve_2_after_repay_some_2 = reserves_state_read(&deps.storage)
+        let market_2_after_repay_some_2 = markets_state_read(&deps.storage)
             .load(b"borrowedcoinnative")
             .unwrap();
         let expected_debt_scaled_2_after_repay_some_2 = expected_debt_scaled_2_after_borrow_2
@@ -4692,25 +4678,25 @@ mod tests {
         );
         assert_eq!(
             expected_debt_scaled_2_after_repay_some_2,
-            reserve_2_after_repay_some_2.debt_total_scaled
+            market_2_after_repay_some_2.debt_total_scaled
         );
         assert_eq!(
             expected_params_native.borrow_rate,
-            reserve_2_after_repay_some_2.borrow_rate
+            market_2_after_repay_some_2.borrow_rate
         );
         assert_eq!(
             expected_params_native.liquidity_rate,
-            reserve_2_after_repay_some_2.liquidity_rate
+            market_2_after_repay_some_2.liquidity_rate
         );
 
         // *
         // Repay all native debt
         // *
-        let block_time = reserve_2_after_repay_some_2.interests_last_updated + 10000u64;
+        let block_time = market_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
         let expected_params_native = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_2_after_repay_some_2,
+            &market_2_after_repay_some_2,
             block_time,
             available_liquidity_native,
             TestUtilizationDeltas {
@@ -4743,7 +4729,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "repay"),
-                log("reserve", "borrowedcoinnative"),
+                log("market", "borrowedcoinnative"),
                 log("user", "borrower"),
                 log("amount", repay_amount),
                 log("borrow_index", expected_params_native.borrow_index),
@@ -4762,14 +4748,14 @@ mod tests {
         let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        let reserve_2_after_repay_all_2 = reserves_state_read(&deps.storage)
+        let market_2_after_repay_all_2 = markets_state_read(&deps.storage)
             .load(b"borrowedcoinnative")
             .unwrap();
 
         assert_eq!(Uint256::zero(), debt2.amount_scaled);
         assert_eq!(
             Uint256::zero(),
-            reserve_2_after_repay_all_2.debt_total_scaled
+            market_2_after_repay_all_2.debt_total_scaled
         );
 
         // *
@@ -4785,12 +4771,12 @@ mod tests {
         // *
         // Repay all cw20 debt (and then some)
         // *
-        let block_time = reserve_2_after_repay_all_2.interests_last_updated + 5000u64;
+        let block_time = market_2_after_repay_all_2.interests_last_updated + 5000u64;
         let repay_amount = 4800u128;
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_1_after_borrow_again,
+            &market_1_after_borrow_again,
             block_time,
             available_liquidity_cw20,
             TestUtilizationDeltas {
@@ -4839,7 +4825,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "repay"),
-                log("reserve", "borrowedcoincw20"),
+                log("market", "borrowedcoincw20"),
                 log("user", "borrower"),
                 log("amount", Uint128(repay_amount - expected_refund_amount)),
                 log("borrow_index", expected_params_cw20.borrow_index),
@@ -4857,13 +4843,13 @@ mod tests {
         let debt1 = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-        let reserve_1_after_repay_1 = reserves_state_read(&deps.storage)
+        let market_1_after_repay_1 = markets_state_read(&deps.storage)
             .load(cw20_contract_addr_canonical.as_slice())
             .unwrap();
         assert_eq!(Uint256::from(0_u128), debt1.amount_scaled);
         assert_eq!(
             Uint256::from(0_u128),
-            reserve_1_after_repay_1.debt_total_scaled
+            market_1_after_repay_1.debt_total_scaled
         );
     }
 
@@ -4877,7 +4863,7 @@ mod tests {
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
         let ltv = Decimal256::from_ratio(7, 10);
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -4892,7 +4878,7 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"uusd", &mock_reserve);
+        let market = th_init_market(&deps.api, &mut deps.storage, b"uusd", &mock_market);
 
         // Set tax data for uusd
         deps.querier.set_native_tax(
@@ -4900,10 +4886,10 @@ mod tests {
             &[(String::from("uusd"), Uint128(100u128))],
         );
 
-        // Set user as having the reserve_collateral deposited
+        // Set user as having the market_collateral deposited
         let deposit_amount = 110000u64;
         let mut user = User::default();
-        set_bit(&mut user.collateral_assets, reserve.index).unwrap();
+        set_bit(&mut user.collateral_assets, market.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(borrower_canonical_addr.as_slice(), &user)
@@ -4918,10 +4904,10 @@ mod tests {
 
         // borrow with insufficient collateral, should fail
         let new_block_time = 120u64;
-        let time_elapsed = new_block_time - reserve.interests_last_updated;
+        let time_elapsed = new_block_time - market.interests_last_updated;
         let liquidity_index = calculate_applied_linear_interest_rate(
-            reserve.liquidity_index,
-            reserve.liquidity_rate,
+            market.liquidity_index,
+            market.liquidity_rate,
             time_elapsed,
         );
         let collateral = Decimal256::from_uint256(Uint256::from(deposit_amount)) * liquidity_index;
@@ -4958,7 +4944,7 @@ mod tests {
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve,
+            &market,
             block_time,
             initial_liquidity,
             TestUtilizationDeltas {
@@ -4968,7 +4954,7 @@ mod tests {
             },
         );
 
-        let reserve_after_borrow = reserves_state_read(&deps.storage).load(b"uusd").unwrap();
+        let market_after_borrow = markets_state_read(&deps.storage).load(b"uusd").unwrap();
 
         let user = users_state_read(&deps.storage)
             .load(borrower_canonical_addr.as_slice())
@@ -4981,7 +4967,7 @@ mod tests {
 
         assert_eq!(valid_amount, debt.amount_scaled);
         assert_eq!(
-            reserve_after_borrow.protocol_income_to_distribute,
+            market_after_borrow.protocol_income_to_distribute,
             expected_params.protocol_income_to_distribute
         );
     }
@@ -5022,7 +5008,7 @@ mod tests {
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
 
-        let mock_reserve_1 = Reserve {
+        let mock_market_1 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken1"))
@@ -5034,7 +5020,7 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = Reserve {
+        let mock_market_2 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken2"))
@@ -5046,7 +5032,7 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let mock_reserve_3 = Reserve {
+        let mock_market_3 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken3"))
@@ -5060,34 +5046,34 @@ mod tests {
         };
 
         // should get index 0
-        let reserve_1_initial = th_init_reserve(
+        let market_1_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             cw20_contract_addr_canonical.as_slice(),
-            &mock_reserve_1,
+            &mock_market_1,
         );
         // should get index 1
-        let reserve_2_initial = th_init_reserve(
+        let market_2_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"depositedcoin2",
-            &mock_reserve_2,
+            &mock_market_2,
         );
         // should get index 2
-        let reserve_3_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"uusd", &mock_reserve_3);
+        let market_3_initial =
+            th_init_market(&deps.api, &mut deps.storage, b"uusd", &mock_market_3);
 
         let borrower_canonical_addr = deps
             .api
             .canonical_address(&HumanAddr::from("borrower"))
             .unwrap();
 
-        // Set user as having all the reserves as collateral
+        // Set user as having all the markets as collateral
         let mut user = User::default();
 
-        set_bit(&mut user.collateral_assets, reserve_1_initial.index).unwrap();
-        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
-        set_bit(&mut user.collateral_assets, reserve_3_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_3_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
@@ -5112,13 +5098,13 @@ mod tests {
         deps.querier
             .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3)]);
 
-        let max_borrow_allowed_in_uusd = (reserve_1_initial.max_loan_to_value
+        let max_borrow_allowed_in_uusd = (market_1_initial.max_loan_to_value
             * Uint256::from(balance_1)
             * Decimal256::from(exchange_rate_1))
-            + (reserve_2_initial.max_loan_to_value
+            + (market_2_initial.max_loan_to_value
                 * Uint256::from(balance_2)
                 * Decimal256::from(exchange_rate_2))
-            + (reserve_3_initial.max_loan_to_value
+            + (market_3_initial.max_loan_to_value
                 * Uint256::from(balance_3)
                 * Decimal256::from(exchange_rate_3));
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
@@ -5190,7 +5176,7 @@ mod tests {
         let second_debt_to_repay = Uint256::from(10_000_000_u64);
         let second_block_time = 16_000_000;
 
-        // Global debt for the debt reserve
+        // Global debt for the debt market
         let mut expected_global_debt_scaled = Uint256::from(1_800_000_000_u64);
 
         config_state(&mut deps.storage)
@@ -5208,17 +5194,17 @@ mod tests {
             )],
         );
 
-        // initialize collateral and debt reserves
+        // initialize collateral and debt markets
         deps.querier.set_native_exchange_rates(
             "uusd".to_string(),
             &[("collateral".to_string(), collateral_price)],
         );
 
-        let collateral_reserve_ma_token_human_addr = HumanAddr::from("ma_collateral");
-        let collateral_reserve = Reserve {
+        let collateral_market_ma_token_human_addr = HumanAddr::from("ma_collateral");
+        let collateral_market = Market {
             ma_token_address: deps
                 .api
-                .canonical_address(&collateral_reserve_ma_token_human_addr)
+                .canonical_address(&collateral_market_ma_token_human_addr)
                 .unwrap(),
             max_loan_to_value: collateral_max_ltv,
             maintenance_margin: collateral_maintenance_margin,
@@ -5234,7 +5220,7 @@ mod tests {
             ..Default::default()
         };
 
-        let debt_reserve = Reserve {
+        let debt_market = Market {
             max_loan_to_value: Decimal256::from_ratio(6, 10),
             debt_total_scaled: expected_global_debt_scaled,
             liquidity_index: Decimal256::one(),
@@ -5247,31 +5233,27 @@ mod tests {
             ..Default::default()
         };
 
-        let collateral_reserve_initial = th_init_reserve(
+        let collateral_market_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"collateral",
-            &collateral_reserve,
+            &collateral_market,
         );
 
-        let debt_reserve_initial = th_init_reserve(
+        let debt_market_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             debt_contract_addr_canonical.as_slice(),
-            &debt_reserve,
+            &debt_market,
         );
 
-        let mut expected_user_debt_scaled = user_debt / debt_reserve_initial.liquidity_index;
+        let mut expected_user_debt_scaled = user_debt / debt_market_initial.liquidity_index;
 
-        // Set user as having collateral and debt in respective reserves
+        // Set user as having collateral and debt in respective markets
         {
             let mut user = User::default();
-            set_bit(
-                &mut user.collateral_assets,
-                collateral_reserve_initial.index,
-            )
-            .unwrap();
-            set_bit(&mut user.borrowed_assets, debt_reserve_initial.index).unwrap();
+            set_bit(&mut user.collateral_assets, collateral_market_initial.index).unwrap();
+            set_bit(&mut user.borrowed_assets, debt_market_initial.index).unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
             users_bucket
                 .save(user_canonical_addr.as_slice(), &user)
@@ -5281,7 +5263,7 @@ mod tests {
         // trying to liquidate user with zero collateral balance should fail
         {
             deps.querier.set_cw20_balances(
-                collateral_reserve_ma_token_human_addr,
+                collateral_market_ma_token_human_addr,
                 &[(user_address.clone(), Uint128::zero())],
             );
 
@@ -5399,10 +5381,10 @@ mod tests {
                 amount: first_debt_to_repay.into(),
             });
 
-            let collateral_reserve_before = reserves_state_read(&deps.storage)
+            let collateral_market_before = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_before = reserves_state_read(&deps.storage)
+            let debt_market_before = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5416,10 +5398,10 @@ mod tests {
             );
             let res = handle(&mut deps, env.clone(), liquidate_msg).unwrap();
 
-            // get expected indices and rates for debt reserve
+            // get expected indices and rates for debt market
             let expected_debt_rates = th_get_expected_indices_and_rates(
                 &deps,
-                &debt_reserve_initial,
+                &debt_market_initial,
                 block_time,
                 available_liquidity_debt,
                 TestUtilizationDeltas {
@@ -5428,10 +5410,10 @@ mod tests {
                 },
             );
 
-            let collateral_reserve_after = reserves_state_read(&deps.storage)
+            let collateral_market_after = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_after = reserves_state_read(&deps.storage)
+            let debt_market_after = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5442,7 +5424,7 @@ mod tests {
                 / Decimal256::from(collateral_price);
 
             let expected_liquidated_collateral_amount_scaled = expected_liquidated_collateral_amount
-                / get_updated_liquidity_index(&collateral_reserve_after, env.block.time);
+                / get_updated_liquidity_index(&collateral_market_after, env.block.time);
 
             assert_eq!(
                 res.messages,
@@ -5462,8 +5444,8 @@ mod tests {
                 res.log,
                 vec![
                     log("action", "liquidate"),
-                    log("collateral_reserve", "collateral"),
-                    log("debt_reserve", debt_contract_addr.as_str()),
+                    log("collateral_market", "collateral"),
+                    log("debt_market", debt_contract_addr.as_str()),
                     log("user", user_address.as_str()),
                     log("liquidator", liquidator_address.as_str()),
                     log(
@@ -5484,8 +5466,8 @@ mod tests {
             let user = users_state_read(&deps.storage)
                 .load(user_canonical_addr.as_slice())
                 .unwrap();
-            assert!(get_bit(user.collateral_assets, collateral_reserve_before.index).unwrap());
-            assert!(get_bit(user.borrowed_assets, debt_reserve_before.index).unwrap());
+            assert!(get_bit(user.collateral_assets, collateral_market_before.index).unwrap());
+            assert!(get_bit(user.borrowed_assets, debt_market_before.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
             let debt =
@@ -5504,18 +5486,18 @@ mod tests {
 
             assert_eq!(
                 expected_global_debt_scaled,
-                debt_reserve_after.debt_total_scaled
+                debt_market_after.debt_total_scaled
             );
 
             // check correct accumulated protocol income to distribute
             assert_eq!(
                 Uint256::zero(),
-                collateral_reserve_after.protocol_income_to_distribute
+                collateral_market_after.protocol_income_to_distribute
             );
             assert_eq!(
-                debt_reserve_before.protocol_income_to_distribute
+                debt_market_before.protocol_income_to_distribute
                     + expected_debt_rates.protocol_income_to_distribute,
-                debt_reserve_after.protocol_income_to_distribute
+                debt_market_after.protocol_income_to_distribute
             );
         }
 
@@ -5538,10 +5520,10 @@ mod tests {
                 amount: second_debt_to_repay.into(),
             });
 
-            let collateral_reserve_before = reserves_state_read(&deps.storage)
+            let collateral_market_before = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_before = reserves_state_read(&deps.storage)
+            let debt_market_before = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5555,8 +5537,8 @@ mod tests {
             );
             let res = handle(&mut deps, env, liquidate_msg).unwrap();
 
-            // get expected indices and rates for debt and collateral reserves
-            let expected_debt_indices = th_get_expected_indices(&debt_reserve_before, block_time);
+            // get expected indices and rates for debt and collateral markets
+            let expected_debt_indices = th_get_expected_indices(&debt_market_before, block_time);
             let user_debt_asset_total_debt =
                 expected_user_debt_scaled * expected_debt_indices.borrow;
             // Since debt is being over_repayed, we expect to max out the liquidatable debt
@@ -5566,7 +5548,7 @@ mod tests {
 
             let expected_debt_rates = th_get_expected_indices_and_rates(
                 &deps,
-                &debt_reserve_before,
+                &debt_market_before,
                 block_time,
                 available_liquidity_debt, //this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
@@ -5584,7 +5566,7 @@ mod tests {
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
                 &deps,
-                &collateral_reserve_before,
+                &collateral_market_before,
                 block_time,
                 available_liquidity_collateral, //this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
@@ -5593,10 +5575,10 @@ mod tests {
                 },
             );
 
-            let collateral_reserve_after = reserves_state_read(&deps.storage)
+            let collateral_market_after = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_after = reserves_state_read(&deps.storage)
+            let debt_market_after = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5642,8 +5624,8 @@ mod tests {
             mars::testing::assert_eq_vec(
                 vec![
                     log("action", "liquidate"),
-                    log("collateral_reserve", "collateral"),
-                    log("debt_reserve", debt_contract_addr.as_str()),
+                    log("collateral_market", "collateral"),
+                    log("debt_market", debt_contract_addr.as_str()),
                     log("user", user_address.as_str()),
                     log("liquidator", liquidator_address.as_str()),
                     log(
@@ -5669,8 +5651,8 @@ mod tests {
             let user = users_state_read(&deps.storage)
                 .load(user_canonical_addr.as_slice())
                 .unwrap();
-            assert!(get_bit(user.collateral_assets, collateral_reserve_initial.index).unwrap());
-            assert!(get_bit(user.borrowed_assets, debt_reserve_initial.index).unwrap());
+            assert!(get_bit(user.collateral_assets, collateral_market_initial.index).unwrap());
+            assert!(get_bit(user.borrowed_assets, debt_market_initial.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
@@ -5687,18 +5669,18 @@ mod tests {
             expected_global_debt_scaled = expected_global_debt_scaled - expected_less_debt_scaled;
             assert_eq!(
                 expected_global_debt_scaled,
-                debt_reserve_after.debt_total_scaled
+                debt_market_after.debt_total_scaled
             );
 
             // check correct accumulated protocol income to distribute
             assert_eq!(
-                debt_reserve_before.protocol_income_to_distribute
+                debt_market_before.protocol_income_to_distribute
                     + expected_debt_rates.protocol_income_to_distribute,
-                debt_reserve_after.protocol_income_to_distribute
+                debt_market_after.protocol_income_to_distribute
             );
             assert_eq!(
                 expected_collateral_rates.protocol_income_to_distribute,
-                collateral_reserve_after.protocol_income_to_distribute
+                collateral_market_after.protocol_income_to_distribute
             );
         }
 
@@ -5738,10 +5720,10 @@ mod tests {
                 amount: debt_to_repay.into(),
             });
 
-            let collateral_reserve_before = reserves_state_read(&deps.storage)
+            let collateral_market_before = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_before = reserves_state_read(&deps.storage)
+            let debt_market_before = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5755,9 +5737,9 @@ mod tests {
             );
             let res = handle(&mut deps, env, liquidate_msg).unwrap();
 
-            // get expected indices and rates for debt and collateral reserves
+            // get expected indices and rates for debt and collateral markets
             let expected_collateral_indices =
-                th_get_expected_indices(&collateral_reserve_before, block_time);
+                th_get_expected_indices(&collateral_market_before, block_time);
             let user_collateral_balance =
                 user_collateral_balance_scaled * expected_collateral_indices.liquidity;
 
@@ -5770,7 +5752,7 @@ mod tests {
 
             let expected_debt_rates = th_get_expected_indices_and_rates(
                 &deps,
-                &debt_reserve_before,
+                &debt_market_before,
                 block_time,
                 available_liquidity_debt, // this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
@@ -5782,7 +5764,7 @@ mod tests {
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
                 &deps,
-                &collateral_reserve_before,
+                &collateral_market_before,
                 block_time,
                 available_liquidity_collateral, // this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
@@ -5791,10 +5773,10 @@ mod tests {
                 },
             );
 
-            let collateral_reserve_after = reserves_state_read(&deps.storage)
+            let collateral_market_after = markets_state_read(&deps.storage)
                 .load(b"collateral")
                 .unwrap();
-            let debt_reserve_after = reserves_state_read(&deps.storage)
+            let debt_market_after = markets_state_read(&deps.storage)
                 .load(debt_contract_addr_canonical.as_slice())
                 .unwrap();
 
@@ -5842,8 +5824,8 @@ mod tests {
             mars::testing::assert_eq_vec(
                 vec![
                     log("action", "liquidate"),
-                    log("collateral_reserve", "collateral"),
-                    log("debt_reserve", debt_contract_addr.as_str()),
+                    log("collateral_market", "collateral"),
+                    log("debt_market", debt_contract_addr.as_str()),
                     log("user", user_address.as_str()),
                     log("liquidator", liquidator_address.as_str()),
                     log("collateral_amount_liquidated", user_collateral_balance),
@@ -5866,8 +5848,8 @@ mod tests {
             let user = users_state_read(&deps.storage)
                 .load(user_canonical_addr.as_slice())
                 .unwrap();
-            assert!(!get_bit(user.collateral_assets, collateral_reserve_initial.index).unwrap());
-            assert!(get_bit(user.borrowed_assets, debt_reserve_initial.index).unwrap());
+            assert!(!get_bit(user.collateral_assets, collateral_market_initial.index).unwrap());
+            assert!(get_bit(user.borrowed_assets, debt_market_initial.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
@@ -5884,26 +5866,26 @@ mod tests {
             expected_global_debt_scaled = expected_global_debt_scaled - expected_less_debt_scaled;
             assert_eq!(
                 expected_global_debt_scaled,
-                debt_reserve_after.debt_total_scaled
+                debt_market_after.debt_total_scaled
             );
 
             // check correct accumulated protocol income to distribute
             assert_eq!(
                 expected_debt_rates.protocol_income_to_distribute,
-                debt_reserve_after.protocol_income_to_distribute
-                    - debt_reserve_before.protocol_income_to_distribute
+                debt_market_after.protocol_income_to_distribute
+                    - debt_market_before.protocol_income_to_distribute
             );
             assert_eq!(
                 expected_collateral_rates.protocol_income_to_distribute,
-                collateral_reserve_after.protocol_income_to_distribute
-                    - collateral_reserve_before.protocol_income_to_distribute
+                collateral_market_after.protocol_income_to_distribute
+                    - collateral_market_before.protocol_income_to_distribute
             );
         }
     }
 
     #[test]
     fn test_liquidation_health_factor_check() {
-        // initialize collateral and debt reserves
+        // initialize collateral and debt markets
         let available_liquidity_collateral = 1000000000u128;
         let available_liquidity_debt = 2000000000u128;
         let mut deps = th_setup(&[coin(available_liquidity_collateral, "collateral")]);
@@ -5927,7 +5909,7 @@ mod tests {
         let collateral_maintenance_margin = Decimal256::from_ratio(7, 10);
         let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
 
-        let collateral_reserve = Reserve {
+        let collateral_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("collateral"))
@@ -5941,7 +5923,7 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let debt_reserve = Reserve {
+        let debt_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("debt"))
@@ -5954,19 +5936,19 @@ mod tests {
             ..Default::default()
         };
 
-        // initialize reserves
-        let collateral_reserve_initial = th_init_reserve(
+        // initialize markets
+        let collateral_market_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"collateral",
-            &collateral_reserve,
+            &collateral_market,
         );
 
-        let debt_reserve_initial = th_init_reserve(
+        let debt_market_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             debt_contract_addr_canonical.as_slice(),
-            &debt_reserve,
+            &debt_market,
         );
 
         // test health factor check
@@ -5974,19 +5956,15 @@ mod tests {
         let healthy_user_canonical_addr =
             deps.api.canonical_address(&healthy_user_address).unwrap();
 
-        // Set user as having collateral and debt in respective reserves
+        // Set user as having collateral and debt in respective markets
         let mut healthy_user = User::default();
 
         set_bit(
             &mut healthy_user.collateral_assets,
-            collateral_reserve_initial.index,
+            collateral_market_initial.index,
         )
         .unwrap();
-        set_bit(
-            &mut healthy_user.borrowed_assets,
-            debt_reserve_initial.index,
-        )
-        .unwrap();
+        set_bit(&mut healthy_user.borrowed_assets, debt_market_initial.index).unwrap();
 
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
@@ -6049,7 +6027,7 @@ mod tests {
         let mut deps = th_setup(&[]);
         let env_matoken = cosmwasm_std::testing::mock_env(HumanAddr::from("masomecoin"), &[]);
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("masomecoin"))
@@ -6058,17 +6036,13 @@ mod tests {
             maintenance_margin: Decimal256::from_ratio(5, 10),
             ..Default::default()
         };
-        let reserve = th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
-        let debt_mock_reserve = Reserve {
+        let market = th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
+        let debt_mock_market = Market {
             borrow_index: Decimal256::one(),
             ..Default::default()
         };
-        let debt_reserve = th_init_reserve(
-            &deps.api,
-            &mut deps.storage,
-            b"debtcoin",
-            &debt_mock_reserve,
-        );
+        let debt_market =
+            th_init_market(&deps.api, &mut deps.storage, b"debtcoin", &debt_mock_market);
 
         deps.querier.set_native_exchange_rates(
             "uusd".to_string(),
@@ -6090,7 +6064,7 @@ mod tests {
 
         {
             let mut sender_user = User::default();
-            set_bit(&mut sender_user.collateral_assets, reserve.index).unwrap();
+            set_bit(&mut sender_user.collateral_assets, market.index).unwrap();
             users_state(&mut deps.storage)
                 .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
@@ -6115,9 +6089,9 @@ mod tests {
             let recipient_user = users_bucket
                 .load(recipient_canonical_address.as_slice())
                 .unwrap();
-            assert!(get_bit(sender_user.collateral_assets, reserve.index).unwrap());
+            assert!(get_bit(sender_user.collateral_assets, market.index).unwrap());
             // Should create user and set deposited to true as previous balance is 0
-            assert!(get_bit(recipient_user.collateral_assets, reserve.index).unwrap());
+            assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
         }
 
         // Finalize transfer with health factor < 1 for sender doesn't go through
@@ -6133,7 +6107,7 @@ mod tests {
             let mut sender_user = users_bucket
                 .load(sender_canonical_address.as_slice())
                 .unwrap();
-            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_market.index).unwrap();
             users_bucket
                 .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
@@ -6165,7 +6139,7 @@ mod tests {
             let mut sender_user = users_bucket
                 .load(sender_canonical_address.as_slice())
                 .unwrap();
-            set_bit(&mut sender_user.borrowed_assets, debt_reserve.index).unwrap();
+            set_bit(&mut sender_user.borrowed_assets, debt_market.index).unwrap();
             users_bucket
                 .save(sender_canonical_address.as_slice(), &sender_user)
                 .unwrap();
@@ -6190,8 +6164,8 @@ mod tests {
                 .load(recipient_canonical_address.as_slice())
                 .unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
-            assert!(!get_bit(sender_user.collateral_assets, reserve.index).unwrap());
-            assert!(get_bit(recipient_user.collateral_assets, reserve.index).unwrap());
+            assert!(!get_bit(sender_user.collateral_assets, market.index).unwrap());
+            assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
         }
 
         // Calling this with other token fails
@@ -6224,7 +6198,7 @@ mod tests {
             &[(String::from("somecoin"), Uint128(100u128))],
         );
 
-        let mock_reserve = Reserve {
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -6241,13 +6215,13 @@ mod tests {
         };
 
         // should get index 0
-        let reserve_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let market_initial =
+            th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
 
         let borrower_addr = HumanAddr::from("borrower");
         let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
 
-        let mut block_time = mock_reserve.interests_last_updated + 10000u64;
+        let mut block_time = mock_market.interests_last_updated + 10000u64;
         let initial_uncollateralized_loan_limit = Uint128::from(2400_u128);
 
         // Update uncollateralized loan limit
@@ -6312,7 +6286,7 @@ mod tests {
 
         let expected_params = th_get_expected_indices_and_rates(
             &deps,
-            &reserve_initial,
+            &market_initial,
             block_time,
             available_liquidity,
             TestUtilizationDeltas {
@@ -6342,7 +6316,7 @@ mod tests {
             res.log,
             vec![
                 log("action", "borrow"),
-                log("reserve", "somecoin"),
+                log("market", "somecoin"),
                 log("user", "borrower"),
                 log("amount", initial_borrow_amount),
                 log("borrow_index", expected_params.borrow_index),
@@ -6445,12 +6419,12 @@ mod tests {
         let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
 
         let ma_token_address_1 = HumanAddr::from("matoken1");
-        let mock_reserve_1 = Reserve {
+        let mock_market_1 = Market {
             ma_token_address: deps.api.canonical_address(&ma_token_address_1).unwrap(),
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let mock_reserve_2 = Reserve {
+        let mock_market_2 = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken2"))
@@ -6461,23 +6435,23 @@ mod tests {
         let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
 
         // Should get index 0
-        let reserve_1_initial = th_init_reserve(
+        let market_1_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             cw20_contract_addr_canonical.as_slice(),
-            &mock_reserve_1,
+            &mock_market_1,
         );
         // Should get index 1
-        let reserve_2_initial = th_init_reserve(
+        let market_2_initial = th_init_market(
             &deps.api,
             &mut deps.storage,
             b"depositedcoin2",
-            &mock_reserve_2,
+            &mock_market_2,
         );
 
         // Set second asset as collateral
         let mut user = User::default();
-        set_bit(&mut user.collateral_assets, reserve_2_initial.index).unwrap();
+        set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
         users_bucket
             .save(user_canonical_addr.as_slice(), &user)
@@ -6489,7 +6463,7 @@ mod tests {
             &[(user_addr.clone(), Uint128::zero())],
         );
 
-        // Enable first reserve index which is currently disabled as collateral and ma-token balance is 0
+        // Enable first market index which is currently disabled as collateral and ma-token balance is 0
         let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
             asset: Asset::Cw20 {
                 contract_addr: cw20_contract_addr.clone(),
@@ -6510,26 +6484,24 @@ mod tests {
         let user = users_state(&mut deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
-        let reserve_1_collateral =
-            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        let market_1_collateral = get_bit(user.collateral_assets, market_1_initial.index).unwrap();
         // Balance for first asset is zero so don't update bit
-        assert!(!reserve_1_collateral);
+        assert!(!market_1_collateral);
 
         // Set the querier to return balance more than zero for the first asset
         deps.querier
             .set_cw20_balances(ma_token_address_1, &[(user_addr, Uint128(100_000))]);
 
-        // Enable first reserve index which is currently disabled as collateral and ma-token balance is more than 0
+        // Enable first market index which is currently disabled as collateral and ma-token balance is more than 0
         let _res = handle(&mut deps, env.clone(), update_msg).unwrap();
         let user = users_state(&mut deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
-        let reserve_1_collateral =
-            get_bit(user.collateral_assets, reserve_1_initial.index).unwrap();
+        let market_1_collateral = get_bit(user.collateral_assets, market_1_initial.index).unwrap();
         // Balance for first asset is more than zero so update bit
-        assert!(reserve_1_collateral);
+        assert!(market_1_collateral);
 
-        // Disable second reserve index
+        // Disable second market index
         let update_msg = HandleMsg::UpdateUserCollateralAssetStatus {
             asset: Asset::Native {
                 denom: "depositedcoin2".to_string(),
@@ -6540,9 +6512,8 @@ mod tests {
         let user = users_state(&mut deps.storage)
             .load(user_canonical_addr.as_slice())
             .unwrap();
-        let reserve_2_collateral =
-            get_bit(user.collateral_assets, reserve_2_initial.index).unwrap();
-        assert!(!reserve_2_collateral);
+        let market_2_collateral = get_bit(user.collateral_assets, market_2_initial.index).unwrap();
+        assert!(!market_2_collateral);
     }
 
     #[test]
@@ -6562,8 +6533,8 @@ mod tests {
         };
         let protocol_income_to_distribute = Uint256::from(1_000_000_u64);
 
-        // initialize reserve with non-zero amount of protocol_income_to_distribute
-        let mock_reserve = Reserve {
+        // initialize market with non-zero amount of protocol_income_to_distribute
+        let mock_market = Market {
             ma_token_address: deps
                 .api
                 .canonical_address(&HumanAddr::from("matoken"))
@@ -6580,10 +6551,10 @@ mod tests {
             ..Default::default()
         };
         // should get index 0
-        let reserve_initial =
-            th_init_reserve(&deps.api, &mut deps.storage, b"somecoin", &mock_reserve);
+        let market_initial =
+            th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
 
-        let mut block_time = mock_reserve.interests_last_updated + 10000u64;
+        let mut block_time = mock_market.interests_last_updated + 10000u64;
 
         // call function providing amount exceeding protocol_income_to_distribute, should fail
         let exceeding_amount = protocol_income_to_distribute + Uint256::from(1_000_u64);
@@ -6605,7 +6576,7 @@ mod tests {
         let response = handle(&mut deps, env.clone(), distribute_income_msg);
         assert_generic_error_message(
             response,
-            "amount specified exceeds reserve's income to be distributed",
+            "amount specified exceeds market's income to be distributed",
         );
 
         // call function providing amount less than protocol_income_to_distribute
@@ -6617,17 +6588,16 @@ mod tests {
         let res = handle(&mut deps, env.clone(), distribute_income_msg).unwrap();
 
         let config = config_state_read(&deps.storage).load().unwrap();
-        let reserve_after_distribution = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
+        let market_after_distribution =
+            markets_state_read(&deps.storage).load(b"somecoin").unwrap();
 
         let expected_insurance_fund_amount = permissible_amount * config.insurance_fund_fee_share;
         let expected_treasury_amount = permissible_amount * config.treasury_fee_share;
         let expected_staking_amount =
             permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
 
-        let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&reserve_initial, env.block.time);
+        let scaled_mint_amount =
+            expected_treasury_amount / get_updated_liquidity_index(&market_initial, env.block.time);
 
         assert_eq!(
             res.messages,
@@ -6647,7 +6617,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: deps
                         .api
-                        .human_address(&reserve_initial.ma_token_address)
+                        .human_address(&market_initial.ma_token_address)
                         .unwrap(),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Mint {
@@ -6682,7 +6652,7 @@ mod tests {
         let expected_remaining_income_to_be_distributed =
             protocol_income_to_distribute - permissible_amount;
         assert_eq!(
-            reserve_after_distribution.protocol_income_to_distribute,
+            market_after_distribution.protocol_income_to_distribute,
             expected_remaining_income_to_be_distributed
         );
 
@@ -6711,7 +6681,7 @@ mod tests {
             - (expected_insurance_amount + expected_treasury_amount);
 
         let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&reserve_after_distribution, env.block.time);
+            / get_updated_liquidity_index(&market_after_distribution, env.block.time);
 
         assert_eq!(
             res.messages,
@@ -6731,7 +6701,7 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: deps
                         .api
-                        .human_address(&reserve_initial.ma_token_address)
+                        .human_address(&market_initial.ma_token_address)
                         .unwrap(),
                     send: vec![],
                     msg: to_binary(&Cw20HandleMsg::Mint {
@@ -6763,11 +6733,10 @@ mod tests {
             ]
         );
 
-        let reserve_after_second_distribution = reserves_state_read(&deps.storage)
-            .load(b"somecoin")
-            .unwrap();
+        let market_after_second_distribution =
+            markets_state_read(&deps.storage).load(b"somecoin").unwrap();
         assert_eq!(
-            reserve_after_second_distribution.protocol_income_to_distribute,
+            market_after_second_distribution.protocol_income_to_distribute,
             Uint256::zero()
         );
     }
@@ -6792,9 +6761,9 @@ mod tests {
         deps
     }
 
-    impl Default for Reserve {
+    impl Default for Market {
         fn default() -> Self {
-            Reserve {
+            Market {
                 index: 0,
                 ma_token_address: Default::default(),
                 liquidity_index: Default::default(),
@@ -6821,45 +6790,45 @@ mod tests {
         }
     }
 
-    fn th_init_reserve<S: Storage, A: Api>(
+    fn th_init_market<S: Storage, A: Api>(
         _api: &A,
         storage: &mut S,
         key: &[u8],
-        reserve: &Reserve,
-    ) -> Reserve {
+        market: &Market,
+    ) -> Market {
         let mut index = 0;
 
         money_market_state(storage)
-            .update(|mut mm: MoneyMarket| -> StdResult<MoneyMarket> {
-                index = mm.reserve_count;
-                mm.reserve_count += 1;
+            .update(|mut mm: RedBank| -> StdResult<RedBank> {
+                index = mm.market_count;
+                mm.market_count += 1;
                 Ok(mm)
             })
             .unwrap();
 
-        let mut reserve_bucket = reserves_state(storage);
+        let mut market_bucket = markets_state(storage);
 
-        let new_reserve = Reserve {
+        let new_market = Market {
             index,
-            ..reserve.clone()
+            ..market.clone()
         };
 
-        reserve_bucket.save(key, &new_reserve).unwrap();
+        market_bucket.save(key, &new_market).unwrap();
 
-        reserve_references_state(storage)
+        market_references_state(storage)
             .save(
                 &index.to_be_bytes(),
-                &ReserveReferences {
+                &MarketReferences {
                     reference: key.to_vec(),
                 },
             )
             .unwrap();
 
-        reserve_ma_tokens_state(storage)
-            .save(new_reserve.ma_token_address.as_slice(), &key.to_vec())
+        market_ma_tokens_state(storage)
+            .save(new_market.ma_token_address.as_slice(), &key.to_vec())
             .unwrap();
 
-        new_reserve
+        new_market
     }
 
     #[derive(Default, Debug)]
@@ -6879,28 +6848,28 @@ mod tests {
         less_debt: u128,
     }
 
-    /// Takes a reserve before an action (ie: a borrow) among some test parameters
+    /// Takes a market before an action (ie: a borrow) among some test parameters
     /// used in that action and computes the expected indices and rates after that action.
     fn th_get_expected_indices_and_rates<S: Storage, A: Api, Q: Querier>(
         deps: &Extern<S, A, Q>,
-        reserve: &Reserve,
+        market: &Market,
         block_time: u64,
         initial_liquidity: u128,
         deltas: TestUtilizationDeltas,
     ) -> TestInterestResults {
-        let expected_indices = th_get_expected_indices(reserve, block_time);
+        let expected_indices = th_get_expected_indices(market, block_time);
 
         // Compute protocol income to be distributed (using values up to the instant
         // before the contract call is made)
-        let previous_borrow_index = reserve.borrow_index;
-        let previous_debt_total = reserve.debt_total_scaled * previous_borrow_index;
-        let current_debt_total = reserve.debt_total_scaled * expected_indices.borrow;
+        let previous_borrow_index = market.borrow_index;
+        let previous_debt_total = market.debt_total_scaled * previous_borrow_index;
+        let current_debt_total = market.debt_total_scaled * expected_indices.borrow;
         let interest_accrued = if current_debt_total > previous_debt_total {
             current_debt_total - previous_debt_total
         } else {
             Uint256::zero()
         };
-        let expected_protocol_income_to_distribute = interest_accrued * reserve.reserve_factor;
+        let expected_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_indices.borrow;
@@ -6909,15 +6878,15 @@ mod tests {
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         let new_debt_total_scaled =
-            if (reserve.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
-                reserve.debt_total_scaled + more_debt_scaled - less_debt_scaled
+            if (market.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
+                market.debt_total_scaled + more_debt_scaled - less_debt_scaled
             } else {
                 Uint256::zero()
             };
         let dec_debt_total =
             Decimal256::from_uint256(new_debt_total_scaled) * expected_indices.borrow;
         let total_protocol_income_to_distribute =
-            reserve.protocol_income_to_distribute + expected_protocol_income_to_distribute;
+            market.protocol_income_to_distribute + expected_protocol_income_to_distribute;
 
         let config = config_state_read(&deps.storage).load().unwrap();
 
@@ -6932,7 +6901,7 @@ mod tests {
 
         // interest rates
         let (expected_borrow_rate, expected_liquidity_rate) =
-            get_updated_interest_rates(reserve, expected_utilization_rate);
+            get_updated_interest_rates(market, expected_utilization_rate);
 
         TestInterestResults {
             borrow_index: expected_indices.borrow,
@@ -6949,18 +6918,18 @@ mod tests {
         borrow: Decimal256,
     }
 
-    fn th_get_expected_indices(reserve: &Reserve, block_time: u64) -> TestExpectedIndices {
-        let seconds_elapsed = block_time - reserve.interests_last_updated;
+    fn th_get_expected_indices(market: &Market, block_time: u64) -> TestExpectedIndices {
+        let seconds_elapsed = block_time - market.interests_last_updated;
         // market indices
         let expected_liquidity_index = calculate_applied_linear_interest_rate(
-            reserve.liquidity_index,
-            reserve.liquidity_rate,
+            market.liquidity_index,
+            market.liquidity_rate,
             seconds_elapsed,
         );
 
         let expected_borrow_index = calculate_applied_linear_interest_rate(
-            reserve.borrow_index,
-            reserve.borrow_rate,
+            market.borrow_index,
+            market.borrow_rate,
             seconds_elapsed,
         );
 
