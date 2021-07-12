@@ -4,9 +4,10 @@
   "type": "object",
   "required": [
     "decimals",
+    "incentives_address",
     "initial_balances",
-    "money_market_address",
     "name",
+    "red_bank_address",
     "symbol"
   ],
   "properties": {
@@ -14,6 +15,19 @@
       "type": "integer",
       "format": "uint8",
       "minimum": 0.0
+    },
+    "incentives_address": {
+      "$ref": "#/definitions/HumanAddr"
+    },
+    "init_hook": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InitHook"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "initial_balances": {
       "type": "array",
@@ -31,17 +45,21 @@
         }
       ]
     },
-    "money_market_address": {
-      "$ref": "#/definitions/HumanAddr"
-    },
     "name": {
       "type": "string"
+    },
+    "red_bank_address": {
+      "$ref": "#/definitions/HumanAddr"
     },
     "symbol": {
       "type": "string"
     }
   },
   "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
     "Cw20CoinHuman": {
       "type": "object",
       "required": [
@@ -59,6 +77,22 @@
     },
     "HumanAddr": {
       "type": "string"
+    },
+    "InitHook": {
+      "description": "Hook to be called after token initialization",
+      "type": "object",
+      "required": [
+        "contract_addr",
+        "msg"
+      ],
+      "properties": {
+        "contract_addr": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "msg": {
+          "$ref": "#/definitions/Binary"
+        }
+      }
     },
     "MinterResponse": {
       "type": "object",

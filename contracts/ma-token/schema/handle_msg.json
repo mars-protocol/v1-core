@@ -37,17 +37,17 @@
           "type": "object",
           "required": [
             "amount",
-            "from",
-            "to"
+            "recipient",
+            "sender"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint128"
             },
-            "from": {
+            "recipient": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "to": {
+            "sender": {
               "$ref": "#/definitions/HumanAddr"
             }
           }

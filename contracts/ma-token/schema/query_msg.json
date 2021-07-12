@@ -23,6 +23,26 @@
       }
     },
     {
+      "description": "Returns both balance (0 if unset) and total supply Used by incentives contract when computing unclaimed rewards Return type: BalanceAndTotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "balance_and_total_supply"
+      ],
+      "properties": {
+        "balance_and_total_supply": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
       "type": "object",
       "required": [

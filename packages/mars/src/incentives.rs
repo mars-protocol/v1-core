@@ -5,9 +5,10 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
+        /// Contract owner
         pub owner: HumanAddr,
-        pub staking_address: HumanAddr,
-        pub mars_token_address: HumanAddr,
+        /// Address provider returns addresses for all protocol contracts
+        pub address_provider_address: HumanAddr,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
@@ -41,8 +42,7 @@ pub mod msg {
         /// Update contract config (only callable by owner)
         UpdateConfig {
             owner: Option<HumanAddr>,
-            mars_token_address: Option<HumanAddr>,
-            staking_address: Option<HumanAddr>,
+            address_provider_address: Option<HumanAddr>,
         },
 
         /// Execute Cosmos msg. Only callable by owner

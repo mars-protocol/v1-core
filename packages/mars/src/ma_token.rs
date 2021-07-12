@@ -13,7 +13,8 @@ pub mod msg {
         pub decimals: u8,
         pub initial_balances: Vec<Cw20CoinHuman>,
         pub mint: Option<MinterResponse>,
-        pub money_market_address: HumanAddr,
+        pub init_hook: Option<InitHook>,
+        pub red_bank_address: HumanAddr,
         pub incentives_address: HumanAddr,
     }
 
@@ -52,11 +53,18 @@ pub mod msg {
             return false;
         }
         for byte in bytes.iter() {
-            if *byte < 65 || *byte > 90 {
+            if (*byte != 45) && (*byte < 65 || *byte > 90) && (*byte < 97 || *byte > 122) {
                 return false;
             }
         }
         true
+    }
+
+    /// Hook to be called after token initialization
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct InitHook {
+        pub msg: Binary,
+        pub contract_addr: HumanAddr,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Config",
+  "description": "Global configuration",
+  "type": "object",
+  "required": [
+    "council_address",
+    "incentives_address",
+    "insurance_fund_address",
+    "mars_token_address",
+    "owner",
+    "red_bank_address",
+    "staking_address",
+    "treasury_address",
+    "xmars_token_address"
+  ],
+  "properties": {
+    "council_address": {
+      "description": "Council contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "incentives_address": {
+      "description": "Incentives contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "insurance_fund_address": {
+      "description": "Insurance fund contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "mars_token_address": {
+      "description": "Mars token address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "owner": {
+      "description": "Contract owner",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "red_bank_address": {
+      "description": "Red bank contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "staking_address": {
+      "description": "Staking contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "treasury_address": {
+      "description": "Treasury contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    },
+    "xmars_token_address": {
+      "description": "xMars token address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/CanonicalAddr"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "CanonicalAddr": {
+      "$ref": "#/definitions/Binary"
+    }
+  }
+}

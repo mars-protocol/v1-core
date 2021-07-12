@@ -18,10 +18,8 @@ pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
 pub struct Config {
     /// Contract owner
     pub owner: CanonicalAddr,
-    /// Mars token address
-    pub mars_token_address: CanonicalAddr,
-    /// xMars token address
-    pub xmars_token_address: CanonicalAddr,
+    /// Address provider address
+    pub address_provider_address: CanonicalAddr,
     /// Terraswap factory contract address
     pub terraswap_factory_address: CanonicalAddr,
     /// Terraswap max spread
@@ -33,11 +31,11 @@ pub struct Config {
     pub unstake_window: u64,
 }
 
-pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
     singleton_read(storage, CONFIG_KEY)
 }
 
@@ -50,10 +48,10 @@ pub struct Cooldown {
     pub amount: Uint128,
 }
 
-pub fn cooldowns_state<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
+pub fn cooldowns<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
     bucket(COOLDOWNS_NAMESPACE, storage)
 }
 
-pub fn cooldowns_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
+pub fn cooldowns_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
     bucket_read(COOLDOWNS_NAMESPACE, storage)
 }

@@ -2,6 +2,7 @@ use cosmwasm_std::{
     to_binary, Api, CanonicalAddr, HumanAddr, Querier, QueryRequest, StdError, StdResult, Uint128,
     WasmQuery,
 };
+
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
 

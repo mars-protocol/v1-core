@@ -14,7 +14,7 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     sender_address: &HumanAddr,
     recipient_address: &HumanAddr,
     amount: Uint128,
-    finalize_on_money_market: bool,
+    finalize_on_red_bank: bool,
 ) -> StdResult<Vec<CosmosMsg>> {
     let mut accounts = balances(&mut deps.storage);
 
@@ -36,10 +36,10 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     // If the transfer results from a method called on the money market,
     // it is finalized there. Else it needs to update state and perform some validations
     // to ensure the transfer can be executed
-    if finalize_on_money_market {
+    if finalize_on_red_bank {
         messages.push(finalize_transfer_msg(
             &deps.api,
-            &config.money_market_address,
+            &config.red_bank_address,
             sender_address.clone(),
             recipient_address.clone(),
             sender_previous_balance,
@@ -69,7 +69,7 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
 
 pub fn finalize_transfer_msg<A: Api>(
     api: &A,
-    money_market_canonical_address: &CanonicalAddr,
+    red_bank_canonical_address: &CanonicalAddr,
     sender_address: HumanAddr,
     recipient_address: HumanAddr,
     sender_previous_balance: Uint128,
@@ -77,9 +77,9 @@ pub fn finalize_transfer_msg<A: Api>(
     amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: api.human_address(money_market_canonical_address)?,
+        contract_addr: api.human_address(red_bank_canonical_address)?,
         msg: to_binary(
-            &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+            &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                 sender_address,
                 recipient_address,
                 sender_previous_balance,

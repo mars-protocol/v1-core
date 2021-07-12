@@ -3,23 +3,27 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "config",
-    "cw20_code_id"
+    "config"
   ],
   "properties": {
     "config": {
       "$ref": "#/definitions/CreateOrUpdateConfig"
-    },
-    "cw20_code_id": {
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
     }
   },
   "definitions": {
     "CreateOrUpdateConfig": {
       "type": "object",
       "properties": {
+        "address_provider_address": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "cooldown_duration": {
           "type": [
             "integer",
@@ -28,7 +32,7 @@
           "format": "uint64",
           "minimum": 0.0
         },
-        "mars_token_address": {
+        "owner": {
           "anyOf": [
             {
               "$ref": "#/definitions/HumanAddr"

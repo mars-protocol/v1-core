@@ -8,14 +8,13 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitMsg {
-        pub cw20_code_id: u64,
-        pub owner: HumanAddr,
         pub config: CreateOrUpdateConfig,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CreateOrUpdateConfig {
-        pub mars_token_address: Option<HumanAddr>,
+        pub owner: Option<HumanAddr>,
+        pub address_provider_address: Option<HumanAddr>,
         pub terraswap_factory_address: Option<HumanAddr>,
         pub terraswap_max_spread: Option<Decimal>,
         pub cooldown_duration: Option<u64>,
@@ -26,17 +25,11 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum HandleMsg {
         /// Update staking config
-        UpdateConfig {
-            owner: Option<HumanAddr>,
-            xmars_token_address: Option<HumanAddr>,
-            config: CreateOrUpdateConfig,
-        },
+        UpdateConfig { config: CreateOrUpdateConfig },
         /// Implementation cw20 receive msg
         Receive(Cw20ReceiveMsg),
         /// Initialize or refresh cooldown
         Cooldown {},
-        /// Callback to initialize xMars token
-        InitTokenCallback {},
         /// Execute Cosmos msg
         ExecuteCosmosMsg(CosmosMsg),
         /// Swap any asset on the contract to uusd
@@ -44,11 +37,8 @@ pub mod msg {
             offer_asset_info: AssetInfo,
             amount: Option<Uint128>,
         },
-        /// swap any asset on the contract to Mars
-        SwapAssetToMars {
-            offer_asset_info: AssetInfo,
-            amount: Option<Uint128>,
-        },
+        /// Swap uusd on the contract to Mars
+        SwapUusdToMars { amount: Option<Uint128> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -74,8 +64,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
         pub owner: HumanAddr,
-        pub mars_token_address: HumanAddr,
-        pub xmars_token_address: HumanAddr,
+        pub address_provider_address: HumanAddr,
         pub terraswap_max_spread: Decimal,
         pub cooldown_duration: u64,
         pub unstake_window: u64,

@@ -192,7 +192,8 @@ mod tests {
                 amount,
             }],
             mint: None,
-            money_market_address: HumanAddr::from("money_market"),
+            init_hook: None,
+            red_bank_address: HumanAddr::from("red_bank"),
             incentives_address: HumanAddr::from("incentives"),
         };
         let env = mock_env(&HumanAddr("creator".to_string()), &[]);
@@ -444,9 +445,9 @@ mod tests {
             res.messages,
             vec![
                 CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("money_market"),
+                    contract_addr: HumanAddr::from("red_bank"),
                     msg: to_binary(
-                        &mars::liquidity_pool::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                        &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: owner.clone(),
                             recipient_address: rcpt.clone(),
                             sender_previous_balance: start_balance,
