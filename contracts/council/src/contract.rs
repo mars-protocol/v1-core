@@ -668,12 +668,13 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
 ) -> StdResult<ProposalInfo> {
     let latest_execute_proposal = state::proposals_read(&deps.storage)
-        .range(None, None, Order::Ascending)
+        .range(None, None, Order::Descending)
+        .take(MAX_LIMIT as usize)
         .filter(|proposal| {
             let (_, v) = proposal.as_ref().unwrap();
             v.status == ProposalStatus::Executed
         })
-        .last();
+        .nth(0);
 
     match latest_execute_proposal {
         Some(proposal) => {
@@ -695,7 +696,7 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
                 deposit_amount: v.deposit_amount,
             })
         }
-        None => Result::Err(StdError::generic_err("No executed proposals found")),
+        None => Result::Err(StdError::not_found("No executed proposals found")),
     }
 }
 
@@ -1637,6 +1638,72 @@ mod tests {
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_1_id);
+    }
+
+    #[test]
+    fn test_query_latest_executed_proposal() {
+        // Arrange
+        let mut deps = th_setup(&[]);
+
+        let active_proposal_1_id = 1_u64;
+        let active_proposal_1 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_1_id,
+                status: ProposalStatus::Active,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_1_id.to_be_bytes(), &active_proposal_1)
+            .unwrap();
+
+        let council = Council {
+            proposal_count: 2_u64,
+        };
+        state::council(&mut deps.storage).save(&council).unwrap();
+
+        // Assert not found error when no executed proposals
+        let res = query_latest_executed_proposal(&deps).unwrap_err();
+        assert_eq!(res, StdError::not_found("No executed proposals found"));
+
+        // Arrange
+        let active_proposal_2_id = 2_u64;
+        let active_proposal_2 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_2_id,
+                status: ProposalStatus::Executed,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_2_id.to_be_bytes(), &active_proposal_2)
+            .unwrap();
+
+        let active_proposal_3_id = 3_u64;
+        let active_proposal_3 = th_build_mock_proposal(
+            &mut deps,
+            MockProposal {
+                id: active_proposal_3_id,
+                status: ProposalStatus::Executed,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        state::proposals(&mut deps.storage)
+            .save(&active_proposal_3_id.to_be_bytes(), &active_proposal_3)
+            .unwrap();
+
+        // Assert that the latest proposal is returned when multiple proposals executed
+        let res = query_latest_executed_proposal(&deps).unwrap();
+        assert_eq!(res.proposal_id, active_proposal_3_id);
+        assert_eq!(res.status, ProposalStatus::Executed);
     }
 
     #[test]
