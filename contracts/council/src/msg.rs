@@ -80,6 +80,8 @@ pub enum QueryMsg {
     LatestExecutedProposal {},
     ProposalVotes {
         proposal_id: u64,
+        start_after: Option<HumanAddr>,
+        limit: Option<u32>,
     },
 }
 
