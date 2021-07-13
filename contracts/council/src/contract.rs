@@ -4,6 +4,7 @@ use cosmwasm_std::{
     QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
+use cw0::calc_range_start_human;
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
@@ -562,9 +563,16 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
         QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
-        QueryMsg::ProposalVotes { proposal_id } => {
-            to_binary(&query_proposal_votes(deps, proposal_id)?)
-        }
+        QueryMsg::ProposalVotes {
+            proposal_id,
+            start_after,
+            limit,
+        } => to_binary(&query_proposal_votes(
+            deps,
+            proposal_id,
+            start_after,
+            limit,
+        )?),
     }
 }
 
@@ -691,10 +699,16 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
 fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     proposal_id: u64,
+    start_after: Option<HumanAddr>,
+    limit: Option<u32>,
 ) -> StdResult<ProposalVotesResponse> {
+    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
+    let start = calc_range_start_human(deps.api, start_after)?;
+
     let votes: StdResult<Vec<ProposalVoteResponse>> =
         state::proposal_votes_read(&deps.storage, proposal_id)
-            .range(None, None, Order::Ascending)
+            .range(start.as_deref(), None, Order::Ascending)
+            .take(limit)
             .map(|vote| {
                 let (k, v) = vote?;
                 let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
@@ -1679,7 +1693,8 @@ mod tests {
         handle(&mut deps, env, msg_vote_against).unwrap();
 
         // Assert default params
-        let res = query_proposal_votes(&deps, active_proposal_id).unwrap();
+        let res =
+            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::None).unwrap();
         assert_eq!(res.votes.len(), 5);
         assert_eq!(res.proposal_id, active_proposal_id);
 
@@ -1690,6 +1705,23 @@ mod tests {
         assert_eq!(res.votes[4].voter_address, HumanAddr::from("voter5"));
         assert_eq!(res.votes[4].option, ProposalVoteOption::Against);
         assert_eq!(res.votes[4].power, Uint128(500));
+
+        // Assert start_after
+        let res = query_proposal_votes(
+            &deps,
+            active_proposal_id,
+            Option::from(HumanAddr::from("voter4")),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter5"));
+
+        // Assert take
+        let res =
+            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::from(1)).unwrap();
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
     }
 
     #[test]
