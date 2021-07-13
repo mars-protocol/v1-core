@@ -671,7 +671,7 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
             let (_, v) = proposal.as_ref().unwrap();
             v.status == ProposalStatus::Executed
         })
-        .nth(0);
+        .next();
 
     match latest_execute_proposal {
         Some(proposal) => {
