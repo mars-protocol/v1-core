@@ -670,11 +670,10 @@ fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
     let latest_execute_proposal = state::proposals_read(&deps.storage)
         .range(None, None, Order::Descending)
         .take(MAX_LIMIT as usize)
-        .filter(|proposal| {
+        .find(|proposal| {
             let (_, v) = proposal.as_ref().unwrap();
             v.status == ProposalStatus::Executed
-        })
-        .next();
+        });
 
     match latest_execute_proposal {
         Some(proposal) => {
