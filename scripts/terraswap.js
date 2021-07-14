@@ -61,15 +61,6 @@ async function provideLiquidity(address, asset, coins) {
     },
     coins,
   )
-  
-  // check the balances in the pool are correct
-  let pool = await queryContract(terra, address,
-    {
-      "pool": {}
-    }
-  )
-  strictEqual(pool.assets[0].amount, String(ASSET_LP))
-  strictEqual(pool.assets[1].amount, String(UUSD_LP))
 }
 
 // upload Terraswap contracts
