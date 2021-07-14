@@ -5,7 +5,7 @@ Run the test from the root of this repo:
 ```
 docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
 node tests/insurance_fund.js
-docker compose down -f ../LocalTerra/docker-compose.yml
+docker compose -f ../LocalTerra/docker-compose.yml down
 ```
 
 Required directory structure:
