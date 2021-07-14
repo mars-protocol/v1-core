@@ -77,7 +77,6 @@ pub enum QueryMsg {
     Proposal {
         proposal_id: u64,
     },
-    LatestExecutedProposal {},
     ProposalVotes {
         proposal_id: u64,
         start: Option<u64>,
