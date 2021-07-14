@@ -1550,7 +1550,7 @@ mod tests {
                 status: ProposalStatus::Active,
                 start_height: 100_000,
                 end_height: 100_100,
-                execute_calls: execute_calls,
+                execute_calls,
                 ..Default::default()
             },
         );
