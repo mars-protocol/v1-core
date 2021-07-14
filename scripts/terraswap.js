@@ -8,7 +8,6 @@ const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 100_000_000_000000
 const UUSD_LP = 1_000_000_000000
 const TOKEN_INSURANCE_FUND = 1_000_000_000000
-const TOKEN_INSURANCE_FUND_SWAP = 900_000_000000
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
@@ -167,7 +166,7 @@ let res = await executeContract(terra, wallet, insuranceFundAddress,
           "contract_addr": tokenAddress
         }
       },
-      "amount": String(TOKEN_INSURANCE_FUND_SWAP)
+      "amount": String(TOKEN_INSURANCE_FUND)
     }
   }
 )
@@ -181,7 +180,7 @@ balance = await queryContract(terra, tokenAddress,
   }
 )
 
-strictEqual(balance.balance, String(TOKEN_INSURANCE_FUND - TOKEN_INSURANCE_FUND_SWAP))
+strictEqual(balance.balance, "0")
 
 // check the UST balance of the insurance fund is correct
 let insuranceFundBalances = await terra.bank.balance(insuranceFundAddress)
@@ -195,7 +194,7 @@ pool = await queryContract(terra, pairAddress,
   }
 )
 
-strictEqual(pool.assets[0].amount, String(TOKEN_LP + TOKEN_INSURANCE_FUND_SWAP))
+strictEqual(pool.assets[0].amount, String(TOKEN_LP + TOKEN_INSURANCE_FUND))
 assert(parseInt(pool.assets[1].amount) < UUSD_LP)
 
 console.log("DONE")
