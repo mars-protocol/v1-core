@@ -562,7 +562,6 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
-        QueryMsg::LatestExecutedProposal {} => to_binary(&query_latest_executed_proposal(deps)?),
         QueryMsg::ProposalVotes {
             proposal_id,
             start_after,
@@ -659,41 +658,6 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
         execute_calls: proposal.execute_calls,
         deposit_amount: proposal.deposit_amount,
     })
-}
-
-fn query_latest_executed_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ProposalInfo> {
-    let latest_execute_proposal = state::proposals_read(&deps.storage)
-        .range(None, None, Order::Descending)
-        .take(MAX_LIMIT as usize)
-        .find(|proposal| {
-            let (_, v) = proposal.as_ref().unwrap();
-            v.status == ProposalStatus::Executed
-        });
-
-    match latest_execute_proposal {
-        Some(proposal) => {
-            let (k, v) = proposal?;
-            let proposal_id = read_be_u64(k.as_slice())?;
-
-            Ok(ProposalInfo {
-                proposal_id,
-                submitter_address: deps.api.human_address(&v.submitter_canonical_address)?,
-                status: v.status,
-                for_votes: v.for_votes,
-                against_votes: v.against_votes,
-                start_height: v.start_height,
-                end_height: v.end_height,
-                title: v.title,
-                description: v.description,
-                link: v.link,
-                execute_calls: v.execute_calls,
-                deposit_amount: v.deposit_amount,
-            })
-        }
-        None => Result::Err(StdError::not_found("No executed proposals found")),
-    }
 }
 
 fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
@@ -1596,72 +1560,6 @@ mod tests {
         let res = query_proposals(&deps, Option::None, Option::from(99)).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 2);
-    }
-
-    #[test]
-    fn test_query_latest_executed_proposal() {
-        // Arrange
-        let mut deps = th_setup(&[]);
-
-        let active_proposal_1_id = 1_u64;
-        let active_proposal_1 = th_build_mock_proposal(
-            &mut deps,
-            MockProposal {
-                id: active_proposal_1_id,
-                status: ProposalStatus::Active,
-                start_height: 100_000,
-                end_height: 100_100,
-                ..Default::default()
-            },
-        );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_1_id.to_be_bytes(), &active_proposal_1)
-            .unwrap();
-
-        let council = Council {
-            proposal_count: 2_u64,
-        };
-        state::council(&mut deps.storage).save(&council).unwrap();
-
-        // Assert not found error when no executed proposals
-        let res = query_latest_executed_proposal(&deps).unwrap_err();
-        assert_eq!(res, StdError::not_found("No executed proposals found"));
-
-        // Arrange
-        let active_proposal_2_id = 2_u64;
-        let active_proposal_2 = th_build_mock_proposal(
-            &mut deps,
-            MockProposal {
-                id: active_proposal_2_id,
-                status: ProposalStatus::Executed,
-                start_height: 100_000,
-                end_height: 100_100,
-                ..Default::default()
-            },
-        );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_2_id.to_be_bytes(), &active_proposal_2)
-            .unwrap();
-
-        let active_proposal_3_id = 3_u64;
-        let active_proposal_3 = th_build_mock_proposal(
-            &mut deps,
-            MockProposal {
-                id: active_proposal_3_id,
-                status: ProposalStatus::Executed,
-                start_height: 100_000,
-                end_height: 100_100,
-                ..Default::default()
-            },
-        );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_3_id.to_be_bytes(), &active_proposal_3)
-            .unwrap();
-
-        // Assert that the latest proposal is returned when multiple proposals executed
-        let res = query_latest_executed_proposal(&deps).unwrap();
-        assert_eq!(res.proposal_id, active_proposal_3_id);
-        assert_eq!(res.status, ProposalStatus::Executed);
     }
 
     #[test]
