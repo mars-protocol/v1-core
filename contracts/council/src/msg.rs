@@ -79,10 +79,8 @@ pub enum QueryMsg {
     },
     ProposalVotes {
         proposal_id: u64,
-        start: Option<u64>,
+        start_after: Option<HumanAddr>,
         limit: Option<u32>,
-        sort: Option<ProposalVotesSort>,
-        filter: Option<ProposalVotesFilter>,
     },
 }
 
@@ -145,7 +143,6 @@ pub struct ProposalVotesFilter {
 pub struct ProposalVotesResponse {
     pub proposal_id: u64,
     pub votes: Vec<ProposalVoteResponse>,
-    pub proposal_votes_count: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

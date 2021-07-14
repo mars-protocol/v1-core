@@ -4,6 +4,7 @@ use cosmwasm_std::{
     QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
 };
 
+use cw0::calc_range_start_human;
 use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
@@ -12,8 +13,8 @@ use mars::xmars_token;
 
 use crate::msg::{
     ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
-    ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesFilter,
-    ProposalVotesResponse, ProposalVotesSort, ProposalsListResponse, QueryMsg, ReceiveMsg,
+    ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesResponse,
+    ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state;
 use crate::state::{
@@ -563,17 +564,13 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Proposal { proposal_id } => to_binary(&query_proposal(deps, proposal_id)?),
         QueryMsg::ProposalVotes {
             proposal_id,
-            start,
+            start_after,
             limit,
-            sort,
-            filter,
         } => to_binary(&query_proposal_votes(
             deps,
             proposal_id,
-            start,
+            start_after,
             limit,
-            sort,
-            filter,
         )?),
     }
 }
@@ -610,7 +607,7 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
     let proposals = state::proposals_read(&deps.storage);
     let proposals_list: StdResult<Vec<_>> = proposals
-        .range(Option::from(&start[..]), None, Order::Descending)
+        .range(Option::from(&start[..]), None, Order::Ascending)
         .take(limit)
         .map(|item| {
             let (k, v) = item?;
@@ -666,49 +663,16 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
 fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     proposal_id: u64,
-    start: Option<u64>,
+    start_after: Option<HumanAddr>,
     limit: Option<u32>,
-    sort: Option<ProposalVotesSort>,
-    filter: Option<ProposalVotesFilter>,
 ) -> StdResult<ProposalVotesResponse> {
-    let start = start.unwrap_or(0) as usize;
     let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let sort = sort.unwrap_or(ProposalVotesSort::Descending);
+    let start = calc_range_start_human(deps.api, start_after)?;
 
-    let voter_canonical_address = match &filter {
-        Some(filter) => match &filter.voter_address {
-            Some(voter_address) => match deps.api.canonical_address(&voter_address) {
-                Ok(voter_canonical_address) => voter_canonical_address,
-                Err(_) => return Err(StdError::generic_err("Invalid voter address")),
-            },
-            None => CanonicalAddr::default(),
-        },
-        None => CanonicalAddr::default(),
-    };
-
-    let votes_filtered: StdResult<Vec<ProposalVoteResponse>> =
+    let votes: StdResult<Vec<ProposalVoteResponse>> =
         state::proposal_votes_read(&deps.storage, proposal_id)
-            .range(None, None, Order::Ascending)
-            .filter(|vote| match &filter {
-                Some(filter) => match &filter.voter_address {
-                    Some(_) => {
-                        let (k, _) = vote.as_ref().unwrap();
-                        CanonicalAddr::from(k.as_slice()) == voter_canonical_address
-                    }
-                    None => true,
-                },
-                None => true,
-            })
-            .filter(|vote| match &filter {
-                Some(filter) => match &filter.vote_option {
-                    Some(proposal_vote_option) => {
-                        let (_, v) = vote.as_ref().unwrap();
-                        &v.option == proposal_vote_option
-                    }
-                    None => true,
-                },
-                None => true,
-            })
+            .range(start.as_deref(), None, Order::Ascending)
+            .take(limit)
             .map(|vote| {
                 let (k, v) = vote?;
                 let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
@@ -721,36 +685,9 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
             })
             .collect();
 
-    let mut votes_sorted = votes_filtered?;
-    match sort {
-        ProposalVotesSort::Ascending => {
-            votes_sorted.sort_by(|a, b| a.power.cmp(&b.power));
-        }
-        ProposalVotesSort::Descending => {
-            votes_sorted.sort_by(|a, b| b.power.cmp(&a.power));
-        }
-    }
-
-    let proposal_votes_count = votes_sorted.len();
-    let end = if (start + limit) < proposal_votes_count {
-        start + limit
-    } else {
-        proposal_votes_count
-    };
-    if start > end {
-        return Ok(ProposalVotesResponse {
-            proposal_id,
-            votes: vec![],
-            proposal_votes_count: proposal_votes_count as u64,
-        });
-    }
-
-    let votes_paginated = votes_sorted[start..end].to_vec();
-
     Ok(ProposalVotesResponse {
         proposal_id,
-        votes: votes_paginated,
-        proposal_votes_count: proposal_votes_count as u64,
+        votes: votes?,
     })
 }
 
@@ -1626,16 +1563,38 @@ mod tests {
         };
         state::council(&mut deps.storage).save(&council).unwrap();
 
-        //Assert
+        // Assert corectly sorts asc
         let res = query_proposals(&deps, Option::None, Option::None).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 2);
-        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
+        assert_eq!(res.proposal_list[1].proposal_id, active_proposal_2_id);
         assert_eq!(
-            res.proposal_list[0].execute_calls.clone().unwrap()[0].target_contract_human_address,
+            res.proposal_list[1].execute_calls.clone().unwrap()[0].target_contract_human_address,
             HumanAddr::from("test_address")
         );
-        assert_eq!(res.proposal_list[1].proposal_id, active_proposal_1_id);
+
+        // Assert start != 0
+        let res = query_proposals(&deps, Option::from(2), Option::None).unwrap();
+        assert_eq!(res.proposal_count, 2);
+        assert_eq!(res.proposal_list.len(), 1);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
+
+        // Assert start > length of collection
+        let res = query_proposals(&deps, Option::from(99), Option::None).unwrap();
+        assert_eq!(res.proposal_count, 2);
+        assert_eq!(res.proposal_list.len(), 0);
+
+        // Assert limit
+        let res = query_proposals(&deps, Option::None, Option::from(1)).unwrap();
+        assert_eq!(res.proposal_count, 2);
+        assert_eq!(res.proposal_list.len(), 1);
+        assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
+
+        // Assert limit greater than length of collection
+        let res = query_proposals(&deps, Option::None, Option::from(99)).unwrap();
+        assert_eq!(res.proposal_count, 2);
+        assert_eq!(res.proposal_list.len(), 2);
     }
 
     #[test]
@@ -1733,159 +1692,35 @@ mod tests {
         handle(&mut deps, env, msg_vote_against).unwrap();
 
         // Assert default params
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::None,
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.proposal_votes_count, 5);
+        let res =
+            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::None).unwrap();
         assert_eq!(res.votes.len(), 5);
         assert_eq!(res.proposal_id, active_proposal_id);
 
-        // Assert start != 0
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::from(2),
-            Option::None,
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 3);
-        // Assert total count still returned on pagination
-        assert_eq!(res.proposal_votes_count, 5);
-
-        // Assert start = last items index
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::from(4),
-            Option::None,
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 1);
-
-        // Assert start > length of collection
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::from(99),
-            Option::None,
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 0);
-
-        // Assert limit
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::from(1),
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 1);
-
-        // Assert limit greater than length of collection
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::from(99),
-            Option::None,
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 5);
-
-        // Assert corectly sorts desc
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::None,
-            Option::from(ProposalVotesSort::Descending),
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter5"));
-        assert_eq!(res.votes[0].option, ProposalVoteOption::Against);
-        assert_eq!(res.votes[0].power, Uint128(500));
-
         // Assert corectly sorts asc
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::None,
-            Option::from(ProposalVotesSort::Ascending),
-            Option::None,
-        )
-        .unwrap();
         assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
         assert_eq!(res.votes[0].option, ProposalVoteOption::For);
         assert_eq!(res.votes[0].power, Uint128(100));
+        assert_eq!(res.votes[4].voter_address, HumanAddr::from("voter5"));
+        assert_eq!(res.votes[4].option, ProposalVoteOption::Against);
+        assert_eq!(res.votes[4].power, Uint128(500));
 
-        // Assert correctly filters by vote type for
+        // Assert start_after
         let res = query_proposal_votes(
             &deps,
             active_proposal_id,
+            Option::from(HumanAddr::from("voter4")),
             Option::None,
-            Option::None,
-            Option::None,
-            Option::from(ProposalVotesFilter {
-                voter_address: Option::None,
-                vote_option: Option::from(ProposalVoteOption::For),
-            }),
         )
         .unwrap();
-        assert_eq!(res.proposal_votes_count, 3);
-        assert_eq!(res.votes.len(), 3);
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter5"));
 
-        // Assert correctly filters by vote type against
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::None,
-            Option::None,
-            Option::from(ProposalVotesFilter {
-                voter_address: Option::None,
-                vote_option: Option::from(ProposalVoteOption::Against),
-            }),
-        )
-        .unwrap();
-        assert_eq!(res.proposal_votes_count, 2);
-        assert_eq!(res.votes.len(), 2);
-
-        // Assert correctly filters by voter address
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::None,
-            Option::None,
-            Option::None,
-            Option::from(ProposalVotesFilter {
-                voter_address: Option::from(HumanAddr::from("voter1")),
-                vote_option: Option::None,
-            }),
-        )
-        .unwrap();
-        assert_eq!(res.proposal_votes_count, 1);
+        // Assert take
+        let res =
+            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::from(1)).unwrap();
         assert_eq!(res.votes.len(), 1);
         assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
-        assert_eq!(res.votes[0].option, ProposalVoteOption::For);
-        assert_eq!(res.votes[0].power, Uint128(100));
     }
 
     #[test]
