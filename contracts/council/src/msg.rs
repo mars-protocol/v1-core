@@ -127,19 +127,6 @@ pub struct ProposalExecuteCallResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProposalVotesSort {
-    Ascending,
-    Descending,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
-pub struct ProposalVotesFilter {
-    pub voter_address: Option<HumanAddr>,
-    pub vote_option: Option<ProposalVoteOption>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalVotesResponse {
     pub proposal_id: u64,
     pub votes: Vec<ProposalVoteResponse>,
