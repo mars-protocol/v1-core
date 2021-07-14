@@ -4,7 +4,7 @@ Integration test for the insurance fund contract swapping assets to UST via Terr
 Run the test from the root of this repo:
 ```
 docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
-npm test
+node tests/insurance_fund.js
 docker compose -f ../LocalTerra/docker-compose.yml down
 ```
 
@@ -37,16 +37,16 @@ import {
   queryContract,
   toEncodedBinary,
   uploadContract
-} from "../helpers.mjs"
+} from "../scripts/helpers.mjs"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
 
 // consts and globals
 const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
-const ASSET_LP = 10_000_000_000000
+const ASSET_LP = 100_000_000_000000
 const UUSD_LP = 1_000_000_000000
-const INSURANCE_FUND_ASSET_BALANCE = 100_000_000000
+const INSURANCE_FUND_ASSET_BALANCE = 1_000_000_000000
 
 const terra = new LocalTerra()
 const wallet = terra.wallets.test1
@@ -137,111 +137,110 @@ let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts",
   }
 )
 
-test("the insurance fund should swap LUNA for USD", async () => {
-  const LUNA = {
-    "native_token": {
-      "denom": "uluna"
+// test with LUNA
+const LUNA = {
+  "native_token": {
+    "denom": "uluna"
+  }
+}
+
+// instantiate a LUNA/uUSD Terraswap pair
+let lunaPairAddress = await instantiateUusdPair(LUNA)
+await provideLiquidity(lunaPairAddress, LUNA, `${UUSD_LP}uusd,${ASSET_LP}uluna`)
+
+// transfer some LUNA to the insurance fund
+await performTransaction(terra, wallet,
+  new MsgSend(
+    wallet.key.accAddress,
+    insuranceFundAddress,
+    {
+      uluna: INSURANCE_FUND_ASSET_BALANCE
+    }
+  )
+)
+
+// swap the LUNA balance in the insurance fund to uUSD
+await executeContract(terra, wallet, insuranceFundAddress,
+  {
+    "swap_asset_to_uusd": {
+      "offer_asset_info": LUNA,
+      "amount": String(INSURANCE_FUND_ASSET_BALANCE)
     }
   }
+)
 
-  // instantiate a LUNA/uUSD Terraswap pair
-  let lunaPairAddress = await instantiateUusdPair(LUNA)
-  await provideLiquidity(lunaPairAddress, LUNA, `${UUSD_LP}uusd,${ASSET_LP}uluna`)
+// check the insurance fund balances
+let balances = await terra.bank.balance(insuranceFundAddress)
+strictEqual(balances.get("uluna"), undefined)
+assert(balances.get("uusd").amount > 0)
 
-  // transfer some LUNA to the insurance fund
-  await performTransaction(terra, wallet,
-    new MsgSend(
-      wallet.key.accAddress,
-      insuranceFundAddress,
-      {
-        uluna: INSURANCE_FUND_ASSET_BALANCE
-      }
-    )
-  )
+// check the Terraswap pair balances
+let pool = await queryContract(terra, lunaPairAddress,
+  {
+    "pool": {}
+  }
+)
+strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANCE))
+assert(parseInt(pool.assets[1].amount) < UUSD_LP)
 
-  // swap the LUNA balance in the insurance fund to uUSD
-  await executeContract(terra, wallet, insuranceFundAddress,
-    {
-      "swap_asset_to_uusd": {
-        "offer_asset_info": LUNA,
-        "amount": String(INSURANCE_FUND_ASSET_BALANCE)
-      }
-    }
-  )
 
-  // check the insurance fund balances
-  let balances = await terra.bank.balance(insuranceFundAddress)
-  strictEqual(balances.get("uluna"), undefined)
-  assert(balances.get("uusd").amount > 0)
+// test with a token
+const TOKEN = {
+  "token": {
+    "contract_addr": tokenAddress
+  }
+}
 
-  // check the Terraswap pair balances
-  let pool = await queryContract(terra, lunaPairAddress,
-    {
-      "pool": {}
-    }
-  )
-  strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANCE))
-  assert(parseInt(pool.assets[1].amount) < UUSD_LP)
-})
-
-test("the insurance fund should swap tokens for USD", async () => {
-  const TOKEN = {
-    "token": {
-      "contract_addr": tokenAddress
+// instantiate a token/uUSD Terraswap pair
+let tokenPairAddress = await instantiateUusdPair(TOKEN)
+// approve the pair contract to transfer the token
+await executeContract(terra, wallet, tokenAddress,
+  {
+    "increase_allowance": {
+      "spender": tokenPairAddress, 
+      "amount": String(ASSET_LP),
     }
   }
+)
+await provideLiquidity(tokenPairAddress, TOKEN, `${UUSD_LP}uusd`)
 
-  // instantiate a token/uUSD Terraswap pair
-  let tokenPairAddress = await instantiateUusdPair(TOKEN)
-  // approve the pair contract to transfer the token
-  await executeContract(terra, wallet, tokenAddress,
-    {
-      "increase_allowance": {
-        "spender": tokenPairAddress, 
-        "amount": String(ASSET_LP),
-      }
+// transfer some tokens to the insurance fund
+await executeContract(terra, wallet, tokenAddress,
+  {
+    "transfer": {
+      "amount": String(INSURANCE_FUND_ASSET_BALANCE),
+      "recipient": insuranceFundAddress
     }
-  )
-  await provideLiquidity(tokenPairAddress, TOKEN, `${UUSD_LP}uusd`)
+  }  
+)
 
-  // transfer some tokens to the insurance fund
-  await executeContract(terra, wallet, tokenAddress,
-    {
-      "transfer": {
-        "amount": String(INSURANCE_FUND_ASSET_BALANCE),
-        "recipient": insuranceFundAddress
-      }
-    }  
-  )
-
-  // swap the token balance in the insurance fund to uUSD
-  await executeContract(terra, wallet, insuranceFundAddress,
-    {
-      "swap_asset_to_uusd": {
-        "offer_asset_info": TOKEN,
-        "amount": String(INSURANCE_FUND_ASSET_BALANCE)
-      }
+// swap the token balance in the insurance fund to uUSD
+await executeContract(terra, wallet, insuranceFundAddress,
+  {
+    "swap_asset_to_uusd": {
+      "offer_asset_info": TOKEN,
+      "amount": String(INSURANCE_FUND_ASSET_BALANCE)
     }
-  )
+  }
+)
 
-  // check the insurance fund balances
-  let tokenBalance = await queryContract(terra, tokenAddress,
-    {
-      "balance": {
-        "address": insuranceFundAddress
-      }
+// check the insurance fund balances
+let tokenBalance = await queryContract(terra, tokenAddress,
+  {
+    "balance": {
+      "address": insuranceFundAddress
     }
-  )
-  strictEqual(tokenBalance.balance, "0")
-  let balances = await terra.bank.balance(insuranceFundAddress)
-  assert(balances.get("uusd").amount > 0)
+  }
+)
+strictEqual(tokenBalance.balance, "0")
+balances = await terra.bank.balance(insuranceFundAddress)
+assert(balances.get("uusd").amount > 0)
 
-  // check the Terraswap pair balances
-  let pool = await queryContract(terra, tokenPairAddress,
-    {
-      "pool": {}
-    }
-  )
-  strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANCE))
-  assert(parseInt(pool.assets[1].amount) < UUSD_LP)
-})
+// check the Terraswap pair balances
+pool = await queryContract(terra, tokenPairAddress,
+  {
+    "pool": {}
+  }
+)
+strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANCE))
+assert(parseInt(pool.assets[1].amount) < UUSD_LP)
