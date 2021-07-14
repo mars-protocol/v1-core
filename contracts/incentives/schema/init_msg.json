@@ -3,29 +3,112 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "address_provider_address",
-    "owner"
+    "decimals",
+    "initial_balances",
+    "name",
+    "symbol"
   ],
   "properties": {
-    "address_provider_address": {
-      "description": "Address provider returns addresses for all protocol contracts",
-      "allOf": [
+    "decimals": {
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
+    },
+    "init_hook": {
+      "anyOf": [
         {
-          "$ref": "#/definitions/HumanAddr"
+          "$ref": "#/definitions/InitHook"
+        },
+        {
+          "type": "null"
         }
       ]
     },
-    "owner": {
-      "description": "Contract owner",
-      "allOf": [
+    "initial_balances": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Cw20CoinHuman"
+      }
+    },
+    "mint": {
+      "anyOf": [
         {
-          "$ref": "#/definitions/HumanAddr"
+          "$ref": "#/definitions/MinterResponse"
+        },
+        {
+          "type": "null"
         }
       ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
     }
   },
   "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "Cw20CoinHuman": {
+      "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
     "HumanAddr": {
+      "type": "string"
+    },
+    "InitHook": {
+      "description": "Hook to be called after token initialization",
+      "type": "object",
+      "required": [
+        "contract_addr",
+        "msg"
+      ],
+      "properties": {
+        "contract_addr": {
+          "$ref": "#/definitions/HumanAddr"
+        },
+        "msg": {
+          "$ref": "#/definitions/Binary"
+        }
+      }
+    },
+    "MinterResponse": {
+      "type": "object",
+      "required": [
+        "minter"
+      ],
+      "properties": {
+        "cap": {
+          "description": "cap is how many more tokens can be issued by the minter",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minter": {
+          "$ref": "#/definitions/HumanAddr"
+        }
+      }
+    },
+    "Uint128": {
       "type": "string"
     }
   }

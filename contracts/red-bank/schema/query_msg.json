@@ -3,53 +3,13 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Returns the current balance of the given address, 0 if unset. Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "config"
+        "balance"
       ],
       "properties": {
-        "config": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "reserve"
-      ],
-      "properties": {
-        "reserve": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            }
-          }
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "reserves_list"
-      ],
-      "properties": {
-        "reserves_list": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "type": "object",
-      "required": [
-        "debt"
-      ],
-      "properties": {
-        "debt": {
+        "balance": {
           "type": "object",
           "required": [
             "address"
@@ -63,23 +23,165 @@
       }
     },
     {
+      "description": "Returns the balance of the given address at a given block Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "uncollateralized_loan_limit"
+        "balance_at"
       ],
       "properties": {
-        "uncollateralized_loan_limit": {
+        "balance_at": {
           "type": "object",
           "required": [
-            "asset",
-            "user_address"
+            "address",
+            "block"
           ],
           "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            },
-            "user_address": {
+            "address": {
               "$ref": "#/definitions/HumanAddr"
+            },
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
+      "type": "object",
+      "required": [
+        "token_info"
+      ],
+      "properties": {
+        "token_info": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Total Supply at a given block Return type: TotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "total_supply_at"
+      ],
+      "properties": {
+        "total_supply_at": {
+          "type": "object",
+          "required": [
+            "block"
+          ],
+          "properties": {
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "minter"
+      ],
+      "properties": {
+        "minter": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Only with \"allowance\" extension. Returns how much spender can use from owner account, 0 if unset. Return type: AllowanceResponse.",
+      "type": "object",
+      "required": [
+        "allowance"
+      ],
+      "properties": {
+        "allowance": {
+          "type": "object",
+          "required": [
+            "owner",
+            "spender"
+          ],
+          "properties": {
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "spender": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension (and \"allowances\") Returns all allowances this owner has approved. Supports pagination. Return type: AllAllowancesResponse.",
+      "type": "object",
+      "required": [
+        "all_allowances"
+      ],
+      "properties": {
+        "all_allowances": {
+          "type": "object",
+          "required": [
+            "owner"
+          ],
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "start_after": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension Returns all accounts that have balances. Supports pagination. Return type: AllAccountsResponse.",
+      "type": "object",
+      "required": [
+        "all_accounts"
+      ],
+      "properties": {
+        "all_accounts": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -87,48 +189,6 @@
     }
   ],
   "definitions": {
-    "Asset": {
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "cw20"
-          ],
-          "properties": {
-            "cw20": {
-              "type": "object",
-              "required": [
-                "contract_addr"
-              ],
-              "properties": {
-                "contract_addr": {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              }
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "native"
-          ],
-          "properties": {
-            "native": {
-              "type": "object",
-              "required": [
-                "denom"
-              ],
-              "properties": {
-                "denom": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      ]
-    },
     "HumanAddr": {
       "type": "string"
     }
