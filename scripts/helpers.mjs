@@ -14,7 +14,7 @@ export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
     fee: new StdFee(30000000, [
-      new Coin('uusd', 4500000)
+      new Coin('uusd', 45000000)
     ]),
   });
   const result = await terra.tx.broadcast(tx);
