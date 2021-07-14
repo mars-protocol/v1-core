@@ -132,7 +132,7 @@ let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts",
   {
     "owner": wallet.key.accAddress,
     "terraswap_factory_address": factoryAddress,
-    "terraswap_max_spread": "0.05",
+    "terraswap_max_spread": "0.01",
   }
 )
 
