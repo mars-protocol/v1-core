@@ -1,8 +1,45 @@
+/*
+Integration test for the insurance fund contract swapping assets to UST via Terraswap.
+
+Run the test from the root of this repo:
+```
+docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
+node tests/insurance_fund.js
+docker compose down -f ../LocalTerra/docker-compose.yml
+```
+
+Required directory structure:
+```
+$ tree -L 1 ..
+.
+├── LocalTerra
+├── protocol
+├── terraswap
+```
+
+This test works on columbus-4 with the following versions:
+- LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
+- terracli v0.5.0-rc0
+- terraswap 72c60c05c43841499f760710a03f864c5ee4db3b
+
+Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to make the test run faster.
+
+TODO:
+- Upgrade to columbus-5
+*/
+
 import { LocalTerra, MsgSend } from "@terra-money/terra.js"
-import { deployContract, executeContract, instantiateContract, queryContract, uploadContract, toEncodedBinary } from "./helpers.mjs"
+import {
+  deployContract,
+  executeContract,
+  instantiateContract,
+  performTransaction,
+  queryContract,
+  toEncodedBinary,
+  uploadContract
+} from "../scripts/helpers.mjs"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
-import { performTransaction } from "./helpers.mjs"
 
 // consts and globals
 const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
@@ -76,7 +113,7 @@ let factoryAddress = await instantiateContract(terra, wallet, factoryCodeID,
   }
 )
 
-// create a token contract
+// instantiate a token contract
 let tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
   {
     "name": "Mars",
@@ -91,7 +128,7 @@ let tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
   }
 )
 
-// deploy the Mars insurance fund
+// instantiate the Mars insurance fund
 let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts", "insurance_fund.wasm"),
   {
     "owner": wallet.key.accAddress,
