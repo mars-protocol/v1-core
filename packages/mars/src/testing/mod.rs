@@ -5,9 +5,9 @@ pub use helpers::*;
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
-    from_binary, from_slice, to_binary, BlockInfo, Coin, ContractInfo, Decimal, Env, OwnedDeps,
-    Addr, Querier, QuerierResult, QueryRequest, StdError, StdResult, SystemError,
-    Uint128, WasmQuery, Timestamp
+    from_binary, from_slice, to_binary, Addr, Binary, BlockInfo, Coin, ContractInfo,
+    ContractResult, Decimal, Env, OwnedDeps, Querier, QuerierResult, QueryRequest, StdResult,
+    SystemError, Timestamp, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -54,16 +54,17 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
 
 /// mock_dependencies replacement for cosmwasm_std::testing::mock_dependencies
 pub fn mock_dependencies(
-    canonical_length: usize,
     contract_balance: &[Coin],
 ) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
     let contract_addr = Addr::unchecked(MOCK_CONTRACT_ADDR);
-    let custom_querier: MarsMockQuerier =
-        MarsMockQuerier::new(MockQuerier::new(&[(&contract_addr, contract_balance)]));
+    let custom_querier: MarsMockQuerier = MarsMockQuerier::new(MockQuerier::new(&[(
+        &contract_addr.to_string(),
+        contract_balance,
+    )]));
 
     OwnedDeps {
         storage: MockStorage::default(),
-        api: MockApi::new(canonical_length),
+        api: MockApi::default(),
         querier: custom_querier,
     }
 }
@@ -101,10 +102,11 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
 
-                let user_balance = match contract_balances.get(&address) {
+                let user_balance = match contract_balances.get(&Addr::unchecked(address)) {
                     Some(balance) => balance,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -114,12 +116,15 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
 
                 Ok(to_binary(&BalanceResponse {
                     balance: *user_balance,
-                }))
+                })
+                .into())
+                .into()
             }
 
             Cw20QueryMsg::TokenInfo {} => {
@@ -133,16 +138,18 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
 
-                Ok(to_binary(token_info_response))
+                Ok(to_binary(token_info_response).into()).into()
             }
 
             other_query => Err(SystemError::InvalidRequest {
                 error: format!("[mock]: query not supported {:?}", other_query),
                 request: Default::default(),
-            }),
+            })
+            .into(),
         }
     }
 
@@ -163,10 +170,11 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
 
-                let user_balance = match contract_balances.get(&address) {
+                let user_balance = match contract_balances.get(&Addr::unchecked(address)) {
                     Some(balance) => balance,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -176,6 +184,7 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
                 let token_info_response = match self.token_info_responses.get(&contract_addr) {
@@ -188,19 +197,23 @@ impl Cw20Querier {
                             ),
                             request: Default::default(),
                         })
+                        .into()
                     }
                 };
 
                 Ok(to_binary(&ma_token::msg::BalanceAndTotalSupplyResponse {
                     balance: *user_balance,
                     total_supply: token_info_response.total_supply,
-                }))
+                })
+                .into())
+                .into()
             }
 
             other_query => Err(SystemError::InvalidRequest {
                 error: format!("[mock]: query not supported {:?}", other_query),
                 request: Default::default(),
-            }),
+            })
+            .into(),
         }
     }
 }
@@ -239,15 +252,21 @@ impl XMarsQuerier {
 
         match query {
             xmars_token::msg::QueryMsg::BalanceAt { address, block } => {
-                match self.balances_at.get(&(address.clone(), block)) {
-                    Some(balance) => Ok(to_binary(&BalanceResponse { balance: *balance })),
+                match self
+                    .balances_at
+                    .get(&(Addr::unchecked(address.clone()), block))
+                {
+                    Some(balance) => {
+                        Ok(to_binary(&BalanceResponse { balance: *balance }).into()).into()
+                    }
                     None => Err(SystemError::InvalidRequest {
                         error: format!(
                             "[mock]: no balance at block {} for account address {}",
                             block, &address
                         ),
                         request: Default::default(),
-                    }),
+                    })
+                    .into(),
                 }
             }
 
@@ -255,18 +274,22 @@ impl XMarsQuerier {
                 match self.total_supplies_at.get(&block) {
                     Some(balance) => Ok(to_binary(&xmars_token::msg::TotalSupplyResponse {
                         total_supply: *balance,
-                    })),
+                    })
+                    .into())
+                    .into(),
                     None => Err(SystemError::InvalidRequest {
                         error: format!("[mock]: no total supply at block {}", block),
                         request: Default::default(),
-                    }),
+                    })
+                    .into(),
                 }
             }
 
             other_query => Err(SystemError::InvalidRequest {
                 error: format!("[mock]: query not supported {:?}", other_query),
                 request: Default::default(),
-            }),
+            })
+            .into(),
         }
     }
 }
@@ -274,7 +297,7 @@ impl XMarsQuerier {
 impl Default for XMarsQuerier {
     fn default() -> Self {
         XMarsQuerier {
-            xmars_address: Addr::default(),
+            xmars_address: Addr::unchecked(""),
             balances_at: HashMap::new(),
             total_supplies_at: HashMap::new(),
         }
@@ -308,6 +331,7 @@ impl Querier for MarsMockQuerier {
                     error: format!("Parsing query request: {}", e),
                     request: bin_request.into(),
                 })
+                .into()
             }
         };
         self.handle_query(&request)
@@ -343,11 +367,7 @@ impl MarsMockQuerier {
     }
 
     /// Set mock querier balances results for a given cw20 token
-    pub fn set_cw20_balances(
-        &mut self,
-        cw20_address: Addr,
-        balances: &[(Addr, Uint128)],
-    ) {
+    pub fn set_cw20_balances(&mut self, cw20_address: Addr, balances: &[(Addr, Uint128)]) {
         self.cw20_querier
             .balances
             .insert(cw20_address, balances.iter().cloned().collect());
@@ -402,33 +422,38 @@ impl MarsMockQuerier {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
                 if &TerraRoute::Oracle == route {
-                    match query_data {
+                    let ret: ContractResult<Binary> = match query_data {
                         TerraQuery::ExchangeRates {
                             base_denom,
                             quote_denoms,
                         } => {
-                            let base_exchange_rates =
-                                match self.native_querier.exchange_rates.get(base_denom) {
-                                    Some(res) => res,
-                                    None => return Err(SystemError::InvalidRequest {
-                                        error:
-                                            "no exchange rates available for provided base denom"
-                                                .to_string(),
-                                        request: Default::default(),
-                                    }),
-                                };
+                            let base_exchange_rates = match self
+                                .native_querier
+                                .exchange_rates
+                                .get(base_denom)
+                            {
+                                Some(res) => res,
+                                None => {
+                                    let err: ContractResult<Binary> = Err(format!(
+                                        "no exchange rates available for provided base denom: {}",
+                                        base_denom
+                                    ))
+                                    .into();
+                                    return Ok(err).into();
+                                }
+                            };
 
-                            let exchange_rate_items: StdResult<Vec<ExchangeRateItem>> =
+                            let exchange_rate_items: Result<Vec<ExchangeRateItem>, String> =
                                 quote_denoms
                                     .iter()
                                     .map(|denom| {
                                         let exchange_rate = match base_exchange_rates.get(denom) {
                                             Some(rate) => rate,
                                             None => {
-                                                return Err(StdError::generic_err(format!(
+                                                return Err(format!(
                                                     "no exchange rate available for {}",
                                                     denom
-                                                )))
+                                                ))
                                             }
                                         };
 
@@ -443,38 +468,42 @@ impl MarsMockQuerier {
                                 base_denom: base_denom.into(),
                                 exchange_rates: exchange_rate_items.unwrap(),
                             };
-                            Ok(to_binary(&res))
+                            to_binary(&res).into()
                         }
                         _ => panic!(
                             "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
                             query_data
                         ),
-                    }
+                    };
+                    Ok(ret).into()
                 } else if &TerraRoute::Treasury == route {
-                    match query_data {
+                    let ret: ContractResult<Binary> = match query_data {
                         TerraQuery::TaxRate {} => {
                             let res = TaxRateResponse {
                                 rate: self.native_querier.tax_rate,
                             };
-                            Ok(to_binary(&res))
+                            to_binary(&res).into()
                         }
                         TerraQuery::TaxCap { denom } => {
                             match self.native_querier.tax_caps.get(denom) {
                                 Some(cap) => {
                                     let res = TaxCapResponse { cap: *cap };
-                                    Ok(to_binary(&res))
+                                    to_binary(&res).into()
                                 }
-                                None => Err(SystemError::InvalidRequest {
-                                    error: "no tax cap available for provided denom".to_string(),
-                                    request: Default::default(),
-                                }),
+                                None => Err(format!(
+                                    "no tax cap available for provided denom: {}",
+                                    denom
+                                ))
+                                .into(),
                             }
                         }
                         _ => panic!(
                             "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
                             query_data
                         ),
-                    }
+                    };
+
+                    Ok(ret).into()
                 } else {
                     panic!(
                         "[mock]: Unsupported route for QueryRequest::Custom : {:?}",
@@ -539,20 +568,20 @@ pub struct TerraswapPairQuerier {
 
 impl TerraswapPairQuerier {
     pub fn handle_query(&self, request: &terraswap::factory::QueryMsg) -> QuerierResult {
-        let ret: ContractResult<Binary> =
-            match &request {
-                QueryMsg::Pair { asset_infos } => {
-                    let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
-                    match self.pairs.get(&key) {
-                        Some(pair_info) => to_binary(&pair_info).into(),
-                        None => Err(SystemError::InvalidRequest {
-                            error: format!("PairInfo is not found for {}", key),
-                            request: Default::default(),
-                        }).into(),
-                    }
+        let ret: ContractResult<Binary> = match &request {
+            QueryMsg::Pair { asset_infos } => {
+                let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
+                match self.pairs.get(&key) {
+                    Some(pair_info) => to_binary(&pair_info).into(),
+                    None => Err(SystemError::InvalidRequest {
+                        error: format!("PairInfo is not found for {}", key),
+                        request: Default::default(),
+                    })
+                    .into(),
                 }
-                _ => panic!("[mock]: Unsupported Terraswap Pair query"),
-            };
+            }
+            _ => panic!("[mock]: Unsupported Terraswap Pair query"),
+        };
 
         Ok(ret).into()
     }

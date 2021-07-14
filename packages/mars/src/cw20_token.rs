@@ -3,14 +3,14 @@ pub mod msg {
     use serde::{Deserialize, Serialize};
 
     use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
-    use cw20::{Cw20CoinHuman, MinterResponse};
+    use cw20::{Cw20Coin, MinterResponse};
     /// TokenContract InitMsg
     #[derive(Serialize, Deserialize, JsonSchema)]
     pub struct InstantiateMsg {
         pub name: String,
         pub symbol: String,
         pub decimals: u8,
-        pub initial_balances: Vec<Cw20CoinHuman>,
+        pub initial_balances: Vec<Cw20Coin>,
         pub mint: Option<MinterResponse>,
         pub init_hook: Option<InitHook>,
     }

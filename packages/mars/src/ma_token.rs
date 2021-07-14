@@ -72,10 +72,7 @@ pub mod msg {
     pub enum ExecuteMsg {
         /// Transfer is a base message to move tokens to another account. Requires to be finalized
         /// by the money market.
-        Transfer {
-            recipient: String,
-            amount: Uint128,
-        },
+        Transfer { recipient: String, amount: Uint128 },
 
         /// Forced transfer called by the money market when an account is being liquidated
         TransferOnLiquidation {
@@ -98,10 +95,7 @@ pub mod msg {
 
         /// Only with the "mintable" extension. If authorized, creates amount new tokens
         /// and adds to the recipient balance.
-        Mint {
-            recipient: String,
-            amount: Uint128,
-        },
+        Mint { recipient: String, amount: Uint128 },
 
         /// Only with "approval" extension. Allows spender to access an additional amount tokens
         /// from the owner's (env.sender) account. If expires is Some(), overwrites current allowance

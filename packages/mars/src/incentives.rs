@@ -1,5 +1,5 @@
 pub mod msg {
-    use cosmwasm_std::{CosmosMsg, Addr, Uint128};
+    use cosmwasm_std::{Addr, CosmosMsg, Uint128};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 

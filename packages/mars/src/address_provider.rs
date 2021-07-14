@@ -1,7 +1,7 @@
 pub mod msg {
+    use cosmwasm_std::Addr;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
-    use cosmwasm_std::{Addr};
 
     /// Only owner can be set on initialization (the EOA doing all the deployments)
     /// as all other contracts are supposed to be initialized after this one with its address
@@ -77,18 +77,15 @@ pub mod msg {
 
 pub mod helpers {
     use super::msg::{MarsContract, QueryMsg};
-    use cosmwasm_std::{
-        to_binary, Addr, Deps, QueryRequest, StdResult,
-        WasmQuery,
-    };
+    use cosmwasm_std::{to_binary, Addr, Deps, QueryRequest, StdResult, WasmQuery};
 
     pub fn query_address(
         deps: &Deps,
         address_provider_address: Addr,
         contract: MarsContract,
     ) -> StdResult<Addr> {
-        let query: String = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: address_provider_address,
+        let query: Addr = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: address_provider_address.to_string(),
             msg: to_binary(&QueryMsg::Address { contract })?,
         }))?;
 
@@ -100,8 +97,8 @@ pub mod helpers {
         address_provider_address: Addr,
         contracts: Vec<MarsContract>,
     ) -> StdResult<Vec<Addr>> {
-        let query: Vec<String> = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: address_provider_address,
+        let query: Vec<Addr> = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: address_provider_address.to_string(),
             msg: to_binary(&QueryMsg::Addresses { contracts })?,
         }))?;
 

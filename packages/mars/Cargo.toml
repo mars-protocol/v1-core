@@ -13,9 +13,9 @@ backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 cw20 = "0.6"
-cosmwasm-std = "=0.14.0"
+cosmwasm-std = "0.14.1"
 cosmwasm-bignumber = "=2.0.0"
 terra-cosmwasm = "=2.0.0"
+terraswap = "=2.2.0"
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
-terraswap = "=2.2.0"

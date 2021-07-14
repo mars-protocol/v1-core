@@ -1,11 +1,11 @@
 use crate::helpers::cw20_get_balance;
 use cosmwasm_std::{
-    attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response,
-    StdError, StdResult, Uint128, WasmMsg,
+    attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response, StdError,
+    StdResult, Uint128, WasmMsg,
 };
-use cw20::Cw20HandleMsg;
+use cw20::Cw20ExecuteMsg;
 use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
-use terraswap::pair::ExecuteMsg as TerraswapPairHandleMsg;
+use terraswap::pair::ExecuteMsg as TerraswapPairExecuteMsg;
 use terraswap::querier::query_pair_info;
 
 /// Swap assets via terraswap
@@ -64,8 +64,8 @@ pub fn handle_swap(
     };
 
     let pair_info: PairInfo = query_pair_info(
-        &deps,
-        &terraswap_factory_addr,
+        &deps.querier,
+        terraswap_factory_addr,
         &[offer_asset_info.clone(), ask_asset_info],
     )?;
 
@@ -73,14 +73,11 @@ pub fn handle_swap(
         info: offer_asset_info,
         amount: amount_to_swap,
     };
-    let send_msg = asset_into_swap_msg(
-        pair_info.contract_addr,
-        offer_asset,
-        terraswap_max_spread,
-    )?;
+    let send_msg = asset_into_swap_msg(pair_info.contract_addr, offer_asset, terraswap_max_spread)?;
 
     Ok(Response {
         messages: vec![send_msg],
+        submessages: vec![],
         attributes: vec![attr("action", "swap"), attr("asset", asset_label)],
         data: None,
     })
@@ -94,8 +91,8 @@ fn asset_into_swap_msg(
 ) -> StdResult<CosmosMsg<Empty>> {
     let message = match offer_asset.info.clone() {
         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: pair_contract,
-            msg: to_binary(&TerraswapPairHandleMsg::Swap {
+            contract_addr: pair_contract.to_string(),
+            msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                 offer_asset: offer_asset.clone(),
                 belief_price: None,
                 max_spread,
@@ -107,11 +104,11 @@ fn asset_into_swap_msg(
             }],
         }),
         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
-            msg: to_binary(&Cw20HandleMsg::Send {
-                contract: pair_contract,
+            contract_addr: contract_addr.to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: pair_contract.to_string(),
                 amount: offer_asset.amount,
-                msg: Some(to_binary(&TerraswapPairHandleMsg::Swap {
+                msg: Some(to_binary(&TerraswapPairExecuteMsg::Swap {
                     offer_asset,
                     belief_price: None,
                     max_spread,
@@ -134,8 +131,8 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_same_assets() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let assets = vec![
             (
@@ -153,7 +150,7 @@ mod tests {
         ];
         for (asset_name, asset_info) in assets {
             let response = handle_swap(
-                &mut deps,
+                deps.as_mut(),
                 env.clone(),
                 asset_info.clone(),
                 asset_info,
@@ -170,8 +167,8 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_asset_with_zero_balance() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let cw20_contract_address = Addr::unchecked("cw20_zero");
         deps.querier.set_cw20_balances(
@@ -187,7 +184,7 @@ mod tests {
         };
 
         let response = handle_swap(
-            &mut deps,
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
@@ -200,14 +197,11 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_more_than_contract_balance() {
-        let mut deps = mock_dependencies(
-            20,
-            &[Coin {
-                denom: "somecoin".to_string(),
-                amount: Uint128(1_000_000),
-            }],
-        );
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[Coin {
+            denom: "somecoin".to_string(),
+            amount: Uint128(1_000_000),
+        }]);
+        let env = mock_env(MockEnvParams::default());
 
         let offer_asset_info = AssetInfo::NativeToken {
             denom: "somecoin".to_string(),
@@ -217,7 +211,7 @@ mod tests {
         };
 
         let response = handle_swap(
-            &mut deps,
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
@@ -233,8 +227,8 @@ mod tests {
 
     #[test]
     fn test_swap_contract_token_partial_balance() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let cw20_contract_address = Addr::unchecked("cw20");
         let contract_asset_balance = Uint128(1_000_000);
@@ -257,7 +251,7 @@ mod tests {
         });
 
         let res = handle_swap(
-            &mut deps,
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
@@ -270,12 +264,12 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_address.clone(),
-                msg: to_binary(&Cw20HandleMsg::Send {
-                    contract: Addr::unchecked("pair_cw20_mars"),
+                contract_addr: cw20_contract_address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Send {
+                    contract: String::from("pair_cw20_mars"),
                     amount: Uint128(999),
                     msg: Some(
-                        to_binary(&TerraswapPairHandleMsg::Swap {
+                        to_binary(&TerraswapPairExecuteMsg::Swap {
                             offer_asset: TerraswapAsset {
                                 info: AssetInfo::Token {
                                     contract_addr: cw20_contract_address.clone(),
@@ -306,14 +300,11 @@ mod tests {
     #[test]
     fn test_swap_native_token_total_balance() {
         let contract_asset_balance = Uint128(1_234_567);
-        let mut deps = mock_dependencies(
-            20,
-            &[Coin {
-                denom: "uusd".to_string(),
-                amount: contract_asset_balance,
-            }],
-        );
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[Coin {
+            denom: "uusd".to_string(),
+            amount: contract_asset_balance,
+        }]);
+        let env = mock_env(MockEnvParams::default());
 
         let offer_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -329,7 +320,7 @@ mod tests {
         });
 
         let res = handle_swap(
-            &mut deps,
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
@@ -342,8 +333,8 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: Addr::unchecked("pair_uusd_mars"),
-                msg: to_binary(&TerraswapPairHandleMsg::Swap {
+                contract_addr: String::from("pair_uusd_mars"),
+                msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                     offer_asset: TerraswapAsset {
                         info: AssetInfo::NativeToken {
                             denom: "uusd".to_string(),
@@ -362,6 +353,9 @@ mod tests {
             })]
         );
 
-        assert_eq!(res.attributes, vec![attr("action", "swap"), attr("asset", "uusd")]);
+        assert_eq!(
+            res.attributes,
+            vec![attr("action", "swap"), attr("asset", "uusd")]
+        );
     }
 }

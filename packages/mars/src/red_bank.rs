@@ -141,17 +141,10 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
         Config {},
-        Market {
-            asset: Asset,
-        },
+        Market { asset: Asset },
         MarketsList {},
-        Debt {
-            address: String,
-        },
-        UncollateralizedLoanLimit {
-            user_address: String,
-            asset: Asset,
-        },
+        Debt { address: String },
+        UncollateralizedLoanLimit { user_address: String, asset: Asset },
     }
 
     // We define a custom struct for each query response

@@ -1,6 +1,6 @@
 pub mod msg {
     use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
-    use cw20::{Cw20CoinHuman, Expiration, MinterResponse};
+    use cw20::{Cw20Coin, Expiration, MinterResponse};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
@@ -9,7 +9,7 @@ pub mod msg {
         pub name: String,
         pub symbol: String,
         pub decimals: u8,
-        pub initial_balances: Vec<Cw20CoinHuman>,
+        pub initial_balances: Vec<Cw20Coin>,
         pub mint: Option<MinterResponse>,
         pub init_hook: Option<InitHook>,
     }
@@ -70,10 +70,7 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum ExecuteMsg {
         /// Transfer is a base message to move tokens to another account without triggering actions
-        Transfer {
-            recipient: String,
-            amount: Uint128,
-        },
+        Transfer { recipient: String, amount: Uint128 },
         /// Burn is a base message to destroy tokens forever
         Burn { amount: Uint128 },
         /// Send is a base message to transfer tokens to a contract and trigger an action
@@ -85,10 +82,7 @@ pub mod msg {
         },
         /// Only with the "mintable" extension. If authorized, creates amount new tokens
         /// and adds to the recipient balance.
-        Mint {
-            recipient: String,
-            amount: Uint128,
-        },
+        Mint { recipient: String, amount: Uint128 },
         /// Only with "approval" extension. Allows spender to access an additional amount tokens
         /// from the owner's (env.sender) account. If expires is Some(), overwrites current allowance
         /// expiration with this one.

@@ -1,6 +1,5 @@
 use cosmwasm_std::{
-    to_binary, Api, Addr, Querier, QueryRequest, StdError, StdResult, Uint128,
-    WasmQuery,
+    to_binary, Addr, Api, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
 };
 
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
@@ -8,7 +7,7 @@ use std::convert::TryInto;
 
 // CW20
 pub fn cw20_get_balance(
-    querier: &dyn Querier,
+    querier: &QuerierWrapper,
     token_address: Addr,
     balance_address: Addr,
 ) -> StdResult<Uint128> {
@@ -22,22 +21,22 @@ pub fn cw20_get_balance(
     Ok(query.balance)
 }
 
-pub fn cw20_get_total_supply(
-    querier: &dyn Querier,
-    token_address: Addr,
-) -> StdResult<Uint128> {
-    let query = cw20_get_info(querier, token_address);
+pub fn cw20_get_total_supply(querier: &QuerierWrapper, token_address: Addr) -> StdResult<Uint128> {
+    let query = cw20_get_info(querier, token_address)?;
     Ok(query.total_supply)
 }
 
-pub fn cw20_get_symbol(querier: &dyn Querier, token_address: Addr) -> StdResult<String> {
-    let query = cw20_get_info(querier, token_address);
+pub fn cw20_get_symbol(querier: &QuerierWrapper, token_address: Addr) -> StdResult<String> {
+    let query = cw20_get_info(querier, token_address)?;
     Ok(query.symbol)
 }
 
-pub fn cw20_get_info(querier: &dyn Querier, token_address: Addr) -> StdResult<TokenInfoResponse> {
+pub fn cw20_get_info(
+    querier: &QuerierWrapper,
+    token_address: Addr,
+) -> StdResult<TokenInfoResponse> {
     let query: TokenInfoResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: token_address.into,
+        contract_addr: token_address.into(),
         msg: to_binary(&Cw20QueryMsg::TokenInfo {})?,
     }))?;
 
@@ -66,13 +65,13 @@ pub fn read_be_u64(input: &[u8]) -> StdResult<u64> {
 
 /// Used when unwrapping an optional address sent in a contract call by a user.
 /// Validates addreess if present, otherwise uses a given default value.
-pub fn unwrap_option_unchecked_addr(
+pub fn option_string_to_addr(
     api: &dyn Api,
-    option_input_addr: Option<String>,
+    option_string: Option<String>,
     default: Addr,
 ) -> StdResult<Addr> {
-    match option_input_addr {
-        Some(input_addr) => api.addr_validate(&input_addr)?,
+    match option_string {
+        Some(input_addr) => api.addr_validate(&input_addr),
         None => Ok(default),
     }
 }
