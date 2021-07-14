@@ -1,32 +1,36 @@
 import { LocalTerra } from "@terra-money/terra.js";
-import { executeContract, instantiateContract, queryContract, uploadContract, toEncodedBinary } from "./helpers.mjs";
-import { strictEqual } from "assert";
+import { deployContract, executeContract, instantiateContract, queryContract, uploadContract, toEncodedBinary } from "./helpers.mjs";
+import { strict as assert, strictEqual } from "assert";
 import { join } from "path";
 
-const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts";
-const TOKEN_INIT_AMOUNT = "10000"
+const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
+const TOKEN_SUPPLY = 1_000_000_000_000000
+const TOKEN_LP = 100_000_000_000000
+const UUSD_LP = 1_000_000_000000
+const TOKEN_INSURANCE_FUND = 1_000_000_000000
+const TOKEN_INSURANCE_FUND_SWAP = 900_000_000000
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;
 
-// create a token
+// deploy a token contract
 let tokenCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
 
 let tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
   {
     "name": "Mars",
     "symbol": "MARS",
-    "decimals": 2,
+    "decimals": 6,
     "initial_balances": [
       {
         "address": wallet.key.accAddress,
-        "amount": TOKEN_INIT_AMOUNT
+        "amount": String(TOKEN_SUPPLY)
       }
     ]
   }
 )
 
-// check balance is correct
+// check the token balance is correct for the wallet
 let balance = await queryContract(terra, tokenAddress,
   {
     "balance": {
@@ -35,14 +39,14 @@ let balance = await queryContract(terra, tokenAddress,
   }
 )
 
-strictEqual(balance.balance, TOKEN_INIT_AMOUNT)
+strictEqual(balance.balance, String(TOKEN_SUPPLY))
 
-// create a pair
+// deploy a Terraswap pair contract for the token
 let pairCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
 
 let factoryCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
 
-// instantiate the factory contract to act as a directory of instantiated pairs
+// first, instantiate the factory contract without `init_hook`, so that it can be a directory of pairs
 let factoryAddress = await instantiateContract(terra, wallet, factoryCodeID,
   {
     "pair_code_id": pairCodeID,
@@ -50,7 +54,7 @@ let factoryAddress = await instantiateContract(terra, wallet, factoryCodeID,
   }
 )
 
-// instantiate a pair
+// then, instantiate a pair using the factory contract
 let pairAddress = await instantiateContract(terra, wallet, factoryCodeID,
   {
     "pair_code_id": pairCodeID,
@@ -78,12 +82,12 @@ let pairAddress = await instantiateContract(terra, wallet, factoryCodeID,
   }
 )
 
-// approve pair contract to spend the token
+// approve the pair contract to transfer the token
 await executeContract(terra, wallet, tokenAddress,
   {
     "increase_allowance": {
       "spender": pairAddress, 
-      "amount": "10"
+      "amount": String(TOKEN_LP),
     }
   }
 )
@@ -99,28 +103,99 @@ await executeContract(terra, wallet, pairAddress,
               "contract_addr": tokenAddress
             }
           }, 
-          "amount": "10"
+          "amount": String(TOKEN_LP)
         }, {
           "info": {
             "native_token": {
               "denom": "uusd"
             }
-          }, "amount": "10"
+          },
+          "amount": String(UUSD_LP)
         }
       ]
     }
   },
-  "10uusd"
+  String(UUSD_LP)+"uusd"
 )
 
-// check the pool is correct
+// check the balances in the pool are correct
 let pool = await queryContract(terra, pairAddress,
   {
     "pool": {}
   }
 )
 
-strictEqual(pool.assets[0].amount, "10")
-strictEqual(pool.assets[1].amount, "10")
+strictEqual(pool.assets[0].amount, String(TOKEN_LP))
+strictEqual(pool.assets[1].amount, String(UUSD_LP))
+
+// deploy the Mars insurance fund
+let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts", "insurance_fund.wasm"),
+  {
+    "owner": wallet.key.accAddress,
+    "terraswap_factory_address": factoryAddress,
+    "terraswap_max_spread": "0.05",
+  }
+)
+
+// transfer some tokens to the insurance fund
+await executeContract(terra, wallet, tokenAddress,
+  {
+    "transfer": {
+      "amount": String(TOKEN_INSURANCE_FUND),
+      "recipient": insuranceFundAddress
+    }
+  }  
+)
+
+// check the token balance of the insurance fund is correct
+balance = await queryContract(terra, tokenAddress,
+  {
+    "balance": {
+      "address": insuranceFundAddress
+    }
+  }
+)
+
+strictEqual(balance.balance, String(TOKEN_INSURANCE_FUND))
+
+// swap some of the token balance for UST
+let res = await executeContract(terra, wallet, insuranceFundAddress,
+  {
+    "swap_asset_to_uusd": {
+      "offer_asset_info": {
+        "token": {
+          "contract_addr": tokenAddress
+        }
+      },
+      "amount": String(TOKEN_INSURANCE_FUND_SWAP)
+    }
+  }
+)
+
+// check the token balance of the insurance fund is correct
+balance = await queryContract(terra, tokenAddress,
+  {
+    "balance": {
+      "address": insuranceFundAddress
+    }
+  }
+)
+
+strictEqual(balance.balance, String(TOKEN_INSURANCE_FUND - TOKEN_INSURANCE_FUND_SWAP))
+
+// check the UST balance of the insurance fund is correct
+let insuranceFundBalances = await terra.bank.balance(insuranceFundAddress)
+
+assert(insuranceFundBalances.get("uusd").amount > 0)
+
+// check the balances in the pool are correct
+pool = await queryContract(terra, pairAddress,
+  {
+    "pool": {}
+  }
+)
+
+strictEqual(pool.assets[0].amount, String(TOKEN_LP + TOKEN_INSURANCE_FUND_SWAP))
+assert(parseInt(pool.assets[1].amount) < UUSD_LP)
 
 console.log("DONE")
