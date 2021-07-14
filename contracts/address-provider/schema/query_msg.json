@@ -3,55 +3,185 @@
   "title": "QueryMsg",
   "anyOf": [
     {
-      "description": "Get config",
+      "description": "Returns the current balance of the given address, 0 if unset. Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "config"
+        "balance"
       ],
       "properties": {
-        "config": {
-          "type": "object"
-        }
-      }
-    },
-    {
-      "description": "Get a single address",
-      "type": "object",
-      "required": [
-        "address"
-      ],
-      "properties": {
-        "address": {
+        "balance": {
           "type": "object",
           "required": [
-            "contract"
+            "address"
           ],
           "properties": {
-            "contract": {
-              "$ref": "#/definitions/MarsContract"
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
       }
     },
     {
-      "description": "Get a list of addresses",
+      "description": "Returns the balance of the given address at a given block Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "addresses"
+        "balance_at"
       ],
       "properties": {
-        "addresses": {
+        "balance_at": {
           "type": "object",
           "required": [
-            "contracts"
+            "address",
+            "block"
           ],
           "properties": {
-            "contracts": {
-              "type": "array",
-              "items": {
-                "$ref": "#/definitions/MarsContract"
-              }
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
+      "type": "object",
+      "required": [
+        "token_info"
+      ],
+      "properties": {
+        "token_info": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Total Supply at a given block Return type: TotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "total_supply_at"
+      ],
+      "properties": {
+        "total_supply_at": {
+          "type": "object",
+          "required": [
+            "block"
+          ],
+          "properties": {
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "minter"
+      ],
+      "properties": {
+        "minter": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Only with \"allowance\" extension. Returns how much spender can use from owner account, 0 if unset. Return type: AllowanceResponse.",
+      "type": "object",
+      "required": [
+        "allowance"
+      ],
+      "properties": {
+        "allowance": {
+          "type": "object",
+          "required": [
+            "owner",
+            "spender"
+          ],
+          "properties": {
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "spender": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension (and \"allowances\") Returns all allowances this owner has approved. Supports pagination. Return type: AllAllowancesResponse.",
+      "type": "object",
+      "required": [
+        "all_allowances"
+      ],
+      "properties": {
+        "all_allowances": {
+          "type": "object",
+          "required": [
+            "owner"
+          ],
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "start_after": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension Returns all accounts that have balances. Supports pagination. Return type: AllAccountsResponse.",
+      "type": "object",
+      "required": [
+        "all_accounts"
+      ],
+      "properties": {
+        "all_accounts": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "start_after": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -59,19 +189,8 @@
     }
   ],
   "definitions": {
-    "MarsContract": {
-      "description": "Contracts from mars protocol",
-      "type": "string",
-      "enum": [
-        "Council",
-        "Incentives",
-        "InsuranceFund",
-        "MarsToken",
-        "RedBank",
-        "Staking",
-        "Treasury",
-        "XMarsToken"
-      ]
+    "HumanAddr": {
+      "type": "string"
     }
   }
 }

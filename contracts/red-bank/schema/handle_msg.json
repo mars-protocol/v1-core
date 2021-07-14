@@ -3,395 +3,260 @@
   "title": "HandleMsg",
   "anyOf": [
     {
-      "description": "Update LP config",
+      "description": "Transfer is a base message to move tokens to another account without triggering actions",
       "type": "object",
       "required": [
-        "update_config"
+        "transfer"
       ],
       "properties": {
-        "update_config": {
-          "type": "object",
-          "required": [
-            "config"
-          ],
-          "properties": {
-            "config": {
-              "$ref": "#/definitions/CreateOrUpdateConfig"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Implementation of cw20 receive msg",
-      "type": "object",
-      "required": [
-        "receive"
-      ],
-      "properties": {
-        "receive": {
-          "$ref": "#/definitions/Cw20ReceiveMsg"
-        }
-      }
-    },
-    {
-      "description": "Initialize an asset on the money market",
-      "type": "object",
-      "required": [
-        "init_asset"
-      ],
-      "properties": {
-        "init_asset": {
-          "type": "object",
-          "required": [
-            "asset",
-            "asset_params"
-          ],
-          "properties": {
-            "asset": {
-              "description": "Asset related info",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "asset_params": {
-              "description": "Asset parameters",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/InitOrUpdateAssetParams"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Update an asset on the money market",
-      "type": "object",
-      "required": [
-        "update_asset"
-      ],
-      "properties": {
-        "update_asset": {
-          "type": "object",
-          "required": [
-            "asset",
-            "asset_params"
-          ],
-          "properties": {
-            "asset": {
-              "description": "Asset related info",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "asset_params": {
-              "description": "Asset parameters",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/InitOrUpdateAssetParams"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Callback sent from maToken contract after instantiated",
-      "type": "object",
-      "required": [
-        "init_asset_token_callback"
-      ],
-      "properties": {
-        "init_asset_token_callback": {
-          "type": "object",
-          "required": [
-            "reference"
-          ],
-          "properties": {
-            "reference": {
-              "description": "Either the denom for a terra native asset or address for a cw20 token",
-              "type": "array",
-              "items": {
-                "type": "integer",
-                "format": "uint8",
-                "minimum": 0.0
-              }
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Deposit Terra native coins",
-      "type": "object",
-      "required": [
-        "deposit_native"
-      ],
-      "properties": {
-        "deposit_native": {
-          "type": "object",
-          "required": [
-            "denom"
-          ],
-          "properties": {
-            "denom": {
-              "description": "Denom used in Terra (e.g: uluna, uusd)",
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Borrow Terra native coins",
-      "type": "object",
-      "required": [
-        "borrow"
-      ],
-      "properties": {
-        "borrow": {
+        "transfer": {
           "type": "object",
           "required": [
             "amount",
-            "asset"
+            "recipient"
           ],
           "properties": {
             "amount": {
-              "$ref": "#/definitions/Uint256"
+              "$ref": "#/definitions/Uint128"
             },
-            "asset": {
-              "description": "Denom used in Terra (e.g: uluna, uusd)",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
+            "recipient": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
       }
     },
     {
-      "description": "Repay Terra native coins loan",
+      "description": "Burn is a base message to destroy tokens forever",
       "type": "object",
       "required": [
-        "repay_native"
+        "burn"
       ],
       "properties": {
-        "repay_native": {
+        "burn": {
           "type": "object",
           "required": [
-            "denom"
+            "amount"
           ],
           "properties": {
-            "denom": {
-              "description": "Denom used in Terra (e.g: uluna, uusd)",
-              "type": "string"
+            "amount": {
+              "$ref": "#/definitions/Uint128"
             }
           }
         }
       }
     },
     {
-      "description": "Liquidate under-collateralized native loans",
+      "description": "Send is a base message to transfer tokens to a contract and trigger an action on the receiving contract.",
       "type": "object",
       "required": [
-        "liquidate_native"
+        "send"
       ],
       "properties": {
-        "liquidate_native": {
-          "type": "object",
-          "required": [
-            "collateral_asset",
-            "debt_asset",
-            "receive_ma_token",
-            "user_address"
-          ],
-          "properties": {
-            "collateral_asset": {
-              "description": "Details for collateral asset",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "debt_asset": {
-              "description": "Denom used in Terra (e.g: uluna, uusd) of the debt asset",
-              "type": "string"
-            },
-            "receive_ma_token": {
-              "description": "Sends maAsset to liquidator if true and underlying collateral asset if false",
-              "type": "boolean"
-            },
-            "user_address": {
-              "description": "The address of the borrower getting liquidated",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              ]
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Called by liquidity token. Validate liquidity token transfer is valid and update collateral status",
-      "type": "object",
-      "required": [
-        "finalize_liquidity_token_transfer"
-      ],
-      "properties": {
-        "finalize_liquidity_token_transfer": {
+        "send": {
           "type": "object",
           "required": [
             "amount",
-            "recipient_address",
-            "recipient_previous_balance",
-            "sender_address",
-            "sender_previous_balance"
+            "contract"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint128"
             },
-            "recipient_address": {
+            "contract": {
               "$ref": "#/definitions/HumanAddr"
             },
-            "recipient_previous_balance": {
-              "$ref": "#/definitions/Uint128"
-            },
-            "sender_address": {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            "sender_previous_balance": {
-              "$ref": "#/definitions/Uint128"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Update uncollateralized loan limit",
-      "type": "object",
-      "required": [
-        "update_uncollateralized_loan_limit"
-      ],
-      "properties": {
-        "update_uncollateralized_loan_limit": {
-          "type": "object",
-          "required": [
-            "asset",
-            "new_limit",
-            "user_address"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            },
-            "new_limit": {
-              "$ref": "#/definitions/Uint128"
-            },
-            "user_address": {
-              "$ref": "#/definitions/HumanAddr"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Update (enable / disable) asset as collateral",
-      "type": "object",
-      "required": [
-        "update_user_collateral_asset_status"
-      ],
-      "properties": {
-        "update_user_collateral_asset_status": {
-          "type": "object",
-          "required": [
-            "asset",
-            "enable"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            },
-            "enable": {
-              "type": "boolean"
-            }
-          }
-        }
-      }
-    },
-    {
-      "description": "Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts",
-      "type": "object",
-      "required": [
-        "distribute_protocol_income"
-      ],
-      "properties": {
-        "distribute_protocol_income": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "amount": {
-              "description": "Amount to distribute to protocol contracts, defaults to full amount if not specified",
+            "msg": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Uint256"
+                  "$ref": "#/definitions/Binary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with the \"mintable\" extension. If authorized, creates amount new tokens and adds to the recipient balance.",
+      "type": "object",
+      "required": [
+        "mint"
+      ],
+      "properties": {
+        "mint": {
+          "type": "object",
+          "required": [
+            "amount",
+            "recipient"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "recipient": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"approval\" extension. Allows spender to access an additional amount tokens from the owner's (env.sender) account. If expires is Some(), overwrites current allowance expiration with this one.",
+      "type": "object",
+      "required": [
+        "increase_allowance"
+      ],
+      "properties": {
+        "increase_allowance": {
+          "type": "object",
+          "required": [
+            "amount",
+            "spender"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "expires": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Expiration"
                 },
                 {
                   "type": "null"
                 }
               ]
             },
-            "asset": {
-              "description": "Asset reserve fees to distribute",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
+            "spender": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
       }
     },
     {
-      "description": "Withdraw asset",
+      "description": "Only with \"approval\" extension. Lowers the spender's access of tokens from the owner's (env.sender) account by amount. If expires is Some(), overwrites current allowance expiration with this one.",
       "type": "object",
       "required": [
-        "withdraw"
+        "decrease_allowance"
       ],
       "properties": {
-        "withdraw": {
+        "decrease_allowance": {
           "type": "object",
           "required": [
-            "asset"
+            "amount",
+            "spender"
           ],
           "properties": {
             "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "expires": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/Uint256"
+                  "$ref": "#/definitions/Expiration"
                 },
                 {
                   "type": "null"
                 }
               ]
             },
-            "asset": {
-              "$ref": "#/definitions/Asset"
+            "spender": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"approval\" extension. Transfers amount tokens from owner -> recipient if `env.sender` has sufficient pre-approval.",
+      "type": "object",
+      "required": [
+        "transfer_from"
+      ],
+      "properties": {
+        "transfer_from": {
+          "type": "object",
+          "required": [
+            "amount",
+            "owner",
+            "recipient"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "recipient": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"approval\" extension. Sends amount tokens from owner -> contract if `env.sender` has sufficient pre-approval.",
+      "type": "object",
+      "required": [
+        "send_from"
+      ],
+      "properties": {
+        "send_from": {
+          "type": "object",
+          "required": [
+            "amount",
+            "contract",
+            "owner"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "contract": {
+              "$ref": "#/definitions/HumanAddr"
+            },
+            "msg": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Binary"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"approval\" extension. Destroys tokens forever",
+      "type": "object",
+      "required": [
+        "burn_from"
+      ],
+      "properties": {
+        "burn_from": {
+          "type": "object",
+          "required": [
+            "amount",
+            "owner"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
             }
           }
         }
@@ -399,212 +264,59 @@
     }
   ],
   "definitions": {
-    "Asset": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "Expiration": {
+      "description": "Expiration represents a point in time when some event happens. It can compare with a BlockInfo and will return is_expired() == true once the condition is hit (and for every block in the future)",
       "anyOf": [
         {
+          "description": "AtHeight will expire when `env.block.height` >= height",
           "type": "object",
           "required": [
-            "cw20"
+            "at_height"
           ],
           "properties": {
-            "cw20": {
-              "type": "object",
-              "required": [
-                "contract_addr"
-              ],
-              "properties": {
-                "contract_addr": {
-                  "$ref": "#/definitions/HumanAddr"
-                }
-              }
+            "at_height": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         },
         {
+          "description": "AtTime will expire when `env.block.time` >= time",
           "type": "object",
           "required": [
-            "native"
+            "at_time"
           ],
           "properties": {
-            "native": {
-              "type": "object",
-              "required": [
-                "denom"
-              ],
-              "properties": {
-                "denom": {
-                  "type": "string"
-                }
-              }
+            "at_time": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "description": "Never will never expire. Used to express the empty variant",
+          "type": "object",
+          "required": [
+            "never"
+          ],
+          "properties": {
+            "never": {
+              "type": "object"
             }
           }
         }
       ]
     },
-    "Binary": {
-      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
-      "type": "string"
-    },
-    "CreateOrUpdateConfig": {
-      "type": "object",
-      "properties": {
-        "address_provider_address": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "close_factor": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "insurance_fund_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "ma_token_code_id": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "owner": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "treasury_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
-    "Cw20ReceiveMsg": {
-      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a HandleMsg",
-      "type": "object",
-      "required": [
-        "amount",
-        "sender"
-      ],
-      "properties": {
-        "amount": {
-          "$ref": "#/definitions/Uint128"
-        },
-        "msg": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Binary"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "sender": {
-          "$ref": "#/definitions/HumanAddr"
-        }
-      }
-    },
-    "Decimal256": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
-    },
     "HumanAddr": {
       "type": "string"
     },
-    "InitOrUpdateAssetParams": {
-      "type": "object",
-      "properties": {
-        "borrow_slope": {
-          "description": "Borrow slope to calculate borrow rate",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "liquidation_bonus": {
-          "description": "Bonus on the price of assets of the collateral when liquidators purchase it",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "liquidation_threshold": {
-          "description": "Percentage at which the loan is defined as under-collateralized",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "loan_to_value": {
-          "description": "Max percentage of collateral that can be borrowed",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "reserve_factor": {
-          "description": "Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
     "Uint128": {
-      "type": "string"
-    },
-    "Uint256": {
       "type": "string"
     }
   }
