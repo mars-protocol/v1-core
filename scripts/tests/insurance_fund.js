@@ -4,7 +4,7 @@ Integration test for the insurance fund contract swapping assets to UST via Terr
 Run the test from the root of this repo:
 ```
 docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
-node tests/insurance_fund.js
+node scripts/tests/insurance_fund.js
 docker compose -f ../LocalTerra/docker-compose.yml down
 ```
 
@@ -37,16 +37,16 @@ import {
   queryContract,
   toEncodedBinary,
   uploadContract
-} from "../scripts/helpers.mjs"
+} from "../helpers.mjs"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
 
 // consts and globals
 const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
-const ASSET_LP = 100_000_000_000000
+const ASSET_LP = 10_000_000_000000
 const UUSD_LP = 1_000_000_000000
-const INSURANCE_FUND_ASSET_BALANCE = 1_000_000_000000
+const INSURANCE_FUND_ASSET_BALANCE = 100_000_000000
 
 const terra = new LocalTerra()
 const wallet = terra.wallets.test1
@@ -100,7 +100,8 @@ async function provideLiquidity(address, asset, coins) {
   )
 }
 
-// upload Terraswap contracts
+console.log("upload Terraswap contracts")
+
 let tokenCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
 let pairCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
 let factoryCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
@@ -113,7 +114,8 @@ let factoryAddress = await instantiateContract(terra, wallet, factoryCodeID,
   }
 )
 
-// instantiate a token contract
+console.log("instantiate a token contract")
+
 let tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
   {
     "name": "Mars",
@@ -128,7 +130,8 @@ let tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
   }
 )
 
-// instantiate the Mars insurance fund
+console.log("instantiate the Mars insurance fund")
+
 let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts", "insurance_fund.wasm"),
   {
     "owner": wallet.key.accAddress,
@@ -137,7 +140,8 @@ let insuranceFundAddress = await deployContract(terra, wallet, join("artifacts",
   }
 )
 
-// test with LUNA
+console.log("test with LUNA")
+
 const LUNA = {
   "native_token": {
     "denom": "uluna"
@@ -184,7 +188,8 @@ strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANC
 assert(parseInt(pool.assets[1].amount) < UUSD_LP)
 
 
-// test with a token
+console.log("test with a token")
+
 const TOKEN = {
   "token": {
     "contract_addr": tokenAddress
@@ -244,3 +249,5 @@ pool = await queryContract(terra, tokenPairAddress,
 )
 strictEqual(pool.assets[0].amount, String(ASSET_LP + INSURANCE_FUND_ASSET_BALANCE))
 assert(parseInt(pool.assets[1].amount) < UUSD_LP)
+
+console.log("DONE")
