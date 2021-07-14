@@ -12,8 +12,8 @@ use mars::xmars_token;
 
 use crate::msg::{
     ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
-    ProposalInfo, ProposalVoteResponse, ProposalVotesFilter, ProposalVotesResponse,
-    ProposalVotesSort, ProposalsListResponse, QueryMsg, ReceiveMsg,
+    ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesFilter,
+    ProposalVotesResponse, ProposalVotesSort, ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state;
 use crate::state::{
@@ -627,7 +627,7 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
                 title: v.title,
                 description: v.description,
                 link: v.link,
-                execute_calls: v.execute_calls,
+                execute_calls: map_execute_calls_response(&deps, v.execute_calls)?,
                 deposit_amount: v.deposit_amount,
             })
         })
@@ -658,7 +658,7 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
         title: proposal.title,
         description: proposal.description,
         link: proposal.link,
-        execute_calls: proposal.execute_calls,
+        execute_calls: map_execute_calls_response(&deps, proposal.execute_calls)?,
         deposit_amount: proposal.deposit_amount,
     })
 }
@@ -795,6 +795,28 @@ fn xmars_get_balance_at<Q: Querier>(
     }))?;
 
     Ok(query.balance)
+}
+
+fn map_execute_calls_response<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    execute_calls: Option<Vec<ProposalExecuteCall>>,
+) -> Result<Option<Vec<ProposalExecuteCallResponse>>, StdError> {
+    Ok(match execute_calls {
+        Some(execute_calls) => execute_calls
+            .iter()
+            .map(|execute_call| {
+                Some(ProposalExecuteCallResponse {
+                    execution_order: execute_call.execution_order,
+                    target_contract_human_address: deps
+                        .api
+                        .human_address(&execute_call.target_contract_canonical_address)
+                        .unwrap(),
+                    msg: execute_call.msg.clone(),
+                })
+            })
+            .collect(),
+        None => Option::None,
+    })
 }
 
 // TESTS
@@ -1576,6 +1598,14 @@ mod tests {
             .unwrap();
 
         let active_proposal_2_id = 2_u64;
+        let execute_calls = Option::from(vec![ProposalExecuteCall {
+            execution_order: 0,
+            target_contract_canonical_address: deps
+                .api
+                .canonical_address(&HumanAddr::from("test_address"))
+                .unwrap(),
+            msg: Binary::from(br#"{"some":123}"#),
+        }]);
         let active_proposal_2 = th_build_mock_proposal(
             &mut deps,
             MockProposal {
@@ -1583,6 +1613,7 @@ mod tests {
                 status: ProposalStatus::Active,
                 start_height: 100_000,
                 end_height: 100_100,
+                execute_calls: execute_calls,
                 ..Default::default()
             },
         );
@@ -1600,6 +1631,10 @@ mod tests {
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
+        assert_eq!(
+            res.proposal_list[0].execute_calls.clone().unwrap()[0].target_contract_human_address,
+            HumanAddr::from("test_address")
+        );
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_1_id);
     }
 
