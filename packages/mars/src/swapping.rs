@@ -12,7 +12,7 @@ use terraswap::querier::query_pair_info;
 // TODO: AssetInfo will contain unverified Addrs (as they come from user input). This is probably
 // not an issue as we are not transfering to that address and the transaction will fail if the
 // address is non existing. Check if this has a problem besdes the pair query failing. If there is we should verify the addresses. If there isn't just leave as is.
-pub fn handle_swap(
+pub fn execute_swap(
     deps: DepsMut,
     env: Env,
     offer_asset_info: AssetInfo,
@@ -149,7 +149,7 @@ mod tests {
             ),
         ];
         for (asset_name, asset_info) in assets {
-            let response = handle_swap(
+            let response = execute_swap(
                 deps.as_mut(),
                 env.clone(),
                 asset_info.clone(),
@@ -183,7 +183,7 @@ mod tests {
             denom: "uusd".to_string(),
         };
 
-        let response = handle_swap(
+        let response = execute_swap(
             deps.as_mut(),
             env,
             offer_asset_info,
@@ -210,7 +210,7 @@ mod tests {
             contract_addr: Addr::unchecked("cw20_token"),
         };
 
-        let response = handle_swap(
+        let response = execute_swap(
             deps.as_mut(),
             env,
             offer_asset_info,
@@ -250,7 +250,7 @@ mod tests {
             liquidity_token: Addr::unchecked("lp_cw20_mars"),
         });
 
-        let res = handle_swap(
+        let res = execute_swap(
             deps.as_mut(),
             env,
             offer_asset_info,
@@ -319,7 +319,7 @@ mod tests {
             liquidity_token: Addr::unchecked("lp_uusd_mars"),
         });
 
-        let res = handle_swap(
+        let res = execute_swap(
             deps.as_mut(),
             env,
             offer_asset_info,
