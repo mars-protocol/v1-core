@@ -14,7 +14,7 @@ export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
     fee: new StdFee(30000000, [
-      new Coin('uusd', 4500000)
+      new Coin('uusd', 45000000)
     ]),
   });
   const result = await terra.tx.broadcast(tx);
@@ -45,8 +45,8 @@ export async function instantiateContract(terra, wallet, codeId, msg) {
   return result.logs[0].events[0].attributes[2].value //contract address
 }
 
-export async function executeContract(terra, wallet, contractAddress, msg) {
-  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg);
+export async function executeContract(terra, wallet, contractAddress, msg, coins = undefined) {
+  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   return await performTransaction(terra, wallet, executeMsg);
 }
 
@@ -158,4 +158,8 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
       console.log(`Borrowed ${amount} ${asset}`);
     }
   }
+}
+
+export function toEncodedBinary(object) {
+  return Buffer.from(JSON.stringify(object)).toString('base64');
 }
