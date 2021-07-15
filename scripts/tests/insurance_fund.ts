@@ -35,6 +35,7 @@ import {
   instantiateContract,
   performTransaction,
   queryContract,
+  setTimeoutDuration,
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
@@ -254,6 +255,8 @@ async function testSwapTokenToUsd(env: Env, address: string) {
 // main
 
 async function main() {
+  setTimeoutDuration(0)
+
   const terra = new LocalTerra()
   const wallet = terra.wallets.test1
 

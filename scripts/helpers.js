@@ -10,6 +10,16 @@ import {
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
 
+let TIMEOUT = 1000
+
+export function setTimeoutDuration(t) {
+  TIMEOUT = t
+}
+
+export function getTimeoutDuration() {
+  return TIMEOUT
+}
+
 export async function performTransaction(terra, wallet, msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
@@ -27,7 +37,7 @@ export async function performTransaction(terra, wallet, msg) {
   // Can't send txs too fast, tequila lcd is load balanced,
   // account sequence query may resolve an older state depending on which lcd you end up with,
   // generally 1 sec is enough for all nodes to sync up.
-  await new Promise(resolve => setTimeout(resolve, 1000));
+  await new Promise(resolve => setTimeout(resolve, TIMEOUT));
 
   return result
 }
