@@ -18,7 +18,7 @@
 2. Run `yarn install` to install dependencies
 3. Create a .env file in the top level of of the directory if doesn't already exist
 4. Add the env variable TEST_MAIN=[your_deploying_wallets_mnemonic_key]
-5. Run `node scripts/deploy_testnet.js` to deploy and instantiate the smart contracts
+5. Run `node scripts/deploy.js` to deploy and instantiate the smart contracts
 
 ### Linting
 1. Format: `cargo fmt`.

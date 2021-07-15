@@ -89,6 +89,8 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
+    console.log(`Initializing ${asset.denom || asset.symbol || asset.contract_addr}`);
+
     let assetType = asset.denom
       ? {
         "native": {
