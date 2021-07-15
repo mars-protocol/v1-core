@@ -164,6 +164,10 @@ await performTransaction(terra, wallet,
 )
 
 // swap the LUNA balance in the insurance fund to uUSD
+let balances = await terra.bank.balance(insuranceFundAddress)
+// the balance will be undefined if it is zero
+strictEqual(balances.get("uusd"), undefined)
+let insuranceFundUusdBalance = 0
 await executeContract(terra, wallet, insuranceFundAddress,
   {
     "swap_asset_to_uusd": {
@@ -174,10 +178,9 @@ await executeContract(terra, wallet, insuranceFundAddress,
 )
 
 // check the insurance fund balances
-let balances = await terra.bank.balance(insuranceFundAddress)
+balances = await terra.bank.balance(insuranceFundAddress)
 strictEqual(balances.get("uluna"), undefined)
-let insuranceFundUusdBalance = balances.get("uusd").amount
-assert(insuranceFundUusdBalance.gt(0))
+assert(balances.get("uusd").amount.gt(insuranceFundUusdBalance))
 
 // check the Terraswap pair balances
 let pool = await queryContract(terra, lunaPairAddress,
@@ -221,6 +224,8 @@ await executeContract(terra, wallet, tokenAddress,
 )
 
 // swap the token balance in the insurance fund to uUSD
+balances = await terra.bank.balance(insuranceFundAddress)
+insuranceFundUusdBalance = balances.get("uusd").amount
 await executeContract(terra, wallet, insuranceFundAddress,
   {
     "swap_asset_to_uusd": {
