@@ -32,7 +32,7 @@ async function main() {
   let stakingInitMsg;
   let insuranceFundInitMsg;
   let redBankInitMsg;
-  let initialRedBankAssets = []
+  let initialAssets = []
 
   if (isTestnet) {
     let terraswap_factory_address = "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf"
@@ -79,7 +79,7 @@ async function main() {
     }
 
     // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
-    initialRedBankAssets = [
+    initialAssets = [
       {
         denom: "uluna",
         initial_borrow_rate: "0.1",
@@ -264,25 +264,30 @@ async function main() {
   console.log('Setting addresses in address provider')
   await executeContract(terra, wallet, addressProviderContractAddress, {
     "update_config": {
-      "owner": councilContractAddress,
-      "council_address": councilContractAddress,
-      "incentives_address": incentivesContractAddress,
-      "insurance_fund_address": insuranceFundContractAddress,
-      "mars_token_address": marsTokenContractAddress,
-      "red_bank_address": redBankContractAddress,
-      "staking_address": stakingContractAddress,
-      "treasury_address": treasuryContractAddress,
-      "xmars_token_address": xMarsTokenContractAddress
+      "config": {
+        "owner": councilContractAddress,
+        "council_address": councilContractAddress,
+        "incentives_address": incentivesContractAddress,
+        "insurance_fund_address": insuranceFundContractAddress,
+        "mars_token_address": marsTokenContractAddress,
+        "red_bank_address": redBankContractAddress,
+        "staking_address": stakingContractAddress,
+        "treasury_address": treasuryContractAddress,
+        "xmars_token_address": xMarsTokenContractAddress
+      }
     }
   })
-  addressProviderQueryResponse = await queryContract(terra, addressProviderContractAddress, { "config": {} })
-  console.log("Address Provider config successfully setup: ", addressProviderQueryResponse)
+  console.log("Address Provider config successfully setup: ", await queryContract(terra, addressProviderContractAddress, { "config": {} }))
 
   /************************************* Setup Initial Liquidity Pools **************************************/
-  await setupRedBank(terra, wallet, redBankContractAddress, { initialRedBankAssets });
+  await setupRedBank(terra, wallet, redBankContractAddress, { initialAssets });
+  console.log("Initial assets setup successfully")
+
   // Once initial assets initialized, set the owner of Red Bank to be Council rather than EOA
+  console.log(`Updating Red Bank to be owned by Council contract ${councilContractAddress}`)
   redBankInitMsg.owner = councilContractAddress
   await executeContract(terra, wallet, redBankContractAddress, { "update_config": redBankInitMsg })
+  console.log("Red Bank config successfully updated: ", await queryContract(terra, redBankContractAddress, { "config": {} }))
 }
 
 main().catch(console.log);
