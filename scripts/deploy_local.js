@@ -1,6 +1,6 @@
 import 'dotenv/config.js';
-import {deployLiquidityPool, setupLiquidityPool} from "./helpers.mjs";
-import {LocalTerra} from "@terra-money/terra.js";
+import { deployLiquidityPool, setupLiquidityPool } from "./helpers.js";
+import { LocalTerra } from "@terra-money/terra.js";
 
 const terra = new LocalTerra();
 const wallet = terra.wallets.test1;

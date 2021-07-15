@@ -1,12 +1,12 @@
 import {
   Coin,
   isTxError,
+  MnemonicKey,
   MsgExecuteContract,
   MsgInstantiateContract,
   MsgMigrateContract,
   MsgStoreCode,
-  StdFee,
-  MnemonicKey
+  StdFee
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
 

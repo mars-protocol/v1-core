@@ -1,7 +1,7 @@
 import 'dotenv/config.js';
-import {queryContract} from "./helpers.mjs";
-import {LCDClient, LocalTerra} from "@terra-money/terra.js";
-import {writeFileSync} from 'fs';
+import { queryContract } from "./helpers.js";
+import { LCDClient, LocalTerra } from "@terra-money/terra.js";
+import { writeFileSync } from 'fs';
 
 async function main() {
   let terra;

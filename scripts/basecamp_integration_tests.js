@@ -1,6 +1,5 @@
-import {Coin, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
-import {performTransaction, queryContract} from "./helpers.mjs";
-import {deployBasecampContract, toEncodedBinary} from "./helpers.mjs";
+import { Coin, isTxError, LocalTerra, MsgExecuteContract, StdFee } from "@terra-money/terra.js";
+import { deployBasecampContract, performTransaction, queryContract, toEncodedBinary } from "./helpers.js";
 import { strict as assert } from 'assert';
 
 // check token symbols

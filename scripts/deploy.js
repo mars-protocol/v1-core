@@ -1,13 +1,13 @@
 import 'dotenv/config.js';
 import {
-  recover,
-  uploadContract,
-  instantiateContract,
   deployContract,
-  queryContract,
   executeContract,
+  instantiateContract,
+  queryContract,
+  recover,
   setupRedBank,
-} from "./helpers.mjs";
+  uploadContract,
+} from "./helpers.js";
 import { LCDClient, LocalTerra } from "@terra-money/terra.js";
 
 async function main() {

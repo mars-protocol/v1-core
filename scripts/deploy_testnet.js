@@ -1,5 +1,5 @@
 import 'dotenv/config.js';
-import { deployLiquidityPool, setupLiquidityPool, recover } from "./helpers.mjs";
+import { deployLiquidityPool, setupLiquidityPool, recover } from "./helpers.js";
 import { LCDClient } from "@terra-money/terra.js";
 
 const terra = new LCDClient({

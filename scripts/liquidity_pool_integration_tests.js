@@ -1,8 +1,14 @@
-import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
-import {deployLiquidityPool, performTransaction, queryContract, setupLiquidityPool, toEncodedBinary} from "./helpers.mjs";
+import { Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee } from "@terra-money/terra.js";
+import {
+  deployLiquidityPool,
+  performTransaction,
+  queryContract,
+  setupLiquidityPool,
+  toEncodedBinary
+} from "./helpers.js";
 import BigNumber from "bignumber.js";
 import redis from "redis";
-import {promisify} from "util";
+import { promisify } from "util";
 import { strict as assert } from "assert";
 
 BigNumber.config({DECIMAL_PLACES: 18})
