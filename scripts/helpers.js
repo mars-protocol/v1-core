@@ -24,7 +24,7 @@ export async function performTransaction(terra, wallet, msg) {
     );
   }
 
-  // Can't send txs too fast, tequila lcd is load balanced, 
+  // Can't send txs too fast, tequila lcd is load balanced,
   // account sequence query may resolve an older state depending on which lcd you end up with,
   // generally 1 sec is enough for all nodes to sync up.
   await new Promise(resolve => setTimeout(resolve, 1000));

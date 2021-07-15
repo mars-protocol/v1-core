@@ -4,7 +4,7 @@ Integration test for the insurance fund contract swapping assets to UST via Terr
 Run the test from the root of this repo:
 ```
 docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
-node scripts/tests/insurance_fund.js
+node --loader ts-node/esm scripts/tests/insurance_fund.ts
 docker compose -f ../LocalTerra/docker-compose.yml down
 ```
 
@@ -28,7 +28,7 @@ TODO:
 - Upgrade to columbus-5
 */
 
-import { Int, LocalTerra, MsgSend } from "@terra-money/terra.js"
+import { Int, LocalTerra, MsgSend, Numeric, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
@@ -37,9 +37,33 @@ import {
   queryContract,
   toEncodedBinary,
   uploadContract
-} from "../helpers.mjs"
+} from "../helpers.js"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
+
+interface NativeToken {
+  native_token: {
+    denom: string
+  }
+}
+
+interface CW20 {
+  token: {
+    contract_addr: string
+  }
+}
+
+type Token = NativeToken | CW20
+
+interface Env {
+  terra: LocalTerra,
+  wallet: Wallet,
+  tokenCodeID: number,
+  pairCodeID: number,
+  factoryCodeID: number,
+  factoryAddress: string,
+  insuranceFundAddress: string,
+}
 
 // consts and globals
 
@@ -52,7 +76,7 @@ const INSURANCE_FUND_TOKEN_BALANCE = 100_000_000000
 
 // helpers
 
-async function instantiateUsdPair(env, bid) {
+async function instantiateUsdPair(env: Env, bid: Token): Promise<string> {
   return await instantiateContract(env.terra, env.wallet, env.factoryCodeID,
     {
       "pair_code_id": env.pairCodeID,
@@ -77,13 +101,13 @@ async function instantiateUsdPair(env, bid) {
   )
 }
 
-async function provideLiquidity(env, address, asset, coins) {
+async function provideLiquidity(env: Env, address: string, token: Token, coins: string) {
   await executeContract(env.terra, env.wallet, address,
     {
       "provide_liquidity": {
         "assets": [
           {
-            "info": asset,
+            "info": token,
             "amount": String(TOKEN_LP)
           }, {
             "info": {
@@ -100,7 +124,7 @@ async function provideLiquidity(env, address, asset, coins) {
   )
 }
 
-async function getBalance(env, address, denom) {
+async function getBalance(env: Env, address: string, denom: string): Promise<Numeric.Output> {
   const balances = await env.terra.bank.balance(address)
   const balance = balances.get(denom)
   if (balance === undefined) {
@@ -111,7 +135,7 @@ async function getBalance(env, address, denom) {
 
 // tests
 
-async function testSwapNativeTokenToUsd(env, denom) {
+async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   const NATIVE_TOKEN = {
     "native_token": {
       "denom": denom
@@ -162,7 +186,7 @@ async function testSwapNativeTokenToUsd(env, denom) {
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
-async function testSwapTokenToUsd(env, address) {
+async function testSwapTokenToUsd(env: Env, address: string) {
   const TOKEN = {
     "token": {
       "contract_addr": address
@@ -281,7 +305,7 @@ async function main() {
 
   console.log("testSwapNativeTokenToUsd")
   await testSwapNativeTokenToUsd(env, "uluna")
-  
+
   console.log("testSwapTokenToUsd")
   await testSwapTokenToUsd(env, tokenAddress)
 
