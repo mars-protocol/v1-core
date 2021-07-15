@@ -12,10 +12,14 @@ edition = "2018"
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-cw20 = "0.6"
-cosmwasm-std = "0.14.1"
-cosmwasm-bignumber = "=2.0.0"
-terra-cosmwasm = "=2.0.0"
-terraswap = "=2.2.0"
+cw20 = "0.7"
+
+terra-cosmwasm = "2.1.0"
+cosmwasm-bignumber = "2.1.1"
+terraswap = "2.3.0"
+
+cosmwasm-std = "0.15.0"
+cosmwasm-storage = "0.15.0"
+
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }

@@ -309,7 +309,7 @@ pub fn mock_token_info_response() -> TokenInfoResponse {
         name: "".to_string(),
         symbol: "".to_string(),
         decimals: 0,
-        total_supply: Uint128(0),
+        total_supply: Uint128::zero(),
     }
 }
 
@@ -427,21 +427,18 @@ impl MarsMockQuerier {
                             base_denom,
                             quote_denoms,
                         } => {
-                            let base_exchange_rates = match self
-                                .native_querier
-                                .exchange_rates
-                                .get(base_denom)
-                            {
-                                Some(res) => res,
-                                None => {
-                                    let err: ContractResult<Binary> = Err(format!(
+                            let base_exchange_rates =
+                                match self.native_querier.exchange_rates.get(base_denom) {
+                                    Some(res) => res,
+                                    None => {
+                                        let err: ContractResult<Binary> = Err(format!(
                                         "no exchange rates available for provided base denom: {}",
                                         base_denom
                                     ))
-                                    .into();
-                                    return Ok(err).into();
-                                }
-                            };
+                                        .into();
+                                        return Ok(err).into();
+                                    }
+                                };
 
                             let exchange_rate_items: Result<Vec<ExchangeRateItem>, String> =
                                 quote_denoms
