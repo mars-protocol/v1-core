@@ -176,7 +176,8 @@ await executeContract(terra, wallet, insuranceFundAddress,
 // check the insurance fund balances
 let balances = await terra.bank.balance(insuranceFundAddress)
 strictEqual(balances.get("uluna"), undefined)
-assert(balances.get("uusd").amount > 0)
+let insuranceFundUusdBalance = balances.get("uusd").amount
+assert(insuranceFundUusdBalance.gt(0))
 
 // check the Terraswap pair balances
 let pool = await queryContract(terra, lunaPairAddress,
@@ -239,7 +240,7 @@ let tokenBalance = await queryContract(terra, tokenAddress,
 )
 strictEqual(tokenBalance.balance, "0")
 balances = await terra.bank.balance(insuranceFundAddress)
-assert(balances.get("uusd").amount > 0)
+assert(balances.get("uusd").amount.gt(insuranceFundUusdBalance))
 
 // check the Terraswap pair balances
 pool = await queryContract(terra, tokenPairAddress,
