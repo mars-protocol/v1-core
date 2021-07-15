@@ -3,34 +3,97 @@
   "title": "InitMsg",
   "type": "object",
   "required": [
-    "config"
+    "decimals",
+    "initial_balances",
+    "name",
+    "symbol"
   ],
   "properties": {
-    "config": {
-      "$ref": "#/definitions/CreateOrUpdateConfig"
+    "decimals": {
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
+    },
+    "init_hook": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/InitHook"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "initial_balances": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Cw20CoinHuman"
+      }
+    },
+    "mint": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/MinterResponse"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
     }
   },
   "definitions": {
-    "CreateOrUpdateConfig": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "Cw20CoinHuman": {
       "type": "object",
+      "required": [
+        "address",
+        "amount"
+      ],
       "properties": {
-        "proposal_effective_delay": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
+        "address": {
+          "$ref": "#/definitions/HumanAddr"
         },
-        "proposal_expiration_period": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
+        "amount": {
+          "$ref": "#/definitions/Uint128"
+        }
+      }
+    },
+    "HumanAddr": {
+      "type": "string"
+    },
+    "InitHook": {
+      "description": "Hook to be called after token initialization",
+      "type": "object",
+      "required": [
+        "contract_addr",
+        "msg"
+      ],
+      "properties": {
+        "contract_addr": {
+          "$ref": "#/definitions/HumanAddr"
         },
-        "proposal_required_deposit": {
+        "msg": {
+          "$ref": "#/definitions/Binary"
+        }
+      }
+    },
+    "MinterResponse": {
+      "type": "object",
+      "required": [
+        "minter"
+      ],
+      "properties": {
+        "cap": {
+          "description": "cap is how many more tokens can be issued by the minter",
           "anyOf": [
             {
               "$ref": "#/definitions/Uint128"
@@ -40,62 +103,10 @@
             }
           ]
         },
-        "proposal_required_quorum": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "proposal_required_threshold": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "proposal_voting_period": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "staking_contract_address": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "xmars_token_address": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "minter": {
+          "$ref": "#/definitions/HumanAddr"
         }
       }
-    },
-    "Decimal": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
-    },
-    "HumanAddr": {
-      "type": "string"
     },
     "Uint128": {
       "type": "string"

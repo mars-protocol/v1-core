@@ -1,5 +1,5 @@
 import {Coin, Int, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
-import {deployLiquidityPool, performTransaction, queryContract, setupLiquidityPool} from "./helpers.mjs";
+import {deployLiquidityPool, performTransaction, queryContract, setupLiquidityPool, toEncodedBinary} from "./helpers.mjs";
 import BigNumber from "bignumber.js";
 import redis from "redis";
 import {promisify} from "util";
@@ -33,10 +33,6 @@ function assertEqualIndicesAndRates(expectedStateReserve, actualRates) {
 }
 
 // HELPERS
-function toEncodedBinary(object) {
-  return Buffer.from(JSON.stringify(object)).toString('base64');
-}
-
 function isValueInDelta(value, target, deviation) {
   return Math.abs(value - target) < deviation
 }

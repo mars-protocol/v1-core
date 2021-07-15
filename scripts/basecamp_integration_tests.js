@@ -1,12 +1,7 @@
 import {Coin, isTxError, LocalTerra, MsgExecuteContract, StdFee} from "@terra-money/terra.js";
 import {performTransaction, queryContract} from "./helpers.mjs";
-import {deployBasecampContract} from "./helpers.mjs";
+import {deployBasecampContract, toEncodedBinary} from "./helpers.mjs";
 import { strict as assert } from 'assert';
-
-// HELPERS
-function toEncodedBinary(object) {
-  return Buffer.from(JSON.stringify(object)).toString('base64');
-}
 
 // check token symbols
 async function testTokenInit(env) {

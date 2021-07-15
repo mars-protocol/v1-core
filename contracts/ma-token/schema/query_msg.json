@@ -23,20 +23,26 @@
       }
     },
     {
-      "description": "Returns both balance (0 if unset) and total supply Used by incentives contract when computing unclaimed rewards Return type: BalanceAndTotalSupplyResponse",
+      "description": "Returns the balance of the given address at a given block Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "balance_and_total_supply"
+        "balance_at"
       ],
       "properties": {
-        "balance_and_total_supply": {
+        "balance_at": {
           "type": "object",
           "required": [
-            "address"
+            "address",
+            "block"
           ],
           "properties": {
             "address": {
               "$ref": "#/definitions/HumanAddr"
+            },
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         }
@@ -51,6 +57,28 @@
       "properties": {
         "token_info": {
           "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Total Supply at a given block Return type: TotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "total_supply_at"
+      ],
+      "properties": {
+        "total_supply_at": {
+          "type": "object",
+          "required": [
+            "block"
+          ],
+          "properties": {
+            "block": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
         }
       }
     },

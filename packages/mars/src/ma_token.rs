@@ -32,7 +32,7 @@ pub mod msg {
             }
             if !is_valid_symbol(&self.symbol) {
                 return Err(StdError::generic_err(
-                    "Ticker symbol is not in expected format [A-Z]{3,6}",
+                    "Ticker symbol is not in expected format [a-zA-Z\\-]{3,12}",
                 ));
             }
             if self.decimals > TOKEN_MAX_DECIMALS {
@@ -49,7 +49,7 @@ pub mod msg {
 
     fn is_valid_symbol(symbol: &str) -> bool {
         let bytes = symbol.as_bytes();
-        if bytes.len() < 3 || bytes.len() > 6 {
+        if bytes.len() < 3 || bytes.len() > 12 {
             return false;
         }
         for byte in bytes.iter() {

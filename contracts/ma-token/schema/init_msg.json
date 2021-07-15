@@ -4,10 +4,8 @@
   "type": "object",
   "required": [
     "decimals",
-    "incentives_address",
     "initial_balances",
     "name",
-    "red_bank_address",
     "symbol"
   ],
   "properties": {
@@ -15,9 +13,6 @@
       "type": "integer",
       "format": "uint8",
       "minimum": 0.0
-    },
-    "incentives_address": {
-      "$ref": "#/definitions/HumanAddr"
     },
     "init_hook": {
       "anyOf": [
@@ -47,9 +42,6 @@
     },
     "name": {
       "type": "string"
-    },
-    "red_bank_address": {
-      "$ref": "#/definitions/HumanAddr"
     },
     "symbol": {
       "type": "string"

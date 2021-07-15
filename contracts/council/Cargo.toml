@@ -20,8 +20,9 @@ crate-type = ["cdylib", "rlib"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-mars = { path = "../../packages/mars", version = "0.1.0" }
+cw0 = "0.2" 
 cw20 = "0.2"
+mars = { path = "../../packages/mars", version = "0.1.0" }
 cosmwasm-std = { version = "0.10.1", features = ["iterator"] }
 cosmwasm-storage = { version = "0.10.1", features = ["iterator"] }
 cosmwasm-bignumber = "1.0"

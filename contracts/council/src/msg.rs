@@ -1,4 +1,4 @@
-use crate::state::{ProposalExecuteCall, ProposalStatus, ProposalVoteOption};
+use crate::state::{ProposalStatus, ProposalVoteOption};
 use cosmwasm_std::{Binary, Decimal, HumanAddr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -77,13 +77,10 @@ pub enum QueryMsg {
     Proposal {
         proposal_id: u64,
     },
-    LatestExecutedProposal {},
     ProposalVotes {
         proposal_id: u64,
-        start: Option<u64>,
+        start_after: Option<HumanAddr>,
         limit: Option<u32>,
-        sort: Option<ProposalVotesSort>,
-        filter: Option<ProposalVotesFilter>,
     },
 }
 
@@ -118,28 +115,21 @@ pub struct ProposalInfo {
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_calls: Option<Vec<ProposalExecuteCall>>,
+    pub execute_calls: Option<Vec<ProposalExecuteCallResponse>>,
     pub deposit_amount: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ProposalVotesSort {
-    Ascending,
-    Descending,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
-pub struct ProposalVotesFilter {
-    pub voter_address: Option<HumanAddr>,
-    pub vote_option: Option<ProposalVoteOption>,
+pub struct ProposalExecuteCallResponse {
+    pub execution_order: u64,
+    pub target_contract_human_address: HumanAddr,
+    pub msg: Binary,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalVotesResponse {
     pub proposal_id: u64,
     pub votes: Vec<ProposalVoteResponse>,
-    pub proposal_votes_count: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

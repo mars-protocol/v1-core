@@ -3,38 +3,44 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Returns the current balance of the given address, 0 if unset. Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "config"
+        "balance"
       ],
       "properties": {
-        "config": {
-          "type": "object"
+        "balance": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
         }
       }
     },
     {
+      "description": "Returns the balance of the given address at a given block Return type: BalanceResponse.",
       "type": "object",
       "required": [
-        "proposals"
+        "balance_at"
       ],
       "properties": {
-        "proposals": {
+        "balance_at": {
           "type": "object",
+          "required": [
+            "address",
+            "block"
+          ],
           "properties": {
-            "limit": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "uint32",
-              "minimum": 0.0
+            "address": {
+              "$ref": "#/definitions/HumanAddr"
             },
-            "start": {
-              "type": [
-                "integer",
-                "null"
-              ],
+            "block": {
+              "type": "integer",
               "format": "uint64",
               "minimum": 0.0
             }
@@ -43,18 +49,31 @@
       }
     },
     {
+      "description": "Returns metadata on the contract - name, decimals, supply, etc. Return type: TokenInfoResponse.",
       "type": "object",
       "required": [
-        "proposal"
+        "token_info"
       ],
       "properties": {
-        "proposal": {
+        "token_info": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "description": "Total Supply at a given block Return type: TotalSupplyResponse",
+      "type": "object",
+      "required": [
+        "total_supply_at"
+      ],
+      "properties": {
+        "total_supply_at": {
           "type": "object",
           "required": [
-            "proposal_id"
+            "block"
           ],
           "properties": {
-            "proposal_id": {
+            "block": {
               "type": "integer",
               "format": "uint64",
               "minimum": 0.0
@@ -66,36 +85,51 @@
     {
       "type": "object",
       "required": [
-        "latest_executed_proposal"
+        "minter"
       ],
       "properties": {
-        "latest_executed_proposal": {
+        "minter": {
           "type": "object"
         }
       }
     },
     {
+      "description": "Only with \"allowance\" extension. Returns how much spender can use from owner account, 0 if unset. Return type: AllowanceResponse.",
       "type": "object",
       "required": [
-        "proposal_votes"
+        "allowance"
       ],
       "properties": {
-        "proposal_votes": {
+        "allowance": {
           "type": "object",
           "required": [
-            "proposal_id"
+            "owner",
+            "spender"
           ],
           "properties": {
-            "filter": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ProposalVotesFilter"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
             },
+            "spender": {
+              "$ref": "#/definitions/HumanAddr"
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension (and \"allowances\") Returns all allowances this owner has approved. Supports pagination. Return type: AllAllowancesResponse.",
+      "type": "object",
+      "required": [
+        "all_allowances"
+      ],
+      "properties": {
+        "all_allowances": {
+          "type": "object",
+          "required": [
+            "owner"
+          ],
+          "properties": {
             "limit": {
               "type": [
                 "integer",
@@ -104,28 +138,50 @@
               "format": "uint32",
               "minimum": 0.0
             },
-            "proposal_id": {
-              "type": "integer",
-              "format": "uint64",
-              "minimum": 0.0
+            "owner": {
+              "$ref": "#/definitions/HumanAddr"
             },
-            "sort": {
+            "start_after": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/ProposalVotesSort"
+                  "$ref": "#/definitions/HumanAddr"
                 },
                 {
                   "type": "null"
                 }
               ]
-            },
-            "start": {
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Only with \"enumerable\" extension Returns all accounts that have balances. Supports pagination. Return type: AllAccountsResponse.",
+      "type": "object",
+      "required": [
+        "all_accounts"
+      ],
+      "properties": {
+        "all_accounts": {
+          "type": "object",
+          "properties": {
+            "limit": {
               "type": [
                 "integer",
                 "null"
               ],
-              "format": "uint64",
+              "format": "uint32",
               "minimum": 0.0
+            },
+            "start_after": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/HumanAddr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -135,45 +191,6 @@
   "definitions": {
     "HumanAddr": {
       "type": "string"
-    },
-    "ProposalVoteOption": {
-      "type": "string",
-      "enum": [
-        "for",
-        "against"
-      ]
-    },
-    "ProposalVotesFilter": {
-      "type": "object",
-      "properties": {
-        "vote_option": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ProposalVoteOption"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "voter_address": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/HumanAddr"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
-    },
-    "ProposalVotesSort": {
-      "type": "string",
-      "enum": [
-        "ascending",
-        "descending"
-      ]
     }
   }
 }
