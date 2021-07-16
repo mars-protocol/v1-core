@@ -1,7 +1,7 @@
 /*
 Integration test for the insurance fund contract swapping assets to UST via Terraswap.
 
-Run the test from the root of this repo:
+Run:
 ```
 docker_compose_file=$(git rev-parse --show-toplevel)/../LocalTerra/docker-compose.yml
 docker compose -f $docker_compose_file up -d > /dev/null
