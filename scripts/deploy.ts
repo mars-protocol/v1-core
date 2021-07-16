@@ -20,7 +20,7 @@ const MARS_ARTIFACTS_PATH = "../artifacts"
 // main
 
 async function main() {
-  let terra
+  let terra: LCDClient | LocalTerra
   let wallet: Wallet
   const isTestnet = process.env.NETWORK === "testnet"
 
@@ -34,7 +34,7 @@ async function main() {
     console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
   } else {
     terra = new LocalTerra()
-    wallet = terra.wallets!.test1
+    wallet = (terra as LocalTerra).wallets.test1
     setTimeoutDuration(0)
   }
 
