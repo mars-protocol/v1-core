@@ -1,16 +1,9 @@
 /*
 Integration test for the insurance fund contract swapping assets to UST via Terraswap.
 
-Run the test from the root of this repo:
-```
-docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
-node scripts/tests/insurance_fund.js
-docker compose -f ../LocalTerra/docker-compose.yml down
-```
-
 Required directory structure:
 ```
-$ tree -L 1 ..
+$ tree -L 1 $(git rev-parse --show-toplevel)/..
 .
 ├── LocalTerra
 ├── protocol
@@ -22,29 +15,55 @@ This test works on columbus-4 with the following versions:
 - terracli v0.5.0-rc0
 - terraswap 72c60c05c43841499f760710a03f864c5ee4db3b
 
-Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to make the test run faster.
-
 TODO:
 - Upgrade to columbus-5
 */
 
-import { Int, LocalTerra, MsgSend } from "@terra-money/terra.js"
+import { Int, LocalTerra, MsgSend, Numeric, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
   instantiateContract,
   performTransaction,
   queryContract,
+  setTimeoutDuration,
   toEncodedBinary,
   uploadContract
-} from "../helpers.mjs"
+} from "../helpers.js"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
+
+// types
+
+interface NativeToken {
+  native_token: {
+    denom: string
+  }
+}
+
+interface CW20 {
+  token: {
+    contract_addr: string
+  }
+}
+
+type Token = NativeToken | CW20
+
+interface Env {
+  terra: LocalTerra,
+  wallet: Wallet,
+  tokenCodeID: number,
+  pairCodeID: number,
+  factoryCodeID: number,
+  factoryAddress: string,
+  insuranceFundAddress: string,
+}
 
 // consts and globals
 
 const ZERO = new Int(0)
-const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
+const MARS_ARTIFACTS_PATH = "../artifacts"
+const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
 const USD_LP = 1_000_000_000000
@@ -52,7 +71,7 @@ const INSURANCE_FUND_TOKEN_BALANCE = 100_000_000000
 
 // helpers
 
-async function instantiateUsdPair(env, bid) {
+async function instantiateUsdPair(env: Env, bid: Token): Promise<string> {
   return await instantiateContract(env.terra, env.wallet, env.factoryCodeID,
     {
       "pair_code_id": env.pairCodeID,
@@ -77,13 +96,13 @@ async function instantiateUsdPair(env, bid) {
   )
 }
 
-async function provideLiquidity(env, address, asset, coins) {
+async function provideLiquidity(env: Env, address: string, token: Token, coins: string) {
   await executeContract(env.terra, env.wallet, address,
     {
       "provide_liquidity": {
         "assets": [
           {
-            "info": asset,
+            "info": token,
             "amount": String(TOKEN_LP)
           }, {
             "info": {
@@ -100,7 +119,7 @@ async function provideLiquidity(env, address, asset, coins) {
   )
 }
 
-async function getBalance(env, address, denom) {
+async function getBalance(env: Env, address: string, denom: string): Promise<Numeric.Output> {
   const balances = await env.terra.bank.balance(address)
   const balance = balances.get(denom)
   if (balance === undefined) {
@@ -111,7 +130,7 @@ async function getBalance(env, address, denom) {
 
 // tests
 
-async function testSwapNativeTokenToUsd(env, denom) {
+async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   const NATIVE_TOKEN = {
     "native_token": {
       "denom": denom
@@ -162,7 +181,7 @@ async function testSwapNativeTokenToUsd(env, denom) {
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
-async function testSwapTokenToUsd(env, address) {
+async function testSwapTokenToUsd(env: Env, address: string) {
   const TOKEN = {
     "token": {
       "contract_addr": address
@@ -230,6 +249,8 @@ async function testSwapTokenToUsd(env, address) {
 // main
 
 async function main() {
+  setTimeoutDuration(0)
+
   const terra = new LocalTerra()
   const wallet = terra.wallets.test1
 
@@ -246,7 +267,7 @@ async function main() {
   )
 
   console.log("deploying Mars insurance fund")
-  const insuranceFundAddress = await deployContract(terra, wallet, join("artifacts", "insurance_fund.wasm"),
+  const insuranceFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "insurance_fund.wasm"),
     {
       "owner": wallet.key.accAddress,
       "terraswap_factory_address": factoryAddress,
@@ -281,7 +302,7 @@ async function main() {
 
   console.log("testSwapNativeTokenToUsd")
   await testSwapNativeTokenToUsd(env, "uluna")
-  
+
   console.log("testSwapTokenToUsd")
   await testSwapTokenToUsd(env, tokenAddress)
 

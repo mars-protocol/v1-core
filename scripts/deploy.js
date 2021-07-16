@@ -1,14 +1,15 @@
 import 'dotenv/config.js';
 import {
-  recover,
-  uploadContract,
-  instantiateContract,
   deployContract,
-  queryContract,
   executeContract,
+  instantiateContract,
+  queryContract,
+  recover,
   setupRedBank,
-} from "./helpers.mjs";
+  uploadContract,
+} from "./helpers.js";
 import { LCDClient, LocalTerra } from "@terra-money/terra.js";
+import { testnet, local } from "./deploy_configs.js"
 
 async function main() {
   let terra;
@@ -28,158 +29,11 @@ async function main() {
     wallet = terra.wallets.test1;
   }
 
-  let councilInitMsg;
-  let stakingInitMsg;
-  let insuranceFundInitMsg;
-  let redBankInitMsg;
-  let initialAssets = []
-
+  let deployConfig;
   if (isTestnet) {
-    let terraswap_factory_address = "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf"
-
-    councilInitMsg = {
-      "config": {
-        "address_provider_address": undefined,
-
-        "proposal_voting_period": 1000,
-        "proposal_effective_delay": 150,
-        "proposal_expiration_period": 3000,
-        "proposal_required_deposit": "100000000",
-        "proposal_required_quorum": "0.1",
-        "proposal_required_threshold": "0.05"
-      }
-    };
-
-    stakingInitMsg = {
-      "config": {
-        "owner": undefined,
-        "address_provider_address": undefined,
-        "terraswap_factory_address": terraswap_factory_address,
-        "terraswap_max_spread": "0.05",
-        "cooldown_duration": 10,
-        "unstake_window": 300,
-      }
-    }
-
-    insuranceFundInitMsg = {
-      "owner": undefined,
-      "terraswap_factory_address": terraswap_factory_address,
-      "terraswap_max_spread": "0.05",
-    }
-
-    redBankInitMsg = {
-      "config": {
-        "owner": wallet.key.accAddress,
-        "address_provider_address": undefined,
-        "insurance_fund_fee_share": "0.1",
-        "treasury_fee_share": "0.2",
-        "ma_token_code_id": undefined,
-        "close_factor": "0.5"
-      }
-    }
-
-    // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
-    initialAssets = [
-      {
-        denom: "uluna",
-        initial_borrow_rate: "0.1",
-        min_borrow_rate: "0.03",
-        max_borrow_rate: "0.6",
-        max_loan_to_value: "0.7",
-        reserve_factor: "0.3",
-        maintenance_margin: "0.75",
-        liquidation_bonus: "0.05",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
-      },
-      {
-        denom: "uusd",
-        initial_borrow_rate: "0.1",
-        min_borrow_rate: "0.01",
-        max_borrow_rate: "0.8",
-        max_loan_to_value: "0.8",
-        reserve_factor: "0.3",
-        maintenance_margin: "0.825",
-        liquidation_bonus: "0.05",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
-      },
-      {
-        symbol: "ANC",
-        contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-        initial_borrow_rate: "0.1",
-        min_borrow_rate: "0.03",
-        max_borrow_rate: "0.6",
-        max_loan_to_value: "0.5",
-        reserve_factor: "0.3",
-        maintenance_margin: "0.55",
-        liquidation_bonus: "0.1",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
-      },
-      {
-        symbol: "MIR",
-        contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u",
-        initial_borrow_rate: "0.1",
-        min_borrow_rate: "0.03",
-        max_borrow_rate: "0.6",
-        max_loan_to_value: "0.5",
-        reserve_factor: "0.3",
-        maintenance_margin: "0.55",
-        liquidation_bonus: "0.1",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
-      },
-    ]
+    deployConfig = testnet
   } else {
-    councilInitMsg = {
-      "config": {
-        "address_provider_address": undefined,
-
-        "proposal_voting_period": 1000,
-        "proposal_effective_delay": 150,
-        "proposal_expiration_period": 3000,
-        "proposal_required_deposit": "100000000",
-        "proposal_required_quorum": "0.1",
-        "proposal_required_threshold": "0.05"
-      }
-    };
-
-    stakingInitMsg = {
-      "config": {
-        "owner": undefined,
-        "address_provider_address": undefined,
-        "terraswap_factory_address": undefined,
-        "terraswap_max_spread": "0.05",
-        "cooldown_duration": 10,
-        "unstake_window": 300,
-      }
-    }
-
-    insuranceFundInitMsg = {
-      "owner": undefined,
-      "terraswap_factory_address": undefined,
-      "terraswap_max_spread": "0.05",
-    }
-
-    redBankInitMsg = {
-      "config": {
-        "owner": wallet.key.accAddress,
-        "address_provider_address": undefined,
-        "insurance_fund_fee_share": "0.1",
-        "treasury_fee_share": "0.2",
-        "ma_token_code_id": undefined,
-        "close_factor": "0.5"
-      }
-    }
+    deployConfig = local
   }
 
   /*************************************** Deploy Address Provider Contract *****************************************/
@@ -189,21 +43,21 @@ async function main() {
 
   /*************************************** Deploy Council Contract *****************************************/
   console.log("Deploying council...");
-  councilInitMsg.config.address_provider_address = addressProviderContractAddress
-  const councilContractAddress = await deployContract(terra, wallet, './artifacts/council.wasm', councilInitMsg);
+  deployConfig.councilInitMsg.config.address_provider_address = addressProviderContractAddress
+  const councilContractAddress = await deployContract(terra, wallet, './artifacts/council.wasm', deployConfig.councilInitMsg);
   console.log("Council Contract Address: " + councilContractAddress);
 
   /**************************************** Deploy Staking Contract *****************************************/
   console.log("Deploying Staking...");
-  stakingInitMsg.config.owner = councilContractAddress
-  stakingInitMsg.config.address_provider_address = addressProviderContractAddress
-  const stakingContractAddress = await deployContract(terra, wallet, './artifacts/staking.wasm', stakingInitMsg);
+  deployConfig.stakingInitMsg.config.owner = councilContractAddress
+  deployConfig.stakingInitMsg.config.address_provider_address = addressProviderContractAddress
+  const stakingContractAddress = await deployContract(terra, wallet, './artifacts/staking.wasm', deployConfig.stakingInitMsg);
   console.log("Staking Contract Address: " + stakingContractAddress);
 
   /************************************* Deploy Insurance Fund Contract *************************************/
   console.log("Deploying Insurance Fund...");
-  insuranceFundInitMsg.owner = councilContractAddress
-  const insuranceFundContractAddress = await deployContract(terra, wallet, './artifacts/insurance_fund.wasm', insuranceFundInitMsg)
+  deployConfig.insuranceFundInitMsg.owner = councilContractAddress
+  const insuranceFundContractAddress = await deployContract(terra, wallet, './artifacts/insurance_fund.wasm', deployConfig.insuranceFundInitMsg)
   console.log("Insurance Fund Contract Address: " + insuranceFundContractAddress);
 
   /**************************************** Deploy Treasury Contract ****************************************/
@@ -255,9 +109,10 @@ async function main() {
 
   /************************************* Deploy Red Bank Contract *************************************/
   console.log("Deploying Red Bank...");
-  redBankInitMsg.config.address_provider_address = addressProviderContractAddress
-  redBankInitMsg.config.ma_token_code_id = maTokenCodeId
-  const redBankContractAddress = await deployContract(terra, wallet, './artifacts/red_bank.wasm', redBankInitMsg)
+  deployConfig.redBankInitMsg.config.owner = wallet.key.accAddress
+  deployConfig.redBankInitMsg.config.address_provider_address = addressProviderContractAddress
+  deployConfig.redBankInitMsg.config.ma_token_code_id = maTokenCodeId
+  const redBankContractAddress = await deployContract(terra, wallet, './artifacts/red_bank.wasm', deployConfig.redBankInitMsg)
   console.log(`Red Bank Contract Address: ${redBankContractAddress}`);
 
   /**************************************** Update Config in Address Provider Contract *****************************************/
@@ -280,13 +135,13 @@ async function main() {
   console.log("Address Provider config successfully setup: ", await queryContract(terra, addressProviderContractAddress, { "config": {} }))
 
   /************************************* Setup Initial Liquidity Pools **************************************/
-  await setupRedBank(terra, wallet, redBankContractAddress, { initialAssets });
+  await setupRedBank(terra, wallet, redBankContractAddress, { initialAssets: deployConfig.initialAssets });
   console.log("Initial assets setup successfully")
 
   // Once initial assets initialized, set the owner of Red Bank to be Council rather than EOA
   console.log(`Updating Red Bank to be owned by Council contract ${councilContractAddress}`)
-  redBankInitMsg.owner = councilContractAddress
-  await executeContract(terra, wallet, redBankContractAddress, { "update_config": redBankInitMsg })
+  deployConfig.redBankInitMsg.config.owner = councilContractAddress
+  await executeContract(terra, wallet, redBankContractAddress, { "update_config": deployConfig.redBankInitMsg })
   console.log("Red Bank config successfully updated: ", await queryContract(terra, redBankContractAddress, { "config": {} }))
 }
 

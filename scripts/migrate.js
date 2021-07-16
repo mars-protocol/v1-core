@@ -1,7 +1,7 @@
 import 'dotenv/config.js';
-import {migrate, uploadContract} from "./helpers.mjs";
-import {LCDClient, LocalTerra} from "@terra-money/terra.js";
-import {recover} from "./testnet.mjs";
+import { migrate, uploadContract } from "./helpers.js";
+import { LCDClient, LocalTerra } from "@terra-money/terra.js";
+import { recover } from "./testnet.mjs";
 
 async function main() {
   let terra;
