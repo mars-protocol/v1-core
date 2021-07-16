@@ -9,7 +9,6 @@ import {
   MsgMigrateContract,
   MsgStoreCode,
   StdFee,
-  TxSuccess,
   Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
