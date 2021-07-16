@@ -241,17 +241,16 @@ dependencies = [
 name = "council"
 version = "0.1.0"
 dependencies = [
- "cosmwasm-bignumber 1.0.0",
- "cosmwasm-schema 0.10.1",
- "cosmwasm-std 0.10.1",
- "cosmwasm-storage 0.10.1",
- "cw0 0.2.3",
- "cw20 0.2.3",
+ "cosmwasm-schema 0.15.0",
+ "cosmwasm-std 0.15.0",
+ "cosmwasm-storage 0.15.0",
+ "cw0 0.7.0",
+ "cw20 0.7.0",
  "mars",
- "schemars 0.7.6",
+ "schemars 0.8.3",
  "serde",
  "snafu",
- "terra-cosmwasm 1.2.4",
+ "thiserror",
 ]
 
 [[package]]
@@ -557,7 +556,7 @@ dependencies = [
  "cosmwasm-schema 0.10.1",
  "cosmwasm-std 0.10.1",
  "cosmwasm-storage 0.10.1",
- "cw20 0.2.3",
+ "cw20 0.7.0",
  "mars",
  "schemars 0.7.6",
  "serde",
@@ -618,6 +617,7 @@ dependencies = [
  "serde",
  "terra-cosmwasm 2.1.0",
  "terraswap 2.3.0",
+ "thiserror",
 ]
 
 [[package]]

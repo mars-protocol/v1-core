@@ -21,6 +21,7 @@ backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
+
 cw20 = "0.7"
 
 terra-cosmwasm = "2.1.0"
@@ -33,7 +34,7 @@ cosmwasm-storage = "0.15.0"
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 snafu = "0.6.3"
-thiserror = { version = "1.0.20" }
+thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = { version = "0.15.0" }
+cosmwasm-schema = "0.15.0"

@@ -7,7 +7,7 @@ use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADD
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Addr, Binary, BlockInfo, Coin, ContractInfo,
     ContractResult, Decimal, Env, OwnedDeps, Querier, QuerierResult, QueryRequest, StdResult,
-    SystemError, Timestamp, Uint128, WasmQuery,
+    SystemError, Timestamp, Uint128, WasmQuery, MessageInfo
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -49,6 +49,14 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
         contract: ContractInfo {
             address: Addr::unchecked(MOCK_CONTRACT_ADDR),
         },
+    }
+}
+
+/// quick mock info with just the sender
+pub fn mock_info(sender: &str) -> MessageInfo {
+    MessageInfo {
+        sender: Addr::unchecked(sender),
+        funds: vec![]
     }
 }
 

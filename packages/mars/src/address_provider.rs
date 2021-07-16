@@ -78,6 +78,7 @@ pub mod msg {
 pub mod helpers {
     use super::msg::{MarsContract, QueryMsg};
     use cosmwasm_std::{to_binary, Addr, Deps, QueryRequest, StdResult, WasmQuery};
+    use crate::error::{MarsError};
 
     pub fn query_address(
         deps: &Deps,
@@ -96,11 +97,20 @@ pub mod helpers {
         deps: &Deps,
         address_provider_address: Addr,
         contracts: Vec<MarsContract>,
-    ) -> StdResult<Vec<Addr>> {
+    ) -> Result<Vec<Addr>, MarsError> {
+        let expected_len = contracts.len();
+
         let query: Vec<Addr> = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: address_provider_address.to_string(),
             msg: to_binary(&QueryMsg::Addresses { contracts })?,
         }))?;
+
+        if query.len() != expected_len {
+            return Err(MarsError::AddressesQueryWrongNumber{
+                expected: expected_len as u32,
+                actual: query.len() as u32,
+            });
+        }
 
         Ok(query)
     }

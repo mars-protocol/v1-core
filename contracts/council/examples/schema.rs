@@ -2,7 +2,7 @@ use std::env::current_dir;
 use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use council::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
+use council::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 
 use council::state::Config;
 

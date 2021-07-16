@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, CanonicalAddr, Decimal, StdResult, Storage, Uint128};
+use cosmwasm_std::{Binary, Addr, Decimal, StdResult, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -20,7 +20,7 @@ pub static PROPOSAL_VOTES_NAMESPACE: &[u8] = b"proposal_votes";
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Address provider returns addresses for all protocol contracts
-    pub address_provider_address: CanonicalAddr,
+    pub address_provider_address: Addr,
     /// Blocks during which a proposal is active since being submitted
     pub proposal_voting_period: u64,
     /// Blocks that need to pass since a proposal succeeds in order for it to be available to be
@@ -57,11 +57,11 @@ impl Config {
     }
 }
 
-pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config(storage: &mut dyn Storage) -> Singleton<Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read<S: Storage>(storage: &dyn Storage) -> ReadonlySingleton<Config> {
     singleton_read(storage, CONFIG_KEY)
 }
 
@@ -72,11 +72,11 @@ pub struct Council {
     pub proposal_count: u64,
 }
 
-pub fn council<S: Storage>(storage: &mut S) -> Singleton<S, Council> {
+pub fn council(storage: &mut S) -> Singleton<S, Council> {
     singleton(storage, COUNCIL_KEY)
 }
 
-pub fn council_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Council> {
+pub fn council_read(storage: &S) -> ReadonlySingleton<S, Council> {
     singleton_read(storage, COUNCIL_KEY)
 }
 
@@ -95,12 +95,12 @@ pub struct Proposal {
     pub deposit_amount: Uint128,
 }
 
-pub fn proposals<S: Storage>(storage: &mut S) -> Bucket<S, Proposal> {
-    bucket(PROPOSALS_NAMESPACE, storage)
+pub fn proposals(storage: &mut dyn S) -> Bucket<Proposal> {
+    bucket(storage, PROPOSALS_NAMESPACE)
 }
 
-pub fn proposals_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Proposal> {
-    bucket_read(PROPOSALS_NAMESPACE, storage)
+pub fn proposals_read(storage: &dyn S) -> ReadonlyBucket<Proposal> {
+    bucket_read(storage, PROPOSALS_NAMESPACE)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -145,19 +145,19 @@ impl std::fmt::Display for ProposalVoteOption {
     }
 }
 
-pub fn proposal_votes<S: Storage>(storage: &mut S, proposal_id: u64) -> Bucket<S, ProposalVote> {
+pub fn proposal_votes(storage: &mut dyn S, proposal_id: u64) -> Bucket<ProposalVote> {
     Bucket::multilevel(
-        &[PROPOSAL_VOTES_NAMESPACE, &proposal_id.to_be_bytes()],
         storage,
+        &[PROPOSAL_VOTES_NAMESPACE, &proposal_id.to_be_bytes()]
     )
 }
 
-pub fn proposal_votes_read<S: Storage>(
-    storage: &S,
+pub fn proposal_votes_read<(
+    storage: &dyn S,
     proposal_id: u64,
-) -> ReadonlyBucket<S, ProposalVote> {
+) -> ReadonlyBucket<ProposalVote> {
     ReadonlyBucket::multilevel(
-        &[PROPOSAL_VOTES_NAMESPACE, &proposal_id.to_be_bytes()],
         storage,
+        &[PROPOSAL_VOTES_NAMESPACE, &proposal_id.to_be_bytes()]
     )
 }
