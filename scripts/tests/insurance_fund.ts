@@ -3,9 +3,10 @@ Integration test for the insurance fund contract swapping assets to UST via Terr
 
 Run the test from the root of this repo:
 ```
-docker compose -f ../LocalTerra/docker-compose.yml up -d > /dev/null
-node --loader ts-node/esm scripts/tests/insurance_fund.ts
-docker compose -f ../LocalTerra/docker-compose.yml down
+docker_compose_file=$(git rev-parse --show-toplevel)/../LocalTerra/docker-compose.yml
+docker compose -f $docker_compose_file up -d > /dev/null
+node --loader ts-node/esm insurance_fund.ts
+docker compose -f $docker_compose_file down
 ```
 
 Required directory structure:
@@ -71,7 +72,8 @@ interface Env {
 // consts and globals
 
 const ZERO = new Int(0)
-const TERRASWAP_ARTIFACTS_PATH = "../terraswap/artifacts"
+const MARS_ARTIFACTS_PATH = "../../artifacts"
+const TERRASWAP_ARTIFACTS_PATH = "../../../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
 const USD_LP = 1_000_000_000000
@@ -275,7 +277,7 @@ async function main() {
   )
 
   console.log("deploying Mars insurance fund")
-  const insuranceFundAddress = await deployContract(terra, wallet, join("artifacts", "insurance_fund.wasm"),
+  const insuranceFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "insurance_fund.wasm"),
     {
       "owner": wallet.key.accAddress,
       "terraswap_factory_address": factoryAddress,
