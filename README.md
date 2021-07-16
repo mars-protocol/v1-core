@@ -90,6 +90,6 @@ Env variables:
 
 1. Create a .env file in the top level of of the directory if doesn't already exist
 2. Add the env variable NETWORK=[network_to_generate_from_e.g._NETWORK=testnet]
-3. Add the env variable LP_ADDRESS=[your_deployed_lp_contract_address]
+3. Add the env variable REDBANK_ADDRESS=[your_deployed_red_bank_contract_address]
 4. Run `node scripts/whitelist.js`
 5. Check the artifacts folder for [NETWORK].json output
