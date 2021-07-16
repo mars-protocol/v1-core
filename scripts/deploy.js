@@ -81,32 +81,32 @@ async function main() {
     // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
     initialAssets = [
       {
-        denom: "uluna",
-        initial_borrow_rate: "0.1",
-        min_borrow_rate: "0.03",
-        max_borrow_rate: "0.6",
-        max_loan_to_value: "0.7",
-        reserve_factor: "0.3",
-        maintenance_margin: "0.75",
-        liquidation_bonus: "0.05",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
-      },
-      {
         denom: "uusd",
         initial_borrow_rate: "0.1",
         min_borrow_rate: "0.01",
         max_borrow_rate: "0.8",
-        max_loan_to_value: "0.8",
+        max_loan_to_value: "0.75",
         reserve_factor: "0.3",
-        maintenance_margin: "0.825",
-        liquidation_bonus: "0.05",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
+        maintenance_margin: "0.85",
+        liquidation_bonus: "0.15",
+        kp: "4",
+        optimal_utilization_rate: "0.9",
+        kp_augmentation_threshold: "0.2",
+        kp_multiplier: "1.75"
+      },
+      {
+        denom: "uluna",
+        initial_borrow_rate: "0.1",
+        min_borrow_rate: "0.03",
+        max_borrow_rate: "0.6",
+        max_loan_to_value: "0.5",
+        reserve_factor: "0.3",
+        maintenance_margin: "0.7",
+        liquidation_bonus: "0.15",
+        kp: "2",
+        optimal_utilization_rate: "0.7",
+        kp_augmentation_threshold: "0.2",
+        kp_multiplier: "2.5"
       },
       {
         symbol: "ANC",
@@ -116,12 +116,12 @@ async function main() {
         max_borrow_rate: "0.6",
         max_loan_to_value: "0.5",
         reserve_factor: "0.3",
-        maintenance_margin: "0.55",
-        liquidation_bonus: "0.1",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
+        maintenance_margin: "0.7",
+        liquidation_bonus: "0.15",
+        kp: "2",
+        optimal_utilization_rate: "0.5",
+        kp_augmentation_threshold: "0.2",
+        kp_multiplier: "2.5"
       },
       {
         symbol: "MIR",
@@ -131,12 +131,12 @@ async function main() {
         max_borrow_rate: "0.6",
         max_loan_to_value: "0.5",
         reserve_factor: "0.3",
-        maintenance_margin: "0.55",
-        liquidation_bonus: "0.1",
-        kp: "0.5",
-        optimal_utilization_rate: "0.75",
-        kp_augmentation_threshold: "0.1",
-        kp_multiplier: "0.5"
+        maintenance_margin: "0.7",
+        liquidation_bonus: "0.15",
+        kp: "2",
+        optimal_utilization_rate: "0.5",
+        kp_augmentation_threshold: "0.2",
+        kp_multiplier: "2.5"
       },
     ]
   } else {
