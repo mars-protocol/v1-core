@@ -1,17 +1,9 @@
 /*
 Integration test for the insurance fund contract swapping assets to UST via Terraswap.
 
-Run:
-```
-docker_compose_file=$(git rev-parse --show-toplevel)/../LocalTerra/docker-compose.yml
-docker compose -f $docker_compose_file up -d > /dev/null
-node --loader ts-node/esm insurance_fund.ts
-docker compose -f $docker_compose_file down
-```
-
 Required directory structure:
 ```
-$ tree -L 1 ..
+$ tree -L 1 $(git rev-parse --show-toplevel)/..
 .
 ├── LocalTerra
 ├── protocol
@@ -22,8 +14,6 @@ This test works on columbus-4 with the following versions:
 - LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
 - terracli v0.5.0-rc0
 - terraswap 72c60c05c43841499f760710a03f864c5ee4db3b
-
-Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to make the test run faster.
 
 TODO:
 - Upgrade to columbus-5
@@ -72,8 +62,8 @@ interface Env {
 // consts and globals
 
 const ZERO = new Int(0)
-const MARS_ARTIFACTS_PATH = "../../artifacts"
-const TERRASWAP_ARTIFACTS_PATH = "../../../terraswap/artifacts"
+const MARS_ARTIFACTS_PATH = "../artifacts"
+const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
 const USD_LP = 1_000_000_000000

@@ -1,36 +1,82 @@
 # Mars
+## Scripts
 
 ### Build
 
-1. Run `./scripts/build_artifacts.sh`
+```
+./scripts/build_artifacts.sh
+./scripts/build_schema.sh
+```
 
-### Deploy Dev
+### Linting
+
+```
+cargo fmt
+cargo clippy --tests --all-features -- -D warnings
+```
+
+### TypeScript and JavaScript scripts
+
+Must be run from the `scripts` directory.
+
+Setup:
+
+```
+cd scripts
+npm install
+```
+
+TypeScript scripts must be executed with `ts-node` using:
+
+```
+node --loader ts-node/esm script.ts
+```
+
+An alias can be added to the shell profile:
+
+```
+# bash
+echo 'alias ts-node="node --loader ts-node/esm"' >> ~/.bashrc
+
+# zsh
+echo 'alias ts-node="node --loader ts-node/esm"' >> ~/.zshrc
+```
+
+Some scripts require LocalTerra to be running:
+
+```
+git clone https://github.com/terra-money/LocalTerra.git
+cd LocalTerra
+docker compose up
+```
+
+Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to `250ms` to make the test run faster.
+
+### Deploy
 
 1. Build the smart contracts by running `./scripts/build_artifacts.sh`
-2. Run `yarn install` to install dependencies
-3. Ensure you have LocalTerra running
-4. Modify your terra instance and wallet as desired in `deploy_local.js`
-5. Run `node scripts/deploy_local.js` to deploy and instantiate the smart contracts
-
-### Deploy Testnet
-
-1. Build the smart contracts by running `./scripts/build_artifacts.sh`
-2. Run `yarn install` to install dependencies
+2. Run `npm install` to install dependencies
 3. Create a .env file in the top level of of the directory if doesn't already exist
 4. Add the env variable TEST_MAIN=[your_deploying_wallets_mnemonic_key]
 5. Run `node scripts/deploy.js` to deploy and instantiate the smart contracts
 
-### Linting
-1. Format: `cargo fmt`.
-2. Lint: `cargo clippy --tests --all-features -- -D warnings`
-
 ### Testing
 #### Unit tests
-- Run `cargo unit-test` inside a package to run specific package tests
-- Run `cargo test` on root directory to run all tests
+
+```
+# inside a package to run specific package tests
+cargo unit-test
+
+# in the root directory to run all tests
+cargo test
+```
 
 #### Integration tests
-Run `node scripts/liquidity_pool_integration_tests.js`
+
+```
+cd scripts
+ts-node tests/insurance_fund.ts
+```
 
 Env variables:
 - `DEBUG`: when set to 1, more verbose logs are printed.
