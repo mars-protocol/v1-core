@@ -1,5 +1,5 @@
 import 'dotenv/config.js';
-import { queryContract } from "./helpers.mjs";
+import { queryContract } from "./helpers.js";
 import { LCDClient, LocalTerra } from "@terra-money/terra.js";
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 
