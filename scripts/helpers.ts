@@ -14,6 +14,9 @@ import {
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
 
+// Tequila lcd is load balanced, so txs can't be sent too fast, otherwise account sequence queries
+// may resolve an older state depending on which lcd you end up with. Generally 1000 ms is is enough
+// for all nodes to sync up.
 let TIMEOUT = 1000
 
 export function setTimeoutDuration(t: number) {
@@ -37,12 +40,7 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
       `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
     );
   }
-
-  // Can't send txs too fast, tequila lcd is load balanced,
-  // account sequence query may resolve an older state depending on which lcd you end up with,
-  // generally 1 sec is enough for all nodes to sync up.
   await new Promise(resolve => setTimeout(resolve, TIMEOUT));
-
   return result
 }
 
@@ -65,10 +63,7 @@ export async function executeContract(terra: LCDClient, wallet: Wallet, contract
 }
 
 export async function queryContract(terra: LCDClient, contractAddress: string, query: object): Promise<any> {
-  return await terra.wasm.contractQuery(
-    contractAddress,
-    query
-  )
+  return await terra.wasm.contractQuery(contractAddress, query)
 }
 
 export async function deployContract(terra: LCDClient, wallet: Wallet, filepath: string, initMsg: object) {
