@@ -58,11 +58,21 @@ sed -E -I .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/250ms/' 
 
 ### Deploy
 
-1. Build the smart contracts by running `./scripts/build_artifacts.sh`
-2. Run `npm install` to install dependencies
-3. Create a .env file in the top level of of the directory if doesn't already exist
-4. Add the env variable TEST_MAIN=[your_deploying_wallets_mnemonic_key]
-5. Run `node scripts/deploy.js` to deploy and instantiate the smart contracts
+```
+# build the smart contracts
+./scripts/build_artifacts.sh
+
+cd scripts
+npm install
+
+# set the deploying wallet
+echo "TEST_MAIN=<MNEMONIC_OF_YOUR_DEPLOYING_WALLET>" >> .env
+
+# set the network, defaults to LocalTerra if unset
+echo "NETWORK=testnet" >> .env
+
+ts-node deploy.ts
+```
 
 ### Testing
 #### Unit tests

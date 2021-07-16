@@ -5,11 +5,19 @@ import {
   instantiateContract,
   queryContract,
   recover,
+  setTimeoutDuration,
   setupRedBank,
   uploadContract,
 } from "./helpers.js";
 import { LCDClient, LocalTerra } from "@terra-money/terra.js";
-import { testnet, local } from "./deploy_configs.js"
+import { Config, testnet, local } from "./deploy_configs.js"
+import { join } from "path"
+
+// consts
+
+const MARS_ARTIFACTS_PATH = "../artifacts"
+
+// main
 
 async function main() {
   let terra;
@@ -22,14 +30,15 @@ async function main() {
       chainID: 'tequila-0004'
     })
 
-    wallet = await recover(terra, process.env.TEST_MAIN);
+    wallet = recover(terra, process.env.TEST_MAIN!);
     console.log(`Wallet address from seed: ${wallet.key.accAddress}`);
   } else {
     terra = new LocalTerra();
     wallet = terra.wallets.test1;
+    setTimeoutDuration(0)
   }
 
-  let deployConfig;
+  let deployConfig: Config;
   if (isTestnet) {
     deployConfig = testnet
   } else {
@@ -38,41 +47,42 @@ async function main() {
 
   /*************************************** Deploy Address Provider Contract *****************************************/
   console.log("Deploying Address Provider...");
-  const addressProviderContractAddress = await deployContract(terra, wallet, './artifacts/address_provider.wasm', { "owner": wallet.key.accAddress })
+  const addressProviderContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'address_provider.wasm'), { "owner": wallet.key.accAddress })
   console.log("Address Provider Contract Address: " + addressProviderContractAddress);
 
   /*************************************** Deploy Council Contract *****************************************/
   console.log("Deploying council...");
   deployConfig.councilInitMsg.config.address_provider_address = addressProviderContractAddress
-  const councilContractAddress = await deployContract(terra, wallet, './artifacts/council.wasm', deployConfig.councilInitMsg);
+  const councilContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'council.wasm'), deployConfig.councilInitMsg);
   console.log("Council Contract Address: " + councilContractAddress);
 
   /**************************************** Deploy Staking Contract *****************************************/
   console.log("Deploying Staking...");
+  // TODO fix `factory_contract_address` in LocalTerra
   deployConfig.stakingInitMsg.config.owner = councilContractAddress
   deployConfig.stakingInitMsg.config.address_provider_address = addressProviderContractAddress
-  const stakingContractAddress = await deployContract(terra, wallet, './artifacts/staking.wasm', deployConfig.stakingInitMsg);
+  const stakingContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'staking.wasm'), deployConfig.stakingInitMsg);
   console.log("Staking Contract Address: " + stakingContractAddress);
 
   /************************************* Deploy Insurance Fund Contract *************************************/
   console.log("Deploying Insurance Fund...");
   deployConfig.insuranceFundInitMsg.owner = councilContractAddress
-  const insuranceFundContractAddress = await deployContract(terra, wallet, './artifacts/insurance_fund.wasm', deployConfig.insuranceFundInitMsg)
+  const insuranceFundContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'insurance_fund.wasm'), deployConfig.insuranceFundInitMsg)
   console.log("Insurance Fund Contract Address: " + insuranceFundContractAddress);
 
   /**************************************** Deploy Treasury Contract ****************************************/
   console.log("Deploying Treasury...");
-  const treasuryContractAddress = await deployContract(terra, wallet, './artifacts/treasury.wasm', { "owner": councilContractAddress })
+  const treasuryContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'treasury.wasm'), { "owner": councilContractAddress })
   console.log("Treasury Contract Address: " + treasuryContractAddress);
 
   /**************************************** Deploy Incentives Contract ****************************************/
   console.log("Deploying Incentives...");
-  const incentivesContractAddress = await deployContract(terra, wallet, './artifacts/incentives.wasm', { "owner": councilContractAddress, "address_provider_address": addressProviderContractAddress })
+  const incentivesContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'incentives.wasm'), { "owner": councilContractAddress, "address_provider_address": addressProviderContractAddress })
   console.log("Incentives Contract Address: " + incentivesContractAddress);
 
   /************************************* Upload cw20 Token Contract *************************************/
   console.log("Uploading cw20 token contract");
-  const cw20TokenCodeId = await uploadContract(terra, wallet, './artifacts/cw20_token.wasm');
+  const cw20TokenCodeId = await uploadContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'cw20_token.wasm'));
   console.log(`Uploaded cw20 token contract, code: ${cw20TokenCodeId}`);
 
   /************************************* Instantiate Mars Token Contract *************************************/
@@ -91,7 +101,7 @@ async function main() {
 
   /************************************* Instantiate xMars Token Contract *************************************/
   console.log("Deploying xMars token...");
-  const xMarsTokenCodeId = await uploadContract(terra, wallet, './artifacts/xmars_token.wasm');
+  const xMarsTokenCodeId = await uploadContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'xmars_token.wasm'));
   console.log(`Uploaded xMars token contract, code: ${xMarsTokenCodeId}`);
   const xMarsTokenContractAddress = await instantiateContract(terra, wallet, xMarsTokenCodeId, {
     "name": "xMars token",
@@ -104,7 +114,7 @@ async function main() {
 
   /************************************* Upload ma_token Token Contract *************************************/
   console.log("Uploading ma_token contract");
-  const maTokenCodeId = await uploadContract(terra, wallet, './artifacts/ma_token.wasm')
+  const maTokenCodeId = await uploadContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'ma_token.wasm'))
   console.log(`Uploaded ma_token contract code: ${maTokenCodeId}`);
 
   /************************************* Deploy Red Bank Contract *************************************/
@@ -112,7 +122,7 @@ async function main() {
   deployConfig.redBankInitMsg.config.owner = wallet.key.accAddress
   deployConfig.redBankInitMsg.config.address_provider_address = addressProviderContractAddress
   deployConfig.redBankInitMsg.config.ma_token_code_id = maTokenCodeId
-  const redBankContractAddress = await deployContract(terra, wallet, './artifacts/red_bank.wasm', deployConfig.redBankInitMsg)
+  const redBankContractAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, 'red_bank.wasm'), deployConfig.redBankInitMsg)
   console.log(`Red Bank Contract Address: ${redBankContractAddress}`);
 
   /**************************************** Update Config in Address Provider Contract *****************************************/
