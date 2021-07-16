@@ -50,7 +50,11 @@ cd LocalTerra
 docker compose up
 ```
 
-Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to `250ms` to make the test run faster.
+Adjust the `timeout_*` config items in `LocalTerra/config/config.toml` to `250ms` to make the test run faster:
+
+```
+sed -E -I .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/250ms/' config/config.toml
+```
 
 ### Deploy
 
