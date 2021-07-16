@@ -20,11 +20,11 @@ export function setTimeoutDuration(t: number) {
   TIMEOUT = t
 }
 
-export function getTimeoutDuration(): number {
+export function getTimeoutDuration() {
   return TIMEOUT
 }
 
-export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg): Promise<TxSuccess> {
+export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
     fee: new StdFee(30000000, [
@@ -46,20 +46,20 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
   return result
 }
 
-export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string): Promise<number> {
+export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
   const contract = readFileSync(filepath, 'base64');
   const uploadMsg = new MsgStoreCode(wallet.key.accAddress, contract);
   let result = await performTransaction(terra, wallet, uploadMsg);
   return Number(result.logs[0].eventsByType.store_code.code_id[0]) // code_id
 }
 
-export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object): Promise<string> {
+export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object) {
   const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg, undefined, true);
   let result = await performTransaction(terra, wallet, instantiateMsg)
   return result.logs[0].events[0].attributes[2].value // contract address
 }
 
-export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string): Promise<TxSuccess> {
+export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   return await performTransaction(terra, wallet, executeMsg);
 }

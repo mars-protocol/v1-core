@@ -42,6 +42,8 @@ import {
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
 
+// types
+
 interface NativeToken {
   native_token: {
     denom: string
