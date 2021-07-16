@@ -89,7 +89,7 @@ export function initialize(terra: LCDClient) {
   return terra.wallet(mk);
 }
 
-export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAddress: string, options) {
+export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAddress: string, options: any) {
   console.log("Setting up initial asset liquidity pools...");
 
   const initialAssets = options.initialAssets ?? [];
