@@ -6789,9 +6789,9 @@ mod tests {
         // Assert markets correctly return collateral status
         let res = query_collateral(&deps, user_addr.clone()).unwrap();
         assert_eq!(res.collateral[0].denom, String::from("DP1"));
-        assert_eq!(res.collateral[0].enabled, false);
+        assert!(!res.collateral[0].enabled);
         assert_eq!(res.collateral[1].denom, String::from("uusd"));
-        assert_eq!(res.collateral[1].enabled, true);
+        assert!(res.collateral[1].enabled);
 
         // Set first market as collateral
         set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
@@ -6803,9 +6803,9 @@ mod tests {
         // Assert markets correctly return collateral status
         let res = query_collateral(&deps, user_addr.clone()).unwrap();
         assert_eq!(res.collateral[0].denom, String::from("DP1"));
-        assert_eq!(res.collateral[0].enabled, true);
+        assert!(res.collateral[0].enabled);
         assert_eq!(res.collateral[1].denom, String::from("uusd"));
-        assert_eq!(res.collateral[1].enabled, true);
+        assert!(res.collateral[1].enabled);
     }
 
     // TEST HELPERS
