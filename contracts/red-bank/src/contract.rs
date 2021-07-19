@@ -2142,7 +2142,7 @@ fn get_market_denom<S: Storage, A: Api, Q: Querier>(
     match asset_type {
         AssetType::Native => match String::from_utf8(market_id) {
             Ok(denom) => Ok(denom),
-            Err(_) => return Err(StdError::generic_err("failed to encode key into string")),
+            Err(_) => Err(StdError::generic_err("failed to encode key into string")),
         },
         AssetType::Cw20 => {
             let cw20_contract_address =
@@ -6801,7 +6801,7 @@ mod tests {
             .unwrap();
 
         // Assert markets correctly return collateral status
-        let res = query_collateral(&deps, user_addr.clone()).unwrap();
+        let res = query_collateral(&deps, user_addr).unwrap();
         assert_eq!(res.collateral[0].denom, String::from("DP1"));
         assert!(res.collateral[0].enabled);
         assert_eq!(res.collateral[1].denom, String::from("uusd"));
