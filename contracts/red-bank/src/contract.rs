@@ -380,7 +380,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             Decimal256::from_uint256(
                 user_account_settlement.weighted_maintenance_margin_in_uusd
                     - (withdraw_amount_in_uusd * market.maintenance_margin),
-            ) / Decimal256::from_uint256(user_account_settlement.total_debt_in_uusd);
+            ) / Decimal256::from_uint256(user_account_settlement.total_collateralized_debt_in_uusd);
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
@@ -699,6 +699,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // TODO: Check the contract has enough funds to safely lend them
 
+    let mut uncollateralized_debt = false;
     if uncollateralized_loan_limit.is_zero() {
         // Collateralized loan: validate user has enough collateral if they have no uncollateralized loan limit
         let mut native_asset_prices_to_query: Vec<String> = match asset {
@@ -728,15 +729,14 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
+        uncollateralized_debt = true;
         let debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-        let borrower_debt: Debt =
-            match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
-                Ok(Some(debt)) => debt,
-                Ok(None) => Debt {
-                    amount_scaled: Uint256::zero(),
-                },
-                Err(error) => return Err(error),
-            };
+        let borrower_debt = debts_asset_bucket
+            .may_load(borrower_canonical_addr.as_slice())?
+            .unwrap_or(Debt {
+                amount_scaled: Uint256::zero(),
+                uncollateralized: uncollateralized_debt,
+            });
 
         let asset_market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
         let debt_amount =
@@ -760,13 +760,12 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // Set new debt
     let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-    let mut debt: Debt = match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
-        Ok(Some(debt)) => debt,
-        Ok(None) => Debt {
+    let mut debt = debts_asset_bucket
+        .may_load(borrower_canonical_addr.as_slice())?
+        .unwrap_or(Debt {
             amount_scaled: Uint256::zero(),
-        },
-        Err(error) => return Err(error),
-    };
+            uncollateralized: uncollateralized_debt,
+        });
     let borrow_amount_scaled =
         borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time);
     debt.amount_scaled += borrow_amount_scaled;
@@ -1952,6 +1951,7 @@ struct UserAssetSettlement {
     asset_type: AssetType,
     collateral_amount: Uint256,
     debt_amount: Uint256,
+    uncollateralized_debt: bool,
     ltv: Decimal256,
     maintenance_margin: Decimal256,
 }
@@ -2000,16 +2000,19 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             (Uint256::zero(), Decimal256::zero(), Decimal256::zero())
         };
 
-        let debt_amount = if user_is_borrowing {
+        let (debt_amount, uncollateralized_debt) = if user_is_borrowing {
             // query debt
             let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
             let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
 
             let borrow_index = get_updated_borrow_index(&market, block_time);
 
-            user_debt.amount_scaled * borrow_index
+            (
+                user_debt.amount_scaled * borrow_index,
+                user_debt.uncollateralized,
+            )
         } else {
-            Uint256::zero()
+            (Uint256::zero(), false)
         };
 
         // get asset label
@@ -2035,6 +2038,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             asset_type: market.asset_type,
             collateral_amount,
             debt_amount,
+            uncollateralized_debt,
             ltv,
             maintenance_margin,
         };
@@ -2049,6 +2053,7 @@ struct UserAccountSettlement {
     /// NOTE: Not used yet
     _total_collateral_in_uusd: Uint256,
     total_debt_in_uusd: Uint256,
+    total_collateralized_debt_in_uusd: Uint256,
     max_debt_in_uusd: Uint256,
     weighted_maintenance_margin_in_uusd: Uint256,
     health_status: UserHealthStatus,
@@ -2084,6 +2089,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
 
     let mut total_collateral_in_uusd = Uint256::zero();
     let mut total_debt_in_uusd = Uint256::zero();
+    let mut total_collateralized_debt_in_uusd = Uint256::zero();
     let mut weighted_ltv_in_uusd = Uint256::zero();
     let mut weighted_maintenance_margin_in_uusd = Uint256::zero();
 
@@ -2101,20 +2107,28 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
         weighted_maintenance_margin_in_uusd +=
             collateral_in_uusd * user_asset_settlement.maintenance_margin;
 
-        total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
+        let debt_in_uusd = user_asset_settlement.debt_amount * asset_price;
+        total_debt_in_uusd += debt_in_uusd;
+
+        if !user_asset_settlement.uncollateralized_debt {
+            total_collateralized_debt_in_uusd += debt_in_uusd;
+        }
     }
 
-    let health_status = if total_debt_in_uusd.is_zero() {
+    // When computing health factor we should not take debt into account that has been given
+    // an uncollateralized loan limit
+    let health_status = if total_collateralized_debt_in_uusd.is_zero() {
         UserHealthStatus::NotBorrowing
     } else {
         let health_factor = Decimal256::from_uint256(weighted_maintenance_margin_in_uusd)
-            / Decimal256::from_uint256(total_debt_in_uusd);
+            / Decimal256::from_uint256(total_collateralized_debt_in_uusd);
         UserHealthStatus::Borrowing(health_factor)
     };
 
     let use_account_settlement = UserAccountSettlement {
         _total_collateral_in_uusd: total_collateral_in_uusd,
         total_debt_in_uusd,
+        total_collateralized_debt_in_uusd,
         max_debt_in_uusd: weighted_ltv_in_uusd,
         weighted_maintenance_margin_in_uusd,
         health_status,
@@ -3950,12 +3964,21 @@ mod tests {
         );
 
         // Set user to have positive debt amount in debt asset
+        // Uncollateralized debt shouldn't count for health factor
         let token_2_debt_scaled = Uint256::from(200000u128);
         let debt = Debt {
             amount_scaled: token_2_debt_scaled,
+            uncollateralized: false,
+        };
+        let uncollateralized_debt = Debt {
+            amount_scaled: Uint256::from(200000u128),
+            uncollateralized: true,
         };
         debts_asset_state(&mut deps.storage, b"token2")
             .save(withdrawer_canonical_addr.as_slice(), &debt)
+            .unwrap();
+        debts_asset_state(&mut deps.storage, b"token3")
+            .save(withdrawer_canonical_addr.as_slice(), &uncollateralized_debt)
             .unwrap();
 
         // Set the querier to return native exchange rates
@@ -3985,13 +4008,13 @@ mod tests {
             let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
-            let total_debt_in_uusd = token_2_debt_scaled
+            let total_collateralized_debt_in_uusd = token_2_debt_scaled
                 * get_updated_borrow_index(&market_2_initial, env.block.time)
                 * Decimal256::from(token_2_exchange_rate);
 
             // How much to withdraw in uusd to have health factor equal to one
             let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
-                - total_debt_in_uusd)
+                - total_collateralized_debt_in_uusd)
                 / market_3_initial.maintenance_margin;
             how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate)
         };
@@ -5304,6 +5327,7 @@ mod tests {
         {
             let debt = Debt {
                 amount_scaled: Uint256::zero(),
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
@@ -5334,6 +5358,7 @@ mod tests {
         {
             let debt = Debt {
                 amount_scaled: expected_user_debt_scaled,
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
@@ -5702,6 +5727,7 @@ mod tests {
             // set user to have positive debt amount in debt asset
             let debt = Debt {
                 amount_scaled: expected_user_debt_scaled,
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
@@ -5991,6 +6017,7 @@ mod tests {
             Uint256::from(healthy_user_collateral_balance) * collateral_maintenance_margin;
         let healthy_user_debt = Debt {
             amount_scaled: healthy_user_debt_amount,
+            uncollateralized: false,
         };
         debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
             .save(healthy_user_canonical_addr.as_slice(), &healthy_user_debt)
@@ -6102,6 +6129,7 @@ mod tests {
             // set debt for user in order for health factor to be < 1
             let debt = Debt {
                 amount_scaled: Uint256::from(500_000u128),
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
@@ -6134,6 +6162,7 @@ mod tests {
             // set debt for user in order for health factor to be > 1
             let debt = Debt {
                 amount_scaled: Uint256::from(1_000u128),
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
