@@ -242,14 +242,14 @@ pub mod msg {
         pub maintenance_margin: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
-        /// One of the PID parameter
-        pub kp: Option<Decimal256>,
+        /// Proportional parameter for the PID controller
+        pub kp_1: Option<Decimal256>,
         /// Optimal utilization
         pub optimal_utilization_rate: Option<Decimal256>,
         /// Min error that triggers Kp augmentation
         pub kp_augmentation_threshold: Option<Decimal256>,
-        /// Kp multiplier when error threshold is exceeded
-        pub kp_multiplier: Option<Decimal256>,
+        /// Kp value when error threshold is exceeded
+        pub kp_2: Option<Decimal256>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

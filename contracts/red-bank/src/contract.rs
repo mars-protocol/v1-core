@@ -1902,9 +1902,9 @@ fn get_updated_interest_rates(
         };
 
     let kp = if error_value >= pid_params.kp_augmentation_threshold {
-        pid_params.kp * pid_params.kp_multiplier
+        pid_params.kp_2
     } else {
-        pid_params.kp
+        pid_params.kp_1
     };
 
     let p = kp * error_value;
@@ -2374,10 +2374,10 @@ mod tests {
             min_borrow_rate: Decimal256::from_ratio(1, 100),
             max_borrow_rate: Decimal256::from_ratio(90, 100),
             pid_parameters: PidParameters {
-                kp: Decimal256::from_ratio(2, 1),
+                kp_1: Decimal256::from_ratio(2, 1),
                 optimal_utilization_rate: Decimal256::from_ratio(60, 100),
                 kp_augmentation_threshold: Decimal256::from_ratio(10, 100),
-                kp_multiplier: Decimal256::from_ratio(2, 1),
+                kp_2: Decimal256::from_ratio(3, 1),
             },
 
             // Rest params are not used
@@ -2406,7 +2406,8 @@ mod tests {
         let expected_error =
             current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = market.borrow_rate + (market.pid_parameters.kp * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate + (market.pid_parameters.kp_1 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2424,7 +2425,8 @@ mod tests {
         let expected_error =
             market.pid_parameters.optimal_utilization_rate - current_utilization_rate;
         // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate = market.borrow_rate - (market.pid_parameters.kp * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate - (market.pid_parameters.kp_1 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2442,8 +2444,8 @@ mod tests {
         let expected_error =
             current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = market.borrow_rate
-            + (market.pid_parameters.kp * market.pid_parameters.kp_multiplier * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate + (market.pid_parameters.kp_2 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2736,10 +2738,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::one()),
             liquidation_bonus: Some(Decimal256::zero()),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::InitAsset {
             asset: Asset::Native {
@@ -3073,10 +3075,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3206,10 +3208,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(10, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(90, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3267,10 +3269,10 @@ mod tests {
             reserve_factor: None,
             maintenance_margin: None,
             liquidation_bonus: None,
-            kp: None,
+            kp_1: None,
             optimal_utilization_rate: None,
             kp_augmentation_threshold: None,
-            kp_multiplier: None,
+            kp_2: None,
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3313,15 +3315,12 @@ mod tests {
             asset_params.liquidation_bonus.unwrap(),
             new_market.liquidation_bonus
         );
-        assert_eq!(asset_params.kp.unwrap(), new_market.pid_parameters.kp);
+        assert_eq!(asset_params.kp_1.unwrap(), new_market.pid_parameters.kp_1);
         assert_eq!(
             asset_params.kp_augmentation_threshold.unwrap(),
             new_market.pid_parameters.kp_augmentation_threshold
         );
-        assert_eq!(
-            asset_params.kp_multiplier.unwrap(),
-            new_market.pid_parameters.kp_multiplier
-        );
+        assert_eq!(asset_params.kp_2.unwrap(), new_market.pid_parameters.kp_2);
     }
 
     #[test]
@@ -6848,10 +6847,10 @@ mod tests {
                 liquidation_bonus: Decimal256::zero(),
                 protocol_income_to_distribute: Uint256::zero(),
                 pid_parameters: PidParameters {
-                    kp: Default::default(),
+                    kp_1: Default::default(),
                     optimal_utilization_rate: Default::default(),
                     kp_augmentation_threshold: Default::default(),
-                    kp_multiplier: Default::default(),
+                    kp_2: Default::default(),
                 },
             }
         }
