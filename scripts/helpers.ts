@@ -1,16 +1,32 @@
 import {
   Coin,
   isTxError,
+  LCDClient,
+  MnemonicKey,
+  Msg,
   MsgExecuteContract,
   MsgInstantiateContract,
   MsgMigrateContract,
   MsgStoreCode,
   StdFee,
-  MnemonicKey
+  Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
 
-export async function performTransaction(terra, wallet, msg) {
+// Tequila lcd is load balanced, so txs can't be sent too fast, otherwise account sequence queries
+// may resolve an older state depending on which lcd you end up with. Generally 1000 ms is is enough
+// for all nodes to sync up.
+let TIMEOUT = 1000
+
+export function setTimeoutDuration(t: number) {
+  TIMEOUT = t
+}
+
+export function getTimeoutDuration() {
+  return TIMEOUT
+}
+
+export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const tx = await wallet.createAndSignTx({
     msgs: [msg],
     fee: new StdFee(30000000, [
@@ -23,56 +39,48 @@ export async function performTransaction(terra, wallet, msg) {
       `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
     );
   }
-
-  // Can't send txs too fast, tequila lcd is load balanced, 
-  // account sequence query may resolve an older state depending on which lcd you end up with,
-  // generally 1 sec is enough for all nodes to sync up.
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
+  await new Promise(resolve => setTimeout(resolve, TIMEOUT));
   return result
 }
 
-export async function uploadContract(terra, wallet, filepath) {
+export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
   const contract = readFileSync(filepath, 'base64');
   const uploadMsg = new MsgStoreCode(wallet.key.accAddress, contract);
   let result = await performTransaction(terra, wallet, uploadMsg);
-  return Number(result.logs[0].eventsByType.store_code.code_id[0]) //code_id
+  return Number(result.logs[0].eventsByType.store_code.code_id[0]) // code_id
 }
 
-export async function instantiateContract(terra, wallet, codeId, msg) {
+export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object) {
   const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg, undefined, true);
   let result = await performTransaction(terra, wallet, instantiateMsg)
-  return result.logs[0].events[0].attributes[2].value //contract address
+  return result.logs[0].events[0].attributes[2].value // contract address
 }
 
-export async function executeContract(terra, wallet, contractAddress, msg, coins = undefined) {
+export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   return await performTransaction(terra, wallet, executeMsg);
 }
 
-export async function queryContract(terra, contractAddress, query) {
-  return await terra.wasm.contractQuery(
-    contractAddress,
-    query
-  )
+export async function queryContract(terra: LCDClient, contractAddress: string, query: object): Promise<any> {
+  return await terra.wasm.contractQuery(contractAddress, query)
 }
 
-export async function deployContract(terra, wallet, filepath, initMsg) {
+export async function deployContract(terra: LCDClient, wallet: Wallet, filepath: string, initMsg: object) {
   const codeId = await uploadContract(terra, wallet, filepath);
   return await instantiateContract(terra, wallet, codeId, initMsg);
 }
 
-export async function migrate(terra, wallet, contractAddress, newCodeId) {
+export async function migrate(terra: LCDClient, wallet: Wallet, contractAddress: string, newCodeId: number) {
   const migrateMsg = new MsgMigrateContract(wallet.key.accAddress, contractAddress, newCodeId, {});
   return await performTransaction(terra, wallet, migrateMsg);
 }
 
-export function recover(terra, mnemonic) {
+export function recover(terra: LCDClient, mnemonic: string) {
   const mk = new MnemonicKey({ mnemonic: mnemonic });
   return terra.wallet(mk);
 }
 
-export function initialize(terra) {
+export function initialize(terra: LCDClient) {
   const mk = new MnemonicKey();
 
   console.log(`Account Address: ${mk.accAddress}`);
@@ -81,7 +89,7 @@ export function initialize(terra) {
   return terra.wallet(mk);
 }
 
-export async function setupRedBank(terra, wallet, contractAddress, options) {
+export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAddress: string, options: any) {
   console.log("Setting up initial asset liquidity pools...");
 
   const initialAssets = options.initialAssets ?? [];
@@ -89,6 +97,8 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
   const initialBorrows = options.initialBorrows ?? [];
 
   for (let asset of initialAssets) {
+    console.log(`Initializing ${asset.denom || asset.symbol || asset.contract_addr}`);
+
     let assetType = asset.denom
       ? {
         "native": {
@@ -130,7 +140,8 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
   for (let deposit of initialDeposits) {
     const { account, assets } = deposit;
     console.log(`### Deposits for account ${account.key.accAddress}: `);
-    for (const [asset, amount] of Object.entries(assets)) {
+    for (const asset of Object.keys(assets)) {
+      const amount = assets[asset]
       const coins = new Coin(asset, amount);
       const depositMsg = { "deposit_native": { "denom": asset } };
       const executeDepositMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, depositMsg, [coins]);
@@ -142,7 +153,8 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
   for (let borrow of initialBorrows) {
     const { account, assets } = borrow;
     console.log(`### Borrows for account ${account.key.accAddress}: `);
-    for (const [asset, amount] of Object.entries(assets)) {
+    for (const asset of Object.keys(assets)) {
+      const amount = assets[asset]
       const borrowMsg = {
         "borrow": {
           "asset": {
@@ -160,6 +172,6 @@ export async function setupRedBank(terra, wallet, contractAddress, options) {
   }
 }
 
-export function toEncodedBinary(object) {
+export function toEncodedBinary(object: any) {
   return Buffer.from(JSON.stringify(object)).toString('base64');
 }
