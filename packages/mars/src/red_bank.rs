@@ -148,6 +148,9 @@ pub mod msg {
         Debt {
             address: HumanAddr,
         },
+        Collateral {
+            address: HumanAddr,
+        },
         UncollateralizedLoanLimit {
             user_address: HumanAddr,
             asset: Asset,
@@ -201,6 +204,17 @@ pub mod msg {
     pub struct DebtInfo {
         pub denom: String,
         pub amount: Uint256,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct CollateralResponse {
+        pub collateral: Vec<CollateralInfo>,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct CollateralInfo {
+        pub denom: String,
+        pub enabled: bool,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

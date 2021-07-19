@@ -14,9 +14,10 @@ use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
 use mars::ma_token;
 use mars::red_bank::msg::{
-    Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
-    InitMsg, InitOrUpdateAssetParams, MarketInfo, MarketResponse, MarketsListResponse, MigrateMsg,
-    QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    Asset, AssetType, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+    DebtInfo, DebtResponse, HandleMsg, InitMsg, InitOrUpdateAssetParams, MarketInfo,
+    MarketResponse, MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg,
+    UncollateralizedLoanLimitResponse,
 };
 
 use crate::state::{
@@ -1532,6 +1533,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
         QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
+        QueryMsg::Collateral { address } => to_binary(&query_collateral(deps, address)?),
         QueryMsg::UncollateralizedLoanLimit {
             user_address,
             asset,
@@ -1611,36 +1613,7 @@ fn query_markets_list<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-
-            let denom = match v.asset_type {
-                AssetType::Native => match String::from_utf8(k) {
-                    Ok(denom) => denom,
-                    Err(_) => {
-                        return Err(StdError::generic_err("failed to encode key into string"))
-                    }
-                },
-                AssetType::Cw20 => {
-                    let cw20_contract_address =
-                        match deps.api.human_address(&CanonicalAddr::from(k)) {
-                            Ok(cw20_contract_address) => cw20_contract_address,
-                            Err(_) => {
-                                return Err(StdError::generic_err(
-                                    "failed to encode key into canonical address",
-                                ))
-                            }
-                        };
-
-                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
-                        Ok(symbol) => symbol,
-                        Err(_) => {
-                            return Err(StdError::generic_err(format!(
-                                "failed to get symbol from cw20 contract address: {}",
-                                cw20_contract_address
-                            )));
-                        }
-                    }
-                }
-            };
+            let denom = get_market_denom(deps, k, v.asset_type)?;
 
             Ok(MarketInfo {
                 denom,
@@ -1660,8 +1633,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<DebtResponse> {
     let markets = markets_state_read(&deps.storage);
     let debtor_address = deps.api.canonical_address(&address)?;
-    let users_bucket = users_state_read(&deps.storage);
-    let user = users_bucket
+    let user = users_state_read(&deps.storage)
         .may_load(debtor_address.as_slice())?
         .unwrap_or_default();
 
@@ -1669,36 +1641,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-
-            let denom = match v.asset_type {
-                AssetType::Native => match String::from_utf8(k.clone()) {
-                    Ok(denom) => denom,
-                    Err(_) => {
-                        return Err(StdError::generic_err("failed to encode key into string"))
-                    }
-                },
-                AssetType::Cw20 => {
-                    let cw20_contract_address =
-                        match deps.api.human_address(&CanonicalAddr::from(k.clone())) {
-                            Ok(cw20_contract_address) => cw20_contract_address,
-                            Err(_) => {
-                                return Err(StdError::generic_err(
-                                    "failed to encode key into canonical address",
-                                ))
-                            }
-                        };
-
-                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
-                        Ok(symbol) => symbol,
-                        Err(_) => {
-                            return Err(StdError::generic_err(format!(
-                                "failed to get symbol from cw20 contract address: {}",
-                                cw20_contract_address
-                            )));
-                        }
-                    }
-                }
-            };
+            let denom = get_market_denom(deps, k.clone(), v.asset_type)?;
 
             let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
             if is_borrowing_asset {
@@ -1718,6 +1661,34 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .collect();
 
     Ok(DebtResponse { debts: debts? })
+}
+
+fn query_collateral<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+) -> StdResult<CollateralResponse> {
+    let markets = markets_state_read(&deps.storage);
+    let canonical_address = deps.api.canonical_address(&address)?;
+    let user = users_state_read(&deps.storage)
+        .may_load(canonical_address.as_slice())?
+        .unwrap_or_default();
+
+    let collateral: StdResult<Vec<_>> = markets
+        .range(None, None, Order::Ascending)
+        .map(|item| {
+            let (k, v) = item?;
+            let denom = get_market_denom(deps, k, v.asset_type)?;
+
+            Ok(CollateralInfo {
+                denom,
+                enabled: get_bit(user.collateral_assets, v.index)?,
+            })
+        })
+        .collect();
+
+    Ok(CollateralResponse {
+        collateral: collateral?,
+    })
 }
 
 fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
@@ -2161,6 +2132,40 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
         .find(|c| c.denom == denom)
         .map(|c| Uint256::from(c.amount))
         .unwrap_or_else(Uint256::zero)
+}
+
+fn get_market_denom<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    market_id: Vec<u8>,
+    asset_type: AssetType,
+) -> StdResult<String> {
+    match asset_type {
+        AssetType::Native => match String::from_utf8(market_id) {
+            Ok(denom) => Ok(denom),
+            Err(_) => return Err(StdError::generic_err("failed to encode key into string")),
+        },
+        AssetType::Cw20 => {
+            let cw20_contract_address =
+                match deps.api.human_address(&CanonicalAddr::from(market_id)) {
+                    Ok(cw20_contract_address) => cw20_contract_address,
+                    Err(_) => {
+                        return Err(StdError::generic_err(
+                            "failed to encode key into contract address",
+                        ))
+                    }
+                };
+
+            match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
+                Ok(symbol) => Ok(symbol),
+                Err(_) => {
+                    return Err(StdError::generic_err(format!(
+                        "failed to get symbol from cw20 contract address: {}",
+                        cw20_contract_address
+                    )));
+                }
+            }
+        }
+    }
 }
 
 // bitwise operations
@@ -6737,6 +6742,70 @@ mod tests {
             market_after_second_distribution.protocol_income_to_distribute,
             Uint256::zero()
         );
+    }
+
+    #[test]
+    fn test_query_collateral() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = HumanAddr(String::from("user"));
+        let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
+
+        // Setup first market containing a CW20 asset
+        let cw20_contract_addr_1 = HumanAddr::from("depositedcoin1");
+        deps.querier
+            .set_cw20_symbol(cw20_contract_addr_1.clone(), "DP1".to_string());
+        let market_1_initial = th_init_market(
+            &deps.api,
+            &mut deps.storage,
+            deps.api
+                .canonical_address(&cw20_contract_addr_1)
+                .unwrap()
+                .as_slice(),
+            &Market {
+                asset_type: AssetType::Cw20,
+                ..Default::default()
+            },
+        );
+
+        // Setup second market containing a native asset
+        let market_2_initial = th_init_market(
+            &deps.api,
+            &mut deps.storage,
+            String::from("uusd").as_bytes(),
+            &Market {
+                ..Default::default()
+            },
+        );
+
+        // Set second market as collateral
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Assert markets correctly return collateral status
+        let res = query_collateral(&deps, user_addr.clone()).unwrap();
+        assert_eq!(res.collateral[0].denom, String::from("DP1"));
+        assert_eq!(res.collateral[0].enabled, false);
+        assert_eq!(res.collateral[1].denom, String::from("uusd"));
+        assert_eq!(res.collateral[1].enabled, true);
+
+        // Set first market as collateral
+        set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Assert markets correctly return collateral status
+        let res = query_collateral(&deps, user_addr.clone()).unwrap();
+        assert_eq!(res.collateral[0].denom, String::from("DP1"));
+        assert_eq!(res.collateral[0].enabled, true);
+        assert_eq!(res.collateral[1].denom, String::from("uusd"));
+        assert_eq!(res.collateral[1].enabled, true);
     }
 
     // TEST HELPERS
