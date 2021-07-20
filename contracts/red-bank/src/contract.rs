@@ -1338,6 +1338,17 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
 
     uncollateralized_loan_limits_bucket.save(user_canonical_address.as_slice(), &new_limit)?;
 
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
+    let mut debt = debts_asset_bucket
+        .may_load(user_canonical_address.as_slice())?
+        .unwrap_or(Debt {
+            amount_scaled: Uint256::zero(),
+            uncollateralized: false,
+        });
+    // if limit == 0 then uncollateralized = false, otherwise uncollateralized = true
+    debt.uncollateralized = !new_limit.is_zero();
+    debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
+
     Ok(HandleResponse {
         messages: vec![],
         log: vec![
@@ -6293,8 +6304,13 @@ mod tests {
         let limit = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-
         assert_eq!(limit, initial_uncollateralized_loan_limit);
+
+        // check user's uncollateralized debt flag is true (limit > 0)
+        let debt = debts_asset_state_read(&deps.storage, b"somecoin")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+        assert!(debt.uncollateralized);
 
         // Borrow asset
         block_time += 1000_u64;
@@ -6439,8 +6455,13 @@ mod tests {
         let allowance = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-
         assert_eq!(allowance, Uint128::zero());
+
+        // check user's uncollateralized debt flag is false (limit == 0)
+        let debt = debts_asset_state_read(&deps.storage, b"somecoin")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+        assert!(!debt.uncollateralized);
     }
 
     #[test]
