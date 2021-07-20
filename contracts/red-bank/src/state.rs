@@ -358,6 +358,9 @@ pub struct Debt {
     /// Scaled debt amount
     // TODO(does this amount always have six decimals? How do we manage this?)
     pub amount_scaled: Uint256,
+
+    /// Marker for uncollateralized debt
+    pub uncollateralized: bool,
 }
 
 pub fn debts_asset_state<'a, S: Storage>(storage: &'a mut S, asset: &[u8]) -> Bucket<'a, S, Debt> {
