@@ -6,8 +6,8 @@ use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADD
 /// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Addr, Binary, BlockInfo, Coin, ContractInfo,
-    ContractResult, Decimal, Env, OwnedDeps, Querier, QuerierResult, QueryRequest, StdResult,
-    SystemError, Timestamp, Uint128, WasmQuery, MessageInfo
+    ContractResult, Decimal, Env, MessageInfo, OwnedDeps, Querier, QuerierResult, QueryRequest,
+    StdResult, SystemError, Timestamp, Uint128, WasmQuery,
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
@@ -56,7 +56,7 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
 pub fn mock_info(sender: &str) -> MessageInfo {
     MessageInfo {
         sender: Addr::unchecked(sender),
-        funds: vec![]
+        funds: vec![],
     }
 }
 
