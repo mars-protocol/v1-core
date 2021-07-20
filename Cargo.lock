@@ -553,7 +553,7 @@ name = "insurance-fund"
 version = "0.1.0"
 dependencies = [
  "cosmwasm-bignumber 2.1.1",
- "cosmwasm-schema 0.10.1",
+ "cosmwasm-schema 0.15.0",
  "cosmwasm-std 0.15.0",
  "cosmwasm-storage 0.15.0",
  "cw20 0.7.0",
