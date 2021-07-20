@@ -5334,14 +5334,21 @@ mod tests {
             &[(user_address.clone(), user_collateral_balance)],
         );
 
-        // trying to liquidate user with zero outstanding debt should fail
+        // trying to liquidate user with zero outstanding debt should fail (uncollateralized has not impact)
         {
             let debt = Debt {
                 amount_scaled: Uint256::zero(),
                 uncollateralized: false,
             };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
+            };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(user_canonical_addr.as_slice(), &uncollateralized_debt)
                 .unwrap();
 
             let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -5371,8 +5378,15 @@ mod tests {
                 amount_scaled: expected_user_debt_scaled,
                 uncollateralized: false,
             };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
+            };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(user_canonical_addr.as_slice(), &uncollateralized_debt)
                 .unwrap();
         }
 
@@ -6030,8 +6044,18 @@ mod tests {
             amount_scaled: healthy_user_debt_amount,
             uncollateralized: false,
         };
+        let uncollateralized_debt = Debt {
+            amount_scaled: Uint256::from(10000u128),
+            uncollateralized: true,
+        };
         debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
             .save(healthy_user_canonical_addr.as_slice(), &healthy_user_debt)
+            .unwrap();
+        debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+            .save(
+                healthy_user_canonical_addr.as_slice(),
+                &uncollateralized_debt,
+            )
             .unwrap();
 
         // perform liquidation (should fail because health factor is > 1)
@@ -6142,8 +6166,15 @@ mod tests {
                 amount_scaled: Uint256::from(500_000u128),
                 uncollateralized: false,
             };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
+            };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(sender_canonical_address.as_slice(), &uncollateralized_debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
             let mut sender_user = users_bucket
@@ -6175,8 +6206,15 @@ mod tests {
                 amount_scaled: Uint256::from(1_000u128),
                 uncollateralized: false,
             };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
+            };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(sender_canonical_address.as_slice(), &uncollateralized_debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
             let mut sender_user = users_bucket
