@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    SubMsg, Uint128, attr, entry_point, to_binary
+    attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
+    Response, StdResult, SubMsg, Uint128,
 };
 
 use terraswap::asset::AssetInfo;
@@ -12,7 +12,6 @@ use crate::state::Config;
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
 use mars::swapping::execute_swap;
-
 
 // INIT
 
@@ -50,7 +49,9 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, MarsError> {
     match msg {
-        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => execute_execute_cosmos_msg(deps, env, info, cosmos_msg),
+        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
+            execute_execute_cosmos_msg(deps, env, info, cosmos_msg)
+        }
         ExecuteMsg::UpdateConfig {
             owner,
             terraswap_factory_address,
@@ -66,7 +67,12 @@ pub fn execute(
         ExecuteMsg::SwapAssetToUusd {
             offer_asset_info,
             amount,
-        } => Ok(execute_swap_asset_to_uusd(deps, env, offer_asset_info, amount)?),
+        } => Ok(execute_swap_asset_to_uusd(
+            deps,
+            env,
+            offer_asset_info,
+            amount,
+        )?),
     }
 }
 
@@ -106,7 +112,11 @@ pub fn execute_update_config(
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
-    config.terraswap_factory_address = option_string_to_addr(deps.api, terraswap_factory_address, config.terraswap_factory_address)?;
+    config.terraswap_factory_address = option_string_to_addr(
+        deps.api,
+        terraswap_factory_address,
+        config.terraswap_factory_address,
+    )?;
     config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
 
     state::config(deps.storage).save(&config)?;
@@ -148,11 +158,7 @@ pub fn execute_swap_asset_to_uusd(
 // QUERIES
 
 #[entry_point]
-pub fn query(
-    deps: Deps,
-    _env: Env,
-    msg: QueryMsg
-) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
     }
@@ -169,11 +175,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 // MIGRATION
 
 #[entry_point]
-pub fn migrate(
-    _deps: DepsMut,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> StdResult<Response> {
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     Ok(Response::default())
 }
 
@@ -182,9 +184,12 @@ pub fn migrate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{Addr, BankMsg, Coin, SubMsg, Decimal, Uint128, testing::{mock_info, mock_env}};
-    use mars::testing::mock_dependencies;
     use crate::msg::ExecuteMsg::UpdateConfig;
+    use cosmwasm_std::{
+        testing::{mock_env, mock_info},
+        Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
+    };
+    use mars::testing::mock_dependencies;
 
     #[test]
     fn test_proper_initialization() {
@@ -249,8 +254,14 @@ mod tests {
         let new_config = state::config_read(deps.as_ref().storage).load().unwrap();
 
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
-        assert_eq!(new_config.terraswap_factory_address, Addr::unchecked("new_factory"));
-        assert_eq!(new_config.terraswap_max_spread, Decimal::from_ratio(10u128, 100u128));
+        assert_eq!(
+            new_config.terraswap_factory_address,
+            Addr::unchecked("new_factory")
+        );
+        assert_eq!(
+            new_config.terraswap_max_spread,
+            Decimal::from_ratio(10u128, 100u128)
+        );
     }
 
     #[test]

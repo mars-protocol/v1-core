@@ -77,8 +77,8 @@ pub mod msg {
 
 pub mod helpers {
     use super::msg::{MarsContract, QueryMsg};
+    use crate::error::MarsError;
     use cosmwasm_std::{to_binary, Addr, Deps, QueryRequest, StdResult, WasmQuery};
-    use crate::error::{MarsError};
 
     pub fn query_address(
         deps: &Deps,
@@ -106,7 +106,7 @@ pub mod helpers {
         }))?;
 
         if query.len() != expected_len {
-            return Err(MarsError::AddressesQueryWrongNumber{
+            return Err(MarsError::AddressesQueryWrongNumber {
                 expected: expected_len as u32,
                 actual: query.len() as u32,
             });
