@@ -1,91 +1,94 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, InitResponse,
-    MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage,
+    attr, entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
+    StdResult, SubMsg,
 };
 
-use crate::msg::{ConfigResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg};
-use crate::state;
-use crate::state::Config;
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use crate::state::{Config, CONFIG};
+use mars::error::MarsError;
 
 // INIT
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut,
     _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     // initialize Config
     let config = Config {
-        owner: deps.api.canonical_address(&msg.owner)?,
+        owner: deps.api.addr_validate(&msg.owner)?,
     };
 
-    state::config(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    Ok(InitResponse {
-        log: vec![],
+    Ok(Response {
         messages: vec![],
+        attributes: vec![],
+        events: vec![],
+        data: None,
     })
 }
 
 // HANDLERS
 
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn execute(
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, MarsError> {
     match msg {
-        HandleMsg::ExecuteCosmosMsg(cosmos_msg) => handle_execute_cosmos_msg(deps, env, cosmos_msg),
+        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
+            handle_execute_cosmos_msg(deps, env, info, cosmos_msg)
+        }
     }
 }
 
 /// Execute Cosmos message
-pub fn handle_execute_cosmos_msg<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
+pub fn handle_execute_cosmos_msg(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
     msg: CosmosMsg,
-) -> StdResult<HandleResponse> {
-    let config = state::config_read(&deps.storage).load()?;
+) -> Result<Response, MarsError> {
+    let config = CONFIG.load(deps.storage)?;
 
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {});
     }
 
-    Ok(HandleResponse {
-        messages: vec![msg],
-        log: vec![log("action", "execute_cosmos_msg")],
+    Ok(Response {
+        messages: vec![SubMsg::new(msg)],
+        attributes: vec![attr("action", "execute_cosmos_msg")],
+        events: vec![],
         data: None,
     })
 }
 
 // QUERIES
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+#[entry_point]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
     }
 }
 
-fn query_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ConfigResponse> {
-    let config = state::config_read(&deps.storage).load()?;
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        owner: deps.api.human_address(&config.owner)?,
+        owner: config.owner,
     })
 }
 
 // MIGRATION
 
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> MigrateResult {
-    Ok(MigrateResponse::default())
+#[entry_point]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 // TESTS
@@ -93,66 +96,69 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{BankMsg, Coin, CosmosMsg, HumanAddr, Uint128};
+    use cosmwasm_std::testing::mock_info;
+    use cosmwasm_std::{Addr, BankMsg, Coin, CosmosMsg, Uint128};
     use mars::testing::{mock_dependencies, mock_env, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
 
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
+        let msg = InstantiateMsg {
+            owner: String::from("owner"),
         };
-        let env = mock_env("owner", MockEnvParams::default());
+        let info = mock_info("owner", &[]);
 
-        let res = init(&mut deps, env, msg).unwrap();
-        let empty_vec: Vec<CosmosMsg> = vec![];
+        let res =
+            instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        let empty_vec: Vec<SubMsg> = vec![];
         assert_eq!(empty_vec, res.messages);
 
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("owner"))
-                .unwrap(),
-            config.owner
-        );
+        let config = CONFIG.load(&deps.storage).unwrap();
+        assert_eq!(Addr::unchecked("owner"), config.owner);
     }
 
     #[test]
     fn test_execute_cosmos_msg() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
 
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
+        let msg = InstantiateMsg {
+            owner: String::from("owner"),
         };
-        let env = mock_env("owner", MockEnvParams::default());
-        let _res = init(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner", &[]);
+        let _res =
+            instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
 
         let bank = BankMsg::Send {
-            from_address: HumanAddr("source".to_string()),
-            to_address: HumanAddr("destination".to_string()),
+            to_address: "destination".to_string(),
             amount: vec![Coin {
                 denom: "uluna".to_string(),
-                amount: Uint128(123456u128),
+                amount: Uint128::new(123456),
             }],
         };
         let cosmos_msg = CosmosMsg::Bank(bank);
-        let msg = HandleMsg::ExecuteCosmosMsg(cosmos_msg.clone());
+        let msg = ExecuteMsg::ExecuteCosmosMsg(cosmos_msg.clone());
 
         // *
         // non owner is not authorized
         // *
-        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
-        let error_res = handle(&mut deps, env, msg.clone()).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("somebody", &[]);
+        let error_res = execute(
+            deps.as_mut(),
+            mock_env(MockEnvParams::default()),
+            info,
+            msg.clone(),
+        )
+        .unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
 
         // *
         // can execute Cosmos msg
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(res.messages, vec![cosmos_msg]);
-        let expected_log = vec![log("action", "execute_cosmos_msg")];
-        assert_eq!(res.log, expected_log);
+        let info = mock_info("owner", &[]);
+        let res = execute(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        assert_eq!(res.messages, vec![SubMsg::new(cosmos_msg)]);
+        let expected_attr = vec![attr("action", "execute_cosmos_msg")];
+        assert_eq!(res.attributes, expected_attr);
     }
 }
