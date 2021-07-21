@@ -7,9 +7,6 @@ use cw_storage_plus::Item;
 // Key
 pub const CONFIG: Item<Config> = Item::new("config");
 
-// namespaces (for buckets)
-pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
-
 /// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
