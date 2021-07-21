@@ -1,11 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, Storage};
-use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
+use cosmwasm_std::{Addr, Decimal};
+use cw_storage_plus::Item;
 
-// keys (for singleton)
-pub static CONFIG_KEY: &[u8] = b"config";
+// Key
+pub const CONFIG: Item<Config> = Item::new("config");
 
 /// Insurance fund global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -15,12 +15,4 @@ pub struct Config {
     pub terraswap_factory_address: Addr,
     /// Terraswap max spread
     pub terraswap_max_spread: Decimal,
-}
-
-pub fn config(storage: &mut dyn Storage) -> Singleton<Config> {
-    singleton(storage, CONFIG_KEY)
-}
-
-pub fn config_read(storage: &dyn Storage) -> ReadonlySingleton<Config> {
-    singleton_read(storage, CONFIG_KEY)
 }

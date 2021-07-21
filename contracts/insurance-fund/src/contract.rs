@@ -2,12 +2,10 @@ use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
     Response, StdResult, SubMsg, Uint128,
 };
-
 use terraswap::asset::AssetInfo;
 
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
-use crate::state;
-use crate::state::Config;
+use crate::state::{Config, CONFIG};
 
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
@@ -29,7 +27,7 @@ pub fn instantiate(
         terraswap_max_spread: msg.terraswap_max_spread,
     };
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response {
         messages: vec![],
@@ -83,7 +81,7 @@ pub fn execute_execute_cosmos_msg(
     info: MessageInfo,
     msg: CosmosMsg,
 ) -> Result<Response, MarsError> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
         return Err(MarsError::Unauthorized {});
@@ -105,7 +103,7 @@ pub fn execute_update_config(
     terraswap_factory_address: Option<String>,
     terraswap_max_spread: Option<Decimal>,
 ) -> Result<Response, MarsError> {
-    let mut config = state::config_read(deps.storage).load()?;
+    let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
         return Err(MarsError::Unauthorized {});
@@ -119,7 +117,7 @@ pub fn execute_update_config(
     )?;
     config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response {
         messages: vec![],
@@ -136,7 +134,7 @@ pub fn execute_swap_asset_to_uusd(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<Response> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     let ask_asset_info = AssetInfo::NativeToken {
         denom: "uusd".to_string(),
@@ -165,7 +163,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
         owner: config.owner,
@@ -206,7 +204,7 @@ mod tests {
         let empty_vec: Vec<SubMsg> = vec![];
         assert_eq!(empty_vec, res.messages);
 
-        let config = state::config_read(deps.as_ref().storage).load().unwrap();
+        let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(config.owner, Addr::unchecked("owner"));
     }
 
@@ -251,7 +249,7 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // Read config from state
-        let new_config = state::config_read(deps.as_ref().storage).load().unwrap();
+        let new_config = CONFIG.load(&deps.storage).unwrap();
 
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
         assert_eq!(
