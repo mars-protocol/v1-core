@@ -14,9 +14,10 @@ use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
 use mars::ma_token;
 use mars::red_bank::msg::{
-    Asset, AssetType, ConfigResponse, CreateOrUpdateConfig, DebtInfo, DebtResponse, HandleMsg,
-    InitMsg, InitOrUpdateAssetParams, MarketInfo, MarketResponse, MarketsListResponse, MigrateMsg,
-    QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    Asset, AssetType, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+    DebtInfo, DebtResponse, HandleMsg, InitMsg, InitOrUpdateAssetParams, MarketInfo,
+    MarketResponse, MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg,
+    UncollateralizedLoanLimitResponse,
 };
 
 use crate::state::{
@@ -379,7 +380,7 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
             Decimal256::from_uint256(
                 user_account_settlement.weighted_maintenance_margin_in_uusd
                     - (withdraw_amount_in_uusd * market.maintenance_margin),
-            ) / Decimal256::from_uint256(user_account_settlement.total_debt_in_uusd);
+            ) / Decimal256::from_uint256(user_account_settlement.total_collateralized_debt_in_uusd);
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
@@ -407,7 +408,8 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: deps.api.human_address(&market.ma_token_address)?,
         send: vec![],
-        msg: to_binary(&Cw20HandleMsg::Burn {
+        msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+            user: withdrawer_addr.clone(),
             amount: withdraw_amount_scaled.into(),
         })?,
     });
@@ -698,6 +700,7 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // TODO: Check the contract has enough funds to safely lend them
 
+    let mut uncollateralized_debt = false;
     if uncollateralized_loan_limit.is_zero() {
         // Collateralized loan: validate user has enough collateral if they have no uncollateralized loan limit
         let mut native_asset_prices_to_query: Vec<String> = match asset {
@@ -727,15 +730,14 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
+        uncollateralized_debt = true;
         let debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-        let borrower_debt: Debt =
-            match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
-                Ok(Some(debt)) => debt,
-                Ok(None) => Debt {
-                    amount_scaled: Uint256::zero(),
-                },
-                Err(error) => return Err(error),
-            };
+        let borrower_debt = debts_asset_bucket
+            .may_load(borrower_canonical_addr.as_slice())?
+            .unwrap_or(Debt {
+                amount_scaled: Uint256::zero(),
+                uncollateralized: uncollateralized_debt,
+            });
 
         let asset_market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
         let debt_amount =
@@ -759,13 +761,12 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
 
     // Set new debt
     let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-    let mut debt: Debt = match debts_asset_bucket.may_load(borrower_canonical_addr.as_slice()) {
-        Ok(Some(debt)) => debt,
-        Ok(None) => Debt {
+    let mut debt = debts_asset_bucket
+        .may_load(borrower_canonical_addr.as_slice())?
+        .unwrap_or(Debt {
             amount_scaled: Uint256::zero(),
-        },
-        Err(error) => return Err(error),
-    };
+            uncollateralized: uncollateralized_debt,
+        });
     let borrow_amount_scaled =
         borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time);
     debt.amount_scaled += borrow_amount_scaled;
@@ -1338,6 +1339,17 @@ pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>
 
     uncollateralized_loan_limits_bucket.save(user_canonical_address.as_slice(), &new_limit)?;
 
+    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
+    let mut debt = debts_asset_bucket
+        .may_load(user_canonical_address.as_slice())?
+        .unwrap_or(Debt {
+            amount_scaled: Uint256::zero(),
+            uncollateralized: false,
+        });
+    // if limit == 0 then uncollateralized = false, otherwise uncollateralized = true
+    debt.uncollateralized = !new_limit.is_zero();
+    debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
+
     Ok(HandleResponse {
         messages: vec![],
         log: vec![
@@ -1532,6 +1544,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
         QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
         QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
+        QueryMsg::Collateral { address } => to_binary(&query_collateral(deps, address)?),
         QueryMsg::UncollateralizedLoanLimit {
             user_address,
             asset,
@@ -1611,36 +1624,7 @@ fn query_markets_list<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-
-            let denom = match v.asset_type {
-                AssetType::Native => match String::from_utf8(k) {
-                    Ok(denom) => denom,
-                    Err(_) => {
-                        return Err(StdError::generic_err("failed to encode key into string"))
-                    }
-                },
-                AssetType::Cw20 => {
-                    let cw20_contract_address =
-                        match deps.api.human_address(&CanonicalAddr::from(k)) {
-                            Ok(cw20_contract_address) => cw20_contract_address,
-                            Err(_) => {
-                                return Err(StdError::generic_err(
-                                    "failed to encode key into canonical address",
-                                ))
-                            }
-                        };
-
-                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
-                        Ok(symbol) => symbol,
-                        Err(_) => {
-                            return Err(StdError::generic_err(format!(
-                                "failed to get symbol from cw20 contract address: {}",
-                                cw20_contract_address
-                            )));
-                        }
-                    }
-                }
-            };
+            let denom = get_market_denom(deps, k, v.asset_type)?;
 
             Ok(MarketInfo {
                 denom,
@@ -1660,8 +1644,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
 ) -> StdResult<DebtResponse> {
     let markets = markets_state_read(&deps.storage);
     let debtor_address = deps.api.canonical_address(&address)?;
-    let users_bucket = users_state_read(&deps.storage);
-    let user = users_bucket
+    let user = users_state_read(&deps.storage)
         .may_load(debtor_address.as_slice())?
         .unwrap_or_default();
 
@@ -1669,36 +1652,7 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .range(None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
-
-            let denom = match v.asset_type {
-                AssetType::Native => match String::from_utf8(k.clone()) {
-                    Ok(denom) => denom,
-                    Err(_) => {
-                        return Err(StdError::generic_err("failed to encode key into string"))
-                    }
-                },
-                AssetType::Cw20 => {
-                    let cw20_contract_address =
-                        match deps.api.human_address(&CanonicalAddr::from(k.clone())) {
-                            Ok(cw20_contract_address) => cw20_contract_address,
-                            Err(_) => {
-                                return Err(StdError::generic_err(
-                                    "failed to encode key into canonical address",
-                                ))
-                            }
-                        };
-
-                    match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
-                        Ok(symbol) => symbol,
-                        Err(_) => {
-                            return Err(StdError::generic_err(format!(
-                                "failed to get symbol from cw20 contract address: {}",
-                                cw20_contract_address
-                            )));
-                        }
-                    }
-                }
-            };
+            let denom = get_market_denom(deps, k.clone(), v.asset_type)?;
 
             let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
             if is_borrowing_asset {
@@ -1718,6 +1672,34 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
         .collect();
 
     Ok(DebtResponse { debts: debts? })
+}
+
+fn query_collateral<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    address: HumanAddr,
+) -> StdResult<CollateralResponse> {
+    let markets = markets_state_read(&deps.storage);
+    let canonical_address = deps.api.canonical_address(&address)?;
+    let user = users_state_read(&deps.storage)
+        .may_load(canonical_address.as_slice())?
+        .unwrap_or_default();
+
+    let collateral: StdResult<Vec<_>> = markets
+        .range(None, None, Order::Ascending)
+        .map(|item| {
+            let (k, v) = item?;
+            let denom = get_market_denom(deps, k, v.asset_type)?;
+
+            Ok(CollateralInfo {
+                denom,
+                enabled: get_bit(user.collateral_assets, v.index)?,
+            })
+        })
+        .collect();
+
+    Ok(CollateralResponse {
+        collateral: collateral?,
+    })
 }
 
 fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
@@ -1931,9 +1913,9 @@ fn get_updated_interest_rates(
         };
 
     let kp = if error_value >= pid_params.kp_augmentation_threshold {
-        pid_params.kp * pid_params.kp_multiplier
+        pid_params.kp_2
     } else {
-        pid_params.kp
+        pid_params.kp_1
     };
 
     let p = kp * error_value;
@@ -1981,6 +1963,7 @@ struct UserAssetSettlement {
     asset_type: AssetType,
     collateral_amount: Uint256,
     debt_amount: Uint256,
+    uncollateralized_debt: bool,
     ltv: Decimal256,
     maintenance_margin: Decimal256,
 }
@@ -2029,16 +2012,19 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             (Uint256::zero(), Decimal256::zero(), Decimal256::zero())
         };
 
-        let debt_amount = if user_is_borrowing {
+        let (debt_amount, uncollateralized_debt) = if user_is_borrowing {
             // query debt
             let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
             let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
 
             let borrow_index = get_updated_borrow_index(&market, block_time);
 
-            user_debt.amount_scaled * borrow_index
+            (
+                user_debt.amount_scaled * borrow_index,
+                user_debt.uncollateralized,
+            )
         } else {
-            Uint256::zero()
+            (Uint256::zero(), false)
         };
 
         // get asset label
@@ -2064,6 +2050,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             asset_type: market.asset_type,
             collateral_amount,
             debt_amount,
+            uncollateralized_debt,
             ltv,
             maintenance_margin,
         };
@@ -2078,6 +2065,7 @@ struct UserAccountSettlement {
     /// NOTE: Not used yet
     _total_collateral_in_uusd: Uint256,
     total_debt_in_uusd: Uint256,
+    total_collateralized_debt_in_uusd: Uint256,
     max_debt_in_uusd: Uint256,
     weighted_maintenance_margin_in_uusd: Uint256,
     health_status: UserHealthStatus,
@@ -2113,6 +2101,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
 
     let mut total_collateral_in_uusd = Uint256::zero();
     let mut total_debt_in_uusd = Uint256::zero();
+    let mut total_collateralized_debt_in_uusd = Uint256::zero();
     let mut weighted_ltv_in_uusd = Uint256::zero();
     let mut weighted_maintenance_margin_in_uusd = Uint256::zero();
 
@@ -2130,20 +2119,28 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
         weighted_maintenance_margin_in_uusd +=
             collateral_in_uusd * user_asset_settlement.maintenance_margin;
 
-        total_debt_in_uusd += user_asset_settlement.debt_amount * asset_price;
+        let debt_in_uusd = user_asset_settlement.debt_amount * asset_price;
+        total_debt_in_uusd += debt_in_uusd;
+
+        if !user_asset_settlement.uncollateralized_debt {
+            total_collateralized_debt_in_uusd += debt_in_uusd;
+        }
     }
 
-    let health_status = if total_debt_in_uusd.is_zero() {
+    // When computing health factor we should not take debt into account that has been given
+    // an uncollateralized loan limit
+    let health_status = if total_collateralized_debt_in_uusd.is_zero() {
         UserHealthStatus::NotBorrowing
     } else {
         let health_factor = Decimal256::from_uint256(weighted_maintenance_margin_in_uusd)
-            / Decimal256::from_uint256(total_debt_in_uusd);
+            / Decimal256::from_uint256(total_collateralized_debt_in_uusd);
         UserHealthStatus::Borrowing(health_factor)
     };
 
     let use_account_settlement = UserAccountSettlement {
         _total_collateral_in_uusd: total_collateral_in_uusd,
         total_debt_in_uusd,
+        total_collateralized_debt_in_uusd,
         max_debt_in_uusd: weighted_ltv_in_uusd,
         weighted_maintenance_margin_in_uusd,
         health_status,
@@ -2161,6 +2158,40 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
         .find(|c| c.denom == denom)
         .map(|c| Uint256::from(c.amount))
         .unwrap_or_else(Uint256::zero)
+}
+
+fn get_market_denom<S: Storage, A: Api, Q: Querier>(
+    deps: &Extern<S, A, Q>,
+    market_id: Vec<u8>,
+    asset_type: AssetType,
+) -> StdResult<String> {
+    match asset_type {
+        AssetType::Native => match String::from_utf8(market_id) {
+            Ok(denom) => Ok(denom),
+            Err(_) => Err(StdError::generic_err("failed to encode key into string")),
+        },
+        AssetType::Cw20 => {
+            let cw20_contract_address =
+                match deps.api.human_address(&CanonicalAddr::from(market_id)) {
+                    Ok(cw20_contract_address) => cw20_contract_address,
+                    Err(_) => {
+                        return Err(StdError::generic_err(
+                            "failed to encode key into contract address",
+                        ))
+                    }
+                };
+
+            match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
+                Ok(symbol) => Ok(symbol),
+                Err(_) => {
+                    return Err(StdError::generic_err(format!(
+                        "failed to get symbol from cw20 contract address: {}",
+                        cw20_contract_address
+                    )));
+                }
+            }
+        }
+    }
 }
 
 // bitwise operations
@@ -2369,10 +2400,10 @@ mod tests {
             min_borrow_rate: Decimal256::from_ratio(1, 100),
             max_borrow_rate: Decimal256::from_ratio(90, 100),
             pid_parameters: PidParameters {
-                kp: Decimal256::from_ratio(2, 1),
+                kp_1: Decimal256::from_ratio(2, 1),
                 optimal_utilization_rate: Decimal256::from_ratio(60, 100),
                 kp_augmentation_threshold: Decimal256::from_ratio(10, 100),
-                kp_multiplier: Decimal256::from_ratio(2, 1),
+                kp_2: Decimal256::from_ratio(3, 1),
             },
 
             // Rest params are not used
@@ -2401,7 +2432,8 @@ mod tests {
         let expected_error =
             current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = market.borrow_rate + (market.pid_parameters.kp * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate + (market.pid_parameters.kp_1 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2419,7 +2451,8 @@ mod tests {
         let expected_error =
             market.pid_parameters.optimal_utilization_rate - current_utilization_rate;
         // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate = market.borrow_rate - (market.pid_parameters.kp * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate - (market.pid_parameters.kp_1 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2437,8 +2470,8 @@ mod tests {
         let expected_error =
             current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
         // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = market.borrow_rate
-            + (market.pid_parameters.kp * market.pid_parameters.kp_multiplier * expected_error);
+        let expected_borrow_rate =
+            market.borrow_rate + (market.pid_parameters.kp_2 * expected_error);
         let expected_liquidity_rate = expected_borrow_rate
             * current_utilization_rate
             * (Decimal256::one() - market.reserve_factor);
@@ -2731,10 +2764,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::one()),
             liquidation_bonus: Some(Decimal256::zero()),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::InitAsset {
             asset: Asset::Native {
@@ -3068,10 +3101,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3201,10 +3234,10 @@ mod tests {
             reserve_factor: Some(Decimal256::from_ratio(10, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(90, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
-            kp: Some(Decimal256::from_ratio(3, 1)),
+            kp_1: Some(Decimal256::from_ratio(3, 1)),
             optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_multiplier: Some(Decimal256::from_ratio(2, 1)),
+            kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3262,10 +3295,10 @@ mod tests {
             reserve_factor: None,
             maintenance_margin: None,
             liquidation_bonus: None,
-            kp: None,
+            kp_1: None,
             optimal_utilization_rate: None,
             kp_augmentation_threshold: None,
-            kp_multiplier: None,
+            kp_2: None,
         };
         let msg = HandleMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3308,15 +3341,12 @@ mod tests {
             asset_params.liquidation_bonus.unwrap(),
             new_market.liquidation_bonus
         );
-        assert_eq!(asset_params.kp.unwrap(), new_market.pid_parameters.kp);
+        assert_eq!(asset_params.kp_1.unwrap(), new_market.pid_parameters.kp_1);
         assert_eq!(
             asset_params.kp_augmentation_threshold.unwrap(),
             new_market.pid_parameters.kp_augmentation_threshold
         );
-        assert_eq!(
-            asset_params.kp_multiplier.unwrap(),
-            new_market.pid_parameters.kp_multiplier
-        );
+        assert_eq!(asset_params.kp_2.unwrap(), new_market.pid_parameters.kp_2);
     }
 
     #[test]
@@ -3601,12 +3631,10 @@ mod tests {
             )
             .unwrap();
 
+        let withdrawer_addr = HumanAddr::from("withdrawer");
         let user = User::default();
         let mut users_bucket = users_state(&mut deps.storage);
-        let withdrawer_canonical_addr = deps
-            .api
-            .canonical_address(&HumanAddr::from("withdrawer"))
-            .unwrap();
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
         users_bucket
             .save(withdrawer_canonical_addr.as_slice(), &user)
             .unwrap();
@@ -3649,14 +3677,15 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: HumanAddr::from("matoken"),
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdraw_amount_scaled.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("withdrawer"),
+                    to_address: withdrawer_addr,
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
@@ -3799,7 +3828,8 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: ma_token_addr,
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdraw_amount_scaled.into(),
                     })
                     .unwrap(),
@@ -3945,12 +3975,21 @@ mod tests {
         );
 
         // Set user to have positive debt amount in debt asset
+        // Uncollateralized debt shouldn't count for health factor
         let token_2_debt_scaled = Uint256::from(200000u128);
         let debt = Debt {
             amount_scaled: token_2_debt_scaled,
+            uncollateralized: false,
+        };
+        let uncollateralized_debt = Debt {
+            amount_scaled: Uint256::from(200000u128),
+            uncollateralized: true,
         };
         debts_asset_state(&mut deps.storage, b"token2")
             .save(withdrawer_canonical_addr.as_slice(), &debt)
+            .unwrap();
+        debts_asset_state(&mut deps.storage, b"token3")
+            .save(withdrawer_canonical_addr.as_slice(), &uncollateralized_debt)
             .unwrap();
 
         // Set the querier to return native exchange rates
@@ -3980,13 +4019,13 @@ mod tests {
             let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
-            let total_debt_in_uusd = token_2_debt_scaled
+            let total_collateralized_debt_in_uusd = token_2_debt_scaled
                 * get_updated_borrow_index(&market_2_initial, env.block.time)
                 * Decimal256::from(token_2_exchange_rate);
 
             // How much to withdraw in uusd to have health factor equal to one
             let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
-                - total_debt_in_uusd)
+                - total_collateralized_debt_in_uusd)
                 / market_3_initial.maintenance_margin;
             how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate)
         };
@@ -4029,7 +4068,8 @@ mod tests {
                     CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: HumanAddr::from("matoken3"),
                         send: vec![],
-                        msg: to_binary(&Cw20HandleMsg::Burn {
+                        msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                            user: withdrawer_addr.clone(),
                             amount: withdraw_amount_scaled.into(),
                         })
                         .unwrap(),
@@ -4103,13 +4143,11 @@ mod tests {
             .unwrap();
 
         // Mark the market as collateral for the user
+        let withdrawer_addr = HumanAddr::from("withdrawer");
         let mut user = User::default();
         set_bit(&mut user.collateral_assets, market_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
-        let withdrawer_canonical_addr = deps
-            .api
-            .canonical_address(&HumanAddr::from("withdrawer"))
-            .unwrap();
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
         users_bucket
             .save(withdrawer_canonical_addr.as_slice(), &user)
             .unwrap();
@@ -4158,14 +4196,15 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: HumanAddr::from("matoken"),
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdrawer_balance_scaled.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("withdrawer"),
+                    to_address: withdrawer_addr,
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
@@ -5295,13 +5334,21 @@ mod tests {
             &[(user_address.clone(), user_collateral_balance)],
         );
 
-        // trying to liquidate user with zero outstanding debt should fail
+        // trying to liquidate user with zero outstanding debt should fail (uncollateralized has not impact)
         {
             let debt = Debt {
                 amount_scaled: Uint256::zero(),
+                uncollateralized: false,
+            };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(user_canonical_addr.as_slice(), &uncollateralized_debt)
                 .unwrap();
 
             let liquidate_msg = HandleMsg::Receive(Cw20ReceiveMsg {
@@ -5329,9 +5376,17 @@ mod tests {
         {
             let debt = Debt {
                 amount_scaled: expected_user_debt_scaled,
+                uncollateralized: false,
+            };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(user_canonical_addr.as_slice(), &uncollateralized_debt)
                 .unwrap();
         }
 
@@ -5697,6 +5752,7 @@ mod tests {
             // set user to have positive debt amount in debt asset
             let debt = Debt {
                 amount_scaled: expected_user_debt_scaled,
+                uncollateralized: false,
             };
             debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
                 .save(user_canonical_addr.as_slice(), &debt)
@@ -5986,9 +6042,20 @@ mod tests {
             Uint256::from(healthy_user_collateral_balance) * collateral_maintenance_margin;
         let healthy_user_debt = Debt {
             amount_scaled: healthy_user_debt_amount,
+            uncollateralized: false,
+        };
+        let uncollateralized_debt = Debt {
+            amount_scaled: Uint256::from(10000u128),
+            uncollateralized: true,
         };
         debts_asset_state(&mut deps.storage, debt_contract_addr_canonical.as_slice())
             .save(healthy_user_canonical_addr.as_slice(), &healthy_user_debt)
+            .unwrap();
+        debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+            .save(
+                healthy_user_canonical_addr.as_slice(),
+                &uncollateralized_debt,
+            )
             .unwrap();
 
         // perform liquidation (should fail because health factor is > 1)
@@ -6097,9 +6164,17 @@ mod tests {
             // set debt for user in order for health factor to be < 1
             let debt = Debt {
                 amount_scaled: Uint256::from(500_000u128),
+                uncollateralized: false,
+            };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(sender_canonical_address.as_slice(), &uncollateralized_debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
             let mut sender_user = users_bucket
@@ -6129,9 +6204,17 @@ mod tests {
             // set debt for user in order for health factor to be > 1
             let debt = Debt {
                 amount_scaled: Uint256::from(1_000u128),
+                uncollateralized: false,
+            };
+            let uncollateralized_debt = Debt {
+                amount_scaled: Uint256::from(10000u128),
+                uncollateralized: true,
             };
             debts_asset_state(&mut deps.storage, b"debtcoin")
                 .save(sender_canonical_address.as_slice(), &debt)
+                .unwrap();
+            debts_asset_state(&mut deps.storage, b"uncollateralized_debt")
+                .save(sender_canonical_address.as_slice(), &uncollateralized_debt)
                 .unwrap();
             let mut users_bucket = users_state(&mut deps.storage);
             let mut sender_user = users_bucket
@@ -6259,8 +6342,13 @@ mod tests {
         let limit = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-
         assert_eq!(limit, initial_uncollateralized_loan_limit);
+
+        // check user's uncollateralized debt flag is true (limit > 0)
+        let debt = debts_asset_state_read(&deps.storage, b"somecoin")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+        assert!(debt.uncollateralized);
 
         // Borrow asset
         block_time += 1000_u64;
@@ -6405,8 +6493,13 @@ mod tests {
         let allowance = uncollateralized_loan_limits_read(&deps.storage, b"somecoin")
             .load(&borrower_canonical_addr.as_slice())
             .unwrap();
-
         assert_eq!(allowance, Uint128::zero());
+
+        // check user's uncollateralized debt flag is false (limit == 0)
+        let debt = debts_asset_state_read(&deps.storage, b"somecoin")
+            .load(&borrower_canonical_addr.as_slice())
+            .unwrap();
+        assert!(!debt.uncollateralized);
     }
 
     #[test]
@@ -6739,6 +6832,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_query_collateral() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = HumanAddr(String::from("user"));
+        let user_canonical_addr = deps.api.canonical_address(&user_addr).unwrap();
+
+        // Setup first market containing a CW20 asset
+        let cw20_contract_addr_1 = HumanAddr::from("depositedcoin1");
+        deps.querier
+            .set_cw20_symbol(cw20_contract_addr_1.clone(), "DP1".to_string());
+        let market_1_initial = th_init_market(
+            &deps.api,
+            &mut deps.storage,
+            deps.api
+                .canonical_address(&cw20_contract_addr_1)
+                .unwrap()
+                .as_slice(),
+            &Market {
+                asset_type: AssetType::Cw20,
+                ..Default::default()
+            },
+        );
+
+        // Setup second market containing a native asset
+        let market_2_initial = th_init_market(
+            &deps.api,
+            &mut deps.storage,
+            String::from("uusd").as_bytes(),
+            &Market {
+                ..Default::default()
+            },
+        );
+
+        // Set second market as collateral
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Assert markets correctly return collateral status
+        let res = query_collateral(&deps, user_addr.clone()).unwrap();
+        assert_eq!(res.collateral[0].denom, String::from("DP1"));
+        assert!(!res.collateral[0].enabled);
+        assert_eq!(res.collateral[1].denom, String::from("uusd"));
+        assert!(res.collateral[1].enabled);
+
+        // Set first market as collateral
+        set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+        let mut users_bucket = users_state(&mut deps.storage);
+        users_bucket
+            .save(user_canonical_addr.as_slice(), &user)
+            .unwrap();
+
+        // Assert markets correctly return collateral status
+        let res = query_collateral(&deps, user_addr).unwrap();
+        assert_eq!(res.collateral[0].denom, String::from("DP1"));
+        assert!(res.collateral[0].enabled);
+        assert_eq!(res.collateral[1].denom, String::from("uusd"));
+        assert!(res.collateral[1].enabled);
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
@@ -6779,10 +6936,10 @@ mod tests {
                 liquidation_bonus: Decimal256::zero(),
                 protocol_income_to_distribute: Uint256::zero(),
                 pid_parameters: PidParameters {
-                    kp: Default::default(),
+                    kp_1: Default::default(),
                     optimal_utilization_rate: Default::default(),
                     kp_augmentation_threshold: Default::default(),
-                    kp_multiplier: Default::default(),
+                    kp_2: Default::default(),
                 },
             }
         }

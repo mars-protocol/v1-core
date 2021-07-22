@@ -3,8 +3,7 @@ use cosmwasm_std::{
 };
 
 use crate::error::ContractError;
-use crate::state;
-use crate::state::Config;
+use crate::state::{Config, CONFIG};
 
 use mars::address_provider::msg::{
     ConfigParams, ConfigResponse, ExecuteMsg, InstantiateMsg, MarsContract, MigrateMsg, QueryMsg,
@@ -34,7 +33,7 @@ pub fn init(
         xmars_token_address: Addr::unchecked(""),
     };
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
@@ -62,7 +61,7 @@ pub fn execute_update_config(
     info: MessageInfo,
     config_params: ConfigParams,
 ) -> Result<Response, ContractError> {
-    let mut config = state::config_read(deps.storage).load()?;
+    let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
         return Err(ContractError::Unauthorized {});
@@ -102,7 +101,7 @@ pub fn execute_update_config(
     config.xmars_token_address =
         option_string_to_addr(deps.api, xmars_token_address, config.xmars_token_address)?;
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
@@ -119,7 +118,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
         owner: config.owner,
         council_address: config.council_address,
@@ -134,12 +133,12 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 }
 
 fn query_address(deps: Deps, contract: MarsContract) -> StdResult<Addr> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     Ok(get_address(&config, contract))
 }
 
 fn query_addresses(deps: Deps, contracts: Vec<MarsContract>) -> StdResult<Vec<Addr>> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
     for contract in contracts {
         ret.push(get_address(&config, contract));
@@ -197,7 +196,7 @@ mod tests {
         };
         init(deps.as_mut(), env, info, msg).unwrap();
 
-        let config = state::config_read(&deps.storage).load().unwrap();
+        let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(owner_address, config.owner);
     }
 
@@ -242,7 +241,7 @@ mod tests {
             assert_eq!(0, res.messages.len());
 
             // Read config from state
-            let new_config = state::config_read(&deps.storage).load().unwrap();
+            let new_config = CONFIG.load(&deps.storage).unwrap();
 
             assert_eq!(new_config.owner, Addr::unchecked("owner"));
             assert_eq!(new_config.xmars_token_address, Addr::unchecked(""),);
@@ -261,12 +260,12 @@ mod tests {
         let incentives_address = Addr::unchecked("incentives");
         let xmars_token_address = Addr::unchecked("xmars_token");
 
-        state::config(&mut deps.storage)
-            .update(|mut config: Config| -> StdResult<Config> {
-                config.council_address = council_address.clone();
-                config.incentives_address = incentives_address.clone();
-                config.xmars_token_address = xmars_token_address.clone();
-                Ok(config)
+        CONFIG
+            .update(&mut deps.storage, |mut c| -> StdResult<_> {
+                c.council_address = council_address.clone();
+                c.incentives_address = incentives_address.clone();
+                c.xmars_token_address = xmars_token_address.clone();
+                Ok(c)
             })
             .unwrap();
 

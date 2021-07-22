@@ -29,7 +29,7 @@ cosmwasm-bignumber = "2.1.1"
 terraswap = "2.3.0"
 
 cosmwasm-std = "0.15.0"
-cosmwasm-storage = {version = "0.15.0", features = ["iterator"]}
+cw-storage-plus = "0.7.0"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
@@ -38,3 +38,4 @@ thiserror = "1.0.20"
 
 [dev-dependencies]
 cosmwasm-schema = "0.15.0"
+cosmwasm-storage = { version = "0.15.0", features = ["iterator"] }

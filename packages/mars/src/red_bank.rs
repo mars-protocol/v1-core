@@ -145,6 +145,7 @@ pub mod msg {
         MarketsList {},
         Debt { address: String },
         UncollateralizedLoanLimit { user_address: String, asset: Asset },
+        Collateral { address: String },
     }
 
     // We define a custom struct for each query response
@@ -197,6 +198,17 @@ pub mod msg {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct CollateralResponse {
+        pub collateral: Vec<CollateralInfo>,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct CollateralInfo {
+        pub denom: String,
+        pub enabled: bool,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct UncollateralizedLoanLimitResponse {
         pub limit: Uint128,
     }
@@ -221,14 +233,14 @@ pub mod msg {
         pub maintenance_margin: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
-        /// One of the PID parameter
-        pub kp: Option<Decimal256>,
+        /// Proportional parameter for the PID controller
+        pub kp_1: Option<Decimal256>,
         /// Optimal utilization
         pub optimal_utilization_rate: Option<Decimal256>,
         /// Min error that triggers Kp augmentation
         pub kp_augmentation_threshold: Option<Decimal256>,
-        /// Kp multiplier when error threshold is exceeded
-        pub kp_multiplier: Option<Decimal256>,
+        /// Kp value when error threshold is exceeded
+        pub kp_2: Option<Decimal256>,
     }
 
     /// Represents either a native asset or a cw20. Meant to be used as part of a msg

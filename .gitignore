@@ -16,9 +16,11 @@ target/
 
 # Environment
 *.env
+jsconfig.json
 
 # Scripts
 node_modules/
+whitelists/
 
 # Artifacts
 artifacts/

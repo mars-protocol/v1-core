@@ -1,5 +1,5 @@
+use cosmwasm_std::StdError;
 use thiserror::Error;
-use cosmwasm_std::{StdError};
 
 #[derive(Error, Debug, PartialEq)]
 pub enum MarsError {
@@ -10,8 +10,5 @@ pub enum MarsError {
     Unauthorized {},
 
     #[error("Incorrect number of addresses, expected {expected:?}, got {actual:?}")]
-    AddressesQueryWrongNumber {
-        expected: u32,
-        actual: u32,
-    }
+    AddressesQueryWrongNumber { expected: u32, actual: u32 },
 }

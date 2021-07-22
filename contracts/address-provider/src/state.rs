@@ -1,14 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Storage};
-use cosmwasm_storage::{singleton, singleton_read, ReadonlySingleton, Singleton};
+use cosmwasm_std::Addr;
+use cw_storage_plus::Item;
 
-// keys (for singleton)
-pub static CONFIG_KEY: &[u8] = b"config";
-
-// namespaces (for buckets)
-pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
+// Key
+pub const CONFIG: Item<Config> = Item::new("config");
 
 /// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,12 +28,4 @@ pub struct Config {
     pub treasury_address: Addr,
     /// xMars token address
     pub xmars_token_address: Addr,
-}
-
-pub fn config(storage: &mut dyn Storage) -> Singleton<Config> {
-    singleton(storage, CONFIG_KEY)
-}
-
-pub fn config_read(storage: &dyn Storage) -> ReadonlySingleton<Config> {
-    singleton_read(storage, CONFIG_KEY)
 }
