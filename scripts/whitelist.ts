@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'fs';
 
 async function main() {
   let terra;
-  let redBankContractAddress = process.env.REDBANK_ADDRESS;
+  let redBankContractAddress = process.env.REDBANK_ADDRESS!;
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
@@ -18,7 +18,7 @@ async function main() {
 
   const marketsListResult = await queryContract(terra, redBankContractAddress, { "markets_list": {} });
   const { markets_list } = marketsListResult;
-  const marketInfo = {};
+  const marketInfo: any = {};
 
   for (let market of markets_list) {
     const { denom, ma_token_address } = market;
@@ -27,13 +27,13 @@ async function main() {
     marketInfo[ma_token_address] = { denom, decimals }
   }
 
-  const output = {};
+  const output: any = {};
   output.contracts = { redBankContractAddress };
   output.whitelist = marketInfo;
 
   const json = JSON.stringify(output);
 
-  const dir = "artifacts/whitelists"
+  const dir = "whitelists"
   const fileName = `${process.env.NETWORK || 'localterra'}.json`
   if (!existsSync(dir)) {
     mkdirSync(dir);
