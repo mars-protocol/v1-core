@@ -555,7 +555,7 @@ mod tests {
         Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
     };
     use mars::testing::{
-        assert_generic_error_message, assert_generic_mars_error_message, mock_dependencies,
+        assert_generic_error_message, assert_mars_generic_error_message, mock_dependencies,
         MarsMockQuerier,
     };
 
@@ -820,7 +820,7 @@ mod tests {
         let mut env = mock_env();
         env.block.time = Timestamp::from_nanos(unstake_block_timestamp);
         let response = execute(deps.as_mut(), env, info, msg.clone());
-        assert_generic_mars_error_message(
+        assert_mars_generic_error_message(
             response,
             "Address must have a valid cooldown to unstake",
         );
@@ -844,7 +844,7 @@ mod tests {
         let mut env = mock_env();
         env.block.time = Timestamp::from_nanos(unstake_block_timestamp);
         let response = execute(deps.as_mut(), env, info, msg.clone());
-        assert_generic_mars_error_message(response, "Cooldown has expired");
+        assert_mars_generic_error_message(response, "Cooldown has expired");
 
         // unstake Mars unfinished cooldown -> unauthorized
         COOLDOWNS
@@ -862,7 +862,7 @@ mod tests {
         let mut env = mock_env();
         env.block.time = Timestamp::from_nanos(unstake_block_timestamp);
         let response = execute(deps.as_mut(), env, info, msg.clone());
-        assert_generic_mars_error_message(response, "Cooldown has not finished");
+        assert_mars_generic_error_message(response, "Cooldown has not finished");
 
         // unstake Mars cooldown with low amount -> unauthorized
         COOLDOWNS
@@ -880,7 +880,7 @@ mod tests {
         let mut env = mock_env();
         env.block.time = Timestamp::from_nanos(unstake_block_timestamp);
         let response = execute(deps.as_mut(), env, info, msg.clone());
-        assert_generic_mars_error_message(
+        assert_mars_generic_error_message(
             response,
             "Unstake amount must not be greater than cooldown amount",
         );
@@ -1174,7 +1174,7 @@ mod tests {
         };
         let info = mock_info("owner", &[]);
         let response = execute(deps.as_mut(), mock_env(), info, msg);
-        assert_generic_mars_error_message(response, "Cannot swap Mars");
+        assert_mars_generic_error_message(response, "Cannot swap Mars");
     }
 
     // TEST HELPERS

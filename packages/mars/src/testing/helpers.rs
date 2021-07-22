@@ -21,7 +21,7 @@ pub fn assert_generic_error_message<T>(response: StdResult<T>, expected_msg: &st
 }
 
 /// Assert MarsError::Std(StdError::GenericErr) message with expected_msg
-pub fn assert_generic_mars_error_message<T>(response: Result<T, MarsError>, expected_msg: &str) {
+pub fn assert_mars_generic_error_message<T>(response: Result<T, MarsError>, expected_msg: &str) {
     match response {
         Err(MarsError::Std(StdError::GenericErr { msg, .. })) => assert_eq!(msg, expected_msg),
         Err(other_err) => panic!("Unexpected error: {:?}", other_err),
