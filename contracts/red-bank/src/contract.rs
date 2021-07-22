@@ -3685,7 +3685,7 @@ mod tests {
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: withdrawer_addr.clone(),
+                    to_address: withdrawer_addr,
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
@@ -4204,7 +4204,7 @@ mod tests {
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: withdrawer_addr.clone(),
+                    to_address: withdrawer_addr,
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
