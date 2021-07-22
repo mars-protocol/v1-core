@@ -181,7 +181,7 @@ pub fn execute_stake(
     if info.sender != mars_token_address {
         return Err(MarsError::Unauthorized {});
     }
-    if stake_amount == Uint128::new(0) {
+    if stake_amount == Uint128::zero() {
         return Err(MarsError::Std(StdError::generic_err(
             "Stake amount must be greater than 0",
         )));
@@ -195,8 +195,8 @@ pub fn execute_stake(
 
     let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
-    let mint_amount = if net_total_mars_in_staking_contract == Uint128::new(0)
-        || total_xmars_supply == Uint128::new(0)
+    let mint_amount = if net_total_mars_in_staking_contract == Uint128::zero()
+        || total_xmars_supply == Uint128::zero()
     {
         stake_amount
     } else {
@@ -241,7 +241,7 @@ pub fn execute_unstake(
     if info.sender != xmars_token_address {
         return Err(MarsError::Unauthorized {});
     }
-    if burn_amount == Uint128::new(0) {
+    if burn_amount == Uint128::zero() {
         return Err(MarsError::Std(StdError::generic_err(
             "Unstake amount must be greater than 0",
         )));
@@ -700,7 +700,7 @@ mod tests {
         );
 
         deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(0));
+            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::zero());
 
         let info = mock_info("mars_token", &[]);
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
