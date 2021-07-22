@@ -408,7 +408,8 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: deps.api.human_address(&market.ma_token_address)?,
         send: vec![],
-        msg: to_binary(&Cw20HandleMsg::Burn {
+        msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+            user: withdrawer_addr.clone(),
             amount: withdraw_amount_scaled.into(),
         })?,
     });
@@ -3630,12 +3631,10 @@ mod tests {
             )
             .unwrap();
 
+        let withdrawer_addr = HumanAddr::from("withdrawer");
         let user = User::default();
         let mut users_bucket = users_state(&mut deps.storage);
-        let withdrawer_canonical_addr = deps
-            .api
-            .canonical_address(&HumanAddr::from("withdrawer"))
-            .unwrap();
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
         users_bucket
             .save(withdrawer_canonical_addr.as_slice(), &user)
             .unwrap();
@@ -3678,14 +3677,15 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: HumanAddr::from("matoken"),
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdraw_amount_scaled.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("withdrawer"),
+                    to_address: withdrawer_addr.clone(),
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
@@ -3828,7 +3828,8 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: ma_token_addr,
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdraw_amount_scaled.into(),
                     })
                     .unwrap(),
@@ -4067,7 +4068,8 @@ mod tests {
                     CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: HumanAddr::from("matoken3"),
                         send: vec![],
-                        msg: to_binary(&Cw20HandleMsg::Burn {
+                        msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                            user: withdrawer_addr.clone(),
                             amount: withdraw_amount_scaled.into(),
                         })
                         .unwrap(),
@@ -4141,13 +4143,11 @@ mod tests {
             .unwrap();
 
         // Mark the market as collateral for the user
+        let withdrawer_addr = HumanAddr::from("withdrawer");
         let mut user = User::default();
         set_bit(&mut user.collateral_assets, market_initial.index).unwrap();
         let mut users_bucket = users_state(&mut deps.storage);
-        let withdrawer_canonical_addr = deps
-            .api
-            .canonical_address(&HumanAddr::from("withdrawer"))
-            .unwrap();
+        let withdrawer_canonical_addr = deps.api.canonical_address(&withdrawer_addr).unwrap();
         users_bucket
             .save(withdrawer_canonical_addr.as_slice(), &user)
             .unwrap();
@@ -4196,14 +4196,15 @@ mod tests {
                 CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: HumanAddr::from("matoken"),
                     send: vec![],
-                    msg: to_binary(&Cw20HandleMsg::Burn {
+                    msg: to_binary(&ma_token::msg::HandleMsg::Burn {
+                        user: withdrawer_addr.clone(),
                         amount: withdrawer_balance_scaled.into(),
                     })
                     .unwrap(),
                 }),
                 CosmosMsg::Bank(BankMsg::Send {
                     from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    to_address: HumanAddr::from("withdrawer"),
+                    to_address: withdrawer_addr.clone(),
                     amount: vec![deduct_tax(
                         &deps,
                         Coin {
