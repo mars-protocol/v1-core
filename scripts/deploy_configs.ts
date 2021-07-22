@@ -68,9 +68,9 @@ export const testnet: Config = {
     "config": {
       "address_provider_address": undefined,
 
-      "proposal_voting_period": 20, // 20 blocks = ~2.5 minutes (for internal testing) // 960 blocks = ~5 days
-      "proposal_effective_delay": 0, // 0 blocks = able to execute proposal immediately (for internal testing) // 194 blocks = ~24 hours
-      "proposal_expiration_period": 1920, // 1920 blocks = ~10 days
+      "proposal_voting_period": 20, // 20 blocks = ~2.5 minutes (for internal testing) // 57600 blocks = ~5 days
+      "proposal_effective_delay": 0, // 0 blocks = able to execute proposal immediately (for internal testing) // 11520 blocks = ~24 hours
+      "proposal_expiration_period": 115200, // 115200 blocks = ~10 days
       "proposal_required_deposit": "100000000",
       "proposal_required_quorum": "0.1",
       "proposal_required_threshold": "0.05"
@@ -82,8 +82,8 @@ export const testnet: Config = {
       "address_provider_address": undefined,
       "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
       "terraswap_max_spread": "0.05",
-      "cooldown_duration": 12, // 12 blocks = ~1.5 minutes (for internal testing) // 1920 blocks = ~10 days
-      "unstake_window": 40, // 40 blocks = ~5 minutes (for internal testing) // 384 blocks = ~2 days
+      "cooldown_duration": 12, // 12 blocks = ~1.5 minutes (for internal testing) // 115200 blocks = ~10 days
+      "unstake_window": 40, // 40 blocks = ~5 minutes (for internal testing) // 23040 blocks = ~2 days
     }
   },
   insuranceFundInitMsg: {
