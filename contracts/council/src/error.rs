@@ -1,5 +1,5 @@
+use cosmwasm_std::StdError;
 use mars::error::MarsError;
-use cosmwasm_std::{StdError};
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -14,25 +14,24 @@ pub enum ContractError {
     InvalidProposal { error: String },
 
     #[error("Proposal is not active")]
-    ProposalNotActive{},
+    ProposalNotActive {},
 
     #[error("User has already voted on this proposal")]
-    VoteUserAlreadyVoted{},
+    VoteUserAlreadyVoted {},
     #[error("User has no voting power at block: {block:?}")]
-    VoteNoVotingPower{ block: u64 },
+    VoteNoVotingPower { block: u64 },
     #[error("Voting period has ended")]
-    VoteVotingPeriodEnded{},
+    VoteVotingPeriodEnded {},
 
     #[error("Voting period has not ended")]
-    EndProposalVotingPeriodNotEnded{},
+    EndProposalVotingPeriodNotEnded {},
 
     #[error("Proposal has not passed or has already been executed")]
-    ExecuteProposalNotPassed{},
+    ExecuteProposalNotPassed {},
     #[error("Proposal must end it's delay period in order to be executed")]
-    ExecuteProposalDelayNotEnded{},
+    ExecuteProposalDelayNotEnded {},
     #[error("Proposal has expired")]
-    ExecuteProposalExpired{},
-
+    ExecuteProposalExpired {},
 }
 
 impl ContractError {

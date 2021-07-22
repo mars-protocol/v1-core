@@ -1,14 +1,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Binary, Addr, Decimal, StdResult, Uint128};
+use cosmwasm_std::{Addr, Binary, Decimal, StdResult, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
 use mars::helpers::all_conditions_valid;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("global_state");
-pub const PROPOSALS: Map<U64Key, Proposal> =  Map::new("proposals");
+pub const PROPOSALS: Map<U64Key, Proposal> = Map::new("proposals");
 pub const PROPOSAL_VOTES: Map<(U64Key, &Addr), ProposalVote> = Map::new("proposal_votes");
 
 /// Council global configuration
