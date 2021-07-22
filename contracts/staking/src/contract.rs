@@ -5,8 +5,7 @@ use cosmwasm_std::{
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use terraswap::asset::AssetInfo;
 
-use crate::state;
-use crate::state::{Config, Cooldown};
+use crate::state::{Config, Cooldown, CONFIG, COOLDOWNS};
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
@@ -70,7 +69,7 @@ pub fn instantiate(
         unstake_window: unstake_window.unwrap(),
     };
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
@@ -110,7 +109,7 @@ pub fn execute_update_config(
     info: MessageInfo,
     new_config: CreateOrUpdateConfig,
 ) -> Result<Response, MarsError> {
-    let mut config = state::config_read(deps.storage).load()?;
+    let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
         return Err(MarsError::Unauthorized {});
@@ -143,7 +142,7 @@ pub fn execute_update_config(
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
     config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
-    state::config(deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
@@ -175,7 +174,7 @@ pub fn execute_stake(
     stake_amount: Uint128,
 ) -> Result<Response, MarsError> {
     // check stake is valid
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
 
     // Has to send Mars tokens
@@ -237,7 +236,7 @@ pub fn execute_unstake(
     burn_amount: Uint128,
 ) -> Result<Response, MarsError> {
     // check if unstake is valid
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
     if info.sender != xmars_token_address {
         return Err(MarsError::Unauthorized {});
@@ -249,9 +248,9 @@ pub fn execute_unstake(
     }
 
     // check valid cooldown
-    let mut cooldowns_bucket = state::cooldowns(deps.storage);
     let staker_addr = deps.api.addr_validate(&staker)?;
-    match cooldowns_bucket.may_load(staker_addr.as_bytes())? {
+
+    match COOLDOWNS.may_load(deps.storage, staker_addr.as_bytes())? {
         Some(mut cooldown) => {
             if burn_amount > cooldown.amount {
                 return Err(MarsError::Std(StdError::generic_err(
@@ -272,10 +271,10 @@ pub fn execute_unstake(
             }
 
             if burn_amount == cooldown.amount {
-                cooldowns_bucket.remove(staker_addr.as_bytes());
+                COOLDOWNS.remove(deps.storage, staker_addr.as_bytes());
             } else {
                 cooldown.amount -= burn_amount;
-                cooldowns_bucket.save(staker_addr.as_bytes(), &cooldown)?;
+                COOLDOWNS.save(deps.storage, staker_addr.as_bytes(), &cooldown)?;
             }
         }
 
@@ -333,7 +332,7 @@ pub fn execute_unstake(
 /// If a cooldown exists and amount has changed it computes the weighted average
 /// for the cooldown
 pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, MarsError> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     let xmars_token_address = address_provider::helpers::query_address(
         &deps,
@@ -348,10 +347,8 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
         return Err(MarsError::Unauthorized {});
     }
 
-    let mut cooldowns_bucket = state::cooldowns(deps.storage);
-
     // compute new cooldown timestamp
-    let new_cooldown_timestamp = match cooldowns_bucket.may_load(info.sender.as_bytes())? {
+    let new_cooldown_timestamp = match COOLDOWNS.may_load(deps.storage, info.sender.as_bytes())? {
         Some(cooldown) => {
             let minimal_valid_cooldown_timestamp =
                 env.block.time.nanos() - config.cooldown_duration - config.unstake_window;
@@ -373,8 +370,9 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
         None => env.block.time.nanos(),
     };
 
-    cooldowns_bucket.save(
-        &info.sender.as_bytes(),
+    COOLDOWNS.save(
+        deps.storage,
+        info.sender.as_bytes(),
         &Cooldown {
             amount: xmars_balance,
             timestamp: new_cooldown_timestamp,
@@ -400,7 +398,7 @@ pub fn execute_execute_cosmos_msg(
     info: MessageInfo,
     msg: CosmosMsg,
 ) -> Result<Response, MarsError> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
         return Err(MarsError::Unauthorized {});
@@ -421,7 +419,7 @@ pub fn execute_swap_asset_to_uusd(
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
 ) -> StdResult<Response> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     // throw error if the user tries to swap Mars
     let mars_token_address = address_provider::helpers::query_address(
@@ -459,7 +457,7 @@ pub fn execute_swap_uusd_to_mars(
     env: Env,
     amount: Option<Uint128>,
 ) -> StdResult<Response> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     let offer_asset_info = AssetInfo::NativeToken {
         denom: "uusd".to_string(),
@@ -499,7 +497,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
-    let config = state::config_read(deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
         owner: config.owner.to_string(),
         address_provider_address: config.address_provider_address.to_string(),
@@ -510,7 +508,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 }
 
 fn query_cooldown(deps: Deps, sender_address: String) -> StdResult<CooldownResponse> {
-    let cooldown = state::cooldowns_read(deps.storage).may_load(sender_address.as_bytes())?;
+    let cooldown = COOLDOWNS.may_load(deps.storage, sender_address.as_bytes())?;
 
     match cooldown {
         Some(result) => Ok(CooldownResponse {
@@ -606,7 +604,7 @@ mod tests {
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        let config = state::config_read(deps.as_ref().storage).load().unwrap();
+        let config = CONFIG.load(deps.as_ref().storage).unwrap();
         assert_eq!(config.owner, "owner");
         assert_eq!(config.address_provider_address, "address_provider",);
     }
@@ -662,7 +660,7 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // Read config from state
-        let new_config = state::config_read(deps.as_ref().storage).load().unwrap();
+        let new_config = CONFIG.load(deps.as_ref().storage).unwrap();
 
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
         assert_eq!(
@@ -825,8 +823,9 @@ mod tests {
         );
 
         // unstake Mars expired cooldown -> unauthorized
-        state::cooldowns(deps.as_mut().storage)
+        COOLDOWNS
             .save(
+                deps.as_mut().storage,
                 staker_addr.as_bytes(),
                 &Cooldown {
                     amount: unstake_amount,
@@ -845,8 +844,9 @@ mod tests {
         assert_generic_mars_error_message(response, "Cooldown has expired");
 
         // unstake Mars unfinished cooldown -> unauthorized
-        state::cooldowns(deps.as_mut().storage)
+        COOLDOWNS
             .save(
+                deps.as_mut().storage,
                 staker_addr.as_bytes(),
                 &Cooldown {
                     amount: unstake_amount,
@@ -862,8 +862,9 @@ mod tests {
         assert_generic_mars_error_message(response, "Cooldown has not finished");
 
         // unstake Mars cooldown with low amount -> unauthorized
-        state::cooldowns(deps.as_mut().storage)
+        COOLDOWNS
             .save(
+                deps.as_mut().storage,
                 staker_addr.as_bytes(),
                 &Cooldown {
                     amount: unstake_amount - Uint128::new(1000),
@@ -886,8 +887,9 @@ mod tests {
         let pending_cooldown_amount = Uint128::new(300_000);
         let pending_cooldown_timestamp = unstake_block_timestamp - TEST_COOLDOWN_DURATION;
 
-        state::cooldowns(deps.as_mut().storage)
+        COOLDOWNS
             .save(
+                deps.as_mut().storage,
                 staker_addr.as_bytes(),
                 &Cooldown {
                     amount: unstake_amount + pending_cooldown_amount,
@@ -936,8 +938,8 @@ mod tests {
             res.attributes
         );
 
-        let actual_cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .load(staker_addr.as_bytes())
+        let actual_cooldown = COOLDOWNS
+            .load(deps.as_ref().storage, staker_addr.as_bytes())
             .unwrap();
 
         assert_eq!(actual_cooldown.amount, pending_cooldown_amount);
@@ -1008,8 +1010,8 @@ mod tests {
             res.attributes
         );
 
-        let actual_cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .may_load(staker_addr.as_bytes())
+        let actual_cooldown = COOLDOWNS
+            .may_load(deps.as_ref().storage, staker_addr.as_bytes())
             .unwrap();
 
         assert_eq!(actual_cooldown, None);
@@ -1044,8 +1046,8 @@ mod tests {
         env.block.time = Timestamp::from_nanos(initial_block_time);
         let res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
 
-        let cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .load(Addr::unchecked("staker").as_bytes())
+        let cooldown = COOLDOWNS
+            .load(deps.as_ref().storage, Addr::unchecked("staker").as_bytes())
             .unwrap();
 
         assert_eq!(cooldown.timestamp, initial_block_time);
@@ -1066,8 +1068,8 @@ mod tests {
         env.block.time = Timestamp::from_nanos(ongoing_cooldown_block_time);
         let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
 
-        let cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .load(Addr::unchecked("staker").as_bytes())
+        let cooldown = COOLDOWNS
+            .load(deps.as_ref().storage, Addr::unchecked("staker").as_bytes())
             .unwrap();
 
         assert_eq!(cooldown.timestamp, initial_block_time);
@@ -1088,8 +1090,8 @@ mod tests {
         env.block.time = Timestamp::from_nanos(ongoing_cooldown_block_time);
         let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
 
-        let cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .load(Addr::unchecked("staker").as_bytes())
+        let cooldown = COOLDOWNS
+            .load(deps.as_ref().storage, Addr::unchecked("staker").as_bytes())
             .unwrap();
 
         let expected_cooldown_timestamp =
@@ -1117,8 +1119,8 @@ mod tests {
         env.block.time = Timestamp::from_nanos(expired_cooldown_block_time);
         let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
 
-        let cooldown = state::cooldowns_read(deps.as_ref().storage)
-            .load(Addr::unchecked("staker").as_bytes())
+        let cooldown = COOLDOWNS
+            .load(deps.as_ref().storage, Addr::unchecked("staker").as_bytes())
             .unwrap();
 
         assert_eq!(cooldown.timestamp, expired_cooldown_block_time);
