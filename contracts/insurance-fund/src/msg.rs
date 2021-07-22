@@ -1,4 +1,4 @@
-use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{Addr, CosmosMsg, Decimal, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;
@@ -39,7 +39,7 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub owner: String,
+    pub owner: Addr,
 }
 
 /// We currently take no arguments for migrations

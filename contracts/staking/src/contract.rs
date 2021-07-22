@@ -499,8 +499,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        owner: config.owner.to_string(),
-        address_provider_address: config.address_provider_address.to_string(),
+        owner: config.owner,
+        address_provider_address: config.address_provider_address,
         terraswap_max_spread: config.terraswap_max_spread,
         cooldown_duration: config.cooldown_duration,
         unstake_window: config.unstake_window,
@@ -552,7 +552,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::{
         testing::{mock_env, mock_info},
-        BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
+        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
     };
     use mars::testing::{
         assert_generic_error_message, assert_generic_mars_error_message, mock_dependencies,
@@ -605,8 +605,11 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         let config = CONFIG.load(deps.as_ref().storage).unwrap();
-        assert_eq!(config.owner, "owner");
-        assert_eq!(config.address_provider_address, "address_provider",);
+        assert_eq!(config.owner, Addr::unchecked("owner"));
+        assert_eq!(
+            config.address_provider_address,
+            Addr::unchecked("address_provider")
+        );
     }
 
     #[test]
