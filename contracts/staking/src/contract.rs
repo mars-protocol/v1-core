@@ -335,7 +335,7 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
     let config = CONFIG.load(deps.storage)?;
 
     let xmars_token_address = address_provider::helpers::query_address(
-        &deps,
+        &deps.querier,
         config.address_provider_address,
         MarsContract::XMarsToken,
     )?;
@@ -423,7 +423,7 @@ pub fn execute_swap_asset_to_uusd(
 
     // throw error if the user tries to swap Mars
     let mars_token_address = address_provider::helpers::query_address(
-        &deps,
+        &deps.querier,
         config.address_provider_address,
         MarsContract::MarsToken,
     )?;
@@ -464,7 +464,7 @@ pub fn execute_swap_uusd_to_mars(
     };
 
     let mars_token_address = address_provider::helpers::query_address(
-        &deps,
+        &deps.querier,
         config.address_provider_address,
         MarsContract::MarsToken,
     )?;
@@ -531,7 +531,7 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 /// Gets mars and xmars token addresses from address provider and returns them in a tuple.
 fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), MarsError> {
     let mut addresses_query = address_provider::helpers::query_addresses(
-        &deps,
+        &deps.querier,
         config.address_provider_address.clone(),
         vec![MarsContract::MarsToken, MarsContract::XMarsToken],
     )?;
