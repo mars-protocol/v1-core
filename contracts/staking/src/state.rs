@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Decimal, Storage, Uint128};
+use cosmwasm_std::{Addr, Decimal, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -17,11 +17,11 @@ pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
-    pub owner: CanonicalAddr,
+    pub owner: Addr,
     /// Address provider address
-    pub address_provider_address: CanonicalAddr,
+    pub address_provider_address: Addr,
     /// Terraswap factory contract address
-    pub terraswap_factory_address: CanonicalAddr,
+    pub terraswap_factory_address: Addr,
     /// Terraswap max spread
     pub terraswap_max_spread: Decimal,
     /// Cooldown duration in seconds
@@ -31,11 +31,11 @@ pub struct Config {
     pub unstake_window: u64,
 }
 
-pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config(storage: &mut dyn Storage) -> Singleton<Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read(storage: &dyn Storage) -> ReadonlySingleton<Config> {
     singleton_read(storage, CONFIG_KEY)
 }
 
@@ -48,10 +48,10 @@ pub struct Cooldown {
     pub amount: Uint128,
 }
 
-pub fn cooldowns<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
-    bucket(COOLDOWNS_NAMESPACE, storage)
+pub fn cooldowns(storage: &mut dyn Storage) -> Bucket<Cooldown> {
+    bucket(storage, COOLDOWNS_NAMESPACE)
 }
 
-pub fn cooldowns_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
-    bucket_read(COOLDOWNS_NAMESPACE, storage)
+pub fn cooldowns_read(storage: &dyn Storage) -> ReadonlyBucket<Cooldown> {
+    bucket_read(storage, COOLDOWNS_NAMESPACE)
 }
