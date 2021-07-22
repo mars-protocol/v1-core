@@ -166,7 +166,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        owner: config.owner,
+        owner: config.owner.to_string(),
     })
 }
 
@@ -185,7 +185,7 @@ mod tests {
     use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::{
         testing::{mock_env, mock_info},
-        Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
+        BankMsg, Coin, Decimal, SubMsg, Uint128,
     };
     use mars::testing::mock_dependencies;
 
@@ -205,7 +205,7 @@ mod tests {
         assert_eq!(empty_vec, res.messages);
 
         let config = CONFIG.load(&deps.storage).unwrap();
-        assert_eq!(config.owner, Addr::unchecked("owner"));
+        assert_eq!(config.owner, "owner");
     }
 
     #[test]
@@ -251,11 +251,8 @@ mod tests {
         // Read config from state
         let new_config = CONFIG.load(&deps.storage).unwrap();
 
-        assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
-        assert_eq!(
-            new_config.terraswap_factory_address,
-            Addr::unchecked("new_factory")
-        );
+        assert_eq!(new_config.owner, "new_owner");
+        assert_eq!(new_config.terraswap_factory_address, "new_factory");
         assert_eq!(
             new_config.terraswap_max_spread,
             Decimal::from_ratio(10u128, 100u128)
