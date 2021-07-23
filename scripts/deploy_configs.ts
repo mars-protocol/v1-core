@@ -1,68 +1,3 @@
-interface CouncilInitMsg {
-  config: {
-    address_provider_address?: string,
-    proposal_voting_period: number,
-    proposal_effective_delay: number,
-    proposal_expiration_period: number,
-    proposal_required_deposit: string,
-    proposal_required_quorum: string,
-    proposal_required_threshold: string,
-  }
-}
-
-interface StakingInitMsg {
-  config: {
-    owner?: string,
-    address_provider_address?: string,
-    terraswap_factory_address?: string,
-    terraswap_max_spread: string,
-    cooldown_duration: number,
-    unstake_window: number,
-  }
-}
-
-interface InsuranceFundInitMsg {
-  owner?: string,
-  terraswap_factory_address?: string,
-  terraswap_max_spread: string,
-}
-
-interface RedBankInitMsg {
-  config: {
-    owner?: string,
-    address_provider_address?: string,
-    insurance_fund_fee_share: string,
-    treasury_fee_share: string,
-    ma_token_code_id?: number,
-    close_factor: string,
-  }
-}
-
-interface Asset {
-  denom?: string,
-  symbol?: string,
-  contract_addr?: string,
-  initial_borrow_rate: string,
-  min_borrow_rate: string,
-  max_borrow_rate: string,
-  max_loan_to_value: string,
-  reserve_factor: string,
-  maintenance_margin: string,
-  liquidation_bonus: string,
-  kp: string,
-  optimal_utilization_rate: string,
-  kp_augmentation_threshold: string,
-  kp_multiplier: string,
-}
-
-export interface Config {
-  councilInitMsg: CouncilInitMsg,
-  stakingInitMsg: StakingInitMsg,
-  insuranceFundInitMsg: InsuranceFundInitMsg,
-  redBankInitMsg: RedBankInitMsg,
-  initialAssets: Asset[],
-}
-
 export const testnet: Config = {
   councilInitMsg: {
     "config": {
@@ -105,61 +40,61 @@ export const testnet: Config = {
     // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
     {
       denom: "uusd",
-      initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.01",
-      max_borrow_rate: "0.8",
+      initial_borrow_rate: "0.2",
+      min_borrow_rate: "0.0",
+      max_borrow_rate: "1.0",
       max_loan_to_value: "0.75",
-      reserve_factor: "0.3",
+      reserve_factor: "0.2",
       maintenance_margin: "0.85",
-      liquidation_bonus: "0.15",
-      kp: "4",
+      liquidation_bonus: "0.1",
+      kp_1: "0.04",
       optimal_utilization_rate: "0.9",
       kp_augmentation_threshold: "0.2",
-      kp_multiplier: "1.75"
+      kp_2: "0.07"
     },
     {
       denom: "uluna",
       initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.03",
-      max_borrow_rate: "0.6",
-      max_loan_to_value: "0.5",
-      reserve_factor: "0.3",
-      maintenance_margin: "0.7",
-      liquidation_bonus: "0.15",
-      kp: "2",
+      min_borrow_rate: "0.0",
+      max_borrow_rate: "2.0",
+      max_loan_to_value: "0.55",
+      reserve_factor: "0.2",
+      maintenance_margin: "0.65",
+      liquidation_bonus: "0.1",
+      kp_1: "0.02",
       optimal_utilization_rate: "0.7",
       kp_augmentation_threshold: "0.2",
-      kp_multiplier: "2.5"
+      kp_2: "0.05"
     },
     {
       symbol: "ANC",
       contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-      initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.03",
-      max_borrow_rate: "0.6",
-      max_loan_to_value: "0.5",
-      reserve_factor: "0.3",
-      maintenance_margin: "0.7",
+      initial_borrow_rate: "0.07",
+      min_borrow_rate: "0.0",
+      max_borrow_rate: "2.0",
+      max_loan_to_value: "0.35",
+      reserve_factor: "0.2",
+      maintenance_margin: "0.45",
       liquidation_bonus: "0.15",
-      kp: "2",
+      kp_1: "0.02",
       optimal_utilization_rate: "0.5",
       kp_augmentation_threshold: "0.2",
-      kp_multiplier: "2.5"
+      kp_2: "0.05"
     },
     {
       symbol: "MIR",
       contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u",
-      initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.03",
-      max_borrow_rate: "0.6",
-      max_loan_to_value: "0.5",
-      reserve_factor: "0.3",
-      maintenance_margin: "0.7",
+      initial_borrow_rate: "0.07",
+      min_borrow_rate: "0.0",
+      max_borrow_rate: "2.0",
+      max_loan_to_value: "0.45",
+      reserve_factor: "0.2",
+      maintenance_margin: "0.55",
       liquidation_bonus: "0.15",
-      kp: "2",
+      kp_1: "0.02",
       optimal_utilization_rate: "0.5",
       kp_augmentation_threshold: "0.2",
-      kp_multiplier: "2.5"
+      kp_2: "0.05"
     },
   ]
 }
