@@ -96,3 +96,7 @@ pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> StdResul
 
     Ok(())
 }
+
+pub fn zero_address() -> Addr {
+    Addr::unchecked("")
+}
