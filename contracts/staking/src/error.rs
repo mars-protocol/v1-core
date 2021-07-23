@@ -30,10 +30,4 @@ pub enum ContractError {
 
     #[error("Cannot swap Mars")]
     MarsCannotSwap {},
-
-    #[error("xMars token address not found")]
-    XMarsAddressNotFound {},
-
-    #[error("Mars token address not found")]
-    MarsAddressNotFound {},
 }

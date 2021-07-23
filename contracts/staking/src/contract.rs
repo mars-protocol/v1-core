@@ -530,12 +530,8 @@ fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), 
         config.address_provider_address.clone(),
         vec![MarsContract::MarsToken, MarsContract::XMarsToken],
     )?;
-    let xmars_token_address = addresses_query
-        .pop()
-        .ok_or_else(|| ContractError::XMarsAddressNotFound {})?;
-    let mars_token_address = addresses_query
-        .pop()
-        .ok_or_else(|| ContractError::MarsAddressNotFound {})?;
+    let xmars_token_address = addresses_query.pop().unwrap();
+    let mars_token_address = addresses_query.pop().unwrap();
 
     Ok((mars_token_address, xmars_token_address))
 }
