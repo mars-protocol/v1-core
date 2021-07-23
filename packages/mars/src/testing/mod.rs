@@ -52,6 +52,20 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
     }
 }
 
+pub fn mock_env_at_block_time(seconds: u64) -> Env {
+    mock_env(MockEnvParams {
+        block_time: Timestamp::from_seconds(seconds),
+        ..Default::default()
+    })
+}
+
+pub fn mock_env_at_block_height(block_height: u64) -> Env {
+    mock_env(MockEnvParams {
+        block_height,
+        ..Default::default()
+    })
+}
+
 /// quick mock info with just the sender
 pub fn mock_info(sender: &str) -> MessageInfo {
     MessageInfo {

@@ -1,5 +1,5 @@
 pub mod msg {
-    use cosmwasm_std::{Addr, CosmosMsg, Decimal, Uint128};
+    use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
 
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
@@ -63,7 +63,7 @@ pub mod msg {
     // We define a custom struct for each query response
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
-        pub owner: Addr,
+        pub owner: String,
         pub address_provider_address: String,
         pub terraswap_max_spread: Decimal,
         pub cooldown_duration: u64,

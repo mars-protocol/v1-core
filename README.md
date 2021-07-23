@@ -11,8 +11,12 @@
 ### Linting
 
 ```
+rustup component add rustfmt
 cargo fmt
-cargo clippy --tests --all-features -- -D warnings
+
+rustup install nightly
+rustup component add clippy
+cargo +nightly clippy --tests --all-features -- -D warnings
 ```
 
 ### TypeScript and JavaScript scripts
