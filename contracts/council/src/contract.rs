@@ -9,7 +9,7 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
-use mars::helpers::{option_string_to_addr, read_be_u64};
+use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
 use mars::xmars_token;
 
 use crate::error::ContractError;
@@ -72,7 +72,7 @@ pub fn instantiate(
         address_provider_address: option_string_to_addr(
             deps.api,
             address_provider_address,
-            Addr::unchecked(""),
+            zero_address(),
         )?,
         proposal_voting_period: proposal_voting_period.unwrap(),
         proposal_effective_delay: proposal_effective_delay.unwrap(),
@@ -451,23 +451,23 @@ pub fn execute_execute_proposal(
     proposal.status = ProposalStatus::Executed;
     proposal_path.save(deps.storage, &proposal)?;
 
-    let messages: Vec<SubMsg> = if let Some(mut proposal_execute_calls) = proposal.execute_calls {
-        let mut ret = Vec::<SubMsg>::with_capacity(proposal_execute_calls.len());
+    let messages: Vec<SubMsg> = proposal
+        .execute_calls
+        .map(|mut proposal_execute_calls| {
+            proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
 
-        proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
-
-        for execute_call in proposal_execute_calls {
-            ret.push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: execute_call.target_contract_address.into(),
-                msg: execute_call.msg,
-                funds: vec![],
-            })));
-        }
-
-        ret
-    } else {
-        vec![]
-    };
+            proposal_execute_calls
+                .into_iter()
+                .map(|execute_call| {
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: execute_call.target_contract_address.into(),
+                        msg: execute_call.msg,
+                        funds: vec![],
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_else(Vec::new);
 
     Ok(Response {
         messages,
@@ -2012,33 +2012,17 @@ mod tests {
             ..Default::default()
         });
         let info = mock_info("voter1");
-        execute(deps.as_mut(), env, info, msg_vote_for.clone()).unwrap();
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
 
-        let env = mock_env(MockEnvParams {
-            block_height: active_proposal.start_height + 1,
-            ..Default::default()
-        });
         let info = mock_info("voter2");
-        execute(deps.as_mut(), env, info, msg_vote_for.clone()).unwrap();
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
 
-        let env = mock_env(MockEnvParams {
-            block_height: active_proposal.start_height + 1,
-            ..Default::default()
-        });
         let info = mock_info("voter3");
-        execute(deps.as_mut(), env, info, msg_vote_for.clone()).unwrap();
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
 
-        let env = mock_env(MockEnvParams {
-            block_height: active_proposal.start_height + 1,
-            ..Default::default()
-        });
         let info = mock_info("voter4");
-        execute(deps.as_mut(), env, info, msg_vote_against.clone()).unwrap();
+        execute(deps.as_mut(), env.clone(), info, msg_vote_against.clone()).unwrap();
 
-        let env = mock_env(MockEnvParams {
-            block_height: active_proposal.start_height + 1,
-            ..Default::default()
-        });
         let info = mock_info("voter5");
         execute(deps.as_mut(), env, info, msg_vote_against.clone()).unwrap();
 
