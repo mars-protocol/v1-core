@@ -188,9 +188,8 @@ pub fn execute_stake(
         cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
     // Mars amount needs to be before the stake transaction (which is already in the staking contract's
     // balance so it needs to be deducted)
-    let net_total_mars_in_staking_contract = total_mars_in_staking_contract
-        .checked_sub(stake_amount)
-        .map_err(StdError::overflow)?;
+    let net_total_mars_in_staking_contract =
+        total_mars_in_staking_contract.checked_sub(stake_amount)?;
 
     let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
@@ -264,10 +263,7 @@ pub fn execute_unstake(
             if burn_amount == cooldown.amount {
                 COOLDOWNS.remove(deps.storage, &staker_addr);
             } else {
-                cooldown.amount = cooldown
-                    .amount
-                    .checked_sub(burn_amount)
-                    .map_err(StdError::overflow)?;
+                cooldown.amount = cooldown.amount.checked_sub(burn_amount)?;
                 COOLDOWNS.save(deps.storage, &staker_addr, &cooldown)?;
             }
         }
@@ -323,7 +319,11 @@ pub fn execute_unstake(
 /// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
 /// If a cooldown exists and amount has changed it computes the weighted average
 /// for the cooldown
-pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, MarsError> {
+pub fn execute_cooldown(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
     let xmars_token_address = address_provider::helpers::query_address(
@@ -336,7 +336,7 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
     let xmars_balance = cw20_get_balance(&deps.querier, xmars_token_address, info.sender.clone())?;
 
     if xmars_balance.is_zero() {
-        return Err(MarsError::Unauthorized {});
+        return Err((MarsError::Unauthorized {}).into());
     }
 
     // compute new cooldown timestamp
@@ -350,10 +350,7 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
             } else {
                 let mut extra_amount: u128 = 0;
                 if xmars_balance > cooldown.amount {
-                    extra_amount = (xmars_balance
-                        .checked_sub(cooldown.amount)
-                        .map_err(StdError::overflow)?)
-                    .u128();
+                    extra_amount = (xmars_balance.checked_sub(cooldown.amount)?).u128();
                 };
 
                 (((cooldown.timestamp as u128) * cooldown.amount.u128()
