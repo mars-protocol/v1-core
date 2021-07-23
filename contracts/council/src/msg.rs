@@ -1,17 +1,17 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
-use cosmwasm_std::{Binary, Decimal, HumanAddr, Uint128};
+use cosmwasm_std::{Binary, Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InitMsg {
+pub struct InstantiateMsg {
     pub config: CreateOrUpdateConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema, Default)]
 pub struct CreateOrUpdateConfig {
-    pub address_provider_address: Option<HumanAddr>,
+    pub address_provider_address: Option<String>,
 
     pub proposal_voting_period: Option<u64>,
     pub proposal_effective_delay: Option<u64>,
@@ -23,7 +23,7 @@ pub struct CreateOrUpdateConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum HandleMsg {
+pub enum ExecuteMsg {
     /// Implementation cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
@@ -57,12 +57,12 @@ pub enum ReceiveMsg {
 
 /// Execute call that will be done by the DAO if the proposal succeeds.
 /// Contains a the msg and contract_addr attributes of a WasmMsg::Execute call
-/// As this is part of the proposal creation call, the contract human address is sent
-/// (vs the canonical address when persisted)
+/// As this is part of the proposal creation call, the contract unchecked string is sent
+/// (vs the validated address when persisted)
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MsgExecuteCall {
     pub execution_order: u64,
-    pub target_contract_address: HumanAddr,
+    pub target_contract_address: String,
     pub msg: Binary,
 }
 
@@ -79,7 +79,7 @@ pub enum QueryMsg {
     },
     ProposalVotes {
         proposal_id: u64,
-        start_after: Option<HumanAddr>,
+        start_after: Option<String>,
         limit: Option<u32>,
     },
 }
@@ -87,7 +87,7 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub address_provider_address: HumanAddr,
+    pub address_provider_address: String,
 
     pub proposal_voting_period: u64,
     pub proposal_effective_delay: u64,
@@ -106,7 +106,7 @@ pub struct ProposalsListResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalInfo {
     pub proposal_id: u64,
-    pub submitter_address: HumanAddr,
+    pub submitter_address: String,
     pub status: ProposalStatus,
     pub for_votes: Uint128,
     pub against_votes: Uint128,
@@ -122,7 +122,7 @@ pub struct ProposalInfo {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalExecuteCallResponse {
     pub execution_order: u64,
-    pub target_contract_human_address: HumanAddr,
+    pub target_contract_address: String,
     pub msg: Binary,
 }
 
@@ -134,7 +134,7 @@ pub struct ProposalVotesResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalVoteResponse {
-    pub voter_address: HumanAddr,
+    pub voter_address: String,
     pub option: ProposalVoteOption,
     pub power: Uint128,
 }
