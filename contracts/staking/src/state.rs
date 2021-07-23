@@ -8,7 +8,7 @@ use cw_storage_plus::{Item, Map};
 pub const CONFIG: Item<Config> = Item::new("config");
 
 // namespaces (for buckets)
-pub static COOLDOWNS: Map<&[u8], Cooldown> = Map::new("cooldowns");
+pub const COOLDOWNS: Map<&Addr, Cooldown> = Map::new("cooldowns");
 
 /// Treasury global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

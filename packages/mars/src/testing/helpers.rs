@@ -1,4 +1,3 @@
-use crate::error::MarsError;
 use cosmwasm_std::{StdError, StdResult};
 
 /// Assert elements in vecs one by one in order to get a more meaningful error
@@ -15,15 +14,6 @@ pub fn assert_eq_vec<T: std::fmt::Debug + PartialEq>(expected: Vec<T>, actual: V
 pub fn assert_generic_error_message<T>(response: StdResult<T>, expected_msg: &str) {
     match response {
         Err(StdError::GenericErr { msg, .. }) => assert_eq!(msg, expected_msg),
-        Err(other_err) => panic!("Unexpected error: {:?}", other_err),
-        Ok(_) => panic!("SHOULD NOT ENTER HERE!"),
-    }
-}
-
-/// Assert MarsError::Std(StdError::GenericErr) message with expected_msg
-pub fn assert_mars_generic_error_message<T>(response: Result<T, MarsError>, expected_msg: &str) {
-    match response {
-        Err(MarsError::Std(StdError::GenericErr { msg, .. })) => assert_eq!(msg, expected_msg),
         Err(other_err) => panic!("Unexpected error: {:?}", other_err),
         Ok(_) => panic!("SHOULD NOT ENTER HERE!"),
     }

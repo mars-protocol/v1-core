@@ -890,7 +890,6 @@ dependencies = [
 name = "staking"
 version = "0.1.0"
 dependencies = [
- "cosmwasm-bignumber 2.1.1",
  "cosmwasm-schema 0.15.0",
  "cosmwasm-std 0.15.0",
  "cosmwasm-storage 0.15.0",
@@ -902,6 +901,7 @@ dependencies = [
  "snafu",
  "terra-cosmwasm 2.1.0",
  "terraswap",
+ "thiserror",
 ]
 
 [[package]]
