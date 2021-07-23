@@ -551,8 +551,9 @@ mod tests {
     use super::*;
     use cosmwasm_std::{
         testing::{mock_env, mock_info},
-        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
+        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps,
     };
+    use mars::testing::mock_env_at_time;
     use mars::testing::{assert_generic_error_message, mock_dependencies, MarsMockQuerier};
 
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
@@ -580,7 +581,7 @@ mod tests {
             config: empty_config,
         };
         let info = mock_info("owner", &[]);
-        let response = instantiate(deps.as_mut(), mock_env(), info, msg);
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
         assert_generic_error_message(
             response,
             "All params should be available during initialization",
@@ -595,7 +596,6 @@ mod tests {
             unstake_window: Some(10),
         };
         let msg = InstantiateMsg { config };
-        let info = mock_info("owner", &[]);
 
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
@@ -693,7 +693,7 @@ mod tests {
             .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::zero());
 
         let info = mock_info("mars_token", &[]);
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
         assert_eq!(
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -743,7 +743,6 @@ mod tests {
         deps.querier
             .set_cw20_total_supply(Addr::unchecked("xmars_token"), xmars_supply);
 
-        let info = mock_info("mars_token", &[]);
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let expected_minted_xmars =
@@ -807,9 +806,8 @@ mod tests {
 
         // unstake Mars no cooldown -> unauthorized
         let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let response = execute(deps.as_mut(), env, info, msg.clone());
+        let env = mock_env_at_time(unstake_block_timestamp);
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert_contract_generic_error_message(
             response,
             "Address must have a valid cooldown to unstake",
@@ -830,10 +828,7 @@ mod tests {
             )
             .unwrap();
 
-        let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let response = execute(deps.as_mut(), env, info, msg.clone());
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert_contract_generic_error_message(response, "Cooldown has expired");
 
         // unstake Mars unfinished cooldown -> unauthorized
@@ -848,10 +843,7 @@ mod tests {
             )
             .unwrap();
 
-        let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let response = execute(deps.as_mut(), env, info, msg.clone());
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert_contract_generic_error_message(response, "Cooldown has not finished");
 
         // unstake Mars cooldown with low amount -> unauthorized
@@ -866,10 +858,7 @@ mod tests {
             )
             .unwrap();
 
-        let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let response = execute(deps.as_mut(), env, info, msg.clone());
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
         assert_contract_generic_error_message(
             response,
             "Unstake amount must not be greater than cooldown amount",
@@ -891,10 +880,7 @@ mod tests {
             )
             .unwrap();
 
-        let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let res = execute(deps.as_mut(), env, info, msg.clone()).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap();
         let expected_returned_mars =
             unstake_amount.multiply_ratio(unstake_mars_in_basecamp, unstake_xmars_supply);
 
@@ -944,15 +930,11 @@ mod tests {
         });
 
         let info = mock_info("other_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
-        let res_error = execute(deps.as_mut(), env, info, msg.clone()).unwrap_err();
+        let res_error = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap_err();
         assert_eq!(res_error, ContractError::Mars(MarsError::Unauthorized {}));
 
         // unstake pending amount Mars -> cooldown is deleted
         let info = mock_info("xmars_token", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(unstake_block_timestamp);
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             msg: to_binary(&ReceiveMsg::Unstake {
                 recipient: Some(String::from("recipient")),
@@ -1023,7 +1005,7 @@ mod tests {
         );
         let msg = ExecuteMsg::Cooldown {};
         let info = mock_info("staker", &[]);
-        let res_error = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        let res_error = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(res_error, ContractError::Mars(MarsError::Unauthorized {}));
 
         // staker with xmars gets a cooldown equal to the xmars balance
@@ -1033,10 +1015,8 @@ mod tests {
             &[(staker_addr.clone(), initial_xmars_balance)],
         );
 
-        let info = mock_info("staker", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(initial_block_time);
-        let res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
+        let env = mock_env_at_time(initial_block_time);
+        let res = execute(deps.as_mut(), env, info.clone(), ExecuteMsg::Cooldown {}).unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
 
@@ -1053,10 +1033,14 @@ mod tests {
         );
 
         // same amount does not alter cooldown
-        let info = mock_info("staker", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(ongoing_cooldown_block_time);
-        let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
+        let env = mock_env_at_time(ongoing_cooldown_block_time);
+        let _res = execute(
+            deps.as_mut(),
+            env.clone(),
+            info.clone(),
+            ExecuteMsg::Cooldown {},
+        )
+        .unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
 
@@ -1073,10 +1057,7 @@ mod tests {
                 initial_xmars_balance + additional_xmars_balance,
             )],
         );
-        let info = mock_info("staker", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(ongoing_cooldown_block_time);
-        let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
+        let _res = execute(deps.as_mut(), env, info.clone(), ExecuteMsg::Cooldown {}).unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
 
@@ -1100,10 +1081,8 @@ mod tests {
             &[(staker_addr.clone(), expired_balance)],
         );
 
-        let info = mock_info("staker", &[]);
-        let mut env = mock_env();
-        env.block.time = Timestamp::from_seconds(expired_cooldown_block_time);
-        let _res = execute(deps.as_mut(), env, info, ExecuteMsg::Cooldown {}).unwrap();
+        let env = mock_env_at_time(expired_cooldown_block_time);
+        let _res = execute(deps.as_mut(), env, info.clone(), ExecuteMsg::Cooldown {}).unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
 
