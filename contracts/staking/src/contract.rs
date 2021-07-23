@@ -141,7 +141,7 @@ pub fn execute_update_config(
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
     config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
-    CONFIG.update(deps.storage, |_| -> StdResult<_> { Ok(config) })?;
+    CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
@@ -248,7 +248,7 @@ pub fn execute_unstake(
     let staker_addr = deps.api.addr_validate(&staker)?;
 
     match COOLDOWNS.may_load(deps.storage, &staker_addr)? {
-        Some(cooldown) => {
+        Some(mut cooldown) => {
             if burn_amount > cooldown.amount {
                 return Err(ContractError::UnstakeAmountTooLarge {});
             }
@@ -264,11 +264,11 @@ pub fn execute_unstake(
             if burn_amount == cooldown.amount {
                 COOLDOWNS.remove(deps.storage, &staker_addr);
             } else {
-                COOLDOWNS.update(deps.storage, &staker_addr, |_| -> StdResult<_> {
-                    let mut c = cooldown;
-                    c.amount = c.amount.checked_sub(burn_amount)?;
-                    Ok(c)
-                })?;
+                cooldown.amount = cooldown
+                    .amount
+                    .checked_sub(burn_amount)
+                    .map_err(StdError::overflow)?;
+                COOLDOWNS.save(deps.storage, &staker_addr, &cooldown)?;
             }
         }
 
