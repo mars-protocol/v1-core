@@ -10,7 +10,7 @@ import {
   uploadContract,
 } from "./helpers.js"
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { Config, testnet, local } from "./deploy_configs.js"
+import { testnet, local } from "./deploy_configs.js"
 import { join } from "path"
 
 // consts
