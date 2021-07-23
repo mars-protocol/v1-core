@@ -112,7 +112,7 @@ export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAdd
           }
         }
         : undefined
-    let assetParams = {
+    let assetParams: Asset = {
       initial_borrow_rate: asset.initial_borrow_rate,
       min_borrow_rate: asset.min_borrow_rate,
       max_borrow_rate: asset.max_borrow_rate,
@@ -120,10 +120,10 @@ export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAdd
       reserve_factor: asset.reserve_factor,
       maintenance_margin: asset.maintenance_margin,
       liquidation_bonus: asset.liquidation_bonus,
-      kp: asset.kp,
+      kp_1: asset.kp_1,
       optimal_utilization_rate: asset.optimal_utilization_rate,
       kp_augmentation_threshold: asset.kp_augmentation_threshold,
-      kp_multiplier: asset.kp_multiplier
+      kp_2: asset.kp_2
     }
 
     let initAssetMsg = {
