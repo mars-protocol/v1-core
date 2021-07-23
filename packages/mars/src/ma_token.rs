@@ -1,35 +1,14 @@
 pub mod msg {
-    use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
-    use cw20::{Cw20CoinVerified, Expiration, MinterResponse};
+    use cosmwasm_std::{Binary, Uint128};
+    use cw20::Expiration;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
-    use crate::cw20::{validate_name, validate_symbol, validate_decimals}
-
-    const TOKEN_MAX_DECIMALS: u8 = 18;
 
     #[derive(Serialize, Deserialize, JsonSchema)]
     pub struct InstantiateMsg {
-        pub name: String,
-        pub symbol: String,
-        pub decimals: u8,
-        pub initial_balances: Vec<Cw20CoinVerified>,
-        pub mint: Option<MinterResponse>,
+        pub cw20_base_instantiate: cw20_base::msg::InstantiateMsg,
         pub red_bank_address: String,
         pub incentives_address: String,
-    }
-
-    impl InstantiateMsg {
-        pub fn get_cap(&self) -> Option<Uint128> {
-            self.mint.as_ref().and_then(|v| v.cap)
-        }
-
-        pub fn validate(&self) -> StdResult<()> {
-            // Check name, symbol, decimals
-            validate_name(&self.name)?;
-            validate_symbol(&self.symbol)?;
-            validate_decimals(decimals, TOKEN_MAX_DECIMALS)
-            Ok(())
-        }
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
