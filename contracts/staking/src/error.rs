@@ -15,4 +15,25 @@ pub enum ContractError {
 
     #[error("Unstake amount must be greater than 0")]
     UnstakeAmountZero {},
+
+    #[error("Address must have a valid cooldown to unstake")]
+    UnstakeNoCooldown {},
+
+    #[error("Cooldown has expired")]
+    UnstakeCooldownExpired {},
+
+    #[error("Cooldown has not finished")]
+    UnstakeCooldownNotFinished {},
+
+    #[error("Unstake amount must not be greater than cooldown amount")]
+    UnstakeAmountTooLarge {},
+
+    #[error("Cannot swap Mars")]
+    MarsCannotSwap {},
+
+    #[error("xMars token address not found")]
+    XMarsAddressNotFound {},
+
+    #[error("Mars token address not found")]
+    MarsAddressNotFound {},
 }

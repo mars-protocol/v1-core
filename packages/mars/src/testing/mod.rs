@@ -52,7 +52,7 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
     }
 }
 
-pub fn mock_env_at_time(seconds: u64) -> Env {
+pub fn mock_env_at_block_time(seconds: u64) -> Env {
     mock_env(MockEnvParams {
         block_time: Timestamp::from_seconds(seconds),
         ..Default::default()

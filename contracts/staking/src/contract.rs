@@ -26,7 +26,7 @@ pub fn instantiate(
     _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -47,9 +47,7 @@ pub fn instantiate(
         && unstake_window.is_some();
 
     if !available {
-        return Err(StdError::generic_err(
-            "All params should be available during initialization",
-        ));
+        return Err((MarsError::InstantiateParamsUnavailable {}).into());
     };
 
     // Initialize config
@@ -180,7 +178,7 @@ pub fn execute_stake(
 
     // Has to send Mars tokens
     if info.sender != mars_token_address {
-        return Err(ContractError::Mars(MarsError::Unauthorized {}));
+        return Err((MarsError::Unauthorized {}).into());
     }
     if stake_amount == Uint128::zero() {
         return Err(ContractError::StakeAmountZero {});
@@ -192,7 +190,7 @@ pub fn execute_stake(
     // balance so it needs to be deducted)
     let net_total_mars_in_staking_contract = total_mars_in_staking_contract
         .checked_sub(stake_amount)
-        .unwrap();
+        .map_err(StdError::overflow)?;
 
     let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
@@ -240,7 +238,7 @@ pub fn execute_unstake(
     let config = CONFIG.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
     if info.sender != xmars_token_address {
-        return Err(ContractError::Mars(MarsError::Unauthorized {}));
+        return Err((MarsError::Unauthorized {}).into());
     }
     if burn_amount == Uint128::zero() {
         return Err(ContractError::UnstakeAmountZero {});
@@ -252,35 +250,30 @@ pub fn execute_unstake(
     match COOLDOWNS.may_load(deps.storage, &staker_addr)? {
         Some(mut cooldown) => {
             if burn_amount > cooldown.amount {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Unstake amount must not be greater than cooldown amount",
-                )));
+                return Err(ContractError::UnstakeAmountTooLarge {});
             }
             if env.block.time.seconds() < cooldown.timestamp + config.cooldown_duration {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Cooldown has not finished",
-                )));
+                return Err(ContractError::UnstakeCooldownNotFinished {});
             }
             if env.block.time.seconds()
                 > cooldown.timestamp + config.cooldown_duration + config.unstake_window
             {
-                return Err(ContractError::Std(StdError::generic_err(
-                    "Cooldown has expired",
-                )));
+                return Err(ContractError::UnstakeCooldownExpired {});
             }
 
             if burn_amount == cooldown.amount {
                 COOLDOWNS.remove(deps.storage, &staker_addr);
             } else {
-                cooldown.amount = cooldown.amount.checked_sub(burn_amount).unwrap();
+                cooldown.amount = cooldown
+                    .amount
+                    .checked_sub(burn_amount)
+                    .map_err(StdError::overflow)?;
                 COOLDOWNS.save(deps.storage, &staker_addr, &cooldown)?;
             }
         }
 
         None => {
-            return Err(ContractError::Std(StdError::generic_err(
-                "Address must have a valid cooldown to unstake",
-            )))
+            return Err(ContractError::UnstakeNoCooldown {});
         }
     };
 
@@ -357,7 +350,10 @@ pub fn execute_cooldown(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Re
             } else {
                 let mut extra_amount: u128 = 0;
                 if xmars_balance > cooldown.amount {
-                    extra_amount = (xmars_balance.checked_sub(cooldown.amount).unwrap()).u128();
+                    extra_amount = (xmars_balance
+                        .checked_sub(cooldown.amount)
+                        .map_err(StdError::overflow)?)
+                    .u128();
                 };
 
                 (((cooldown.timestamp as u128) * cooldown.amount.u128()
@@ -417,7 +413,7 @@ pub fn execute_swap_asset_to_uusd(
     env: Env,
     offer_asset_info: AssetInfo,
     amount: Option<Uint128>,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
     // throw error if the user tries to swap Mars
@@ -429,7 +425,7 @@ pub fn execute_swap_asset_to_uusd(
 
     if let AssetInfo::Token { contract_addr } = offer_asset_info.clone() {
         if contract_addr == mars_token_address {
-            return Err(StdError::generic_err("Cannot swap Mars"));
+            return Err(ContractError::MarsCannotSwap {});
         }
     }
 
@@ -439,7 +435,7 @@ pub fn execute_swap_asset_to_uusd(
 
     let terraswap_max_spread = Some(config.terraswap_max_spread);
 
-    execute_swap(
+    Ok(execute_swap(
         deps,
         env,
         offer_asset_info,
@@ -447,7 +443,7 @@ pub fn execute_swap_asset_to_uusd(
         amount,
         config.terraswap_factory_address,
         terraswap_max_spread,
-    )
+    )?)
 }
 
 /// Swap uusd on the contract to Mars
@@ -528,7 +524,7 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 // HELPERS
 
 /// Gets mars and xmars token addresses from address provider and returns them in a tuple.
-fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), MarsError> {
+fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), ContractError> {
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address.clone(),
@@ -536,10 +532,10 @@ fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), 
     )?;
     let xmars_token_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("xmars token address not found"))?;
+        .ok_or_else(|| ContractError::XMarsAddressNotFound {})?;
     let mars_token_address = addresses_query
         .pop()
-        .ok_or_else(|| StdError::generic_err("mars token address not found"))?;
+        .ok_or_else(|| ContractError::MarsAddressNotFound {})?;
 
     Ok((mars_token_address, xmars_token_address))
 }
@@ -551,10 +547,9 @@ mod tests {
     use super::*;
     use cosmwasm_std::{
         testing::{mock_env, mock_info},
-        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps,
+        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
     };
-    use mars::testing::mock_env_at_time;
-    use mars::testing::{assert_generic_error_message, mock_dependencies, MarsMockQuerier};
+    use mars::testing::{self, mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use mars::staking::msg::ExecuteMsg::UpdateConfig;
@@ -581,10 +576,10 @@ mod tests {
             config: empty_config,
         };
         let info = mock_info("owner", &[]);
-        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
-        assert_generic_error_message(
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(
             response,
-            "All params should be available during initialization",
+            ContractError::Mars(MarsError::InstantiateParamsUnavailable {})
         );
 
         let config = CreateOrUpdateConfig {
@@ -806,12 +801,12 @@ mod tests {
 
         // unstake Mars no cooldown -> unauthorized
         let info = mock_info("xmars_token", &[]);
-        let env = mock_env_at_time(unstake_block_timestamp);
-        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
-        assert_contract_generic_error_message(
-            response,
-            "Address must have a valid cooldown to unstake",
-        );
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(unstake_block_timestamp),
+            ..Default::default()
+        });
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(response, ContractError::UnstakeNoCooldown {});
 
         // unstake Mars expired cooldown -> unauthorized
         COOLDOWNS
@@ -828,8 +823,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
-        assert_contract_generic_error_message(response, "Cooldown has expired");
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(response, ContractError::UnstakeCooldownExpired {});
 
         // unstake Mars unfinished cooldown -> unauthorized
         COOLDOWNS
@@ -843,8 +838,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
-        assert_contract_generic_error_message(response, "Cooldown has not finished");
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(response, ContractError::UnstakeCooldownNotFinished {});
 
         // unstake Mars cooldown with low amount -> unauthorized
         COOLDOWNS
@@ -858,11 +853,8 @@ mod tests {
             )
             .unwrap();
 
-        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone());
-        assert_contract_generic_error_message(
-            response,
-            "Unstake amount must not be greater than cooldown amount",
-        );
+        let response = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(response, ContractError::UnstakeAmountTooLarge {});
 
         // partial unstake Mars valid cooldown -> burn xMars, receive Mars back,
         // deduct cooldown amount
@@ -1015,7 +1007,10 @@ mod tests {
             &[(staker_addr.clone(), initial_xmars_balance)],
         );
 
-        let env = mock_env_at_time(initial_block_time);
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(initial_block_time),
+            ..Default::default()
+        });
         let res = execute(deps.as_mut(), env, info.clone(), ExecuteMsg::Cooldown {}).unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
@@ -1033,7 +1028,10 @@ mod tests {
         );
 
         // same amount does not alter cooldown
-        let env = mock_env_at_time(ongoing_cooldown_block_time);
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(ongoing_cooldown_block_time),
+            ..Default::default()
+        });
         let _res = execute(
             deps.as_mut(),
             env.clone(),
@@ -1081,7 +1079,10 @@ mod tests {
             &[(staker_addr.clone(), expired_balance)],
         );
 
-        let env = mock_env_at_time(expired_cooldown_block_time);
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(expired_cooldown_block_time),
+            ..Default::default()
+        });
         let _res = execute(deps.as_mut(), env, info.clone(), ExecuteMsg::Cooldown {}).unwrap();
 
         let cooldown = COOLDOWNS.load(deps.as_ref().storage, &staker_addr).unwrap();
@@ -1133,8 +1134,8 @@ mod tests {
             amount: None,
         };
         let info = mock_info("owner", &[]);
-        let response = execute(deps.as_mut(), mock_env(), info, msg);
-        assert_contract_generic_error_message(response, "Cannot swap Mars");
+        let response = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(response, ContractError::MarsCannotSwap {});
     }
 
     // TEST HELPERS
@@ -1155,18 +1156,5 @@ mod tests {
         instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         deps
-    }
-
-    pub fn assert_contract_generic_error_message<T>(
-        response: Result<T, ContractError>,
-        expected_msg: &str,
-    ) {
-        match response {
-            Err(ContractError::Std(StdError::GenericErr { msg, .. })) => {
-                assert_eq!(msg, expected_msg)
-            }
-            Err(other_err) => panic!("Unexpected error: {:?}", other_err),
-            Ok(_) => panic!("SHOULD NOT ENTER HERE!"),
-        }
     }
 }
