@@ -2,31 +2,31 @@ use std::str;
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
-    from_binary, log, to_binary, Api, BankMsg, Binary, CanonicalAddr, Coin, CosmosMsg, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, LogAttribute, MigrateResponse, MigrateResult, Order,
-    Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
+    attr, from_binary, to_binary, Addr, Api, Attribute, BankMsg, Binary, CanonicalAddr, Coin,
+    CosmosMsg, DepsMut, Env, MessageInfo, Order, Querier, Response, StdError, StdResult, Storage,
+    SubMsg, Uint128, WasmMsg,
 };
-use cw20::{Cw20HandleMsg, Cw20ReceiveMsg, MinterResponse};
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, human_addr_into_canonical};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::ma_token;
 use mars::red_bank::msg::{
     Asset, AssetType, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
-    DebtInfo, DebtResponse, HandleMsg, InitMsg, InitOrUpdateAssetParams, MarketInfo,
+    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
     MarketResponse, MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg,
     UncollateralizedLoanLimitResponse,
 };
 
+use crate::error::ContractError;
 use crate::state::{
-    config_state, config_state_read, debts_asset_state, debts_asset_state_read,
-    market_ma_tokens_state, market_ma_tokens_state_read, market_references_state,
-    market_references_state_read, markets_state, markets_state_read, money_market_state,
-    money_market_state_read, uncollateralized_loan_limits, uncollateralized_loan_limits_read,
-    users_state, users_state_read, Config, Debt, Market, MarketReferences, RedBank, User,
+    Config, Debt, Market, MarketReferences, RedBank, User, CONFIG, DEBTS, MARKETS,
+    MARKET_MA_TOKENS, MARKET_REFERENCES, RED_BANK, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
+use cw_storage_plus::U32Key;
+use mars::error::MarsError;
 use mars::tax::deduct_tax;
 
 // CONSTANTS
@@ -35,11 +35,13 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 
 // INIT
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut,
     _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -66,10 +68,12 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
 
     let config = Config {
-        owner: deps.api.canonical_address(&owner.unwrap())?,
-        address_provider_address: deps
-            .api
-            .canonical_address(&address_provider_address.unwrap())?,
+        owner: option_string_to_addr(deps.api, owner, zero_address())?,
+        address_provider_address: option_string_to_addr(
+            deps.api,
+            address_provider_address,
+            zero_address(),
+        )?,
         ma_token_code_id: ma_token_code_id.unwrap(),
         close_factor: close_factor.unwrap(),
         insurance_fund_fee_share: insurance_fund_fee_share.unwrap(),
@@ -77,45 +81,47 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     };
     config.validate()?;
 
-    config_state(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    money_market_state(&mut deps.storage).save(&RedBank { market_count: 0 })?;
+    RED_BANK.save(deps.storage, &RedBank { market_count: 0 })?;
 
-    Ok(InitResponse::default())
+    Ok(Response::default())
 }
 
 // HANDLERS
 
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute(
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
-        HandleMsg::UpdateConfig { config } => handle_update_config(deps, env, config),
+        ExecuteMsg::UpdateConfig { config } => execute_update_config(deps, env, info, config),
 
-        HandleMsg::Receive(cw20_msg) => receive_cw20(deps, env, cw20_msg),
+        ExecuteMsg::Receive(cw20_msg) => execute_receive_cw20(deps, env, info, cw20_msg),
 
-        HandleMsg::InitAsset {
+        ExecuteMsg::InitAsset {
             asset,
             asset_params,
-        } => handle_init_asset(deps, env, asset, asset_params),
+        } => execute_init_asset(deps, env, info, asset, asset_params),
 
-        HandleMsg::UpdateAsset {
+        ExecuteMsg::UpdateAsset {
             asset,
             asset_params,
-        } => handle_update_asset(deps, env, asset, asset_params),
+        } => execute_update_asset(deps, env, info, asset, asset_params),
 
-        HandleMsg::InitAssetTokenCallback { reference } => {
-            init_asset_token_callback(deps, env, reference)
+        ExecuteMsg::InitAssetTokenCallback { reference } => {
+            init_asset_token_callback(deps, env, info, reference)
         }
 
-        HandleMsg::DepositNative { denom } => {
+        ExecuteMsg::DepositNative { denom } => {
             let deposit_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             let depositor_address = env.message.sender.clone();
-            handle_deposit(
+            execute_deposit(
                 deps,
                 env,
+                info,
                 depositor_address,
                 denom.as_bytes(),
                 denom.as_str(),
@@ -123,9 +129,9 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             )
         }
 
-        HandleMsg::Borrow { asset, amount } => handle_borrow(deps, env, asset, amount),
+        ExecuteMsg::Borrow { asset, amount } => execute_borrow(deps, env, info, asset, amount),
 
-        HandleMsg::RepayNative { denom } => {
+        ExecuteMsg::RepayNative { denom } => {
             let repay_amount = get_denom_amount_from_coins(&env.message.sent_funds, &denom);
             let repayer_address = env.message.sender.clone();
             handle_repay(
@@ -139,7 +145,7 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             )
         }
 
-        HandleMsg::LiquidateNative {
+        ExecuteMsg::LiquidateNative {
             collateral_asset,
             debt_asset,
             user_address,
@@ -160,13 +166,13 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             )
         }
 
-        HandleMsg::FinalizeLiquidityTokenTransfer {
+        ExecuteMsg::FinalizeLiquidityTokenTransfer {
             sender_address,
             recipient_address,
             sender_previous_balance,
             recipient_previous_balance,
             amount,
-        } => handle_finalize_liquidity_token_transfer(
+        } => execute_finalize_liquidity_token_transfer(
             deps,
             env,
             sender_address,
@@ -176,33 +182,41 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
             amount,
         ),
 
-        HandleMsg::UpdateUncollateralizedLoanLimit {
+        ExecuteMsg::UpdateUncollateralizedLoanLimit {
             user_address,
             asset,
             new_limit,
-        } => handle_update_uncollateralized_loan_limit(deps, env, user_address, asset, new_limit),
-        HandleMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
-            handle_update_user_collateral_asset_status(deps, env, asset, enable)
+        } => execute_update_uncollateralized_loan_limit(
+            deps,
+            env,
+            info,
+            user_address,
+            asset,
+            new_limit,
+        ),
+        ExecuteMsg::UpdateUserCollateralAssetStatus { asset, enable } => {
+            execute_update_user_collateral_asset_status(deps, env, info, asset, enable)
         }
 
-        HandleMsg::DistributeProtocolIncome { asset, amount } => {
+        ExecuteMsg::DistributeProtocolIncome { asset, amount } => {
             handle_distribute_protocol_income(deps, env, asset, amount)
         }
 
-        HandleMsg::Withdraw { asset, amount } => handle_withdraw(deps, env, asset, amount),
+        ExecuteMsg::Withdraw { asset, amount } => execute_withdraw(deps, env, asset, amount),
     }
 }
 
 /// Update config
-pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_update_config(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     new_config: CreateOrUpdateConfig,
-) -> StdResult<HandleResponse> {
-    let mut config = config_state_read(&deps.storage).load()?;
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
 
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {}.into());
     }
 
     // Destructuring a struct’s fields into separate variables in order to force
@@ -217,8 +231,8 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = new_config;
 
     // Update config
-    config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
-    config.address_provider_address = human_addr_into_canonical(
+    config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
+    config.address_provider_address = option_string_to_addr(
         deps.api,
         address_provider_address,
         config.address_provider_address,
@@ -232,22 +246,23 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     // Validate config
     config.validate()?;
 
-    config_state(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    Ok(HandleResponse::default())
+    Ok(Response::default())
 }
 
 /// cw20 receive implementation
-pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_receive_cw20(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     if let Some(msg) = cw20_msg.msg {
         match from_binary(&msg)? {
             ReceiveMsg::DepositCw20 {} => {
-                let token_contract_address = env.message.sender.clone();
-                handle_deposit(
+                let token_contract_address = info.sender.clone();
+                execute_deposit(
                     deps,
                     env,
                     cw20_msg.sender,
@@ -306,67 +321,67 @@ pub fn receive_cw20<S: Storage, A: Api, Q: Querier>(
 }
 
 /// Burns sent maAsset in exchange of underlying asset
-pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_withdraw(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     asset: Asset,
     amount: Option<Uint256>,
-) -> StdResult<HandleResponse> {
-    let withdrawer_addr = env.message.sender.clone();
+) -> Result<Response, ContractError> {
+    let withdrawer_addr = info.sender.clone();
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
+    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&deps, &asset)?;
+    let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
-    let asset_ma_human_addr = deps.api.human_address(&market.ma_token_address)?;
+    let asset_ma_addr = market.ma_token_address;
     let withdrawer_balance_scaled = Uint256::from(cw20_get_balance(
         &deps.querier,
-        asset_ma_human_addr,
+        asset_ma_addr,
         withdrawer_addr.clone(),
     )?);
 
     if withdrawer_balance_scaled.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "User has no balance (asset: {})",
-            asset_label,
-        )));
+        return Err(StdError::generic_err(
+            format!("User has no balance (asset: {})", asset_label,),
+        )
+        .into());
     }
 
     // Check user has sufficient balance to send back
     let (withdraw_amount, withdraw_amount_scaled) = match amount {
         Some(amount) => {
-            let amount_scaled = amount / get_updated_liquidity_index(&market, env.block.time);
+            let amount_scaled =
+                amount / get_updated_liquidity_index(&market, env.block.time.seconds());
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
                 return Err(StdError::generic_err(format!(
                     "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
                     asset_label,
-                )));
+                )).into());
             };
             (amount, amount_scaled)
         }
         None => {
             // NOTE: We prefer to just do one multiplication equation instead of two: division and multiplication.
             // This helps to avoid rounding errors if we want to be sure in burning total balance.
-            let withdrawer_balance =
-                withdrawer_balance_scaled * get_updated_liquidity_index(&market, env.block.time);
+            let withdrawer_balance = withdrawer_balance_scaled
+                * get_updated_liquidity_index(&market, env.block.time.seconds());
             (withdrawer_balance, withdrawer_balance_scaled)
         }
     };
 
-    let withdrawer_canonical_address = deps.api.canonical_address(&withdrawer_addr)?;
-    let mut withdrawer =
-        users_state_read(&deps.storage).load(withdrawer_canonical_address.as_slice())?;
+    let mut withdrawer = USERS.load(deps.storage, &withdrawer_addr)?;
     let asset_as_collateral = get_bit(withdrawer.collateral_assets, market.index)?;
     let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
 
     // if asset is used as collateral and user is borrowing we need to validate health factor after withdraw,
     // otherwise no reasons to block the withdraw
     if asset_as_collateral && user_is_borrowing {
-        let money_market = money_market_state_read(&deps.storage).load()?;
+        let money_market = RED_BANK.load(deps.storage)?;
 
         let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
-            deps,
-            env.block.time,
-            &withdrawer_canonical_address,
+            &deps,
+            env.block.time.seconds(),
+            &withdrawer_addr,
             &withdrawer,
             &money_market,
             &mut vec![],
@@ -384,15 +399,15 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
-            ));
+            )
+            .into());
         }
     }
 
     // if max collateral to withdraw equals the user's balance then unset collateral bit
     if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
         unset_bit(&mut withdrawer.collateral_assets, market.index)?;
-        users_state(&mut deps.storage)
-            .save(withdrawer_canonical_address.as_slice(), &withdrawer)?;
+        USERS.save(deps.storage, &withdrawer_addr, &withdrawer)?;
     }
 
     market_apply_accumulated_interests(&env, &mut market);
@@ -403,19 +418,19 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
         &mut market,
         withdraw_amount,
     )?;
-    markets_state(&mut deps.storage).save(asset_reference.as_slice(), &market)?;
+    MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: deps.api.human_address(&market.ma_token_address)?,
-        send: vec![],
-        msg: to_binary(&ma_token::msg::HandleMsg::Burn {
-            user: withdrawer_addr.clone(),
+        contract_addr: market.ma_token_address.into(),
+        msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
+            user: withdrawer_addr.into(),
             amount: withdraw_amount_scaled.into(),
         })?,
+        funds: vec![],
     });
 
     let send_underlying_asset_msg = build_send_asset_msg(
-        deps,
+        &deps,
         env.contract.address,
         withdrawer_addr.clone(),
         asset,
@@ -424,54 +439,55 @@ pub fn handle_withdraw<S: Storage, A: Api, Q: Querier>(
 
     let messages = vec![burn_ma_tokens_msg, send_underlying_asset_msg];
 
-    let mut log = vec![
-        log("action", "withdraw"),
-        log("market", asset_label.as_str()),
-        log("user", withdrawer_addr.as_str()),
-        log("burn_amount", withdraw_amount_scaled),
-        log("withdraw_amount", withdraw_amount),
+    let mut attributes = vec![
+        attr("action", "withdraw"),
+        attr("market", asset_label.as_str()),
+        attr("user", withdrawer_addr.as_str()),
+        attr("burn_amount", withdraw_amount_scaled),
+        attr("withdraw_amount", withdraw_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &market);
+    append_indices_and_rates_to_logs(&mut attributes, &market);
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages,
-        log,
+        attributes,
+        events: vec![],
         data: None,
     })
 }
 
 /// Initialize asset if not exist.
 /// Initialization requires that all params are provided and there is no asset in state.
-pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_init_asset(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     asset: Asset,
     asset_params: InitOrUpdateAssetParams,
-) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
 
-    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    if sender_canonical_address != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {}.into());
     }
 
-    let mut money_market = money_market_state_read(&deps.storage).load()?;
+    let mut money_market = RED_BANK.load(deps.storage)?;
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut markets = markets_state(&mut deps.storage);
-    let market_option = markets.may_load(asset_reference.as_slice())?;
+    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&deps, &asset)?;
+    let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         None => {
             let market_idx = money_market.market_count;
             let new_market = Market::create(env.block.time, market_idx, asset_type, asset_params)?;
 
             // Save new market
-            markets.save(asset_reference.as_slice(), &new_market)?;
+            MARKETS.save(deps.storage, asset_reference.as_slice(), &new_market)?;
 
             // Save index to reference mapping
-            market_references_state(&mut deps.storage).save(
-                &market_idx.to_be_bytes(),
+            MARKET_REFERENCES.save(
+                deps.storage,
+                U32Key::new(market_idx),
                 &MarketReferences {
                     reference: asset_reference.to_vec(),
                 },
@@ -479,224 +495,232 @@ pub fn handle_init_asset<S: Storage, A: Api, Q: Querier>(
 
             // Increment market count
             money_market.market_count += 1;
-            money_market_state(&mut deps.storage).save(&money_market)?;
+            RED_BANK.save(deps.storage, &money_market)?;
 
             let symbol = match asset {
                 Asset::Native { denom } => denom,
-                Asset::Cw20 { contract_addr } => cw20_get_symbol(&deps.querier, contract_addr)?,
+                Asset::Cw20 { contract_addr } => {
+                    let contract_addr = deps.api.addr_validate(&contract_addr)?;
+                    cw20_get_symbol(&deps.querier, contract_addr)?
+                }
             };
 
             // Prepare response, should instantiate an maToken
             // and use the Register hook.
             // A new maToken should be created which callbacks this contract in order to be registered.
             let incentives_address = address_provider::helpers::query_address(
-                &deps,
-                &config.address_provider_address,
+                &deps.querier,
+                config.address_provider_address,
                 MarsContract::Incentives,
             )?;
 
-            Ok(HandleResponse {
-                log: vec![log("action", "init_asset"), log("asset", asset_label)],
+            Ok(Response {
+                attributes: vec![attr("action", "init_asset"), attr("asset", asset_label)],
+                events: vec![],
                 data: None,
-                messages: vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
+                messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Instantiate {
+                    admin: None,
                     code_id: config.ma_token_code_id,
-                    msg: to_binary(&ma_token::msg::InitMsg {
+                    msg: to_binary(&ma_token::msg::InstantiateMsg {
                         name: format!("mars {} liquidity token", symbol),
                         symbol: format!("ma{}", symbol),
                         decimals: 6,
                         initial_balances: vec![],
                         mint: Some(MinterResponse {
-                            minter: env.contract.address.clone(),
+                            minter: env.contract.address.into(),
                             cap: None,
                         }),
                         init_hook: Some(ma_token::msg::InitHook {
-                            msg: to_binary(&HandleMsg::InitAssetTokenCallback {
+                            msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
                                 reference: asset_reference,
                             })?,
-                            contract_addr: env.contract.address.clone(),
+                            contract_addr: env.contract.address.into(),
                         }),
-                        red_bank_address: env.contract.address,
-                        incentives_address,
+                        red_bank_address: env.contract.address.into(),
+                        incentives_address: incentives_address.into(),
                     })?,
-                    send: vec![],
-                    label: None,
-                })],
+                    funds: vec![],
+                    label: String::from(""),
+                }))],
             })
         }
-        Some(_) => Err(StdError::generic_err("Asset already initialized")),
+        Some(_) => Err(StdError::generic_err("Asset already initialized").into()),
     }
 }
 
 /// Update asset with new params.
-pub fn handle_update_asset<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_update_asset(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     asset: Asset,
     asset_params: InitOrUpdateAssetParams,
-) -> StdResult<HandleResponse> {
-    let config = config_state_read(&deps.storage).load()?;
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
 
-    let sender_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    if sender_canonical_address != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {}.into());
     }
 
-    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(deps, &asset)?;
-    let mut markets = markets_state(&mut deps.storage);
-    let market_option = markets.may_load(asset_reference.as_slice())?;
+    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(&deps, &asset)?;
+    let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
             let updated_market = market.update_with(asset_params)?;
 
             // Save updated market
-            markets.save(asset_reference.as_slice(), &updated_market)?;
+            MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
-            Ok(HandleResponse {
-                log: vec![log("action", "update_asset"), log("asset", asset_label)],
+            Ok(Response {
+                attributes: vec![attr("action", "update_asset"), attr("asset", asset_label)],
+                events: vec![],
                 data: None,
                 messages: vec![],
             })
         }
-        None => Err(StdError::generic_err("Asset not initialized")),
+        None => Err(StdError::generic_err("Asset not initialized").into()),
     }
 }
 
-pub fn init_asset_token_callback<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn init_asset_token_callback(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     reference: Vec<u8>,
-) -> StdResult<HandleResponse> {
-    let mut state = markets_state(&mut deps.storage);
-    let mut market = state.load(reference.as_slice())?;
+) -> Result<Response, ContractError> {
+    let mut market = MARKETS.load(deps.storage, reference.as_slice())?;
 
-    if market.ma_token_address == CanonicalAddr::default() {
-        let ma_contract_canonical_addr = deps.api.canonical_address(&env.message.sender)?;
+    if market.ma_token_address == zero_address() {
+        let ma_contract_addr = info.sender;
 
-        market.ma_token_address = ma_contract_canonical_addr.clone();
-        state.save(reference.as_slice(), &market)?;
+        market.ma_token_address = ma_contract_addr.clone();
+        MARKETS.save(deps.storage, reference.as_slice(), &market)?;
 
         // save ma token contract to reference mapping
-        market_ma_tokens_state(&mut deps.storage)
-            .save(ma_contract_canonical_addr.as_slice(), &reference)?;
+        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference);
 
-        Ok(HandleResponse::default())
+        Ok(Response::default())
     } else {
         // Can do this only once
-        Err(StdError::unauthorized())
+        Err(MarsError::Unauthorized {}.into())
     }
 }
 
-/// Handle deposits and mint corresponding ma_tokens
-pub fn handle_deposit<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+/// Execute deposits and mint corresponding ma_tokens
+pub fn execute_deposit(
+    deps: DepsMut,
     env: Env,
-    depositor_address: HumanAddr,
+    info: MessageInfo,
+    depositor_address: Addr,
     asset_reference: &[u8],
     asset_label: &str,
     deposit_amount: Uint256,
-) -> StdResult<HandleResponse> {
-    let mut market = markets_state_read(&deps.storage).load(asset_reference)?;
+) -> Result<Response, ContractError> {
+    let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
         return Err(StdError::generic_err(format!(
             "Deposit amount must be greater than 0 {}",
             asset_label,
-        )));
+        ))
+        .into());
     }
 
-    let depositor_canonical_addr = deps.api.canonical_address(&depositor_address)?;
-    let mut user = users_state_read(&deps.storage)
-        .may_load(depositor_canonical_addr.as_slice())?
+    let mut user = USERS
+        .may_load(deps.storage, &depositor_address)?
         .unwrap_or_default();
 
     let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.collateral_assets, market.index)?;
-        users_state(&mut deps.storage).save(depositor_canonical_addr.as_slice(), &user)?;
+        USERS.save(deps.storage, &depositor_address, &user);
     }
 
     market_apply_accumulated_interests(&env, &mut market);
     market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint256::zero())?;
-    markets_state(&mut deps.storage).save(asset_reference, &market)?;
+    MARKETS.save(deps.storage, asset_reference, &market)?;
 
     if market.liquidity_index.is_zero() {
-        return Err(StdError::generic_err("Cannot have 0 as liquidity index"));
+        return Err(StdError::generic_err("Cannot have 0 as liquidity index").into());
     }
-    let mint_amount = deposit_amount / get_updated_liquidity_index(&market, env.block.time);
+    // FIXME: timestamp or u64?
+    let mint_amount =
+        deposit_amount / get_updated_liquidity_index(&market, env.block.time.seconds());
 
     let mut log = vec![
-        log("action", "deposit"),
-        log("market", asset_label),
-        log("user", depositor_address.as_str()),
-        log("amount", deposit_amount),
+        attr("action", "deposit"),
+        attr("market", asset_label),
+        attr("user", depositor_address.as_str()),
+        attr("amount", deposit_amount),
     ];
 
     append_indices_and_rates_to_logs(&mut log, &market);
 
-    Ok(HandleResponse {
+    Ok(Response {
         data: None,
-        log,
-        messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: deps.api.human_address(&market.ma_token_address)?,
-            send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Mint {
-                recipient: depositor_address,
+        attributes,
+        messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: market.ma_token_address.into(),
+            msg: to_binary(&Cw20ExecuteMsg::Mint {
+                recipient: depositor_address.into(),
                 amount: mint_amount.into(),
             })?,
-        })],
+            funds: vec![],
+        }))],
+        events: vec![],
     })
 }
 
 /// Add debt for the borrower and send the borrowed funds
-pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_borrow(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     asset: Asset,
     borrow_amount: Uint256,
-) -> StdResult<HandleResponse> {
-    let borrower_address = env.message.sender.clone();
+) -> Result<Response, ContractError> {
+    let borrower_address = info.sender.clone();
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(deps, &asset)?;
+    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&deps, &asset)?;
 
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
         return Err(StdError::generic_err(format!(
             "Borrow amount must be greater than 0 {}",
             asset_label,
-        )));
+        ))
+        .into());
     }
 
-    let money_market = money_market_state_read(&deps.storage).load()?;
-    let mut borrow_market = match markets_state_read(&deps.storage).load(asset_reference.as_slice())
-    {
+    let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
         Ok(borrow_market) => borrow_market,
         Err(_) => {
             return Err(StdError::generic_err(format!(
                 "no borrow market exists with asset reference: {}",
                 String::from_utf8(asset_reference).expect("Found invalid UTF-8")
-            )));
+            ))
+            .into());
         }
     };
-    let borrower_canonical_addr = deps.api.canonical_address(&borrower_address)?;
 
-    let uncollateralized_loan_limits_bucket =
-        uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice());
-    let uncollateralized_loan_limit = uncollateralized_loan_limits_bucket
-        .may_load(borrower_canonical_addr.as_slice())?
+    let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
+        .may_load(
+            deps.storage,
+            (asset_reference.as_slice(), &borrower_address),
+        )?
         .unwrap_or_else(Uint128::zero);
 
-    let mut user: User =
-        match users_state_read(&deps.storage).may_load(borrower_canonical_addr.as_slice())? {
-            Some(user) => user,
-            None => {
-                if uncollateralized_loan_limit.is_zero() {
-                    return Err(StdError::generic_err("address has no collateral deposited"));
-                }
-                // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
-                User::default()
+    let mut user: User = match USERS.may_load(deps.storage, &borrower_address)? {
+        Some(user) => user,
+        None => {
+            if uncollateralized_loan_limit.is_zero() {
+                return Err(StdError::generic_err("address has no collateral deposited").into());
             }
-        };
+            // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
+            User::default()
+        }
+    };
 
     // TODO: Check the contract has enough funds to safely lend them
 
@@ -709,8 +733,8 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         };
 
         let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
-            deps,
-            env.block.time,
+            &deps,
+            env.block.time.seconds(),
             &borrower_canonical_addr,
             &user,
             &money_market,
@@ -726,26 +750,31 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         {
             return Err(StdError::generic_err(
                 "borrow amount exceeds maximum allowed given current collateral value",
-            ));
+            )
+            .into());
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
         uncollateralized_debt = true;
-        let debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-        let borrower_debt = debts_asset_bucket
-            .may_load(borrower_canonical_addr.as_slice())?
+
+        let borrower_debt = DEBTS
+            .may_load(
+                deps.storage,
+                (asset_reference.as_slice(), &borrower_address),
+            )?
             .unwrap_or(Debt {
                 amount_scaled: Uint256::zero(),
                 uncollateralized: uncollateralized_debt,
             });
 
-        let asset_market = markets_state_read(&deps.storage).load(asset_reference.as_slice())?;
-        let debt_amount =
-            borrower_debt.amount_scaled * get_updated_borrow_index(&asset_market, env.block.time);
+        let asset_market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
+        let debt_amount = borrower_debt.amount_scaled
+            * get_updated_borrow_index(&asset_market, env.block.time.seconds());
         if borrow_amount + debt_amount > Uint256::from(uncollateralized_loan_limit) {
             return Err(StdError::generic_err(
                 "borrow amount exceeds uncollateralized loan limit given existing debt",
-            ));
+            )
+            .into());
         }
     }
 
@@ -755,22 +784,27 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_market.index)?;
-        let mut users_bucket = users_state(&mut deps.storage);
-        users_bucket.save(borrower_canonical_addr.as_slice(), &user)?;
+        USERS.save(deps.storage, &borrower_address, &user)?;
     }
 
     // Set new debt
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-    let mut debt = debts_asset_bucket
-        .may_load(borrower_canonical_addr.as_slice())?
+    let mut debt = DEBTS
+        .may_load(
+            deps.storage,
+            (asset_reference.as_slice(), &borrower_address),
+        )?
         .unwrap_or(Debt {
             amount_scaled: Uint256::zero(),
             uncollateralized: uncollateralized_debt,
         });
     let borrow_amount_scaled =
-        borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time);
+        borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time.seconds());
     debt.amount_scaled += borrow_amount_scaled;
-    debts_asset_bucket.save(borrower_canonical_addr.as_slice(), &debt)?;
+    DEBTS.save(
+        deps.storage,
+        (asset_reference.as_slice(), &borrower_address),
+        &debt,
+    )?;
 
     borrow_market.debt_total_scaled += borrow_amount_scaled;
 
@@ -781,30 +815,31 @@ pub fn handle_borrow<S: Storage, A: Api, Q: Querier>(
         &mut borrow_market,
         borrow_amount,
     )?;
-    markets_state(&mut deps.storage).save(&asset_reference.as_slice(), &borrow_market)?;
+    MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
 
-    let mut log = vec![
-        log("action", "borrow"),
-        log("market", asset_label.as_str()),
-        log("user", borrower_address.as_str()),
-        log("amount", borrow_amount),
+    let mut attributes = vec![
+        attr("action", "borrow"),
+        attr("market", asset_label.as_str()),
+        attr("user", borrower_address.as_str()),
+        attr("amount", borrow_amount),
     ];
 
-    append_indices_and_rates_to_logs(&mut log, &borrow_market);
+    append_indices_and_rates_to_logs(&mut attributes, &borrow_market);
 
     // Send borrow amount to borrower
     let send_msg = build_send_asset_msg(
-        deps,
+        &deps,
         env.contract.address,
         borrower_address,
         asset,
         borrow_amount,
     )?;
 
-    Ok(HandleResponse {
+    Ok(Response {
         data: None,
-        log,
-        messages: vec![send_msg],
+        attributes,
+        messages: vec![SubMsg::new(send_msg)],
+        events: vec![],
     })
 }
 
@@ -1257,39 +1292,38 @@ fn liquidation_compute_amounts(
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
-pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_finalize_liquidity_token_transfer(
+    deps: DepsMut,
     env: Env,
-    from_address: HumanAddr,
-    to_address: HumanAddr,
+    info: MessageInfo,
+    from_address: Addr,
+    to_address: Addr,
     from_previous_balance: Uint128,
     to_previous_balance: Uint128,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     // Get liquidity token market
-    let market_reference = market_ma_tokens_state_read(&deps.storage)
-        .load(deps.api.canonical_address(&env.message.sender)?.as_slice())?;
-    let market = markets_state_read(&deps.storage).load(&market_reference)?;
+    let market_reference = MARKET_MA_TOKENS.load(deps.storage, &info.sender)?;
+    let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
 
     // Check user health factor is above 1
     // TODO: this assumes new balances are already in state as this call will be made
     // after a transfer call on an ma_asset. Double check this is the case when doing
     // integration tests. If it's not we would need to pass the updated balances to
     // the health factor somehow
-    let from_canonical_address = deps.api.canonical_address(&from_address)?;
-    let money_market = money_market_state_read(&deps.storage).load()?;
-    let mut from_user = users_state_read(&deps.storage).load(from_canonical_address.as_slice())?;
+    let money_market = RED_BANK.load(&deps.storage)?;
+    let mut from_user = USERS.load(deps.storage, &from_address)?;
     let (user_account_settlement, _) = prepare_user_account_settlement(
         &deps,
-        env.block.time,
-        &from_canonical_address,
+        env.block.time.seconds(),
+        &from_address,
         &from_user,
         &money_market,
         &mut vec![],
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_account_settlement.health_status {
         if health_factor < Decimal256::one() {
-            return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender"));
+            return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender").into());
         }
     }
 
@@ -1298,120 +1332,123 @@ pub fn handle_finalize_liquidity_token_transfer<S: Storage, A: Api, Q: Querier>(
     if from_address != to_address {
         if (from_previous_balance - amount)? == Uint128::zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
-            users_state(&mut deps.storage).save(from_canonical_address.as_slice(), &from_user)?;
+            USERS.save(deps.storage, &from_address, &from_user)?;
         }
 
         if (to_previous_balance == Uint128::zero()) && (amount != Uint128::zero()) {
-            let to_canonical_address = deps.api.canonical_address(&to_address)?;
-            let mut users_bucket = users_state(&mut deps.storage);
-            let mut to_user = users_bucket
-                .may_load(&to_canonical_address.as_slice())?
+            let mut to_user = USERS
+                .may_load(deps.storage, &to_address)?
                 .unwrap_or_default();
             set_bit(&mut to_user.collateral_assets, market.index)?;
-            users_bucket.save(to_canonical_address.as_slice(), &to_user)?;
+            USERS.save(deps.storage, &to_address, &to_user)?;
         }
     }
 
-    Ok(HandleResponse::default())
+    Ok(Response::default())
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
-pub fn handle_update_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_update_uncollateralized_loan_limit(
+    deps: DepsMut,
     env: Env,
-    user_address: HumanAddr,
+    info: MessageInfo,
+    user_address: Addr,
     asset: Asset,
     new_limit: Uint128,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     // Get config
-    let config = config_state_read(&deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
 
     // Only owner can do this
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {}.into());
     }
 
-    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
-    let user_canonical_address = deps.api.canonical_address(&user_address)?;
+    let (asset_label, asset_reference, _) = asset_get_attributes(&deps, &asset)?;
 
-    let mut uncollateralized_loan_limits_bucket =
-        uncollateralized_loan_limits(&mut deps.storage, asset_reference.as_slice());
+    UNCOLLATERALIZED_LOAN_LIMITS.save(
+        deps.storage,
+        (asset_reference.as_slice(), &user_address),
+        &new_limit,
+    )?;
 
-    uncollateralized_loan_limits_bucket.save(user_canonical_address.as_slice(), &new_limit)?;
-
-    let mut debts_asset_bucket = debts_asset_state(&mut deps.storage, asset_reference.as_slice());
-    let mut debt = debts_asset_bucket
-        .may_load(user_canonical_address.as_slice())?
+    // FIXME: use update?
+    let mut debt = DEBTS
+        .may_load(deps.storage, (asset_reference.as_slice(), &user_address))?
         .unwrap_or(Debt {
             amount_scaled: Uint256::zero(),
             uncollateralized: false,
         });
     // if limit == 0 then uncollateralized = false, otherwise uncollateralized = true
     debt.uncollateralized = !new_limit.is_zero();
-    debts_asset_bucket.save(user_canonical_address.as_slice(), &debt)?;
+    DEBTS.save(
+        deps.storage,
+        (asset_reference.as_slice(), &user_address),
+        &debt,
+    )?;
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages: vec![],
-        log: vec![
-            log("action", "update_uncollateralized_loan_limit"),
-            log("user", user_address),
-            log("asset", asset_label),
-            log("new_allowance", new_limit),
+        attributes: vec![
+            attr("action", "update_uncollateralized_loan_limit"),
+            attr("user", user_address.as_str()),
+            attr("asset", asset_label),
+            attr("new_allowance", new_limit),
         ],
+        events: vec![],
         data: None,
     })
 }
 
 /// Update (enable / disable) collateral asset for specific user
-pub fn handle_update_user_collateral_asset_status<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_update_user_collateral_asset_status(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     asset: Asset,
     enable: bool,
-) -> StdResult<HandleResponse> {
-    let user_address = env.message.sender;
-    let user_canonical_address = deps.api.canonical_address(&user_address)?;
-    let mut user = users_state_read(&deps.storage)
-        .may_load(user_canonical_address.as_slice())
-        .map(|u| u.unwrap_or_default())?;
+) -> Result<Response, ContractError> {
+    let user_address = info.sender;
+    let mut user = USERS
+        .may_load(deps.storage, &user_address)?
+        .unwrap_or_default();
 
     let (collateral_asset_label, collateral_asset_reference, _) =
-        asset_get_attributes(deps, &asset)?;
-    let collateral_market =
-        markets_state_read(&deps.storage).load(collateral_asset_reference.as_slice())?;
+        asset_get_attributes(&deps, &asset)?;
+    let collateral_market = MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
     let has_collateral_asset = get_bit(user.collateral_assets, collateral_market.index)?;
     if !has_collateral_asset && enable {
-        let collateral_ma_address = deps
-            .api
-            .human_address(&collateral_market.ma_token_address)?;
+        let collateral_ma_address = collateral_market.ma_token_address;
         let user_collateral_balance =
             cw20_get_balance(&deps.querier, collateral_ma_address, user_address.clone())?;
         if user_collateral_balance > Uint128::zero() {
             // enable collateral asset
             set_bit(&mut user.collateral_assets, collateral_market.index)?;
-            users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+            USERS.save(deps.storage, &user_address, &user)?;
         } else {
             return Err(StdError::generic_err(format!(
                 "User address {} has no balance in specified collateral asset {}",
                 user_address.as_str(),
                 collateral_asset_label
-            )));
+            ))
+            .into());
         }
     } else if has_collateral_asset && !enable {
         // disable collateral asset
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
-        users_state(&mut deps.storage).save(user_canonical_address.as_slice(), &user)?;
+        USERS.save(deps.storage, &user_address, &user)?;
     }
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages: vec![],
-        log: vec![
-            log("action", "update_user_collateral_asset_status"),
-            log("user", user_address),
-            log("asset", collateral_asset_label),
-            log("has_collateral", has_collateral_asset),
-            log("enable", enable),
+        attributes: vec![
+            attr("action", "update_user_collateral_asset_status"),
+            attr("user", user_address.as_str()),
+            attr("asset", collateral_asset_label),
+            attr("has_collateral", has_collateral_asset),
+            attr("enable", enable),
         ],
+        events: vec![],
         data: None,
     })
 }
@@ -1827,8 +1864,8 @@ fn calculate_applied_linear_interest_rate(
 
 /// Update interest rates for current liquidity and debt levels
 /// Note it does not save the market to the store (that is left to the caller)
-pub fn market_update_interest_rates<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+pub fn market_update_interest_rates(
+    deps: &DepsMut,
     env: &Env,
     reference: &[u8],
     market: &mut Market,
@@ -1947,12 +1984,12 @@ fn get_updated_interest_rates(
     (new_borrow_rate, new_liquidity_rate)
 }
 
-fn append_indices_and_rates_to_logs(logs: &mut Vec<LogAttribute>, market: &Market) {
+fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) {
     let mut interest_logs = vec![
-        log("borrow_index", market.borrow_index),
-        log("liquidity_index", market.liquidity_index),
-        log("borrow_rate", market.borrow_rate),
-        log("liquidity_rate", market.liquidity_rate),
+        attr("borrow_index", market.borrow_index),
+        attr("liquidity_index", market.liquidity_index),
+        attr("borrow_rate", market.borrow_rate),
+        attr("liquidity_rate", market.liquidity_rate),
     ];
     logs.append(&mut interest_logs);
 }
@@ -1977,7 +2014,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
     money_market: &RedBank,
     user: &User,
-    user_canonical_address: &CanonicalAddr,
+    user_address: &Addr,
     native_asset_prices_to_query: &mut Vec<String>,
     block_time: u64,
 ) -> StdResult<Vec<UserAssetSettlement>> {
@@ -1997,7 +2034,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
             let asset_balance = cw20_get_balance(
                 &deps.querier,
                 deps.api.human_address(&market.ma_token_address)?,
-                deps.api.human_address(user_canonical_address)?,
+                deps.api.human_address(user_address)?,
             )?;
 
             let liquidity_index = get_updated_liquidity_index(&market, block_time);
@@ -2015,7 +2052,7 @@ fn user_get_balances<S: Storage, A: Api, Q: Querier>(
         let (debt_amount, uncollateralized_debt) = if user_is_borrowing {
             // query debt
             let debts_asset_bucket = debts_asset_state_read(&deps.storage, &asset_reference_vec);
-            let user_debt: Debt = debts_asset_bucket.load(user_canonical_address.as_slice())?;
+            let user_debt: Debt = debts_asset_bucket.load(user_address.as_slice())?;
 
             let borrow_index = get_updated_borrow_index(&market, block_time);
 
@@ -2080,10 +2117,10 @@ enum UserHealthStatus {
 /// This includes the total debt/collateral balances in uusd,
 /// the average LTV, the average Liquidation threshold, and the Health factor.
 /// Moreover returns the list of asset prices that were used during the computation.
-fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn prepare_user_account_settlement(
+    deps: &DepsMut,
     block_time: u64,
-    user_canonical_address: &CanonicalAddr,
+    user_address: &Addr,
     user: &User,
     money_market: &RedBank,
     native_asset_prices_to_query: &mut Vec<String>,
@@ -2092,7 +2129,7 @@ fn prepare_user_account_settlement<S: Storage, A: Api, Q: Querier>(
         &deps,
         &money_market,
         user,
-        user_canonical_address,
+        user_address,
         native_asset_prices_to_query,
         block_time,
     )?;
@@ -2221,10 +2258,10 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     Ok(())
 }
 
-fn build_send_asset_msg<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    sender_address: HumanAddr,
-    recipient_address: HumanAddr,
+fn build_send_asset_msg(
+    deps: &DepsMut,
+    sender_address: Addr,
+    recipient_address: Addr,
     asset: Asset,
     amount: Uint256,
 ) -> StdResult<CosmosMsg> {
@@ -2237,6 +2274,7 @@ fn build_send_asset_msg<S: Storage, A: Api, Q: Querier>(
             amount,
         )?),
         Asset::Cw20 { contract_addr } => {
+            let contract_addr = deps.api.addr_validate(&contract_addr)?;
             build_send_cw20_token_msg(recipient_address, contract_addr, amount)
         }
     }
@@ -2248,14 +2286,13 @@ fn build_send_asset_msg<S: Storage, A: Api, Q: Querier>(
 /// Instead of sending amount, send: amount - compute_tax(amount).
 fn build_send_native_asset_msg<S: Storage, A: Api, Q: Querier>(
     deps: &Extern<S, A, Q>,
-    sender: HumanAddr,
-    recipient: HumanAddr,
+    sender: Addr,
+    recipient: Addr,
     denom: &str,
     amount: Uint256,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Bank(BankMsg::Send {
-        from_address: sender,
-        to_address: recipient,
+        to_address: recipient.into(),
         amount: vec![deduct_tax(
             deps,
             Coin {
@@ -2267,17 +2304,17 @@ fn build_send_native_asset_msg<S: Storage, A: Api, Q: Querier>(
 }
 
 fn build_send_cw20_token_msg(
-    recipient: HumanAddr,
-    token_contract_address: HumanAddr,
+    recipient: Addr,
+    token_contract_address: Addr,
     amount: Uint256,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: token_contract_address,
+        contract_addr: token_contract_address.into(),
         msg: to_binary(&Cw20HandleMsg::Transfer {
             recipient,
             amount: amount.into(),
         })?,
-        send: vec![],
+        funds: vec![],
     }))
 }
 
@@ -2327,10 +2364,8 @@ fn asset_get_price(
     Ok(asset_price)
 }
 
-fn asset_get_attributes<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    asset: &Asset,
-) -> StdResult<(String, Vec<u8>, AssetType)> {
+// FIXME: canonical address
+fn asset_get_attributes(deps: &DepsMut, asset: &Asset) -> StdResult<(String, Vec<u8>, AssetType)> {
     match asset {
         Asset::Native { denom } => {
             let asset_label = denom.as_bytes().to_vec();
