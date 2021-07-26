@@ -3,8 +3,8 @@ use std::str;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     attr, from_binary, to_binary, Addr, Api, Attribute, BankMsg, Binary, CanonicalAddr, Coin,
-    CosmosMsg, DepsMut, Env, MessageInfo, Order, Querier, Response, StdError, StdResult, Storage,
-    SubMsg, Uint128, WasmMsg,
+    CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order, Querier, Response, StdError, StdResult,
+    Storage, SubMsg, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use terra_cosmwasm::TerraQuerier;
@@ -90,6 +90,7 @@ pub fn instantiate(
 
 // HANDLERS
 
+#[entry_point]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -1572,35 +1573,40 @@ pub fn handle_distribute_protocol_income<S: Storage, A: Api, Q: Querier>(
 
 // QUERIES
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+pub fn query(deps: Deps, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
         QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
-        QueryMsg::Debt { address } => to_binary(&query_debt(deps, address)?),
-        QueryMsg::Collateral { address } => to_binary(&query_collateral(deps, address)?),
+        QueryMsg::Debt { address } => {
+            let address = deps.api.addr_validate(&address)?;
+            to_binary(&query_debt(deps, address)?)
+        }
+        QueryMsg::Collateral { address } => {
+            let address = deps.api.addr_validate(&address)?;
+            to_binary(&query_collateral(deps, address)?)
+        }
         QueryMsg::UncollateralizedLoanLimit {
             user_address,
             asset,
-        } => to_binary(&query_uncollateralized_loan_limit(
-            deps,
-            user_address,
-            asset,
-        )?),
+        } => {
+            let user_address = deps.api.addr_validate(&user_address)?;
+            to_binary(&query_uncollateralized_loan_limit(
+                deps,
+                user_address,
+                asset,
+            )?)
+        }
     }
 }
 
-fn query_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ConfigResponse> {
-    let config = config_state_read(&deps.storage).load()?;
-    let money_market = money_market_state_read(&deps.storage).load()?;
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let money_market = RED_BANK.load(deps.storage)?;
+
     Ok(ConfigResponse {
-        owner: deps.api.human_address(&config.owner)?,
-        address_provider_address: deps.api.human_address(&config.address_provider_address)?,
+        owner: config.owner,
+        address_provider_address: config.address_provider_address,
         insurance_fund_fee_share: config.insurance_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
@@ -1609,12 +1615,9 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn query_market<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    asset: Asset,
-) -> StdResult<MarketResponse> {
+fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
     let market = match asset {
-        Asset::Native { denom } => match markets_state_read(&deps.storage).load(denom.as_bytes()) {
+        Asset::Native { denom } => match MARKETS.load(deps.storage, denom.as_bytes()) {
             Ok(market) => market,
             Err(_) => {
                 return Err(StdError::generic_err(format!(
@@ -1624,8 +1627,8 @@ fn query_market<S: Storage, A: Api, Q: Querier>(
             }
         },
         Asset::Cw20 { contract_addr } => {
-            let cw20_canonical_address = deps.api.canonical_address(&contract_addr)?;
-            match markets_state_read(&deps.storage).load(cw20_canonical_address.as_slice()) {
+            let contract_addr = deps.api.addr_validate(&contract_addr)?;
+            match MARKETS.load(deps.storage, contract_addr.as_bytes()) {
                 Ok(market) => market,
                 Err(_) => {
                     return Err(StdError::generic_err(format!(
@@ -1638,7 +1641,7 @@ fn query_market<S: Storage, A: Api, Q: Querier>(
     };
 
     Ok(MarketResponse {
-        ma_token_address: deps.api.human_address(&market.ma_token_address)?,
+        ma_token_address: market.ma_token_address,
         borrow_index: market.borrow_index,
         liquidity_index: market.liquidity_index,
         borrow_rate: market.borrow_rate,
@@ -1652,20 +1655,17 @@ fn query_market<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn query_markets_list<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<MarketsListResponse> {
-    let markets = markets_state_read(&deps.storage);
-
-    let markets_list: StdResult<Vec<_>> = markets
-        .range(None, None, Order::Ascending)
+fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
+    // FIXME: add pagination?
+    let markets_list: StdResult<Vec<_>> = MARKETS
+        .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
             let denom = get_market_denom(deps, k, v.asset_type)?;
 
             Ok(MarketInfo {
                 denom,
-                ma_token_address: deps.api.human_address(&v.ma_token_address)?,
+                ma_token_address: v.ma_token_address,
             })
         })
         .collect();
@@ -1675,26 +1675,19 @@ fn query_markets_list<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn query_debt<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
-) -> StdResult<DebtResponse> {
-    let markets = markets_state_read(&deps.storage);
-    let debtor_address = deps.api.canonical_address(&address)?;
-    let user = users_state_read(&deps.storage)
-        .may_load(debtor_address.as_slice())?
-        .unwrap_or_default();
+fn query_debt(deps: Deps, address: Addr) -> StdResult<DebtResponse> {
+    // FIXME: add pagination?
+    let user = USERS.may_load(deps.storage, &address)?.unwrap_or_default();
 
-    let debts: StdResult<Vec<_>> = markets
-        .range(None, None, Order::Ascending)
+    let debts: StdResult<Vec<_>> = MARKETS
+        .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
             let denom = get_market_denom(deps, k.clone(), v.asset_type)?;
 
             let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
             if is_borrowing_asset {
-                let debts_asset_bucket = debts_asset_state_read(&deps.storage, k.as_slice());
-                let debt = debts_asset_bucket.load(debtor_address.as_slice())?;
+                let debt = DEBTS.load(deps.storage, (k.as_slice(), &address))?;
                 Ok(DebtInfo {
                     denom,
                     amount: debt.amount_scaled,
@@ -1711,18 +1704,12 @@ fn query_debt<S: Storage, A: Api, Q: Querier>(
     Ok(DebtResponse { debts: debts? })
 }
 
-fn query_collateral<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
-) -> StdResult<CollateralResponse> {
-    let markets = markets_state_read(&deps.storage);
-    let canonical_address = deps.api.canonical_address(&address)?;
-    let user = users_state_read(&deps.storage)
-        .may_load(canonical_address.as_slice())?
-        .unwrap_or_default();
+fn query_collateral(deps: Deps, address: Addr) -> StdResult<CollateralResponse> {
+    // FIXME: add pagination?
+    let user = USERS.may_load(deps.storage, &address)?.unwrap_or_default();
 
-    let collateral: StdResult<Vec<_>> = markets
-        .range(None, None, Order::Ascending)
+    let collateral: StdResult<Vec<_>> = MARKETS
+        .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
             let (k, v) = item?;
             let denom = get_market_denom(deps, k, v.asset_type)?;
@@ -1739,16 +1726,14 @@ fn query_collateral<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    user_address: HumanAddr,
+fn query_uncollateralized_loan_limit(
+    deps: Deps,
+    user_address: Addr,
     asset: Asset,
 ) -> StdResult<UncollateralizedLoanLimitResponse> {
-    let user_canonical_address = deps.api.canonical_address(&user_address)?;
-    let (asset_label, asset_reference, _) = asset_get_attributes(deps, &asset)?;
-    let uncollateralized_loan_limit =
-        uncollateralized_loan_limits_read(&deps.storage, asset_reference.as_slice())
-            .load(&user_canonical_address.as_slice());
+    let (asset_label, asset_reference, _) = asset_get_attributes(&deps, &asset)?;
+    let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
+        .load(deps.storage, (asset_reference.as_slice(), &user_address));
 
     match uncollateralized_loan_limit {
         Ok(limit) => Ok(UncollateralizedLoanLimitResponse { limit }),
@@ -1759,12 +1744,9 @@ fn query_uncollateralized_loan_limit<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> MigrateResult {
-    Ok(MigrateResponse::default())
+#[entry_point]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 // INTEREST
@@ -1773,7 +1755,7 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 /// last interest update and current block.
 /// Note it does not save the market to the store (that is left to the caller)
 pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
-    let current_timestamp = env.block.time;
+    let current_timestamp = env.block.time.seconds();
     // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
     // of the indices and subtracting them returns the accrued borrow interest for the period since
     // when the indices were last updated and the current point in time.
@@ -2197,11 +2179,7 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
         .unwrap_or_else(Uint256::zero)
 }
 
-fn get_market_denom<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    market_id: Vec<u8>,
-    asset_type: AssetType,
-) -> StdResult<String> {
+fn get_market_denom(deps: Deps, market_id: Vec<u8>, asset_type: AssetType) -> StdResult<String> {
     match asset_type {
         AssetType::Native => match String::from_utf8(market_id) {
             Ok(denom) => Ok(denom),
@@ -2259,7 +2237,7 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
 }
 
 fn build_send_asset_msg(
-    deps: &DepsMut,
+    deps: Deps,
     sender_address: Addr,
     recipient_address: Addr,
     asset: Asset,
@@ -2284,8 +2262,8 @@ fn build_send_asset_msg(
 /// When doing native transfers a "tax" is charged.
 /// The actual amount taken from the contract is: amount + tax.
 /// Instead of sending amount, send: amount - compute_tax(amount).
-fn build_send_native_asset_msg<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn build_send_native_asset_msg(
+    deps: Deps,
     sender: Addr,
     recipient: Addr,
     denom: &str,
@@ -2365,7 +2343,7 @@ fn asset_get_price(
 }
 
 // FIXME: canonical address
-fn asset_get_attributes(deps: &DepsMut, asset: &Asset) -> StdResult<(String, Vec<u8>, AssetType)> {
+fn asset_get_attributes(deps: &Deps, asset: &Asset) -> StdResult<(String, Vec<u8>, AssetType)> {
     match asset {
         Asset::Native { denom } => {
             let asset_label = denom.as_bytes().to_vec();
