@@ -47,7 +47,7 @@ pub fn instantiate(
         && unstake_window.is_some();
 
     if !available {
-        return Err((MarsError::InstantiateParamsUnavailable {}).into());
+        return Err(MarsError::InstantiateParamsUnavailable {})?;
     };
 
     // Initialize config
@@ -178,7 +178,7 @@ pub fn execute_stake(
 
     // Has to send Mars tokens
     if info.sender != mars_token_address {
-        return Err((MarsError::Unauthorized {}).into());
+        return Err(MarsError::Unauthorized {})?;
     }
     if stake_amount == Uint128::zero() {
         return Err(ContractError::StakeAmountZero {});
@@ -237,7 +237,7 @@ pub fn execute_unstake(
     let config = CONFIG.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
     if info.sender != xmars_token_address {
-        return Err((MarsError::Unauthorized {}).into());
+        return Err(MarsError::Unauthorized {})?;
     }
     if burn_amount == Uint128::zero() {
         return Err(ContractError::UnstakeAmountZero {});
@@ -336,7 +336,7 @@ pub fn execute_cooldown(
     let xmars_balance = cw20_get_balance(&deps.querier, xmars_token_address, info.sender.clone())?;
 
     if xmars_balance.is_zero() {
-        return Err((MarsError::Unauthorized {}).into());
+        return Err(MarsError::Unauthorized {})?;
     }
 
     // compute new cooldown timestamp
