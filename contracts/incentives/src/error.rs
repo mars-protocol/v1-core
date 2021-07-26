@@ -1,3 +1,5 @@
+use std::string::FromUtf8Error;
+
 use cosmwasm_std::{OverflowError, StdError};
 use mars::error::MarsError;
 use thiserror::Error;
@@ -12,6 +14,9 @@ pub enum ContractError {
 
     #[error("{0}")]
     Overflow(#[from] OverflowError),
+
+    #[error("{0}")]
+    FromUtf8(#[from] FromUtf8Error),
 
     #[error("Start time must be before end time")]
     IndexStartEndTime {},
