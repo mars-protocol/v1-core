@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Decimal, Storage, Uint128};
+use cosmwasm_std::{Addr, Decimal, Storage, Uint128};
 use cosmwasm_storage::{
     bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
     Singleton,
@@ -19,9 +19,9 @@ pub static USER_UNCLAIMED_REWARDS_NAMESPACE: &[u8] = b"user_unclaimed_rewards";
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
-    pub owner: CanonicalAddr,
+    pub owner: Addr,
     /// Address provider returns addresses for all protocol contracts
-    pub address_provider_address: CanonicalAddr,
+    pub address_provider_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -31,40 +31,40 @@ pub struct AssetIncentive {
     pub last_updated: u64,
 }
 
-pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
+pub fn config(storage: &mut dyn Storage) -> Singleton<Config> {
     singleton(storage, CONFIG_KEY)
 }
 
-pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
+pub fn config_read(storage: &dyn Storage) -> ReadonlySingleton<Config> {
     singleton_read(storage, CONFIG_KEY)
 }
 
-pub fn asset_incentives<S: Storage>(storage: &mut S) -> Bucket<S, AssetIncentive> {
-    bucket(ASSET_INCENTIVES_NAMESPACE, storage)
+pub fn asset_incentives(storage: &mut dyn Storage) -> Bucket<AssetIncentive> {
+    bucket(storage, ASSET_INCENTIVES_NAMESPACE)
 }
 
-pub fn asset_incentives_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, AssetIncentive> {
-    bucket_read(ASSET_INCENTIVES_NAMESPACE, storage)
+pub fn asset_incentives_read(storage: &dyn Storage) -> ReadonlyBucket<AssetIncentive> {
+    bucket_read(storage, ASSET_INCENTIVES_NAMESPACE)
 }
 
-pub fn user_asset_indices<'a, S: Storage>(
-    storage: &'a mut S,
+pub fn user_asset_indices<'a>(
+    storage: &'a mut dyn Storage,
     user_reference: &[u8],
-) -> Bucket<'a, S, Decimal> {
-    Bucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
+) -> Bucket<'a, Decimal> {
+    Bucket::multilevel(storage, &[USER_ASSET_INDICES_NAMESPACE, user_reference])
 }
 
-pub fn user_asset_indices_read<'a, S: Storage>(
-    storage: &'a S,
+pub fn user_asset_indices_read<'a>(
+    storage: &'a dyn Storage,
     user_reference: &[u8],
-) -> ReadonlyBucket<'a, S, Decimal> {
-    ReadonlyBucket::multilevel(&[USER_ASSET_INDICES_NAMESPACE, user_reference], storage)
+) -> ReadonlyBucket<'a, Decimal> {
+    ReadonlyBucket::multilevel(storage, &[USER_ASSET_INDICES_NAMESPACE, user_reference])
 }
 
-pub fn user_unclaimed_rewards<S: Storage>(storage: &mut S) -> Bucket<S, Uint128> {
-    bucket(USER_UNCLAIMED_REWARDS_NAMESPACE, storage)
+pub fn user_unclaimed_rewards(storage: &mut dyn Storage) -> Bucket<Uint128> {
+    bucket(storage, USER_UNCLAIMED_REWARDS_NAMESPACE)
 }
 
-pub fn user_unclaimed_rewards_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Uint128> {
-    bucket_read(USER_UNCLAIMED_REWARDS_NAMESPACE, storage)
+pub fn user_unclaimed_rewards_read(storage: &dyn Storage) -> ReadonlyBucket<Uint128> {
+    bucket_read(storage, USER_UNCLAIMED_REWARDS_NAMESPACE)
 }
