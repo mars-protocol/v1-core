@@ -156,9 +156,10 @@ pub fn execute_balance_change(
 
     // Check if user has accumulated uncomputed rewards (which means index is not up to date)
     let user_address = deps.api.addr_validate(&user_address)?;
-    let user_asset_index = USER_ASSET_INDICES
-        .may_load(deps.storage, (&user_address, &ma_token_address))?
-        .unwrap_or_else(Decimal::zero);
+
+    let key = USER_ASSET_INDICES.key((&user_address, &ma_token_address));
+
+    let user_asset_index = key.may_load(deps.storage)?.unwrap_or_else(Decimal::zero);
 
     let mut accrued_rewards = Uint128::zero();
 
@@ -177,20 +178,14 @@ pub fn execute_balance_change(
                 &user_address,
                 |ur: Option<Uint128>| -> StdResult<Uint128> {
                     match ur {
-                        Some(current_unclaimed_rewards) => {
-                            Ok(current_unclaimed_rewards + accrued_rewards)
-                        }
+                        Some(unclaimed_rewards) => Ok(unclaimed_rewards + accrued_rewards),
                         None => Ok(accrued_rewards),
                     }
                 },
             )?;
         }
 
-        USER_ASSET_INDICES.save(
-            deps.storage,
-            (&user_address, &ma_token_address),
-            &asset_incentive.index,
-        )?;
+        key.save(deps.storage, &asset_incentive.index)?;
     }
 
     Ok(Response {
