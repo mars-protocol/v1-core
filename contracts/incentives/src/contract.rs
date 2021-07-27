@@ -1,7 +1,6 @@
 use cosmwasm_std::{
     attr, entry_point, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env,
-    MessageInfo, Order, QueryRequest, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
-    WasmQuery,
+    MessageInfo, Order, QueryRequest, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -51,15 +50,15 @@ pub fn execute(
             user_address,
             user_balance_before,
             total_supply_before,
-        } => Ok(execute_balance_change(
+        } => execute_balance_change(
             deps,
             env,
             info,
             user_address,
             user_balance_before,
             total_supply_before,
-        )?),
-        ExecuteMsg::ClaimRewards {} => Ok(execute_claim_rewards(deps, env, info)?),
+        ),
+        ExecuteMsg::ClaimRewards {} => execute_claim_rewards(deps, env, info),
         ExecuteMsg::UpdateConfig {
             owner,
             address_provider_address,
@@ -144,6 +143,7 @@ pub fn execute_balance_change(
         // success of the call is needed for the call that triggered the change to
         // succeed and be persisted to state.
         None => return Ok(Response::default()),
+
         Some(ai) => ai,
     };
 
@@ -224,8 +224,12 @@ pub fn execute_claim_rewards(
         .collect();
 
     for result_kv_pair in result_user_asset_indices? {
-        let (ma_token_address_vec, user_asset_index) = result_kv_pair;
-        let ma_token_address = Addr::unchecked(String::from_utf8(ma_token_address_vec)?);
+        let (ma_token_address_bytes, user_asset_index) = result_kv_pair;
+
+        let ma_token_address = deps
+            .api
+            .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
+
         // Get asset user balances and total supply
         let balance_and_total_supply: mars::ma_token::msg::BalanceAndTotalSupplyResponse =
             deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
@@ -267,28 +271,13 @@ pub fn execute_claim_rewards(
 
     let config = CONFIG.load(deps.storage)?;
     let mars_contracts = vec![MarsContract::MarsToken, MarsContract::Staking];
-    let expected_len = mars_contracts.len();
     let mut addresses_query = query_addresses(
         &deps.querier,
         config.address_provider_address,
         mars_contracts,
     )?;
-    if addresses_query.len() != expected_len {
-        // TODO
-        return Err(StdError::generic_err(format!(
-            "Incorrect number of addresses, expected {} got {}",
-            expected_len,
-            addresses_query.len()
-        )))?;
-    }
-
-    // TODO
-    let staking_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
-    let mars_token_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
+    let staking_address = addresses_query.pop().unwrap();
+    let mars_token_address = addresses_query.pop().unwrap();
 
     let messages = if accrued_rewards > Uint128::zero() {
         vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
