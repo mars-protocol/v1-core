@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{OverflowError, StdError};
 use mars::error::MarsError;
 use thiserror::Error;
 
@@ -9,4 +9,7 @@ pub enum ContractError {
 
     #[error("{0}")]
     Mars(#[from] MarsError),
+
+    #[error("{0}")]
+    Overflow(#[from] OverflowError),
 }

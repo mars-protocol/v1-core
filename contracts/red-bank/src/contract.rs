@@ -262,69 +262,65 @@ pub fn execute_receive_cw20(
     info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    if let Some(msg) = cw20_msg.msg {
-        match from_binary(&msg)? {
-            ReceiveMsg::DepositCw20 {} => {
-                let depositor_addr = deps.api.addr_validate(&cw20_msg.sender)?;
-                let token_contract_address = info.sender.clone();
-                execute_deposit(
-                    deps,
-                    env,
-                    info,
-                    depositor_addr,
-                    token_contract_address.as_bytes(),
-                    token_contract_address.as_str(),
-                    Uint256::from(cw20_msg.amount),
-                )
-            }
-            ReceiveMsg::RepayCw20 {} => {
-                let repayer_addr = deps.api.addr_validate(&cw20_msg.sender)?;
-                let token_contract_address = info.sender.clone();
-                execute_repay(
-                    deps,
-                    env,
-                    info,
-                    repayer_addr,
-                    token_contract_address.as_bytes(),
-                    token_contract_address.as_str(),
-                    Uint256::from(cw20_msg.amount),
-                    AssetType::Cw20,
-                )
-            }
-            ReceiveMsg::LiquidateCw20 {
-                collateral_asset,
-                debt_asset_address,
-                user_address,
-                receive_ma_token,
-            } => {
-                let debt_asset_addr = deps.api.addr_validate(&debt_asset_address)?;
-                if info.sender != debt_asset_addr {
-                    return Err(StdError::generic_err(format!(
-                        "Incorrect asset, must send {} in order to liquidate",
-                        debt_asset_address
-                    ))
-                    .into());
-                }
-                let liquidator_addr = deps.api.addr_validate(&cw20_msg.sender)?;
-                let user_addr = deps.api.addr_validate(&user_address)?;
-                let sent_debt_asset_amount = Uint256::from(cw20_msg.amount);
-                execute_liquidate(
-                    deps,
-                    env,
-                    info,
-                    liquidator_addr,
-                    collateral_asset,
-                    Asset::Cw20 {
-                        contract_addr: debt_asset_address,
-                    },
-                    user_addr,
-                    sent_debt_asset_amount,
-                    receive_ma_token,
-                )
-            }
+    match from_binary(&cw20_msg.msg)? {
+        ReceiveMsg::DepositCw20 {} => {
+            let depositor_addr = deps.api.addr_validate(&cw20_msg.sender)?;
+            let token_contract_address = info.sender.clone();
+            execute_deposit(
+                deps,
+                env,
+                info,
+                depositor_addr,
+                token_contract_address.as_bytes(),
+                token_contract_address.as_str(),
+                Uint256::from(cw20_msg.amount),
+            )
         }
-    } else {
-        Err(StdError::generic_err("Invalid Cw20ReceiveMsg").into())
+        ReceiveMsg::RepayCw20 {} => {
+            let repayer_addr = deps.api.addr_validate(&cw20_msg.sender)?;
+            let token_contract_address = info.sender.clone();
+            execute_repay(
+                deps,
+                env,
+                info,
+                repayer_addr,
+                token_contract_address.as_bytes(),
+                token_contract_address.as_str(),
+                Uint256::from(cw20_msg.amount),
+                AssetType::Cw20,
+            )
+        }
+        ReceiveMsg::LiquidateCw20 {
+            collateral_asset,
+            debt_asset_address,
+            user_address,
+            receive_ma_token,
+        } => {
+            let debt_asset_addr = deps.api.addr_validate(&debt_asset_address)?;
+            if info.sender != debt_asset_addr {
+                return Err(StdError::generic_err(format!(
+                    "Incorrect asset, must send {} in order to liquidate",
+                    debt_asset_address
+                ))
+                .into());
+            }
+            let liquidator_addr = deps.api.addr_validate(&cw20_msg.sender)?;
+            let user_addr = deps.api.addr_validate(&user_address)?;
+            let sent_debt_asset_amount = Uint256::from(cw20_msg.amount);
+            execute_liquidate(
+                deps,
+                env,
+                info,
+                liquidator_addr,
+                collateral_asset,
+                Asset::Cw20 {
+                    contract_addr: debt_asset_address,
+                },
+                user_addr,
+                sent_debt_asset_amount,
+                receive_ma_token,
+            )
+        }
     }
 }
 
@@ -341,7 +337,7 @@ pub fn execute_withdraw(
     let (asset_label, asset_reference, asset_type) = asset_get_attributes(&deps.as_ref(), &asset)?;
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
-    let asset_ma_addr = market.ma_token_address;
+    let asset_ma_addr = market.ma_token_address.clone();
     let withdrawer_balance_scaled = Uint256::from(cw20_get_balance(
         &deps.querier,
         asset_ma_addr,
@@ -429,9 +425,9 @@ pub fn execute_withdraw(
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: market.ma_token_address.into(),
+        contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
-            user: withdrawer_addr.into(),
+            user: withdrawer_addr.to_string(),
             amount: withdraw_amount_scaled.into(),
         })?,
         funds: vec![],
@@ -537,16 +533,16 @@ pub fn execute_init_asset(
                         decimals: 6,
                         initial_balances: vec![],
                         mint: Some(MinterResponse {
-                            minter: env.contract.address.into(),
+                            minter: env.contract.address.to_string(),
                             cap: None,
                         }),
                         init_hook: Some(ma_token::msg::InitHook {
                             msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
                                 reference: asset_reference,
                             })?,
-                            contract_addr: env.contract.address.into(),
+                            contract_addr: env.contract.address.to_string(),
                         }),
-                        red_bank_address: env.contract.address.into(),
+                        red_bank_address: env.contract.address.to_string(),
                         incentives_address: incentives_address.into(),
                     })?,
                     funds: vec![],
@@ -607,7 +603,7 @@ pub fn init_asset_token_callback(
         MARKETS.save(deps.storage, reference.as_slice(), &market)?;
 
         // save ma token contract to reference mapping
-        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference);
+        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference)?;
 
         Ok(Response::default())
     } else {
@@ -644,7 +640,7 @@ pub fn execute_deposit(
     let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.collateral_assets, market.index)?;
-        USERS.save(deps.storage, &depositor_address, &user);
+        USERS.save(deps.storage, &depositor_address, &user)?;
     }
 
     market_apply_accumulated_interests(&env, &mut market);
@@ -1008,7 +1004,7 @@ pub fn execute_liquidate(
     let user_collateral_balance = get_updated_liquidity_index(&collateral_market, block_time)
         * Uint256::from(cw20_get_balance(
             &deps.querier,
-            collateral_market.ma_token_address,
+            collateral_market.ma_token_address.clone(),
             user_address.clone(),
         )?);
     if user_collateral_balance == Uint256::zero() {
@@ -1111,10 +1107,10 @@ pub fn execute_liquidate(
             / get_updated_liquidity_index(&collateral_market, block_time);
 
         messages.push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: collateral_market.ma_token_address.into(),
+            contract_addr: collateral_market.ma_token_address.to_string(),
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
-                sender: user_address.into(),
-                recipient: liquidator_address.into(),
+                sender: user_address.to_string(),
+                recipient: liquidator_address.to_string(),
                 amount: collateral_amount_to_liquidate_scaled.into(),
             })?,
             funds: vec![],
@@ -1163,9 +1159,9 @@ pub fn execute_liquidate(
             / get_updated_liquidity_index(&collateral_market, block_time);
 
         let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: collateral_market.ma_token_address.into(),
+            contract_addr: collateral_market.ma_token_address.to_string(),
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
-                user: user_address.into(),
+                user: user_address.to_string(),
                 amount: collateral_amount_to_liquidate_scaled.into(),
             })?,
             funds: vec![],
@@ -1352,7 +1348,7 @@ pub fn execute_finalize_liquidity_token_transfer(
     // Update users's positions
     // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
-        if (from_previous_balance - amount)? == Uint128::zero() {
+        if from_previous_balance.checked_sub(amount)? == Uint128::zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
             USERS.save(deps.storage, &from_address, &from_user)?;
         }
@@ -1891,8 +1887,18 @@ pub fn market_update_interest_rates(
                 .amount
         }
         AssetType::Cw20 => {
-            let cw20_human_addr = deps.api.human_address(&CanonicalAddr::from(reference))?;
-            cw20_get_balance(&deps.querier, cw20_human_addr, env.contract.address.clone())?
+            // FIXME: is this ok?
+            let cw20_addr = str::from_utf8(reference);
+            let cw20_addr = match cw20_addr {
+                Ok(cw20_addr) => cw20_addr,
+                Err(_) => {
+                    return Err(StdError::generic_err(
+                        "failed to encode Cw20 address into string",
+                    ))
+                }
+            };
+            let cw20_addr = deps.api.addr_validate(cw20_addr)?;
+            cw20_get_balance(&deps.querier, cw20_addr, env.contract.address.clone())?
         }
     };
 
@@ -2039,8 +2045,11 @@ fn user_get_balances(
 
         let (collateral_amount, ltv, maintenance_margin) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
-            let asset_balance =
-                cw20_get_balance(&deps.querier, market.ma_token_address, user_address.clone())?;
+            let asset_balance = cw20_get_balance(
+                &deps.querier,
+                market.ma_token_address.clone(),
+                user_address.clone(),
+            )?;
 
             let liquidity_index = get_updated_liquidity_index(&market, block_time);
             let collateral_amount = Uint256::from(asset_balance) * liquidity_index;
@@ -2075,11 +2084,14 @@ fn user_get_balances(
                 Ok(res) => res,
                 Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
             },
-            AssetType::Cw20 => String::from(
-                deps.api
-                    .human_address(&CanonicalAddr::from(asset_reference_vec.as_slice()))?
-                    .as_str(),
-            ),
+            AssetType::Cw20 => match String::from_utf8(asset_reference_vec) {
+                Ok(res) => res,
+                Err(_) => {
+                    return Err(StdError::generic_err(
+                        "failed to encode Cw20 address into string",
+                    ))
+                }
+            },
         };
 
         // Add price to query list
@@ -2209,16 +2221,16 @@ fn get_market_denom(deps: Deps, market_id: Vec<u8>, asset_type: AssetType) -> St
             Err(_) => Err(StdError::generic_err("failed to encode key into string")),
         },
         AssetType::Cw20 => {
-            let cw20_contract_address =
-                match deps.api.human_address(&CanonicalAddr::from(market_id)) {
-                    Ok(cw20_contract_address) => cw20_contract_address,
-                    Err(_) => {
-                        return Err(StdError::generic_err(
-                            "failed to encode key into contract address",
-                        ))
-                    }
-                };
-
+            // FIXME: is it ok to convert to String?
+            let cw20_contract_address = match String::from_utf8(market_id) {
+                Ok(cw20_contract_address) => cw20_contract_address,
+                Err(_) => {
+                    return Err(StdError::generic_err(
+                        "failed to encode key into contract address",
+                    ))
+                }
+            };
+            let cw20_contract_address = deps.api.addr_validate(&cw20_contract_address)?;
             match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                 Ok(symbol) => Ok(symbol),
                 Err(_) => {
@@ -2246,7 +2258,7 @@ fn set_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     if index >= 128 {
         return Err(StdError::generic_err("index out of range"));
     }
-    *bitmap = Uint128(bitmap.u128() | (1 << index));
+    *bitmap = Uint128::from(bitmap.u128() | (1 << index));
     Ok(())
 }
 
@@ -2255,7 +2267,7 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     if index >= 128 {
         return Err(StdError::generic_err("index out of range"));
     }
-    *bitmap = Uint128(bitmap.u128() & !(1 << index));
+    *bitmap = Uint128::from(bitmap.u128() & !(1 << index));
     Ok(())
 }
 

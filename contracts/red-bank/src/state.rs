@@ -194,7 +194,7 @@ impl Market {
             liquidity_rate: Decimal256::zero(),
             max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
-            interests_last_updated: block_time,
+            interests_last_updated: block_time.seconds(),
             debt_total_scaled: Uint256::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
