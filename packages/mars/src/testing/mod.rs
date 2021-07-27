@@ -114,7 +114,7 @@ impl Cw20Querier {
     fn handle_cw20_query(&self, contract_addr: &Addr, query: Cw20QueryMsg) -> QuerierResult {
         match query {
             Cw20QueryMsg::Balance { address } => {
-                let contract_balances = match self.balances.get(&contract_addr) {
+                let contract_balances = match self.balances.get(contract_addr) {
                     Some(balances) => balances,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -150,7 +150,7 @@ impl Cw20Querier {
             }
 
             Cw20QueryMsg::TokenInfo {} => {
-                let token_info_response = match self.token_info_responses.get(&contract_addr) {
+                let token_info_response = match self.token_info_responses.get(contract_addr) {
                     Some(tir) => tir,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -182,7 +182,7 @@ impl Cw20Querier {
     ) -> QuerierResult {
         match query {
             ma_token::msg::QueryMsg::BalanceAndTotalSupply { address } => {
-                let contract_balances = match self.balances.get(&contract_addr) {
+                let contract_balances = match self.balances.get(contract_addr) {
                     Some(balances) => balances,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -209,7 +209,7 @@ impl Cw20Querier {
                         .into()
                     }
                 };
-                let token_info_response = match self.token_info_responses.get(&contract_addr) {
+                let token_info_response = match self.token_info_responses.get(contract_addr) {
                     Some(tir) => tir,
                     None => {
                         return Err(SystemError::InvalidRequest {
@@ -534,7 +534,7 @@ impl MarsMockQuerier {
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
                 let contract_addr = Addr::unchecked(contract_addr);
                 // Cw20 Queries
-                let parse_cw20_query: StdResult<Cw20QueryMsg> = from_binary(&msg);
+                let parse_cw20_query: StdResult<Cw20QueryMsg> = from_binary(msg);
                 if let Ok(cw20_query) = parse_cw20_query {
                     return self
                         .cw20_querier
@@ -542,7 +542,7 @@ impl MarsMockQuerier {
                 }
 
                 // MaToken Queries
-                let parse_ma_token_query: StdResult<ma_token::msg::QueryMsg> = from_binary(&msg);
+                let parse_ma_token_query: StdResult<ma_token::msg::QueryMsg> = from_binary(msg);
                 if let Ok(ma_token_query) = parse_ma_token_query {
                     return self
                         .cw20_querier
@@ -550,14 +550,14 @@ impl MarsMockQuerier {
                 }
 
                 // XMars Queries
-                let parse_xmars_query: StdResult<xmars_token::msg::QueryMsg> = from_binary(&msg);
+                let parse_xmars_query: StdResult<xmars_token::msg::QueryMsg> = from_binary(msg);
                 if let Ok(xmars_query) = parse_xmars_query {
                     return self.xmars_querier.handle_query(&contract_addr, xmars_query);
                 }
 
                 // Address Provider Queries
                 let parse_address_provider_query: StdResult<address_provider::msg::QueryMsg> =
-                    from_binary(&msg);
+                    from_binary(msg);
                 if let Ok(address_provider_query) = parse_address_provider_query {
                     return mock_address_provider::handle_query(
                         &contract_addr,
@@ -567,7 +567,7 @@ impl MarsMockQuerier {
 
                 // Terraswap Queries
                 let terraswap_pair_query: StdResult<terraswap::factory::QueryMsg> =
-                    from_binary(&msg);
+                    from_binary(msg);
                 if let Ok(pair_query) = terraswap_pair_query {
                     return self.terraswap_pair_querier.handle_query(&pair_query);
                 }
