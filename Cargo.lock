@@ -548,16 +548,17 @@ dependencies = [
 name = "incentives"
 version = "0.1.0"
 dependencies = [
- "cosmwasm-bignumber 1.0.0",
- "cosmwasm-schema 0.10.1",
- "cosmwasm-std 0.10.1",
- "cosmwasm-storage 0.10.1",
- "cw20 0.2.3",
+ "cosmwasm-schema 0.15.2",
+ "cosmwasm-std 0.15.2",
+ "cosmwasm-storage 0.15.2",
+ "cw-storage-plus",
+ "cw20 0.7.0",
  "mars",
- "schemars 0.7.6",
+ "schemars 0.8.3",
  "serde",
  "snafu",
- "terra-cosmwasm 1.2.4",
+ "terra-cosmwasm 2.1.0",
+ "thiserror",
 ]
 
 [[package]]
