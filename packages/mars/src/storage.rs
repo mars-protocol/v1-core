@@ -8,7 +8,7 @@ use std::any::type_name;
 /// and value.map(|s| s.as_slice()) seems trickier than &value
 pub fn may_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResult<Option<T>> {
     match value {
-        Some(vec) => Ok(Some(from_slice(&vec)?)),
+        Some(vec) => Ok(Some(from_slice(vec)?)),
         None => Ok(None),
     }
 }
@@ -16,7 +16,7 @@ pub fn may_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResul
 /// must_deserialize parses json bytes from storage (Option), returning NotFound error if no data present
 pub fn must_deserialize<T: DeserializeOwned>(value: &Option<Vec<u8>>) -> StdResult<T> {
     match value {
-        Some(vec) => from_slice(&vec),
+        Some(vec) => from_slice(vec),
         None => Err(StdError::not_found(type_name::<T>())),
     }
 }
