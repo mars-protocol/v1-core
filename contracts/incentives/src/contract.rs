@@ -155,9 +155,9 @@ pub fn execute_balance_change(
     ASSET_INCENTIVES.save(deps.storage, &ma_token_address, &asset_incentive)?;
 
     // Check if user has accumulated uncomputed rewards (which means index is not up to date)
-    let user_canonical_address = deps.api.addr_validate(&user_address)?;
+    let user_address = deps.api.addr_validate(&user_address)?;
     let user_asset_index = USER_ASSET_INDICES
-        .may_load(deps.storage, (&user_canonical_address, &ma_token_address))?
+        .may_load(deps.storage, (&user_address, &ma_token_address))?
         .unwrap_or_else(Decimal::zero);
 
     let mut accrued_rewards = Uint128::zero();
@@ -172,21 +172,23 @@ pub fn execute_balance_change(
 
         // Store user accrued rewards as unclaimed
         if !accrued_rewards.is_zero() {
-            // TODO use update
-            let current_unclaimed_rewards = USER_UNCLAIMED_REWARDS
-                .may_load(deps.storage, &user_canonical_address)?
-                .unwrap_or_else(Uint128::zero);
-
-            USER_UNCLAIMED_REWARDS.save(
+            USER_UNCLAIMED_REWARDS.update(
                 deps.storage,
-                &user_canonical_address,
-                &(current_unclaimed_rewards + accrued_rewards),
-            )?
+                &user_address,
+                |ur: Option<Uint128>| -> StdResult<Uint128> {
+                    match ur {
+                        Some(current_unclaimed_rewards) => {
+                            Ok(current_unclaimed_rewards + accrued_rewards)
+                        }
+                        None => Ok(accrued_rewards),
+                    }
+                },
+            )?;
         }
 
         USER_ASSET_INDICES.save(
             deps.storage,
-            (&user_canonical_address, &ma_token_address),
+            (&user_address, &ma_token_address),
             &asset_incentive.index,
         )?;
     }
