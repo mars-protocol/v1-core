@@ -14,7 +14,7 @@ use mars::helpers::option_string_to_addr;
 // INIT
 
 #[entry_point]
-pub fn init(
+pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
@@ -174,9 +174,9 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{MockApi, MockStorage};
+    use cosmwasm_std::testing::{mock_env, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Coin, OwnedDeps};
-    use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
+    use mars::testing::{mock_dependencies, MarsMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -189,12 +189,11 @@ mod tests {
         let msg = InstantiateMsg {
             owner: "owner".to_string(),
         };
-        let env = mock_env(MockEnvParams::default());
         let info = MessageInfo {
             sender: Addr::unchecked("whoever"),
             funds: vec![],
         };
-        init(deps.as_mut(), env, info, msg).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(owner_address, config.owner);
@@ -210,12 +209,11 @@ mod tests {
             let msg = ExecuteMsg::UpdateConfig {
                 config: ConfigParams::default(),
             };
-            let env = cosmwasm_std::testing::mock_env();
             let info = MessageInfo {
                 sender: Addr::unchecked("somebody"),
                 funds: vec![],
             };
-            let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            let error_res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
             assert_eq!(error_res, ContractError::Unauthorized {});
         }
 
@@ -231,13 +229,12 @@ mod tests {
                     ..Default::default()
                 },
             };
-            let env = cosmwasm_std::testing::mock_env();
             let info = MessageInfo {
                 sender: Addr::unchecked("owner"),
                 funds: vec![],
             };
 
-            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
             assert_eq!(0, res.messages.len());
 
             // Read config from state
@@ -254,7 +251,7 @@ mod tests {
     #[test]
     fn test_address_queries() {
         let mut deps = th_setup(&[]);
-        let env = cosmwasm_std::testing::mock_env();
+        let env = mock_env();
 
         let council_address = Addr::unchecked("council");
         let incentives_address = Addr::unchecked("incentives");
@@ -307,8 +304,7 @@ mod tests {
             sender: Addr::unchecked("someone"),
             funds: vec![],
         };
-        let env = mock_env(MockEnvParams::default());
-        init(deps.as_mut(), env, info, msg).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         deps
     }
 }
