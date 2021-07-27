@@ -14,7 +14,7 @@ use mars::helpers::option_string_to_addr;
 // INIT
 
 #[entry_point]
-pub fn init(
+pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     _info: MessageInfo,
@@ -194,7 +194,7 @@ mod tests {
             sender: Addr::unchecked("whoever"),
             funds: vec![],
         };
-        init(deps.as_mut(), env, info, msg).unwrap();
+        instantiate(deps.as_mut(), env, info, msg).unwrap();
 
         let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(owner_address, config.owner);
@@ -308,7 +308,7 @@ mod tests {
             funds: vec![],
         };
         let env = mock_env(MockEnvParams::default());
-        init(deps.as_mut(), env, info, msg).unwrap();
+        instantiate(deps.as_mut(), env, info, msg).unwrap();
         deps
     }
 }
