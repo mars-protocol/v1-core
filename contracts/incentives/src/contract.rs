@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env,
-    MessageInfo, Order, QueryRequest, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
+    attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
+    Order, QueryRequest, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -450,11 +450,11 @@ mod tests {
     fn test_proper_initialization() {
         let mut deps = mock_dependencies(&[]);
 
+        let info = mock_info("sender", &[]);
         let msg = InstantiateMsg {
             owner: String::from("owner"),
             address_provider_address: String::from("address_provider"),
         };
-        let info = mock_info("sender", &[]);
 
         let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         let empty_vec: Vec<SubMsg> = vec![];
@@ -475,14 +475,12 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         let info = mock_info("sender", &[]);
-
         let msg = ExecuteMsg::SetAssetIncentive {
             ma_token_address: String::from("ma_asset"),
             emission_per_second: Uint128::new(100),
         };
 
         let res_error = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
-
         assert_eq!(res_error, ContractError::Mars(MarsError::Unauthorized {}));
     }
 
@@ -496,13 +494,12 @@ mod tests {
             block_time: Timestamp::from_seconds(1_000_000),
             ..Default::default()
         });
-
         let msg = ExecuteMsg::SetAssetIncentive {
             ma_token_address: ma_asset_address.to_string(),
             emission_per_second: Uint128::new(100),
         };
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.attributes,
             vec![
@@ -552,6 +549,7 @@ mod tests {
             ma_token_address: ma_asset_address.to_string(),
             emission_per_second: Uint128::new(200),
         };
+
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // tests
@@ -589,16 +587,15 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         // non existing incentive returns a no op
-        {
-            let info = mock_info("ma_asset", &[]);
-            let msg = ExecuteMsg::BalanceChange {
-                user_address: String::from("user"),
-                user_balance_before: Uint128::new(100000),
-                total_supply_before: Uint128::new(100000),
-            };
-            let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-            assert_eq!(res, Response::default())
-        }
+        let info = mock_info("ma_asset", &[]);
+        let msg = ExecuteMsg::BalanceChange {
+            user_address: String::from("user"),
+            user_balance_before: Uint128::new(100000),
+            total_supply_before: Uint128::new(100000),
+        };
+
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(res, Response::default())
     }
 
     #[test]
@@ -621,7 +618,6 @@ mod tests {
             .unwrap();
 
         let info = mock_info("ma_asset", &[]);
-
         let env = mars::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(600_000),
             ..Default::default()
@@ -631,6 +627,7 @@ mod tests {
             user_balance_before: Uint128::new(100_000),
             total_supply_before: Uint128::new(100_000),
         };
+
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let expected_accrued_rewards = user_compute_accrued_rewards(
@@ -695,7 +692,6 @@ mod tests {
             .unwrap();
 
         let info = mock_info("ma_asset", &[]);
-
         let env = mars::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(time_contract_call),
             ..Default::default()
@@ -705,6 +701,7 @@ mod tests {
             user_balance_before: Uint128::zero(),
             total_supply_before: total_supply,
         };
+
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.attributes,
@@ -770,11 +767,13 @@ mod tests {
             )
             .unwrap();
 
+        let info = mock_info("ma_asset", &[]);
+
         // first call no previous rewards
         {
             let time_contract_call = 600_000_u64;
             let user_balance = Uint128::new(10_000);
-            let info = mock_info("ma_asset", &[]);
+
             let env = mars::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
@@ -784,7 +783,7 @@ mod tests {
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };
-            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
 
             expected_asset_incentive_index = asset_incentive_compute_index(
                 expected_asset_incentive_index,
@@ -838,7 +837,7 @@ mod tests {
         {
             let time_contract_call = 700_000_u64;
             let user_balance = Uint128::new(20_000);
-            let info = mock_info("ma_asset", &[]);
+
             let env = mars::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
@@ -848,7 +847,7 @@ mod tests {
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };
-            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
 
             let previous_user_index = expected_asset_incentive_index;
             expected_asset_incentive_index = asset_incentive_compute_index(
@@ -903,7 +902,7 @@ mod tests {
         {
             let time_contract_call = 700_000_u64;
             let user_balance = Uint128::new(20_000);
-            let info = mock_info("ma_asset", &[]);
+
             let env = mars::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
@@ -913,7 +912,7 @@ mod tests {
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };
-            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
 
             assert_eq!(
                 res.attributes,
@@ -1051,6 +1050,7 @@ mod tests {
             ..Default::default()
         });
         let msg = ExecuteMsg::ClaimRewards {};
+
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // ASSERT
@@ -1157,11 +1157,9 @@ mod tests {
 
         let info = mock_info("user", &[]);
         let msg = ExecuteMsg::ClaimRewards {};
+
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // ASSERT
         assert_eq!(res.messages.len(), 0);
-
         assert_eq!(
             res.attributes,
             vec![
@@ -1201,7 +1199,6 @@ mod tests {
 
         // Read config from state
         let new_config = CONFIG.load(deps.as_ref().storage).unwrap();
-
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
         assert_eq!(
             new_config.address_provider_address,
