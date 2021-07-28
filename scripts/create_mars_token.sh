@@ -67,13 +67,13 @@ token_cap=1000000000000000
 token_info_template='{"name": "", "symbol": "", "decimals": 0, "initial_balances": [], "mint": {"minter": "", "cap": ""}}'
 
 token_info=$(
-  echo $token_info_template | jq -c \
-    --arg name $token_name \
-    --arg symbol $token_symbol \
-    --argjson decimals $token_decimals \
-    --arg minter $token_minter \
-    --arg cap $token_cap \
-    '.name |= $name | .symbol |= $symbol | .decimals |= $decimals | .mint.minter |= $minter | .mint.cap |= $cap'
+  echo $token_info_template \
+    | jq '.name |= $name | .symbol |= $symbol | .decimals |= $decimals | .mint.minter |= $minter | .mint.cap |= $cap' \
+      --arg name $token_name \
+      --arg symbol $token_symbol \
+      --argjson decimals $token_decimals \
+      --arg minter $token_minter \
+      --arg cap $token_cap
 )
 
 cosmwasm_plus_path=../../cosmwasm-plus
@@ -137,7 +137,11 @@ terracli query wasm contract-store $contract_addr '{"token_info": {}}'
 beneficiary=$(terracli keys show test4 --output json | jq -r .address)
 mint_amount=100000000
 
-mint_tx=$(jq -n -c --arg address $beneficiary --arg amount $mint_amount '{"mint": {"recipient": $address, "amount": $amount}}')
+mint_tx=$(
+  jq -n '{"mint": {"recipient": $address, "amount": $amount}}' \
+    --arg address $beneficiary \
+    --arg amount $mint_amount
+)
 
 terracli tx wasm execute $contract_addr $mint_tx \
   --from $multi \
@@ -154,7 +158,10 @@ if [ $(echo $res | jq -r .total_supply) != $mint_amount ]; then
 fi
 
 # Check the token balance of the beneficiary is correct
-balance_query=$(jq -n -c --arg address $beneficiary '{"balance": {"address": $address}}')
+balance_query=$(
+  jq -n '{"balance": {"address": $address}}' \
+    --arg address $beneficiary
+)
 res=$(terracli query wasm contract-store $contract_addr $balance_query)
 if [ $(echo $res | jq -r .balance) != $mint_amount ]; then
   echo ERROR
