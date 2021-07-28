@@ -12,8 +12,10 @@ edition = "2018"
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
+cw2 = "0.7"
 cw20 = "0.7"
 cw20-base = { version = "0.7", features = ["library"] }
+
 
 terra-cosmwasm = "2.1.0"
 cosmwasm-bignumber = "2.1.1"

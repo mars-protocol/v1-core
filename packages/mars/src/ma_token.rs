@@ -1,12 +1,19 @@
 pub mod msg {
     use cosmwasm_std::{Binary, Uint128};
-    use cw20::Expiration;
+    use cw20::{Cw20Coin, Expiration, MinterResponse};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, JsonSchema)]
     pub struct InstantiateMsg {
-        pub cw20_base_instantiate: cw20_base::msg::InstantiateMsg,
+        // cw20_base params
+        pub name: String,
+        pub symbol: String,
+        pub decimals: u8,
+        pub initial_balances: Vec<Cw20Coin>,
+        pub mint: Option<MinterResponse>,
+
+        // custom_params
         pub red_bank_address: String,
         pub incentives_address: String,
     }

@@ -1,4 +1,5 @@
 pub mod address_provider;
+pub mod cw20_core;
 pub mod cw20_token;
 pub mod error;
 pub mod helpers;
