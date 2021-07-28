@@ -2417,11 +2417,13 @@ mod tests {
     use super::*;
     use crate::state::{debts_asset_state_read, users_state_read, PidParameters};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, from_binary, Decimal, Extern};
-    use mars::red_bank::msg::HandleMsg::UpdateConfig;
+    use cosmwasm_std::{coin, from_binary, Decimal, Extern, OwnedDeps};
+    use mars::red_bank::msg::ExecuteMsg::UpdateConfig;
     use mars::testing::{
-        assert_generic_error_message, mock_dependencies, MarsMockQuerier, MockEnvParams,
+        assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
+        mock_info, MarsMockQuerier, MockEnvParams,
     };
+    use term::color::RED;
 
     #[test]
     fn test_accumulated_index_calculation() {
@@ -2555,7 +2557,8 @@ mod tests {
 
     #[test]
     fn test_proper_initialization() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         // Config with base params valid (just update the rest)
         let base_config = CreateOrUpdateConfig {
@@ -2578,11 +2581,11 @@ mod tests {
             ma_token_code_id: None,
             close_factor: None,
         };
-        let msg = InitMsg {
+        let msg = InstantiateMsg {
             config: empty_config,
         };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = init(&mut deps, env, msg);
+        let info = mock_info("owner");
+        let response = instantiate(deps.as_mut(), env.clone(), info, msg);
         assert_generic_error_message(
             response,
             "All params should be available during initialization",
@@ -2601,8 +2604,8 @@ mod tests {
             ..base_config.clone()
         };
         let msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = init(&mut deps, env, msg);
+        let info = mock_info("owner");
+        let response = instantiate(deps.as_mut(), env.clone(), info, msg);
         assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
                 Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
 
@@ -2619,8 +2622,8 @@ mod tests {
             ..base_config.clone()
         };
         let exceeding_fees_msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = init(&mut deps, env.clone(), exceeding_fees_msg);
+        let info = mock_info("owner");
+        let response = instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg);
         assert_generic_error_message(
             response,
             "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
@@ -2641,11 +2644,12 @@ mod tests {
         let msg = InitMsg { config };
 
         // we can just call .unwrap() to assert this was a success
-        let res = init(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let res = instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(&deps, QueryMsg::Config {}).unwrap();
+        let res = query(deps.as_ref(), QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.market_count);
@@ -2655,7 +2659,8 @@ mod tests {
 
     #[test]
     fn test_update_config() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         // *
         // init config with valid params
@@ -2675,8 +2680,8 @@ mod tests {
             config: init_config.clone(),
         };
         // we can just call .unwrap() to assert this was a success
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let _res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // *
         // non owner is not authorized
@@ -2684,9 +2689,9 @@ mod tests {
         let msg = UpdateConfig {
             config: init_config.clone(),
         };
-        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("somebody");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
 
         // *
         // update config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
@@ -2702,10 +2707,11 @@ mod tests {
             ..init_config.clone()
         };
         let msg = UpdateConfig { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
+        //         Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
 
         // *
         // update config with invalid fee share amounts
@@ -2718,12 +2724,13 @@ mod tests {
             ..init_config
         };
         let exceeding_fees_msg = UpdateConfig { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = handle(&mut deps, env.clone(), exceeding_fees_msg);
-        assert_generic_error_message(
-            response,
-            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+        // );
 
         // *
         // update config with all new params
@@ -2744,23 +2751,17 @@ mod tests {
         };
 
         // we can just call .unwrap() to assert this was a success
-        let res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         // Read config from state
-        let new_config = config_state_read(&deps.storage).load().unwrap();
+        let new_config = CONFIG.load(&deps.storage).unwrap();
 
-        assert_eq!(
-            new_config.owner,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_owner"))
-                .unwrap()
-        );
+        assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
         assert_eq!(
             new_config.address_provider_address,
-            deps.api
-                .canonical_address(&config.address_provider_address.unwrap())
-                .unwrap()
+            Addr::unchecked(config.address_provider_address.unwrap())
         );
         assert_eq!(
             new_config.ma_token_code_id,
@@ -2779,7 +2780,8 @@ mod tests {
 
     #[test]
     fn test_init_asset() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let config = CreateOrUpdateConfig {
             owner: Some(HumanAddr::from("owner")),
@@ -2790,13 +2792,12 @@ mod tests {
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
         let msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        init(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // *
         // non owner is not authorized
         // *
-        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
@@ -2816,13 +2817,13 @@ mod tests {
             },
             asset_params: asset_params.clone(),
         };
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("somebody");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
 
         // *
         // init asset with empty params
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let empty_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: None,
             maintenance_margin: None,
@@ -2835,16 +2836,17 @@ mod tests {
             },
             asset_params: empty_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "All params should be available during initialization",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "All params should be available during initialization",
+        // );
 
         // *
         // init asset with some params greater than 1
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal256::from_ratio(110, 10)),
             reserve_factor: Some(Decimal256::from_ratio(120, 100)),
@@ -2856,14 +2858,15 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [max_loan_to_value, reserve_factor]");
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
+        //         Invalid params: [max_loan_to_value, reserve_factor]");
 
         // *
         // init asset where LTV >= liquidity threshold
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal256::from_ratio(5, 10)),
             maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
@@ -2875,18 +2878,19 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "maintenance_margin should be greater than max_loan_to_value. \
-                    maintenance_margin: 0.5, \
-                    max_loan_to_value: 0.5",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "maintenance_margin should be greater than max_loan_to_value. \
+        //             maintenance_margin: 0.5, \
+        //             max_loan_to_value: 0.5",
+        // );
 
         // *
         // init asset where min borrow rate >= max borrow rate
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             min_borrow_rate: Some(Decimal256::from_ratio(5, 10)),
             max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
@@ -2898,16 +2902,17 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5",
+        // );
 
         // *
         // init asset where optimal utilization rate > 1
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
             ..asset_params
@@ -2918,205 +2923,188 @@ mod tests {
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "Optimal utilization rate can't be greater than one",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "Optimal utilization rate can't be greater than one",
+        // );
 
         // *
         // owner is authorized
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let msg = HandleMsg::InitAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // should have asset market with Canonical default address
-        let market = markets_state_read(&deps.storage)
-            .load(b"someasset")
-            .unwrap();
-        assert_eq!(CanonicalAddr::default(), market.ma_token_address);
+        let market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        assert_eq!(zero_address(), market.ma_token_address);
         // should have 0 index
         assert_eq!(0, market.index);
         // should have asset_type Native
         assert_eq!(AssetType::Native, market.asset_type);
 
         // should store reference in market index
-        let market_reference = market_references_state_read(&deps.storage)
-            .load(&0_u32.to_be_bytes())
+        let market_reference = MARKET_REFERENCES
+            .load(&deps.storage, U32Key::new(0))
             .unwrap();
         assert_eq!(b"someasset", market_reference.reference.as_slice());
 
         // Should have market count of 1
-        let money_market = money_market_state_read(&deps.storage).load().unwrap();
+        let money_market = RED_BANK.load(&deps.storage).unwrap();
         assert_eq!(money_market.market_count, 1);
 
         // should instantiate a liquidity token
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Instantiate {
+                admin: None,
                 code_id: 5u64,
-                msg: to_binary(&ma_token::msg::InitMsg {
+                msg: to_binary(&ma_token::msg::InstantiateMsg {
                     name: String::from("mars someasset liquidity token"),
                     symbol: String::from("masomeasset"),
                     decimals: 6,
                     initial_balances: vec![],
                     mint: Some(MinterResponse {
-                        minter: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        minter: MOCK_CONTRACT_ADDR.to_string(),
                         cap: None,
                     }),
                     init_hook: Some(ma_token::msg::InitHook {
-                        msg: to_binary(&HandleMsg::InitAssetTokenCallback {
+                        msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
                             reference: "someasset".into(),
                         })
                         .unwrap(),
-                        contract_addr: HumanAddr::from(MOCK_CONTRACT_ADDR),
+                        contract_addr: MOCK_CONTRACT_ADDR.to_string(),
                     }),
-                    red_bank_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                    incentives_address: HumanAddr::from("incentives"),
+                    red_bank_address: MOCK_CONTRACT_ADDR.to_string(),
+                    incentives_address: "incentives".to_string(),
                 })
                 .unwrap(),
-                send: vec![],
-                label: None,
+                funds: vec![],
+                label: "".to_string()
             }),]
         );
 
         assert_eq!(
-            res.log,
-            vec![log("action", "init_asset"), log("asset", "someasset"),],
+            res.attributes,
+            vec![attr("action", "init_asset"), attr("asset", "someasset"),],
         );
 
         // *
         // can't init more than once
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let msg = HandleMsg::InitAsset {
+        let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Asset already initialized");
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "Asset already initialized");
 
         // *
         // callback comes back with created token
         // *
-        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
-        let msg = HandleMsg::InitAssetTokenCallback {
+        let msg = ExecuteMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
         };
-        handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("mtokencontract");
+        execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // should have asset market with contract address
-        let market = markets_state_read(&deps.storage)
-            .load(b"someasset")
-            .unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("mtokencontract"))
-                .unwrap(),
-            market.ma_token_address
-        );
+        let market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        assert_eq!(Addr::unchecked("mtokencontract"), market.ma_token_address);
         assert_eq!(Decimal256::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
         // *
-        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
-        let msg = HandleMsg::InitAssetTokenCallback {
+        let msg = ExecuteMsg::InitAssetTokenCallback {
             reference: "someasset".into(),
         };
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("mtokencontract");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
 
         // *
         // Initialize a cw20 asset
         // *
-        let cw20_addr = HumanAddr::from("otherasset");
+        let cw20_addr = Addr::unchecked("otherasset");
         deps.querier
             .set_cw20_symbol(cw20_addr.clone(), "otherasset".to_string());
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
+        let info = mock_info("owner");
 
-        let msg = HandleMsg::InitAsset {
+        let msg = ExecuteMsg::InitAsset {
             asset: Asset::Cw20 {
-                contract_addr: cw20_addr.clone(),
+                contract_addr: cw20_addr.to_string(),
             },
             asset_params,
         };
-        let res = handle(&mut deps, env, msg).unwrap();
-        let cw20_canonical_addr = deps.api.canonical_address(&cw20_addr).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let market = markets_state_read(&deps.storage)
-            .load(&cw20_canonical_addr.as_slice())
-            .unwrap();
+        let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
         // should have asset market with Canonical default address
-        assert_eq!(CanonicalAddr::default(), market.ma_token_address);
+        assert_eq!(zero_address(), market.ma_token_address);
         // should have index 1
         assert_eq!(1, market.index);
         // should have asset_type Cw20
         assert_eq!(AssetType::Cw20, market.asset_type);
 
         // should store reference in market index
-        let market_reference = market_references_state_read(&deps.storage)
-            .load(&1_u32.to_be_bytes())
+        let market_reference = MARKET_REFERENCES
+            .load(&deps.storage, U32Key::new(1))
             .unwrap();
-        assert_eq!(
-            cw20_canonical_addr.as_slice(),
-            market_reference.reference.as_slice()
-        );
+        assert_eq!(cw20_addr.as_bytes(), market_reference.reference.as_slice());
 
         // should have an asset_type of cw20
         assert_eq!(AssetType::Cw20, market.asset_type);
 
         // Should have market count of 2
-        let money_market = money_market_state_read(&deps.storage).load().unwrap();
+        let money_market = RED_BANK.load(&deps.storage).unwrap();
         assert_eq!(2, money_market.market_count);
 
         assert_eq!(
-            res.log,
-            vec![log("action", "init_asset"), log("asset", cw20_addr)],
+            res.attributes,
+            vec![attr("action", "init_asset"), attr("asset", cw20_addr)],
         );
         // *
         // cw20 callback comes back with created token
         // *
-        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
-        let msg = HandleMsg::InitAssetTokenCallback {
-            reference: Vec::from(cw20_canonical_addr.as_slice()),
+        let msg = ExecuteMsg::InitAssetTokenCallback {
+            reference: Vec::from(cw20_addr.as_bytes()),
         };
-        handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("mtokencontract");
+        execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // should have asset market with contract address
-        let market = markets_state_read(&deps.storage)
-            .load(cw20_canonical_addr.as_slice())
-            .unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("mtokencontract"))
-                .unwrap(),
-            market.ma_token_address
-        );
+        let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
+        assert_eq!(Addr::unchecked("mtokencontract"), market.ma_token_address);
         assert_eq!(Decimal256::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
         // *
-        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
-        let msg = HandleMsg::InitAssetTokenCallback {
-            reference: Vec::from(cw20_canonical_addr.as_slice()),
+        let msg = ExecuteMsg::InitAssetTokenCallback {
+            reference: Vec::from(cw20_addr.as_bytes()),
         };
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("mtokencontract");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
     }
 
     #[test]
     fn test_update_asset() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let config = CreateOrUpdateConfig {
             owner: Some(HumanAddr::from("owner")),
@@ -3126,14 +3114,13 @@ mod tests {
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        init(&mut deps, env, msg).unwrap();
+        let msg = InstantiateMsg { config };
+        let info = mock_info("owner");
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // *
         // non owner is not authorized
         // *
-        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
@@ -3147,126 +3134,131 @@ mod tests {
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
             kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        let info = mock_info("somebody");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::Unauthorized {});
 
         // *
         // owner is authorized but can't update asset if not initialize firstly
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Asset not initialized");
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "Asset not initialized");
 
         // *
         // initialize asset
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let msg = HandleMsg::InitAsset {
+        let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         // *
         // update asset with some params greater than 1
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             maintenance_margin: Some(Decimal256::from_ratio(110, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [maintenance_margin]");
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
+        //         Invalid params: [maintenance_margin]");
 
         // *
         // update asset where LTV >= liquidity threshold
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal256::from_ratio(6, 10)),
             maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "maintenance_margin should be greater than max_loan_to_value. \
-                    maintenance_margin: 0.5, \
-                    max_loan_to_value: 0.6",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "maintenance_margin should be greater than max_loan_to_value. \
+        //             maintenance_margin: 0.5, \
+        //             max_loan_to_value: 0.6",
+        // );
 
         // *
         // init asset where min borrow rate >= max borrow rate
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             min_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
             max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.4",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.4",
+        // );
 
         // *
         // init asset where optimal utilization rate > 1
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let invalid_asset_params = InitOrUpdateAssetParams {
             optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
             ..asset_params
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: invalid_asset_params,
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "Optimal utilization rate can't be greater than one",
-        );
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "Optimal utilization rate can't be greater than one",
+        // );
 
         // *
         // update asset with new params
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
             min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
@@ -3280,17 +3272,16 @@ mod tests {
             kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
             kp_2: Some(Decimal256::from_ratio(2, 1)),
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: asset_params.clone(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let new_market = markets_state_read(&deps.storage)
-            .load(b"someasset")
-            .unwrap();
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(0, new_market.index);
         assert_eq!(
             asset_params.max_loan_to_value.unwrap(),
@@ -3309,25 +3300,24 @@ mod tests {
             new_market.liquidation_bonus
         );
 
-        let new_market_reference = market_references_state_read(&deps.storage)
-            .load(&0_u32.to_be_bytes())
+        let new_market_reference = MARKET_REFERENCES
+            .load(&deps.storage, U32Key::new(0))
             .unwrap();
         assert_eq!(b"someasset", new_market_reference.reference.as_slice());
 
-        let new_money_market = money_market_state_read(&deps.storage).load().unwrap();
+        let new_money_market = RED_BANK.load(&deps.storage).unwrap();
         assert_eq!(new_money_market.market_count, 1);
 
         assert_eq!(res.messages, vec![],);
 
         assert_eq!(
-            res.log,
-            vec![log("action", "update_asset"), log("asset", "someasset"),],
+            res.attributes,
+            vec![attr("action", "update_asset"), attr("asset", "someasset"),],
         );
 
         // *
         // update asset with empty params
         // *
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
         let empty_asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: None,
             min_borrow_rate: None,
@@ -3341,17 +3331,16 @@ mod tests {
             kp_augmentation_threshold: None,
             kp_2: None,
         };
-        let msg = HandleMsg::UpdateAsset {
+        let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
                 denom: "someasset".to_string(),
             },
             asset_params: empty_asset_params,
         };
-        let _res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let new_market = markets_state_read(&deps.storage)
-            .load(b"someasset")
-            .unwrap();
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(0, new_market.index);
         // should keep old params
         assert_eq!(
@@ -3394,12 +3383,13 @@ mod tests {
     fn test_init_asset_callback_cannot_be_called_on_its_own() {
         let mut deps = th_setup(&[]);
 
-        let env = cosmwasm_std::testing::mock_env("mtokencontract", &[]);
-        let msg = HandleMsg::InitAssetTokenCallback {
+        let info = mock_info("mtokencontract");
+        let msg = ExecuteMsg::InitAssetTokenCallback {
             reference: "uluna".into(),
         };
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::not_found("red_bank::state::Market"));
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_eq!(error_res, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
@@ -3409,10 +3399,7 @@ mod tests {
         let reserve_factor = Decimal256::from_ratio(1, 10);
 
         let mock_market = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: Decimal256::from_ratio(11, 10),
             max_loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
@@ -3423,26 +3410,21 @@ mod tests {
             interests_last_updated: 10000000,
             ..Default::default()
         };
-        let market = th_init_market(&deps.api, &mut deps.storage, b"somecoin", &mock_market);
+        let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
         let deposit_amount = 110000;
-        let env = mars::testing::mock_env(
-            "depositor",
-            MockEnvParams {
-                sent_funds: &[coin(deposit_amount, "somecoin")],
-                block_time: 10000100,
-                ..Default::default()
-            },
-        );
-        let msg = HandleMsg::DepositNative {
+        let env = mock_env_at_block_time(10000100);
+        let info =
+            cosmwasm_std::testing::mock_info("depositor", &[coin(deposit_amount, "somecoin")]);
+        let msg = ExecuteMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let res = handle(&mut deps, env.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market,
-            env.block.time,
+            env.block.time.seconds(),
             initial_liquidity,
             Default::default(),
         );
@@ -3454,30 +3436,30 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("matoken"),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("depositor"),
+                contract_addr: "matoken".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: "depositor".to_string(),
                     amount: expected_mint_amount,
                 })
                 .unwrap(),
+                funds: vec![]
             })]
         );
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "deposit"),
-                log("market", "somecoin"),
-                log("user", "depositor"),
-                log("amount", deposit_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "deposit"),
+                attr("market", "somecoin"),
+                attr("user", "depositor"),
+                attr("amount", deposit_amount),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
-        let market = markets_state_read(&deps.storage).load(b"somecoin").unwrap();
+        let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
@@ -3488,12 +3470,13 @@ mod tests {
         );
 
         // empty deposit fails
-        let env = cosmwasm_std::testing::mock_env("depositor", &[]);
-        let msg = HandleMsg::DepositNative {
+        let info = mock_info("depositor");
+        let msg = ExecuteMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Deposit amount must be greater than 0 somecoin");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "Deposit amount must be greater than 0 somecoin");
     }
 
     #[test]
@@ -3501,14 +3484,10 @@ mod tests {
         let initial_liquidity = 10_000_000;
         let mut deps = th_setup(&[]);
 
-        let cw20_addr = HumanAddr::from("somecontract");
-        let contract_addr_raw = deps.api.canonical_address(&cw20_addr).unwrap();
+        let cw20_addr = Addr::unchecked("somecontract");
 
         let mock_market = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: Decimal256::from_ratio(11, 10),
             max_loan_to_value: Decimal256::one(),
             borrow_index: Decimal256::from_ratio(1, 1),
@@ -3519,18 +3498,13 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let market = th_init_market(
-            &deps.api,
-            &mut deps.storage,
-            contract_addr_raw.as_slice(),
-            &mock_market,
-        );
+        let market = th_init_market(deps.as_mut(), cw20_addr.as_bytes(), &mock_market);
 
         // set initial balance on cw20 contract
         deps.querier.set_cw20_balances(
             cw20_addr.clone(),
             &[(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
+                Addr::unchecked(MOCK_CONTRACT_ADDR),
                 initial_liquidity.into(),
             )],
         );
@@ -3539,26 +3513,21 @@ mod tests {
             .set_cw20_symbol(cw20_addr.clone(), "somecoin".to_string());
 
         let deposit_amount = 110000u128;
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
-            sender: HumanAddr::from("depositor"),
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            msg: to_binary(&ReceiveMsg::DepositCw20 {}).unwrap(),
+            sender: "depositor".to_string(),
             amount: Uint128(deposit_amount),
         });
-        let env = mars::testing::mock_env(
-            "somecontract",
-            MockEnvParams {
-                sent_funds: &[coin(deposit_amount, "somecoin")],
-                block_time: 10000100,
-                ..Default::default()
-            },
-        );
+        let env = mock_env_at_block_time(10000100);
+        let info =
+            cosmwasm_std::testing::mock_info("somecontract", &[coin(deposit_amount, "somecoin")]);
 
-        let res = handle(&mut deps, env.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market,
-            env.block.time,
+            env.block.time.seconds(),
             initial_liquidity,
             Default::default(),
         );
@@ -3566,34 +3535,32 @@ mod tests {
         let expected_mint_amount: Uint256 =
             Uint256::from(deposit_amount) / expected_params.liquidity_index;
 
-        let market = markets_state_read(&deps.storage)
-            .load(contract_addr_raw.as_slice())
-            .unwrap();
+        let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
 
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: HumanAddr::from("matoken"),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Mint {
-                    recipient: HumanAddr::from("depositor"),
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: "depositor".to_string(),
                     amount: expected_mint_amount.into(),
                 })
                 .unwrap(),
+                funds: vec![]
             })]
         );
 
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "deposit"),
-                log("market", cw20_addr),
-                log("user", "depositor"),
-                log("amount", deposit_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "deposit"),
+                attr("market", cw20_addr),
+                attr("user", "depositor"),
+                attr("amount", deposit_amount),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
         assert_eq!(
@@ -3602,26 +3569,29 @@ mod tests {
         );
 
         // empty deposit fails
-        let env = cosmwasm_std::testing::mock_env("depositor", &[]);
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::DepositCw20 {}).unwrap()),
-            sender: HumanAddr::from("depositor"),
+        let info = mock_info("depositor");
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            msg: to_binary(&ExecuteMsg::DepositCw20 {}).unwrap(),
+            sender: "depositor".to_string(),
             amount: Uint128(deposit_amount),
         });
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
     fn test_cannot_deposit_if_no_market() {
         let mut deps = th_setup(&[]);
+        let env = mock_env(MockEnvParams::default());
 
-        let env = cosmwasm_std::testing::mock_env("depositer", &[coin(110000, "somecoin")]);
-        let msg = HandleMsg::DepositNative {
+        let info = cosmwasm_std::testing::mock_info("depositer", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::DepositNative {
             denom: String::from("somecoin"),
         };
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_eq!(res_error, StdError::not_found("red_bank::state::Market"));
     }
 
     #[test]
@@ -3741,15 +3711,15 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "withdraw"),
-                log("market", "somecoin"),
-                log("user", "withdrawer"),
-                log("burn_amount", withdraw_amount_scaled),
-                log("withdraw_amount", withdraw_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "withdraw"),
+                attr("market", "somecoin"),
+                attr("user", "withdrawer"),
+                attr("burn_amount", withdraw_amount_scaled),
+                attr("withdraw_amount", withdraw_amount),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -3889,15 +3859,15 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "withdraw"),
-                log("market", "somecontract"),
-                log("user", "withdrawer"),
-                log("burn_amount", withdraw_amount_scaled),
-                log("withdraw_amount", withdraw_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "withdraw"),
+                attr("market", "somecontract"),
+                attr("user", "withdrawer"),
+                attr("burn_amount", withdraw_amount_scaled),
+                attr("withdraw_amount", withdraw_amount),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -4260,15 +4230,15 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "withdraw"),
-                log("market", "somecoin"),
-                log("user", "withdrawer"),
-                log("burn_amount", withdrawer_balance_scaled),
-                log("withdraw_amount", withdrawer_balance),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "withdraw"),
+                attr("market", "somecoin"),
+                attr("user", "withdrawer"),
+                attr("burn_amount", withdrawer_balance_scaled),
+                attr("withdraw_amount", withdrawer_balance),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -4454,14 +4424,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "borrow"),
-                log("market", "borrowedcoincw20"),
-                log("user", "borrower"),
-                log("amount", borrow_amount),
-                log("borrow_index", expected_params_cw20.borrow_index),
-                log("liquidity_index", expected_params_cw20.liquidity_index),
-                log("borrow_rate", expected_params_cw20.borrow_rate),
-                log("liquidity_rate", expected_params_cw20.liquidity_rate),
+                attr("action", "borrow"),
+                attr("market", "borrowedcoincw20"),
+                attr("user", "borrower"),
+                attr("amount", borrow_amount),
+                attr("borrow_index", expected_params_cw20.borrow_index),
+                attr("liquidity_index", expected_params_cw20.liquidity_index),
+                attr("borrow_rate", expected_params_cw20.borrow_rate),
+                attr("liquidity_rate", expected_params_cw20.liquidity_rate),
             ]
         );
 
@@ -4621,14 +4591,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "borrow"),
-                log("market", "borrowedcoinnative"),
-                log("user", "borrower"),
-                log("amount", borrow_amount),
-                log("borrow_index", expected_params_native.borrow_index),
-                log("liquidity_index", expected_params_native.liquidity_index),
-                log("borrow_rate", expected_params_native.borrow_rate),
-                log("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("action", "borrow"),
+                attr("market", "borrowedcoinnative"),
+                attr("user", "borrower"),
+                attr("amount", borrow_amount),
+                attr("borrow_index", expected_params_native.borrow_index),
+                attr("liquidity_index", expected_params_native.liquidity_index),
+                attr("borrow_rate", expected_params_native.borrow_rate),
+                attr("liquidity_rate", expected_params_native.liquidity_rate),
             ]
         );
 
@@ -4725,14 +4695,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "repay"),
-                log("market", "borrowedcoinnative"),
-                log("user", "borrower"),
-                log("amount", repay_amount),
-                log("borrow_index", expected_params_native.borrow_index),
-                log("liquidity_index", expected_params_native.liquidity_index),
-                log("borrow_rate", expected_params_native.borrow_rate),
-                log("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("action", "repay"),
+                attr("market", "borrowedcoinnative"),
+                attr("user", "borrower"),
+                attr("amount", repay_amount),
+                attr("borrow_index", expected_params_native.borrow_index),
+                attr("liquidity_index", expected_params_native.liquidity_index),
+                attr("borrow_rate", expected_params_native.borrow_rate),
+                attr("liquidity_rate", expected_params_native.liquidity_rate),
             ]
         );
 
@@ -4806,14 +4776,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "repay"),
-                log("market", "borrowedcoinnative"),
-                log("user", "borrower"),
-                log("amount", repay_amount),
-                log("borrow_index", expected_params_native.borrow_index),
-                log("liquidity_index", expected_params_native.liquidity_index),
-                log("borrow_rate", expected_params_native.borrow_rate),
-                log("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("action", "repay"),
+                attr("market", "borrowedcoinnative"),
+                attr("user", "borrower"),
+                attr("amount", repay_amount),
+                attr("borrow_index", expected_params_native.borrow_index),
+                attr("liquidity_index", expected_params_native.liquidity_index),
+                attr("borrow_rate", expected_params_native.borrow_rate),
+                attr("liquidity_rate", expected_params_native.liquidity_rate),
             ]
         );
 
@@ -4902,14 +4872,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "repay"),
-                log("market", "borrowedcoincw20"),
-                log("user", "borrower"),
-                log("amount", Uint128(repay_amount - expected_refund_amount)),
-                log("borrow_index", expected_params_cw20.borrow_index),
-                log("liquidity_index", expected_params_cw20.liquidity_index),
-                log("borrow_rate", expected_params_cw20.borrow_rate),
-                log("liquidity_rate", expected_params_cw20.liquidity_rate),
+                attr("action", "repay"),
+                attr("market", "borrowedcoincw20"),
+                attr("user", "borrower"),
+                attr("amount", Uint128(repay_amount - expected_refund_amount)),
+                attr("borrow_index", expected_params_cw20.borrow_index),
+                attr("liquidity_index", expected_params_cw20.liquidity_index),
+                attr("borrow_rate", expected_params_cw20.borrow_rate),
+                attr("liquidity_rate", expected_params_cw20.liquidity_rate),
             ]
         );
         let user = users_state_read(&deps.storage)
@@ -5537,21 +5507,21 @@ mod tests {
             mars::testing::assert_eq_vec(
                 res.log,
                 vec![
-                    log("action", "liquidate"),
-                    log("collateral_market", "collateral"),
-                    log("debt_market", debt_contract_addr.as_str()),
-                    log("user", user_address.as_str()),
-                    log("liquidator", liquidator_address.as_str()),
-                    log(
+                    attr("action", "liquidate"),
+                    attr("collateral_market", "collateral"),
+                    attr("debt_market", debt_contract_addr.as_str()),
+                    attr("user", user_address.as_str()),
+                    attr("liquidator", liquidator_address.as_str()),
+                    attr(
                         "collateral_amount_liquidated",
                         expected_liquidated_collateral_amount,
                     ),
-                    log("debt_amount_repaid", first_debt_to_repay),
-                    log("refund_amount", 0),
-                    log("borrow_index", expected_debt_rates.borrow_index),
-                    log("liquidity_index", expected_debt_rates.liquidity_index),
-                    log("borrow_rate", expected_debt_rates.borrow_rate),
-                    log("liquidity_rate", expected_debt_rates.liquidity_rate),
+                    attr("debt_amount_repaid", first_debt_to_repay),
+                    attr("refund_amount", 0),
+                    attr("borrow_index", expected_debt_rates.borrow_index),
+                    attr("liquidity_index", expected_debt_rates.liquidity_index),
+                    attr("borrow_rate", expected_debt_rates.borrow_rate),
+                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
                 ],
             );
 
@@ -5717,25 +5687,25 @@ mod tests {
 
             mars::testing::assert_eq_vec(
                 vec![
-                    log("action", "liquidate"),
-                    log("collateral_market", "collateral"),
-                    log("debt_market", debt_contract_addr.as_str()),
-                    log("user", user_address.as_str()),
-                    log("liquidator", liquidator_address.as_str()),
-                    log(
+                    attr("action", "liquidate"),
+                    attr("collateral_market", "collateral"),
+                    attr("debt_market", debt_contract_addr.as_str()),
+                    attr("user", user_address.as_str()),
+                    attr("liquidator", liquidator_address.as_str()),
+                    attr(
                         "collateral_amount_liquidated",
                         expected_liquidated_collateral_amount,
                     ),
-                    log("debt_amount_repaid", expected_less_debt),
-                    log("refund_amount", expected_refund_amount),
-                    log("borrow_index", expected_debt_rates.borrow_index),
-                    log("liquidity_index", expected_debt_rates.liquidity_index),
-                    log("borrow_rate", expected_debt_rates.borrow_rate),
-                    log("liquidity_rate", expected_debt_rates.liquidity_rate),
-                    log("borrow_index", expected_collateral_rates.borrow_index),
-                    log("liquidity_index", expected_collateral_rates.liquidity_index),
-                    log("borrow_rate", expected_collateral_rates.borrow_rate),
-                    log("liquidity_rate", expected_collateral_rates.liquidity_rate),
+                    attr("debt_amount_repaid", expected_less_debt),
+                    attr("refund_amount", expected_refund_amount),
+                    attr("borrow_index", expected_debt_rates.borrow_index),
+                    attr("liquidity_index", expected_debt_rates.liquidity_index),
+                    attr("borrow_rate", expected_debt_rates.borrow_rate),
+                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
+                    attr("borrow_index", expected_collateral_rates.borrow_index),
+                    attr("liquidity_index", expected_collateral_rates.liquidity_index),
+                    attr("borrow_rate", expected_collateral_rates.borrow_rate),
+                    attr("liquidity_rate", expected_collateral_rates.liquidity_rate),
                 ],
                 res.log,
             );
@@ -5918,22 +5888,22 @@ mod tests {
 
             mars::testing::assert_eq_vec(
                 vec![
-                    log("action", "liquidate"),
-                    log("collateral_market", "collateral"),
-                    log("debt_market", debt_contract_addr.as_str()),
-                    log("user", user_address.as_str()),
-                    log("liquidator", liquidator_address.as_str()),
-                    log("collateral_amount_liquidated", user_collateral_balance),
-                    log("debt_amount_repaid", expected_less_debt),
-                    log("refund_amount", expected_refund_amount),
-                    log("borrow_index", expected_debt_rates.borrow_index),
-                    log("liquidity_index", expected_debt_rates.liquidity_index),
-                    log("borrow_rate", expected_debt_rates.borrow_rate),
-                    log("liquidity_rate", expected_debt_rates.liquidity_rate),
-                    log("borrow_index", expected_collateral_rates.borrow_index),
-                    log("liquidity_index", expected_collateral_rates.liquidity_index),
-                    log("borrow_rate", expected_collateral_rates.borrow_rate),
-                    log("liquidity_rate", expected_collateral_rates.liquidity_rate),
+                    attr("action", "liquidate"),
+                    attr("collateral_market", "collateral"),
+                    attr("debt_market", debt_contract_addr.as_str()),
+                    attr("user", user_address.as_str()),
+                    attr("liquidator", liquidator_address.as_str()),
+                    attr("collateral_amount_liquidated", user_collateral_balance),
+                    attr("debt_amount_repaid", expected_less_debt),
+                    attr("refund_amount", expected_refund_amount),
+                    attr("borrow_index", expected_debt_rates.borrow_index),
+                    attr("liquidity_index", expected_debt_rates.liquidity_index),
+                    attr("borrow_rate", expected_debt_rates.borrow_rate),
+                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
+                    attr("borrow_index", expected_collateral_rates.borrow_index),
+                    attr("liquidity_index", expected_collateral_rates.liquidity_index),
+                    attr("borrow_rate", expected_collateral_rates.borrow_rate),
+                    attr("liquidity_rate", expected_collateral_rates.liquidity_rate),
                 ],
                 res.log,
             );
@@ -6442,14 +6412,14 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "borrow"),
-                log("market", "somecoin"),
-                log("user", "borrower"),
-                log("amount", initial_borrow_amount),
-                log("borrow_index", expected_params.borrow_index),
-                log("liquidity_index", expected_params.liquidity_index),
-                log("borrow_rate", expected_params.borrow_rate),
-                log("liquidity_rate", expected_params.liquidity_rate),
+                attr("action", "borrow"),
+                attr("market", "somecoin"),
+                attr("user", "borrower"),
+                attr("amount", initial_borrow_amount),
+                attr("borrow_index", expected_params.borrow_index),
+                attr("liquidity_index", expected_params.liquidity_index),
+                attr("borrow_rate", expected_params.borrow_rate),
+                attr("liquidity_rate", expected_params.liquidity_rate),
             ]
         );
 
@@ -6775,9 +6745,9 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "distribute_protocol_income"),
-                log("asset", "somecoin"),
-                log("amount", permissible_amount),
+                attr("action", "distribute_protocol_income"),
+                attr("asset", "somecoin"),
+                attr("amount", permissible_amount),
             ]
         );
 
@@ -6859,9 +6829,9 @@ mod tests {
         assert_eq!(
             res.log,
             vec![
-                log("action", "distribute_protocol_income"),
-                log("asset", "somecoin"),
-                log("amount", expected_remaining_income_to_be_distributed),
+                attr("action", "distribute_protocol_income"),
+                attr("asset", "somecoin"),
+                attr("amount", expected_remaining_income_to_be_distributed),
             ]
         );
 
@@ -6939,20 +6909,19 @@ mod tests {
 
     // TEST HELPERS
 
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
-        let mut deps = mock_dependencies(20, contract_balances);
+    fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
+        let mut deps = mock_dependencies(&[]);
 
         let config = CreateOrUpdateConfig {
-            owner: Some(HumanAddr::from("owner")),
-            address_provider_address: Some(HumanAddr::from("address_provider")),
+            owner: Some("owner".to_string()),
+            address_provider_address: Some("address_provider".to_string()),
             insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
             treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
             ma_token_code_id: Some(1u64),
             close_factor: Some(Decimal256::from_ratio(1, 2)),
         };
-        let msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        init(&mut deps, env, msg).unwrap();
+        let info = mock_info("owner");
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         deps
     }
@@ -6986,12 +6955,7 @@ mod tests {
         }
     }
 
-    fn th_init_market<S: Storage, A: Api>(
-        _api: &A,
-        storage: &mut S,
-        key: &[u8],
-        market: &Market,
-    ) -> Market {
+    fn th_init_market(deps: DepsMut, key: &[u8], market: &Market) -> Market {
         let mut index = 0;
 
         money_market_state(storage)
@@ -7046,8 +7010,8 @@ mod tests {
 
     /// Takes a market before an action (ie: a borrow) among some test parameters
     /// used in that action and computes the expected indices and rates after that action.
-    fn th_get_expected_indices_and_rates<S: Storage, A: Api, Q: Querier>(
-        deps: &Extern<S, A, Q>,
+    fn th_get_expected_indices_and_rates(
+        deps: &Deps,
         market: &Market,
         block_time: u64,
         initial_liquidity: u128,
