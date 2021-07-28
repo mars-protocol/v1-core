@@ -17,8 +17,8 @@ export const testnet: Config = {
       "address_provider_address": undefined,
       "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
       "terraswap_max_spread": "0.05",
-      "cooldown_duration": 12, // 12 blocks = ~1.5 minutes (for internal testing) // 115200 blocks = ~10 days
-      "unstake_window": 40, // 40 blocks = ~5 minutes (for internal testing) // 23040 blocks = ~2 days
+      "cooldown_duration": 90, // Seconds (for internal testing) // 864000 Seconds = 10 days
+      "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
     }
   },
   insuranceFundInitMsg: {
@@ -49,7 +49,7 @@ export const testnet: Config = {
       liquidation_bonus: "0.1",
       kp_1: "0.04",
       optimal_utilization_rate: "0.9",
-      kp_augmentation_threshold: "0.2",
+      kp_augmentation_threshold: "0.15",
       kp_2: "0.07"
     },
     {
@@ -63,7 +63,7 @@ export const testnet: Config = {
       liquidation_bonus: "0.1",
       kp_1: "0.02",
       optimal_utilization_rate: "0.7",
-      kp_augmentation_threshold: "0.2",
+      kp_augmentation_threshold: "0.15",
       kp_2: "0.05"
     },
     {
@@ -78,7 +78,7 @@ export const testnet: Config = {
       liquidation_bonus: "0.15",
       kp_1: "0.02",
       optimal_utilization_rate: "0.5",
-      kp_augmentation_threshold: "0.2",
+      kp_augmentation_threshold: "0.15",
       kp_2: "0.05"
     },
     {
@@ -93,7 +93,7 @@ export const testnet: Config = {
       liquidation_bonus: "0.15",
       kp_1: "0.02",
       optimal_utilization_rate: "0.5",
-      kp_augmentation_threshold: "0.2",
+      kp_augmentation_threshold: "0.15",
       kp_2: "0.05"
     },
   ]
