@@ -7,6 +7,7 @@
 #   - cosmwasm-plus v0.2.0
 #   - terracli 58602320d2907814cfccdf43e9679468bb4bd8d3
 #   - LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
+#   - docker
 #   - jq
 #   - Add test accounts to terracli
 #
@@ -99,13 +100,13 @@ terracli tx send test1 $multi 10000000uluna \
 # Compile the contract
 (
   cd $cosmwasm_plus_path/contracts/cw20-base
-
   RUSTFLAGS='-C link-arg=-s' cargo wasm
 
+  # cd $cosmwasm_plus_path
   # docker run --rm -v "$(pwd)":/code \
   #   --mount type=volume,source="$(basename "$(pwd)")_cache",target=/code/target \
   #   --mount type=volume,source=registry_cache,target=/usr/local/cargo/registry \
-  #   cosmwasm/rust-optimizer:0.11.4
+  #   cosmwasm/workspace-optimizer:0.11.4
 )
 
 # Upload the contract
