@@ -4224,12 +4224,11 @@ mod tests {
         let available_liquidity_native = 2000000000u128; // native
         let mut deps = th_setup(&[coin(available_liquidity_native, "borrowedcoinnative")]);
 
-        let cw20_contract_addr = HumanAddr::from("borrowedcoincw20");
-        let cw20_contract_addr_canonical = deps.api.canonical_address(&cw20_contract_addr).unwrap();
+        let cw20_contract_addr = Addr::unchecked("borrowedcoincw20");
         deps.querier.set_cw20_balances(
             cw20_contract_addr.clone(),
             &[(
-                HumanAddr::from(MOCK_CONTRACT_ADDR),
+                Addr::unchecked(MOCK_CONTRACT_ADDR),
                 Uint128(available_liquidity_cw20),
             )],
         );
@@ -4246,10 +4245,7 @@ mod tests {
         );
 
         let mock_market_1 = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken1"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken1"),
             borrow_index: Decimal256::from_ratio(12, 10),
             liquidity_index: Decimal256::from_ratio(8, 10),
             borrow_rate: Decimal256::from_ratio(20, 100),
@@ -4261,20 +4257,14 @@ mod tests {
             ..Default::default()
         };
         let mock_market_2 = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken2"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken2"),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let mock_market_3 = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken3"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken3"),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::from_ratio(11, 10),
             max_loan_to_value: Decimal256::from_ratio(7, 10),
@@ -4288,41 +4278,25 @@ mod tests {
         };
 
         // should get index 0
-        let market_1_initial = th_init_market(
-            &deps.api,
-            &mut deps.storage,
-            cw20_contract_addr_canonical.as_slice(),
-            &mock_market_1,
-        );
+        let market_1_initial =
+            th_init_market(deps.as_mut(), cw20_contract_addr.as_bytes(), &mock_market_1);
         // should get index 1
-        let market_2_initial = th_init_market(
-            &deps.api,
-            &mut deps.storage,
-            b"borrowedcoinnative",
-            &mock_market_2,
-        );
+        let market_2_initial = th_init_market(deps.as_mut(), b"borrowedcoinnative", &mock_market_2);
         // should get index 2
-        let market_collateral = th_init_market(
-            &deps.api,
-            &mut deps.storage,
-            b"depositedcoin",
-            &mock_market_3,
-        );
+        let market_collateral = th_init_market(deps.as_mut(), b"depositedcoin", &mock_market_3);
 
-        let borrower_addr = HumanAddr::from("borrower");
-        let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
+        let borrower_addr = Addr::unchecked("borrower");
 
         // Set user as having the market_collateral deposited
         let mut user = User::default();
 
         set_bit(&mut user.collateral_assets, market_collateral.index).unwrap();
-        let mut users_bucket = users_state(&mut deps.storage);
-        users_bucket
-            .save(borrower_canonical_addr.as_slice(), &user)
+        USERS
+            .save(deps.as_mut().storage, &borrower_addr, &user)
             .unwrap();
 
         // Set the querier to return a certain collateral balance
-        let deposit_coin_address = HumanAddr::from("matoken3");
+        let deposit_coin_address = Addr::unchecked("matoken3");
         deps.querier.set_cw20_balances(
             deposit_coin_address,
             &[(borrower_addr.clone(), Uint128(10000))],
@@ -4338,24 +4312,18 @@ mod tests {
 
         let msg = HandleMsg::Borrow {
             asset: Asset::Cw20 {
-                contract_addr: cw20_contract_addr.clone(),
+                contract_addr: cw20_contract_addr.to_string(),
             },
             amount: Uint256::from(borrow_amount),
         };
 
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
+        let env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrower");
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_1_initial,
             block_time,
             available_liquidity_cw20,
@@ -4370,17 +4338,17 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_addr.clone(),
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: borrower_addr.clone(),
+                contract_addr: cw20_contract_addr.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: borrower_addr.to_string(),
                     amount: borrow_amount.into(),
                 })
                 .unwrap(),
-                send: vec![],
+                funds: vec![]
             })]
         );
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
                 attr("action", "borrow"),
                 attr("market", "borrowedcoincw20"),
@@ -4393,20 +4361,21 @@ mod tests {
             ]
         );
 
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
         assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
-        let debt = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
-            .load(&borrower_canonical_addr.as_slice())
+        let debt = DEBTS
+            .load(
+                &deps.storage,
+                (cw20_contract_addr.as_bytes(), &borrower_addr),
+            )
             .unwrap();
         let expected_debt_scaled_1_after_borrow =
             Uint256::from(borrow_amount) / expected_params_cw20.borrow_index;
 
-        let market_1_after_borrow = markets_state_read(&deps.storage)
-            .load(cw20_contract_addr_canonical.as_slice())
+        let market_1_after_borrow = MARKETS
+            .load(&deps.storage, cw20_contract_addr.as_bytes())
             .unwrap();
 
         assert_eq!(expected_debt_scaled_1_after_borrow, debt.amount_scaled);
@@ -4429,32 +4398,24 @@ mod tests {
         let borrow_amount = 1200u128;
         let block_time = market_1_after_borrow.interests_last_updated + 20000u64;
 
-        let msg = HandleMsg::Borrow {
+        let msg = ExecuteMsg::Borrow {
             asset: Asset::Cw20 {
-                contract_addr: cw20_contract_addr.clone(),
+                contract_addr: cw20_contract_addr.to_string(),
             },
             amount: Uint256::from(borrow_amount),
         };
 
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
+        let env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrower");
 
-        handle(&mut deps, env, msg).unwrap();
+        execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
         assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_1_after_borrow,
             block_time,
             available_liquidity_cw20,
@@ -4464,11 +4425,14 @@ mod tests {
                 ..Default::default()
             },
         );
-        let debt = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
-            .load(&borrower_canonical_addr.as_slice())
+        let debt = DEBTS
+            .load(
+                &deps.storage,
+                (cw20_contract_addr.as_bytes(), &borrower_addr),
+            )
             .unwrap();
-        let market_1_after_borrow_again = markets_state_read(&deps.storage)
-            .load(cw20_contract_addr_canonical.as_slice())
+        let market_1_after_borrow_again = MARKETS
+            .load(&deps.storage, cw20_contract_addr.as_bytes())
             .unwrap();
 
         let expected_debt_scaled_1_after_borrow_again = expected_debt_scaled_1_after_borrow
@@ -4496,30 +4460,22 @@ mod tests {
 
         let borrow_amount = 4000u128;
         let block_time = market_1_after_borrow_again.interests_last_updated + 3000u64;
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
-        let msg = HandleMsg::Borrow {
+        let env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrower");
+        let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
             amount: Uint256::from(borrow_amount),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
         assert!(get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_2_initial,
             block_time,
             available_liquidity_native,
@@ -4534,10 +4490,9 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Bank(BankMsg::Send {
-                from_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                to_address: HumanAddr::from("borrower"),
+                to_address: "borrower".to_string(),
                 amount: vec![deduct_tax(
-                    &deps,
+                    deps.as_ref(),
                     Coin {
                         denom: String::from("borrowedcoinnative"),
                         amount: borrow_amount.into(),
@@ -4547,7 +4502,7 @@ mod tests {
             })]
         );
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
                 attr("action", "borrow"),
                 attr("market", "borrowedcoinnative"),
@@ -4560,12 +4515,10 @@ mod tests {
             ]
         );
 
-        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
-            .load(&borrower_canonical_addr.as_slice())
+        let debt2 = DEBTS
+            .load(&deps.storage, (b"borrowedcoinnative", &borrower_addr))
             .unwrap();
-        let market_2_after_borrow_2 = markets_state_read(&deps.storage)
-            .load(b"borrowedcoinnative")
-            .unwrap();
+        let market_2_after_borrow_2 = MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
         let expected_debt_scaled_2_after_borrow_2 =
             Uint256::from(borrow_amount) / expected_params_native.borrow_index;
@@ -4587,59 +4540,54 @@ mod tests {
         // Borrow native coin again (should fail due to insufficient collateral)
         // *
 
-        let env = cosmwasm_std::testing::mock_env("borrower", &[]);
-        let msg = HandleMsg::Borrow {
+        let env = mock_env(MockEnvParams::default());
+        let info = mock_info("borrower");
+        let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
             amount: Uint256::from(83968_u128),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "borrow amount exceeds maximum allowed given current collateral value",
-        );
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "borrow amount exceeds maximum allowed given current collateral value",
+        // );
 
         // *
         // Repay zero native debt(should fail)
         // *
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
-        let msg = HandleMsg::RepayNative {
+        let env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrower");
+        let msg = ExecuteMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "Repay amount must be greater than 0 borrowedcoinnative",
-        );
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // let response = handle(&mut deps, env, msg);
+        // assert_generic_error_message(
+        //     response,
+        //     "Repay amount must be greater than 0 borrowedcoinnative",
+        // );
 
         // *
         // Repay some native debt
         // *
         let repay_amount = 2000u128;
         let block_time = market_2_after_borrow_2.interests_last_updated + 8000u64;
-        let env = mars::testing::mock_env(
+        let env = mock_env_at_block_time(block_time);
+        let info = cosmwasm_std::testing::mock_info(
             "borrower",
-            MockEnvParams {
-                sent_funds: &[coin(repay_amount, "borrowedcoinnative")],
-                block_time,
-                ..Default::default()
-            },
+            &[coin(repay_amount, "borrowedcoinnative")],
         );
-        let msg = HandleMsg::RepayNative {
+        let msg = ExecuteMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_2_after_borrow_2,
             block_time,
             available_liquidity_native,
@@ -4651,7 +4599,7 @@ mod tests {
 
         assert_eq!(res.messages, vec![]);
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
                 attr("action", "repay"),
                 attr("market", "borrowedcoinnative"),
@@ -4664,18 +4612,16 @@ mod tests {
             ]
         );
 
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
         assert!(get_bit(user.borrowed_assets, 1).unwrap());
 
-        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
-            .load(&borrower_canonical_addr.as_slice())
+        let debt2 = DEBTS
+            .load(&deps.storage, (b"borrowedcoinnative", &borrower_addr))
             .unwrap();
-        let market_2_after_repay_some_2 = markets_state_read(&deps.storage)
-            .load(b"borrowedcoinnative")
-            .unwrap();
+        let market_2_after_repay_some_2 =
+            MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
+
         let expected_debt_scaled_2_after_repay_some_2 = expected_debt_scaled_2_after_borrow_2
             - Uint256::from(repay_amount) / expected_params_native.borrow_index;
         assert_eq!(
@@ -4701,7 +4647,7 @@ mod tests {
         let block_time = market_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_2_after_repay_some_2,
             block_time,
             available_liquidity_native,
@@ -4717,22 +4663,19 @@ mod tests {
             * expected_params_native.borrow_index)
             .into();
 
-        let env = mars::testing::mock_env(
+        let env = mock_env_at_block_time(block_time);
+        let info = cosmwasm_std::testing::mock_info(
             "borrower",
-            MockEnvParams {
-                sent_funds: &[coin(repay_amount, "borrowedcoinnative")],
-                block_time,
-                ..Default::default()
-            },
+            &[coin(repay_amount, "borrowedcoinnative")],
         );
-        let msg = HandleMsg::RepayNative {
+        let msg = ExecuteMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         assert_eq!(res.messages, vec![]);
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
                 attr("action", "repay"),
                 attr("market", "borrowedcoinnative"),
@@ -4745,18 +4688,15 @@ mod tests {
             ]
         );
 
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
         assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
-        let debt2 = debts_asset_state_read(&deps.storage, b"borrowedcoinnative")
-            .load(&borrower_canonical_addr.as_slice())
+        let debt2 = DEBTS
+            .load(&deps.storage, (b"borrowedcoinnative", &borrower_addr))
             .unwrap();
-        let market_2_after_repay_all_2 = markets_state_read(&deps.storage)
-            .load(b"borrowedcoinnative")
-            .unwrap();
+        let market_2_after_repay_all_2 =
+            MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
         assert_eq!(Uint256::zero(), debt2.amount_scaled);
         assert_eq!(
@@ -4767,12 +4707,15 @@ mod tests {
         // *
         // Repay more native debt (should fail)
         // *
-        let env = cosmwasm_std::testing::mock_env("borrower", &[coin(2000, "borrowedcoinnative")]);
-        let msg = HandleMsg::RepayNative {
+        let env = mock_env(MockEnvParams::default());
+        let info =
+            cosmwasm_std::testing::mock_info("borrower", &[coin(2000, "borrowedcoinnative")]);
+        let msg = ExecuteMsg::RepayNative {
             denom: String::from("borrowedcoinnative"),
         };
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Cannot repay 0 debt");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(response, "Cannot repay 0 debt");
 
         // *
         // Repay all cw20 debt (and then some)
@@ -4781,7 +4724,7 @@ mod tests {
         let repay_amount = 4800u128;
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market_1_after_borrow_again,
             block_time,
             available_liquidity_cw20,
@@ -4791,22 +4734,16 @@ mod tests {
             },
         );
 
-        let env = mars::testing::mock_env(
-            "borrowedcoincw20",
-            MockEnvParams {
-                sent_funds: &[],
-                block_time,
-                ..Default::default()
-            },
-        );
+        let env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrowedcoincw20");
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(to_binary(&ReceiveMsg::RepayCw20 {}).unwrap()),
-            sender: borrower_addr.clone(),
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            msg: to_binary(&ReceiveMsg::RepayCw20 {}).unwrap(),
+            sender: borrower_addr.to_string(),
             amount: Uint128(repay_amount),
         });
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_repay_amount_scaled =
             Uint256::from(repay_amount) / expected_params_cw20.borrow_index;
@@ -4818,17 +4755,17 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_addr,
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: borrower_addr,
+                contract_addr: cw20_contract_addr.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: borrower_addr.to_string(),
                     amount: expected_refund_amount.into(),
                 })
                 .unwrap(),
-                send: vec![],
+                funds: vec![]
             })]
         );
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
                 attr("action", "repay"),
                 attr("market", "borrowedcoincw20"),
@@ -4840,17 +4777,18 @@ mod tests {
                 attr("liquidity_rate", expected_params_cw20.liquidity_rate),
             ]
         );
-        let user = users_state_read(&deps.storage)
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(!get_bit(user.borrowed_assets, 0).unwrap());
         assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
-        let debt1 = debts_asset_state_read(&deps.storage, cw20_contract_addr_canonical.as_slice())
-            .load(&borrower_canonical_addr.as_slice())
+        let debt1 = DEBTS
+            .load(
+                &deps.storage,
+                (cw20_contract_addr.as_bytes(), &borrower_addr),
+            )
             .unwrap();
-        let market_1_after_repay_1 = markets_state_read(&deps.storage)
-            .load(cw20_contract_addr_canonical.as_slice())
+        let market_1_after_repay_1 = MARKETS
+            .load(&deps.storage, cw20_contract_addr.as_bytes())
             .unwrap();
         assert_eq!(Uint256::from(0_u128), debt1.amount_scaled);
         assert_eq!(
@@ -4865,15 +4803,11 @@ mod tests {
         let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
         let block_time = 1;
 
-        let borrower_addr = HumanAddr::from("borrower");
-        let borrower_canonical_addr = deps.api.canonical_address(&borrower_addr).unwrap();
+        let borrower_addr = Addr::unchecked("borrower");
         let ltv = Decimal256::from_ratio(7, 10);
 
         let mock_market = Market {
-            ma_token_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("matoken"))
-                .unwrap(),
+            ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: Decimal256::one(),
             max_loan_to_value: ltv,
             borrow_index: Decimal256::one(),
@@ -4884,7 +4818,7 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let market = th_init_market(&deps.api, &mut deps.storage, b"uusd", &mock_market);
+        let market = th_init_market(deps.as_mut(), b"uusd", &mock_market);
 
         // Set tax data for uusd
         deps.querier.set_native_tax(
@@ -4896,13 +4830,10 @@ mod tests {
         let deposit_amount = 110000u64;
         let mut user = User::default();
         set_bit(&mut user.collateral_assets, market.index).unwrap();
-        let mut users_bucket = users_state(&mut deps.storage);
-        users_bucket
-            .save(borrower_canonical_addr.as_slice(), &user)
-            .unwrap();
+        USERS.load(&deps.storage, &borrower_addr).unwrap();
 
         // Set the querier to return collateral balance
-        let deposit_coin_address = HumanAddr::from("matoken");
+        let deposit_coin_address = Addr::unchecked("matoken");
         deps.querier.set_cw20_balances(
             deposit_coin_address,
             &[(borrower_addr, Uint128::from(deposit_amount))],
@@ -4918,38 +4849,34 @@ mod tests {
         );
         let collateral = Decimal256::from_uint256(Uint256::from(deposit_amount)) * liquidity_index;
         let max_to_borrow = Uint256::one() * (collateral * ltv);
-        let msg = HandleMsg::Borrow {
+        let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
             },
             amount: max_to_borrow + Uint256::from(1u128),
         };
-        let mut env = mars::testing::mock_env("borrower", MockEnvParams::default());
-        env.block.time = new_block_time;
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "borrow amount exceeds maximum allowed given current collateral value",
-        );
+        let mut env = mock_env_at_block_time(new_block_time);
+        let info = mock_info("borrower");
+        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, ContractError::TodoError {});
+        // assert_generic_error_message(
+        //     response,
+        //     "borrow amount exceeds maximum allowed given current collateral value",
+        // );
 
         let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
-        let msg = HandleMsg::Borrow {
+        let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
             },
             amount: valid_amount,
         };
-        let env = mars::testing::mock_env(
-            "borrower",
-            MockEnvParams {
-                block_time,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg).unwrap();
+        let mut env = mock_env_at_block_time(block_time);
+        let info = mock_info("borrower");
+        execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps,
+            &deps.as_ref(),
             &market,
             block_time,
             initial_liquidity,
@@ -4960,16 +4887,12 @@ mod tests {
             },
         );
 
-        let market_after_borrow = markets_state_read(&deps.storage).load(b"uusd").unwrap();
+        let market_after_borrow = MARKETS.load(&deps.storage, b"uusd").unwrap();
 
-        let user = users_state_read(&deps.storage)
-            .load(borrower_canonical_addr.as_slice())
-            .unwrap();
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(get_bit(user.borrowed_assets, 0).unwrap());
 
-        let debt = debts_asset_state_read(&deps.storage, b"uusd")
-            .load(&borrower_canonical_addr.as_slice())
-            .unwrap();
+        let debt = DEBTS.load(&deps.storage, (b"uusd", &borrower_addr)).unwrap();
 
         assert_eq!(valid_amount, debt.amount_scaled);
         assert_eq!(
