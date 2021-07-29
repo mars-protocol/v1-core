@@ -1,70 +1,21 @@
 pub mod msg {
-    use cosmwasm_std::{Binary, StdError, StdResult, Uint128};
-    use cw20::{Cw20CoinVerified, Expiration, MinterResponse};
+    use cosmwasm_std::{Binary, Uint128};
+    use cw20::{Cw20Coin, Expiration, MinterResponse};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    const TOKEN_MAX_DECIMALS: u8 = 18;
-
     #[derive(Serialize, Deserialize, JsonSchema)]
     pub struct InstantiateMsg {
+        // cw20_base params
         pub name: String,
         pub symbol: String,
         pub decimals: u8,
-        pub initial_balances: Vec<Cw20CoinVerified>,
+        pub initial_balances: Vec<Cw20Coin>,
         pub mint: Option<MinterResponse>,
-        pub init_hook: Option<InitHook>,
+
+        // custom_params
         pub red_bank_address: String,
         pub incentives_address: String,
-    }
-
-    impl InstantiateMsg {
-        pub fn get_cap(&self) -> Option<Uint128> {
-            self.mint.as_ref().and_then(|v| v.cap)
-        }
-
-        pub fn validate(&self) -> StdResult<()> {
-            // Check name, symbol, decimals
-            if !is_valid_name(&self.name) {
-                return Err(StdError::generic_err(
-                    "Name is not in the expected format (3-30 UTF-8 bytes)",
-                ));
-            }
-            if !is_valid_symbol(&self.symbol) {
-                return Err(StdError::generic_err(
-                    "Ticker symbol is not in expected format [a-zA-Z\\-]{3,12}",
-                ));
-            }
-            if self.decimals > TOKEN_MAX_DECIMALS {
-                return Err(StdError::generic_err("Decimals must not exceed 18"));
-            }
-            Ok(())
-        }
-    }
-
-    fn is_valid_name(name: &str) -> bool {
-        let bytes = name.as_bytes();
-        !(bytes.len() < 3 || bytes.len() > 30)
-    }
-
-    fn is_valid_symbol(symbol: &str) -> bool {
-        let bytes = symbol.as_bytes();
-        if bytes.len() < 3 || bytes.len() > 12 {
-            return false;
-        }
-        for byte in bytes.iter() {
-            if (*byte != 45) && (*byte < 65 || *byte > 90) && (*byte < 97 || *byte > 122) {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Hook to be called after token initialization
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct InitHook {
-        pub msg: Binary,
-        pub contract_addr: String,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -90,7 +41,7 @@ pub mod msg {
         Send {
             contract: String,
             amount: Uint128,
-            msg: Option<Binary>,
+            msg: Binary,
         },
 
         /// Only with the "mintable" extension. If authorized, creates amount new tokens
@@ -119,6 +70,14 @@ pub mod msg {
             owner: String,
             recipient: String,
             amount: Uint128,
+        },
+        /// Only with "approval" extension. Sends amount tokens from owner -> contract
+        /// if `info.sender` has sufficient pre-approval.
+        SendFrom {
+            owner: String,
+            contract: String,
+            amount: Uint128,
+            msg: Binary,
         },
     }
 

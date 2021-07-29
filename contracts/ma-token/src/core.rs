@@ -1,35 +1,32 @@
 use cosmwasm_std::{
-    to_binary, Api, CanonicalAddr, CosmosMsg, Extern, HumanAddr, Querier, StdResult, Storage,
-    Uint128, WasmMsg,
+    to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, SubMsg, Uint128, WasmMsg,
 };
 
-use crate::state;
-use crate::state::{balances, Config};
+use cw20_base::state::{BALANCES, TOKEN_INFO};
+use cw20_base::ContractError as Cw20BaseError;
 
-/// Deduct amount form sender balance and deducts it from recipient
+use crate::error::ContractError;
+use crate::state::Config;
+
+/// Deduct amount from sender balance and add it to recipient balance
 /// Returns messages to be sent on the final response
-pub fn transfer<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn transfer(
+    storage: &mut dyn Storage,
     config: &Config,
-    sender_address: &HumanAddr,
-    recipient_address: &HumanAddr,
+    sender_address: Addr,
+    recipient_address: Addr,
     amount: Uint128,
     finalize_on_red_bank: bool,
-) -> StdResult<Vec<CosmosMsg>> {
-    let mut accounts = balances(&mut deps.storage);
+) -> Result<Vec<SubMsg>, ContractError> {
+    if amount == Uint128::zero() {
+        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
+    }
 
-    let sender_raw = deps.api.canonical_address(sender_address)?;
-    let recipient_raw = deps.api.canonical_address(recipient_address)?;
+    let sender_previous_balance = decrease_balance(storage, &sender_address, amount)?;
 
-    let sender_previous_balance = accounts.load(sender_raw.as_slice()).unwrap_or_default();
-    let sender_new_balance = (sender_previous_balance - amount)?;
-    accounts.save(sender_raw.as_slice(), &sender_new_balance)?;
+    let recipient_previous_balance = increase_balance(storage, &recipient_address, amount)?;
 
-    let recipient_previous_balance = accounts.load(recipient_raw.as_slice()).unwrap_or_default();
-    let recipient_new_balance = recipient_previous_balance + amount;
-    accounts.save(recipient_raw.as_slice(), &recipient_new_balance)?;
-
-    let total_supply = state::token_info_read(&deps.storage).load()?.total_supply;
+    let total_supply = TOKEN_INFO.load(storage)?.total_supply;
 
     let mut messages = vec![];
 
@@ -38,8 +35,7 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     // to ensure the transfer can be executed
     if finalize_on_red_bank {
         messages.push(finalize_transfer_msg(
-            &deps.api,
-            &config.red_bank_address,
+            config.red_bank_address.clone(),
             sender_address.clone(),
             recipient_address.clone(),
             sender_previous_balance,
@@ -48,18 +44,16 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
         )?);
     }
 
-    // Build incentive messages
+    // Build incentives messagess
     messages.push(balance_change_msg(
-        &deps.api,
-        &config.incentives_address,
-        sender_address.clone(),
+        config.incentives_address.clone(),
+        sender_address,
         sender_previous_balance,
         total_supply,
     )?);
     messages.push(balance_change_msg(
-        &deps.api,
-        &config.incentives_address,
-        recipient_address.clone(),
+        config.incentives_address.clone(),
+        recipient_address,
         recipient_previous_balance,
         total_supply,
     )?);
@@ -67,44 +61,68 @@ pub fn transfer<S: Storage, A: Api, Q: Querier>(
     Ok(messages)
 }
 
-pub fn finalize_transfer_msg<A: Api>(
-    api: &A,
-    red_bank_canonical_address: &CanonicalAddr,
-    sender_address: HumanAddr,
-    recipient_address: HumanAddr,
+/// Lower user balance and commit to store, returns previous balance
+pub fn decrease_balance(
+    storage: &mut dyn Storage,
+    address: &Addr,
+    amount: Uint128,
+) -> Result<Uint128, StdError> {
+    let previous_balance = BALANCES.load(storage, address).unwrap_or_default();
+    let new_balance = previous_balance.checked_sub(amount)?;
+    BALANCES.save(storage, address, &new_balance)?;
+
+    Ok(previous_balance)
+}
+
+/// Increase user balance and commit to store, returns previous balance
+pub fn increase_balance(
+    storage: &mut dyn Storage,
+    address: &Addr,
+    amount: Uint128,
+) -> Result<Uint128, StdError> {
+    let previous_balance = BALANCES.load(storage, address).unwrap_or_default();
+    let new_balance = previous_balance + amount;
+    BALANCES.save(storage, address, &new_balance)?;
+
+    Ok(previous_balance)
+}
+
+pub fn finalize_transfer_msg(
+    red_bank_address: Addr,
+    sender_address: Addr,
+    recipient_address: Addr,
     sender_previous_balance: Uint128,
     recipient_previous_balance: Uint128,
     amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: api.human_address(red_bank_canonical_address)?,
+) -> StdResult<SubMsg> {
+    Ok(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: red_bank_address.into(),
         msg: to_binary(
-            &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
-                sender_address,
-                recipient_address,
+            &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                sender_address: sender_address.to_string(), // TODO: Maybe we trust these to be Addr
+                recipient_address: recipient_address.to_string(),
                 sender_previous_balance,
                 recipient_previous_balance,
                 amount,
             },
         )?,
-        send: vec![],
-    }))
+        funds: vec![],
+    })))
 }
 
-pub fn balance_change_msg<A: Api>(
-    api: &A,
-    incentives_canonical_address: &CanonicalAddr,
-    user_address: HumanAddr,
+pub fn balance_change_msg(
+    incentives_address: Addr,
+    user_address: Addr,
     user_balance_before: Uint128,
     total_supply_before: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: api.human_address(incentives_canonical_address)?,
-        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
-            user_address,
+) -> StdResult<SubMsg> {
+    Ok(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: incentives_address.into(),
+        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+            user_address: user_address.to_string(), // TODO: Maybe we trust this to be Addr
             user_balance_before,
             total_supply_before,
         })?,
-        send: vec![],
-    }))
+        funds: vec![],
+    })))
 }
