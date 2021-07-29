@@ -56,7 +56,13 @@ function multisign-broadcast {
 chain_id=localterra
 
 # Default terracli args. Compatible with zsh (for bash, replace parentheses with double quote marks)
-defaults=(--chain-id $chain_id --fees=100000uluna --broadcast-mode block --output json -y)
+defaults=(
+  --chain-id $chain_id \
+  --fees=100000uluna \
+  --broadcast-mode block \
+  --output json \
+  -y
+)
 
 # Token info
 token_name=Mars
