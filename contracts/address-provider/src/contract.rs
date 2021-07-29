@@ -174,9 +174,8 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_env, MockApi, MockStorage};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
     use cosmwasm_std::{from_binary, Coin, OwnedDeps};
-    use mars::testing::{mock_dependencies, MarsMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -295,7 +294,7 @@ mod tests {
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
+    fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
         let mut deps = mock_dependencies(contract_balances);
         let msg = InstantiateMsg {
             owner: "owner".to_string(),
