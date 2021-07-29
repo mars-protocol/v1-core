@@ -72,7 +72,7 @@ pub mod msg {
             amount: Uint128,
         },
         /// Only with "approval" extension. Sends amount tokens from owner -> contract
-        /// if `env.sender` has sufficient pre-approval.
+        /// if `info.sender` has sufficient pre-approval.
         SendFrom {
             owner: String,
             contract: String,
