@@ -103,6 +103,7 @@ terracli keys add multi \
   --multisig-threshold=2
 
 multi=$(terracli keys show multi --output json | jq -r .address)
+echo "Multisig address = $multi"
 
 # Send some Luna to the multisig address
 terracli tx send test1 $multi 10000000uluna \
@@ -132,7 +133,7 @@ res=$(
     $defaults
 )
 code_id=$(echo $res | jq -r ".logs[0].events[-1].attributes[-1].value")
-echo Code ID = $code_id
+echo "Code ID = $code_id"
 
 # Instantiate the token contract
 terracli tx wasm instantiate $code_id $token_info \
@@ -144,11 +145,11 @@ terracli tx wasm instantiate $code_id $token_info \
 
 res=$(multisign-broadcast)
 tx_hash=$(echo $res | jq -r .txhash)
-echo Tx hash = $tx_hash
+echo "Tx hash = $tx_hash"
 
 res=$(terracli query tx --trust-node $tx_hash --output json)
 contract_addr=$(echo $res | jq -r ".logs[0].events[0].attributes[-1].value")
-echo Contract address = $contract_addr
+echo "Contract address = $contract_addr"
 
 terracli query wasm contract-store $contract_addr '{"token_info": {}}'
 
@@ -161,6 +162,7 @@ mint_tx=$(
     --arg address $beneficiary \
     --arg amount $mint_amount
 )
+
 terracli tx wasm execute $contract_addr $mint_tx \
   --from $multi \
   --gas 2000000 \
@@ -180,6 +182,7 @@ balance_query=$(
   jq -n '{"balance": {"address": $address}}' \
     --arg address $beneficiary
 )
+
 res=$(terracli query wasm contract-store $contract_addr $balance_query)
 if [ $(echo $res | jq -r .balance) != $mint_amount ]; then
   echo ERROR
@@ -194,3 +197,5 @@ terracli tx wasm migrate $contract_addr $code_id '{"migrate": {}}' \
   --generate-only > unsignedTx.json
 
 multisign-broadcast
+
+terracli query wasm contract $contract_addr
