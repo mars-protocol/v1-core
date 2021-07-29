@@ -86,7 +86,7 @@ pub fn execute_set_asset_incentive(
     let config = CONFIG.load(deps.storage)?;
     let owner = config.owner;
     if info.sender != owner {
-        return Err((MarsError::Unauthorized {}).into());
+        return Err(MarsError::Unauthorized {}.into());
     }
 
     let ma_asset_address = deps.api.addr_validate(&ma_token_address)?;
