@@ -1,83 +1,51 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
+    attr, entry_point, to_binary, Api, Binary, CosmosMsg, Env, Extern, HumanAddr, Querier,
+    Response, Response, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
 
-use mars::xmars_token::msg::{HandleMsg, InitMsg, MigrateMsg, QueryMsg, TotalSupplyResponse};
-
-use crate::allowances::{
-    handle_burn_from, handle_decrease_allowance, handle_increase_allowance, handle_send_from,
-    handle_transfer_from, query_allowance,
+use c20_base::allowances::{
+    execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
+use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
+
+use mars::xmars_token::msg::{
+    ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, TotalSupplyResponse,
+};
+
+use crate::allowances::{execute_burn_from, execute_send_from, execute_transfer_from};
 use crate::core;
-use crate::enumerable::{query_all_accounts, query_all_allowances};
 use crate::snapshots::{
     capture_balance_snapshot, capture_total_supply_snapshot, get_balance_snapshot_value_at,
     get_total_supply_snapshot_value_at,
 };
-use crate::state::{balances, balances_read, token_info, token_info_read, MinterData, TokenInfo};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:xmars-token";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut,
     env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     // check valid token info
     msg.validate()?;
     // create initial accounts
     let total_supply = create_accounts(deps, &env, &msg.initial_balances)?;
-
-    if let Some(limit) = msg.get_cap() {
-        if total_supply > limit {
-            return Err(StdError::generic_err("Initial supply greater than cap"));
-        }
-    }
-
     if total_supply > Uint128::zero() {
         capture_total_supply_snapshot(&mut deps.storage, &env, total_supply)?;
     }
 
-    let mint = match msg.mint {
-        Some(m) => Some(MinterData {
-            minter: deps.api.canonical_address(&m.minter)?,
-            cap: m.cap,
-        }),
-        None => None,
-    };
-
-    // store token info
-    let data = TokenInfo {
-        name: msg.name,
-        symbol: msg.symbol,
-        decimals: msg.decimals,
-        total_supply,
-        mint,
-    };
-    token_info(&mut deps.storage).save(&data)?;
-
-    if let Some(hook) = msg.init_hook {
-        Ok(InitResponse {
-            messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: hook.contract_addr,
-                msg: hook.msg,
-                send: vec![],
-            })],
-            log: vec![],
-        })
-    } else {
-        Ok(InitResponse::default())
-    }
+    create_token_info()
 }
 
 pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: &Env,
     accounts: &[Cw20CoinHuman],
 ) -> StdResult<Uint128> {
@@ -93,36 +61,36 @@ pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    msg: ExecuteMsg,
+) -> StdResult<Response> {
     match msg {
-        HandleMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
-        HandleMsg::Burn { amount } => handle_burn(deps, env, amount),
-        HandleMsg::Send {
+        ExecuteMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
+        ExecuteMsg::Burn { amount } => handle_burn(deps, env, amount),
+        ExecuteMsg::Send {
             contract,
             amount,
             msg,
         } => handle_send(deps, env, contract, amount, msg),
-        HandleMsg::Mint { recipient, amount } => handle_mint(deps, env, recipient, amount),
-        HandleMsg::IncreaseAllowance {
+        ExecuteMsg::Mint { recipient, amount } => handle_mint(deps, env, recipient, amount),
+        ExecuteMsg::IncreaseAllowance {
             spender,
             amount,
             expires,
         } => handle_increase_allowance(deps, env, spender, amount, expires),
-        HandleMsg::DecreaseAllowance {
+        ExecuteMsg::DecreaseAllowance {
             spender,
             amount,
             expires,
         } => handle_decrease_allowance(deps, env, spender, amount, expires),
-        HandleMsg::TransferFrom {
+        ExecuteMsg::TransferFrom {
             owner,
             recipient,
             amount,
         } => handle_transfer_from(deps, env, owner, recipient, amount),
-        HandleMsg::BurnFrom { owner, amount } => handle_burn_from(deps, env, owner, amount),
-        HandleMsg::SendFrom {
+        ExecuteMsg::BurnFrom { owner, amount } => handle_burn_from(deps, env, owner, amount),
+        ExecuteMsg::SendFrom {
             owner,
             contract,
             amount,
@@ -132,11 +100,11 @@ pub fn handle<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: Env,
     recipient: HumanAddr,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> StdResult<Response> {
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
@@ -145,7 +113,7 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
 
     core::transfer(deps, &env, Some(&sender_raw), Some(&rcpt_raw), amount)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![],
         log: vec![
             log("action", "transfer"),
@@ -159,10 +127,10 @@ pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: Env,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> StdResult<Response> {
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
@@ -171,7 +139,7 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 
     core::burn(deps, &env, &sender_raw, amount)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![],
         log: vec![
             log("action", "burn"),
@@ -184,11 +152,11 @@ pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: Env,
     recipient: HumanAddr,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> StdResult<Response> {
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
@@ -215,7 +183,7 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
     let rcpt_raw = deps.api.canonical_address(&recipient)?;
     core::transfer(deps, &env, None, Some(&rcpt_raw), amount)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![],
         log: vec![
             log("action", "mint"),
@@ -228,12 +196,12 @@ pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn handle_send<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     env: Env,
     contract: HumanAddr,
     amount: Uint128,
     msg: Option<Binary>,
-) -> StdResult<HandleResponse> {
+) -> StdResult<Response> {
     if amount == Uint128::zero() {
         return Err(StdError::generic_err("Invalid zero amount"));
     }
@@ -260,7 +228,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
     }
     .into_cosmos_msg(contract)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![msg],
         log: logs,
         data: None,
@@ -270,10 +238,7 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
 
 // QUERY
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+pub fn query<S: Storage, A: Api, Q: Querier>(deps: Deps, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::BalanceAt { address, block } => {
@@ -297,7 +262,7 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn query_balance<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+    deps: Deps,
     address: HumanAddr,
 ) -> StdResult<BalanceResponse> {
     let addr_raw = deps.api.canonical_address(&address)?;
@@ -308,7 +273,7 @@ pub fn query_balance<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+    deps: Deps,
     address: HumanAddr,
     block: u64,
 ) -> StdResult<BalanceResponse> {
@@ -318,7 +283,7 @@ pub fn query_balance_at<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+    deps: Deps,
 ) -> StdResult<TokenInfoResponse> {
     let info = token_info_read(&deps.storage).load()?;
     let res = TokenInfoResponse {
@@ -331,7 +296,7 @@ pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn query_total_supply_at<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+    deps: Deps,
     block: u64,
 ) -> StdResult<TotalSupplyResponse> {
     let total_supply = get_total_supply_snapshot_value_at(&deps.storage, block)?;
@@ -339,7 +304,7 @@ pub fn query_total_supply_at<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn query_minter<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+    deps: Deps,
 ) -> StdResult<Option<MinterResponse>> {
     let meta = token_info_read(&deps.storage).load()?;
     let minter = match meta.mint {
@@ -353,10 +318,10 @@ pub fn query_minter<S: Storage, A: Api, Q: Querier>(
 }
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+    deps: DepsMut,
     _env: Env,
     _msg: MigrateMsg,
-) -> StdResult<MigrateResponse> {
+) -> StdResult<Response> {
     let old_version = get_contract_version(&deps.storage)?;
     if old_version.contract != CONTRACT_NAME {
         return Err(StdError::generic_err(format!(
@@ -381,7 +346,7 @@ mod tests {
     const CANONICAL_LENGTH: usize = 20;
 
     fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
-        deps: &Extern<S, A, Q>,
+        deps: Deps,
         address: T,
     ) -> Uint128 {
         query_balance(&deps, address.into()).unwrap().balance
@@ -389,7 +354,7 @@ mod tests {
 
     // this will set up the init for other tests
     fn do_init_with_minter<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
+        deps: DepsMut,
         addr: &HumanAddr,
         amount: Uint128,
         minter: &HumanAddr,
@@ -408,7 +373,7 @@ mod tests {
 
     // this will set up the init for other tests
     fn do_init<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
+        deps: DepsMut,
         addr: &HumanAddr,
         amount: Uint128,
     ) -> TokenInfoResponse {
@@ -417,12 +382,12 @@ mod tests {
 
     // this will set up the init for other tests
     fn _do_init<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
+        deps: DepsMut,
         addr: &HumanAddr,
         amount: Uint128,
         mint: Option<MinterResponse>,
     ) -> TokenInfoResponse {
-        let init_msg = InitMsg {
+        let init_msg = InstantiateMsg {
             name: "Auto Gen".to_string(),
             symbol: "AUTO".to_string(),
             decimals: 3,
@@ -456,7 +421,7 @@ mod tests {
     fn proper_initialization() {
         let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
         let amount = Uint128::from(11223344u128);
-        let init_msg = InitMsg {
+        let init_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
@@ -501,7 +466,7 @@ mod tests {
         let amount = Uint128(11223344);
         let minter = HumanAddr::from("asmodat");
         let limit = Uint128(511223344);
-        let init_msg = InitMsg {
+        let init_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
@@ -544,7 +509,7 @@ mod tests {
         let amount = Uint128(11223344);
         let minter = HumanAddr::from("asmodat");
         let limit = Uint128(11223300);
-        let init_msg = InitMsg {
+        let init_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
@@ -576,7 +541,7 @@ mod tests {
         // minter can mint coins to some winner
         let winner = HumanAddr::from("lucky");
         let prize = Uint128(222_222_222);
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: winner.clone(),
             amount: prize,
         };
@@ -610,7 +575,7 @@ mod tests {
         );
 
         // but cannot mint nothing
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: winner.clone(),
             amount: Uint128::zero(),
         };
@@ -620,7 +585,7 @@ mod tests {
 
         // but if it exceeds cap (even over multiple rounds), it fails
         // cap is enforced
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: winner,
             amount: Uint128(333_222_222),
         };
@@ -640,7 +605,7 @@ mod tests {
             None,
         );
 
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: HumanAddr::from("lucky"),
             amount: Uint128(222),
         };
@@ -654,7 +619,7 @@ mod tests {
         let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
         do_init(&mut deps, &HumanAddr::from("genesis"), Uint128(1234));
 
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: HumanAddr::from("lucky"),
             amount: Uint128(222),
         };
@@ -670,7 +635,7 @@ mod tests {
         let addr1 = HumanAddr::from("addr0001");
         let amount2 = Uint128::from(7890987u128);
         let addr2 = HumanAddr::from("addr0002");
-        let init_msg = InitMsg {
+        let init_msg = InstantiateMsg {
             name: "Bash Shell".to_string(),
             symbol: "BASH".to_string(),
             decimals: 6,
@@ -746,7 +711,7 @@ mod tests {
 
         // cannot transfer nothing
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: Uint128::zero(),
         };
@@ -755,7 +720,7 @@ mod tests {
 
         // cannot send more than we have
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: too_much,
         };
@@ -767,7 +732,7 @@ mod tests {
 
         // cannot send from empty account
         let env = mock_env(addr2.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let msg = ExecuteMsg::Transfer {
             recipient: addr1.clone(),
             amount: transfer,
         };
@@ -785,7 +750,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let msg = HandleMsg::Transfer {
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: transfer,
         };
@@ -818,7 +783,7 @@ mod tests {
 
         // cannot burn nothing
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Burn {
+        let msg = ExecuteMsg::Burn {
             amount: Uint128::zero(),
         };
         let res = handle(&mut deps, env, msg);
@@ -827,7 +792,7 @@ mod tests {
 
         // cannot burn more than we have
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Burn { amount: too_much };
+        let msg = ExecuteMsg::Burn { amount: too_much };
         let res = handle(&mut deps, env, msg);
         match res.unwrap_err() {
             StdError::Underflow { .. } => {}
@@ -843,7 +808,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let msg = HandleMsg::Burn { amount: burn };
+        let msg = ExecuteMsg::Burn { amount: burn };
         let res = handle(&mut deps, env, msg).unwrap();
         assert_eq!(res.messages.len(), 0);
 
@@ -874,7 +839,7 @@ mod tests {
 
         // cannot send nothing
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: Uint128::zero(),
             msg: Some(send_msg.clone()),
@@ -884,7 +849,7 @@ mod tests {
 
         // cannot send more than we have
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: too_much,
             msg: Some(send_msg.clone()),
@@ -897,7 +862,7 @@ mod tests {
 
         // valid transfer
         let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: transfer,
             msg: Some(send_msg.clone()),
@@ -978,7 +943,7 @@ mod tests {
                 },
             );
 
-            let msg = HandleMsg::Mint {
+            let msg = ExecuteMsg::Mint {
                 recipient: addr2.clone(),
                 amount: mint_amount,
             };
@@ -1005,7 +970,7 @@ mod tests {
                 },
             );
 
-            let msg = HandleMsg::Transfer {
+            let msg = ExecuteMsg::Transfer {
                 recipient: addr2.clone(),
                 amount: transfer_amount,
             };
@@ -1032,7 +997,7 @@ mod tests {
                 },
             );
 
-            let msg = HandleMsg::Burn {
+            let msg = ExecuteMsg::Burn {
                 amount: burn_amount,
             };
 

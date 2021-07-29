@@ -1077,18 +1077,20 @@ checksum = "85e60b0d1b5f99db2556934e21937020776a5d31520bf169e851ac44e6420214"
 
 [[package]]
 name = "xmars-token"
-version = "0.2.0"
+version = "0.1.0"
 dependencies = [
- "cosmwasm-schema 0.10.1",
- "cosmwasm-std 0.10.1",
- "cosmwasm-storage 0.10.1",
- "cw0 0.2.3",
- "cw2 0.2.3",
- "cw20 0.2.3",
+ "cosmwasm-schema 0.15.2",
+ "cosmwasm-std 0.15.2",
+ "cw-storage-plus",
+ "cw0 0.7.0",
+ "cw2 0.7.0",
+ "cw20 0.7.0",
+ "cw20-base 0.7.0",
  "mars",
- "schemars 0.7.6",
+ "schemars 0.8.3",
  "serde",
  "snafu",
+ "thiserror",
 ]
 
 [[package]]
