@@ -184,10 +184,9 @@ mod tests {
     use super::*;
     use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::{
-        testing::{mock_env, mock_info},
+        testing::{mock_dependencies, mock_env, mock_info},
         Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
     };
-    use mars::testing::mock_dependencies;
 
     #[test]
     fn test_proper_initialization() {
