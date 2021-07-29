@@ -65,7 +65,16 @@ token_decimals=6
 token_minter=$(terracli keys show multi --output json | jq -r .address)
 token_cap=1000000000000000
 
-token_info_template='{"name": "", "symbol": "", "decimals": 0, "initial_balances": [], "mint": {"minter": "", "cap": ""}}'
+token_info_template='{
+  "name": "",
+  "symbol": "",
+  "decimals": 0,
+  "initial_balances": [],
+  "mint": {
+    "minter": "",
+    "cap": ""
+  }
+}'
 
 token_info=$(
   echo $token_info_template \
