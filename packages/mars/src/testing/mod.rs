@@ -1,9 +1,9 @@
+/// cosmwasm_std::testing overrides and custom test helpers
 mod helpers;
 mod mock_address_provider;
 pub use helpers::*;
 
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
-/// cosmwasm_std::testing overrides and custom test helpers
 use cosmwasm_std::{
     from_binary, from_slice, to_binary, Addr, Binary, BlockInfo, Coin, ContractInfo,
     ContractResult, Decimal, Env, MessageInfo, OwnedDeps, Querier, QuerierResult, QueryRequest,
@@ -22,16 +22,14 @@ use crate::xmars_token;
 use terraswap::asset::PairInfo;
 use terraswap::factory::QueryMsg;
 
-pub struct MockEnvParams<'a> {
-    pub sent_funds: &'a [Coin],
+pub struct MockEnvParams {
     pub block_time: Timestamp,
     pub block_height: u64,
 }
 
-impl<'a> Default for MockEnvParams<'a> {
+impl Default for MockEnvParams {
     fn default() -> Self {
         MockEnvParams {
-            sent_funds: &[],
             block_time: Timestamp::from_nanos(1_571_797_419_879_305_533),
             block_height: 1,
         }
@@ -67,6 +65,7 @@ pub fn mock_env_at_block_height(block_height: u64) -> Env {
 }
 
 /// quick mock info with just the sender
+// TODO: Maybe this one does not make sense given there's a very smilar helper in cosmwasm_std
 pub fn mock_info(sender: &str) -> MessageInfo {
     MessageInfo {
         sender: Addr::unchecked(sender),
