@@ -8,7 +8,7 @@ use cw20_base::ContractError as Cw20BaseError;
 use crate::error::ContractError;
 use crate::state::Config;
 
-/// Deduct amount form sender balance and deducts it from recipient
+/// Deduct amount from sender balance and add it to recipient balance
 /// Returns messages to be sent on the final response
 pub fn transfer(
     storage: &mut dyn Storage,
