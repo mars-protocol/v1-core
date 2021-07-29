@@ -4,7 +4,6 @@ use cosmwasm_std::{
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
-
 use cw20_base::allowances::{
     execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
@@ -57,7 +56,6 @@ pub fn instantiate(
         },
     )?;
 
-    // TODO: Send event here?
     Ok(Response::default())
 }
 
