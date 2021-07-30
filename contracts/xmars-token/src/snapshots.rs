@@ -1,228 +1,61 @@
-use cosmwasm_std::{to_vec, CanonicalAddr, Env, StdResult, Storage, Uint128};
-use cosmwasm_storage::{to_length_prefixed, to_length_prefixed_nested};
-use mars::storage::{kv_build_key, may_deserialize, must_deserialize};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use cosmwasm_std::{Addr, Env, Order, StdResult, Storage, Uint128};
+use cw_storage_plus::{Bound, Map, Prefix, U64Key};
 
 // STATE
-
-pub const KEY_TOTAL_SUPPLY_SNAPSHOT_INFO: &[u8] = b"total_supply_snapshot_info";
-pub const PREFIX_TOTAL_SUPPLY_SNAPSHOT: &[u8] = b"total_supply_snapshot";
-pub const PREFIX_BALANCE_SNAPSHOT_INFO: &[u8] = b"balance_snapshot_info";
-pub const PREFIX_BALANCE_SNAPSHOT: &[u8] = b"balance_snapshot";
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-/// Snapshot for a given amount, could be applied to the total supply or to the balance of
-/// a specific address
-pub struct Snapshot {
-    pub block: u64,
-    pub value: Uint128,
-}
-
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-/// Snapshot metadata for a given value
-pub struct SnapshotInfo {
-    /// Index where snapshot search should start. Could be different than 0 if the
-    /// target sample should get smaller than all available snapshots to guarantee
-    /// less operations when searching for a snapshot
-    pub start_index: u64,
-    /// Last index for snapshot search
-    pub end_index: u64,
-    /// Last block a snapshot was taken
-    pub end_block: u64,
-}
-
-fn may_load_snapshot_info<S: Storage>(storage: &S, key: &[u8]) -> StdResult<Option<SnapshotInfo>> {
-    let value = storage.get(key);
-    may_deserialize(&value)
-}
-
-fn save_snapshot_info<S: Storage>(
-    storage: &mut S,
-    key: &[u8],
-    snapshot_info: &SnapshotInfo,
-) -> StdResult<()> {
-    storage.set(key, &to_vec(snapshot_info)?);
-    Ok(())
-}
-
-fn load_snapshot<S: Storage>(storage: &S, namespace: &[u8], index: u64) -> StdResult<Snapshot> {
-    let value = storage.get(&kv_build_key(namespace, &index.to_be_bytes()));
-    must_deserialize(&value)
-}
-
-fn save_snapshot<S: Storage>(
-    storage: &mut S,
-    namespace: &[u8],
-    index: u64,
-    snapshot: &Snapshot,
-) -> StdResult<()> {
-    storage.set(
-        &kv_build_key(namespace, &index.to_be_bytes()),
-        &to_vec(snapshot)?,
-    );
-    Ok(())
-}
+pub const TOTAL_SUPPLY_SNAPSHOTS: Map<U64Key, Uint128> = Map::new("total_supply_snapshots");
+pub const BALANCE_SNAPSHOTS: Map<(&Addr, U64Key), Uint128> = Map::new("balance_snapshots");
 
 // CORE
 //
-fn capture_snapshot<S: Storage>(
-    storage: &mut S,
-    env: &Env,
-    snapshot_info_key: &[u8],
-    snapshot_namespace: &[u8],
-    value: Uint128,
-) -> StdResult<()> {
-    // Update snapshot info
-    let mut persist_snapshot_info = false;
-    let mut snapshot_info = match may_load_snapshot_info(storage, snapshot_info_key)? {
-        Some(some_snapshot_info) => some_snapshot_info,
-        None => {
-            persist_snapshot_info = true;
-            SnapshotInfo {
-                start_index: 0,
-                end_index: 0,
-                end_block: env.block.height,
-            }
-        }
-    };
 
-    if snapshot_info.end_block != env.block.height {
-        persist_snapshot_info = true;
-        snapshot_info.end_index += 1;
-        snapshot_info.end_block = env.block.height;
-    }
-
-    if persist_snapshot_info {
-        save_snapshot_info(storage, snapshot_info_key, &snapshot_info)?;
-    }
-
-    // Save new balance (always end index/end block)
-    save_snapshot(
-        storage,
-        &snapshot_namespace,
-        snapshot_info.end_index,
-        &Snapshot {
-            block: snapshot_info.end_block,
-            value,
-        },
-    )?;
-
-    Ok(())
-}
-
-fn get_snapshot_value_at<S: Storage>(
-    storage: &S,
-    snapshot_info_key: &[u8],
-    snapshot_namespace: &[u8],
+fn get_snapshot_value_at(
+    storage: &dyn Storage,
+    prefix: Prefix<Uint128>,
     block: u64,
 ) -> StdResult<Uint128> {
-    let snapshot_info = match may_load_snapshot_info(storage, snapshot_info_key)? {
-        Some(some_snapshot_info) => some_snapshot_info,
-        None => return Ok(Uint128::zero()),
-    };
+    // Look for the last value recorded before the current block (if none then value is zero)
+    let end = Bound::inclusive(U64Key::new(block));
+    let last_value_up_to_block = prefix
+        .range(storage, None, Some(end), Order::Descending)
+        .next();
 
-    // If block is higher than end block, return last recorded balance
-    if block >= snapshot_info.end_block {
-        let value = load_snapshot(storage, snapshot_namespace, snapshot_info.end_index)?.value;
-        return Ok(value);
+    if let Some(value) = last_value_up_to_block {
+        let (_, v) = value?;
+        return Ok(v);
     }
 
-    // If block is lower than start block, return zero
-    let start_snapshot = load_snapshot(storage, snapshot_namespace, snapshot_info.start_index)?;
-
-    if block < start_snapshot.block {
-        return Ok(Uint128::zero());
-    }
-
-    if block == start_snapshot.block {
-        return Ok(start_snapshot.value);
-    }
-
-    let mut start_index = snapshot_info.start_index;
-    let mut end_index = snapshot_info.end_index;
-
-    let mut ret_value = start_snapshot.value;
-
-    while end_index > start_index {
-        let middle_index = end_index - ((end_index - start_index) / 2);
-
-        let middle_snapshot = load_snapshot(storage, snapshot_namespace, middle_index)?;
-
-        if block >= middle_snapshot.block {
-            ret_value = middle_snapshot.value;
-            if middle_snapshot.block == block {
-                break;
-            }
-            start_index = middle_index;
-        } else {
-            end_index = middle_index - 1;
-        }
-    }
-
-    Ok(ret_value)
+    Ok(Uint128::zero())
 }
 
 // BALANCE
 
-pub fn capture_balance_snapshot<S: Storage>(
-    storage: &mut S,
+pub fn capture_balance_snapshot(
+    storage: &mut dyn Storage,
     env: &Env,
-    addr_raw: &CanonicalAddr,
+    addr: &Addr,
     balance: Uint128,
 ) -> StdResult<()> {
-    capture_snapshot(
-        storage,
-        env,
-        &kv_build_key(
-            &to_length_prefixed(PREFIX_BALANCE_SNAPSHOT_INFO),
-            addr_raw.as_slice(),
-        ),
-        to_length_prefixed_nested(&[PREFIX_BALANCE_SNAPSHOT, addr_raw.as_slice()]).as_slice(),
-        balance,
-    )
+    BALANCE_SNAPSHOTS.save(storage, (&addr, U64Key::new(env.block.height)), &balance)
 }
 
-pub fn get_balance_snapshot_value_at<S: Storage>(
-    storage: &S,
-    addr_raw: &CanonicalAddr,
+pub fn get_balance_snapshot_value_at(
+    storage: &dyn Storage,
+    addr: &Addr,
     block: u64,
 ) -> StdResult<Uint128> {
-    get_snapshot_value_at(
-        storage,
-        &kv_build_key(
-            &to_length_prefixed(PREFIX_BALANCE_SNAPSHOT_INFO),
-            addr_raw.as_slice(),
-        ),
-        to_length_prefixed_nested(&[PREFIX_BALANCE_SNAPSHOT, addr_raw.as_slice()]).as_slice(),
-        block,
-    )
+    get_snapshot_value_at(storage, BALANCE_SNAPSHOTS.prefix(&addr), block)
 }
 
 // TOTAL SUPPLY
 
-pub fn capture_total_supply_snapshot<S: Storage>(
-    storage: &mut S,
+pub fn capture_total_supply_snapshot(
+    storage: &mut dyn Storage,
     env: &Env,
     total_supply: Uint128,
 ) -> StdResult<()> {
-    capture_snapshot(
-        storage,
-        env,
-        &to_length_prefixed(KEY_TOTAL_SUPPLY_SNAPSHOT_INFO),
-        &to_length_prefixed(PREFIX_TOTAL_SUPPLY_SNAPSHOT),
-        total_supply,
-    )
+    TOTAL_SUPPLY_SNAPSHOTS.save(storage, U64Key::new(env.block.height), &total_supply)
 }
 
-pub fn get_total_supply_snapshot_value_at<S: Storage>(
-    storage: &S,
-    block: u64,
-) -> StdResult<Uint128> {
-    get_snapshot_value_at(
-        storage,
-        &to_length_prefixed(KEY_TOTAL_SUPPLY_SNAPSHOT_INFO),
-        &to_length_prefixed(PREFIX_TOTAL_SUPPLY_SNAPSHOT),
-        block,
-    )
+pub fn get_total_supply_snapshot_value_at(storage: &dyn Storage, block: u64) -> StdResult<Uint128> {
+    get_snapshot_value_at(storage, TOTAL_SUPPLY_SNAPSHOTS.prefix(()), block)
 }
