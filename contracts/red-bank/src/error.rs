@@ -12,7 +12,4 @@ pub enum ContractError {
 
     #[error("{0}")]
     Overflow(#[from] OverflowError),
-
-    #[error("todo")]
-    TodoError {},
 }
