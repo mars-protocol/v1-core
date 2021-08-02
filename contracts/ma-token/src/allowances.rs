@@ -1,5 +1,5 @@
 use cosmwasm_std::{attr, Binary, Deps, DepsMut, Env, MessageInfo, Response, SubMsg, Uint128};
-use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
+use cw20::Cw20ReceiveMsg;
 use cw20_base::allowances::deduct_allowance;
 use cw20_base::ContractError as Cw20BaseError;
 
@@ -96,7 +96,7 @@ mod tests {
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{to_binary, Binary, CosmosMsg, StdError, WasmMsg};
-    use cw20::{Cw20Coin, Cw20ReceiveMsg, TokenInfoResponse};
+    use cw20::{AllowanceResponse, Cw20Coin, Cw20ReceiveMsg, Expiration, TokenInfoResponse};
     use cw20_base::allowances::query_allowance;
     use cw20_base::contract::{query_balance, query_token_info};
 

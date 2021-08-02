@@ -4,15 +4,15 @@ use cosmwasm_std::{
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::{Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
-
 use cw20_base::allowances::{
     execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
-use cw20_base::contract::{query_balance, query_minter, query_token_info};
+use cw20_base::contract::{create_accounts, query_balance, query_minter, query_token_info};
 use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError as Cw20BaseError;
 
+use mars::cw20_core::instantiate_token_info;
 use mars::ma_token::msg::{
     BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
 };
@@ -33,18 +33,19 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
-    mars::cw20_core::instantiate(
-        &mut deps,
-        cw20_base::msg::InstantiateMsg {
-            name: msg.name,
-            symbol: msg.symbol,
-            decimals: msg.decimals,
-            initial_balances: msg.initial_balances,
-            mint: msg.mint,
-        },
-        CONTRACT_NAME,
-        CONTRACT_VERSION,
-    )?;
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
+    let base_msg = cw20_base::msg::InstantiateMsg {
+        name: msg.name,
+        symbol: msg.symbol,
+        decimals: msg.decimals,
+        initial_balances: msg.initial_balances,
+        mint: msg.mint,
+    };
+    base_msg.validate()?;
+
+    let total_supply = create_accounts(&mut deps, &base_msg.initial_balances)?;
+    instantiate_token_info(&mut deps, base_msg, total_supply)?;
 
     // store token config
     CONFIG.save(
@@ -55,7 +56,6 @@ pub fn instantiate(
         },
     )?;
 
-    // TODO: Send event here?
     Ok(Response::default())
 }
 
