@@ -1,7 +1,6 @@
 // Contracts
 pub mod address_provider;
 pub mod cw20_core;
-pub mod cw20_token;
 pub mod incentives;
 pub mod red_bank;
 pub mod staking;
