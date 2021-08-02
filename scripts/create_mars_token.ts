@@ -1,34 +1,96 @@
-import { Wallet, StdFee, Coin, isTxError, MsgSend, LocalTerra, MsgUpdateContractOwner, StdTx, MsgExecuteContract } from "@terra-money/terra.js"
-import { CLIKey } from "@terra-money/terra.js/dist/key/CLIKey.js"
+/*
+Script to deploy a cw20 token from a multisig account, mint tokens, and migrate the contract.
+
+This script is designed to work with Terra Columbus-4.
+
+Dependencies:
+  - rust
+  - terracli 58602320d2907814cfccdf43e9679468bb4bd8d3
+  - cosmwasm-plus v0.2.0 (NB set `COSMWASM_PLUS_PATH` below)
+
+Dependencies to run LocalTerra:
+  - docker
+  - LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
+  - Add test accounts and multisig to terracli (see below)
+
+LocalTerra test accounts:
+```
+terracli keys add test1 --recover
+notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius
+
+terracli keys add test2 --recover
+quality vacuum heart guard buzz spike sight swarm shove special gym robust assume sudden deposit grid alcohol choice devote leader tilt noodle tide penalty
+
+terracli keys add test3 --recover
+symbol force gallery make bulk round subway violin worry mixture penalty kingdom boring survey tool fringe patrol sausage hard admit remember broken alien absorb
+```
+
+Multisig:
+```
+terracli keys add multi \
+  --multisig=test1,test2,test3 \
+  --multisig-threshold=2
+```
+*/
+
 import {
-  executeContract,
-  instantiateContract,
-  performTransaction,
-  queryContract,
-  setTimeoutDuration,
-  uploadContract,
-  migrate
-} from "./helpers.js"
+  Coin,
+  isTxError,
+  LocalTerra,
+  MsgExecuteContract,
+  MsgSend,
+  MsgUpdateContractOwner,
+  StdFee,
+  StdTx,
+  Wallet
+} from "@terra-money/terra.js"
+import { CLIKey } from "@terra-money/terra.js/dist/key/CLIKey.js"
 import { strictEqual } from "assert"
 import { execSync } from "child_process"
 import { unlinkSync, writeFileSync } from "fs"
+import {
+  instantiateContract,
+  migrate,
+  performTransaction,
+  queryContract,
+  setTimeoutDuration,
+  uploadContract
+} from "./helpers.js"
 
 const MULTISIG_ADDRESS = "terra1e0fx0q9meawrcq7fmma9x60gk35lpr4xk3884m"
 const MULTISIG_NAME = "multi"
-const MULTISIG_KEYS = ["test1", "test2"]
+const MULTISIG_KEYS = ["test1", "test2", "test3"]
+const MULTISIG_THRESHOLD = 2
 
 const TOKEN_NAME = "Mars"
 const TOKEN_SYMBOL = "MARS"
 const TOKEN_DECIMALS = 6
 const TOKEN_MINTER = MULTISIG_ADDRESS
 const TOKEN_CAP = 1_000_000_000_000000
+// TODO check if we want initial balances in prod
 const TOKEN_INITIAL_AMOUNT = 1_000_000_000000
 const TOKEN_INITIAL_AMOUNT_ADDRESS = TOKEN_MINTER
+
+const TOKEN_INFO = {
+  name: TOKEN_NAME,
+  symbol: TOKEN_SYMBOL,
+  decimals: TOKEN_DECIMALS,
+  initial_balances: [
+    {
+      address: TOKEN_INITIAL_AMOUNT_ADDRESS,
+      amount: String(TOKEN_INITIAL_AMOUNT)
+    }
+  ],
+  mint: {
+    minter: TOKEN_MINTER,
+    cap: String(TOKEN_CAP)
+  }
+}
 
 const COSMWASM_PLUS_PATH = "../../cosmwasm-plus"
 
 async function main() {
-  setTimeoutDuration(10)
+  setTimeoutDuration(0)
 
   const terra = new LocalTerra()
   const wallet = terra.wallets.test1
@@ -47,32 +109,14 @@ async function main() {
   const codeID = await uploadContract(terra, wallet, "../../cosmwasm-plus/target/wasm32-unknown-unknown/release/cw20_base.wasm")
   console.log(codeID)
 
-  // Token info
-  // TODO check if we want initial balances in prod
-  const initialBalance = {
-    address: TOKEN_INITIAL_AMOUNT_ADDRESS,
-    amount: String(TOKEN_INITIAL_AMOUNT)
-  }
-
-  const TOKEN_INFO = {
-    name: TOKEN_NAME,
-    symbol: TOKEN_SYMBOL,
-    decimals: TOKEN_DECIMALS,
-    initial_balances: [initialBalance],
-    mint: {
-      minter: TOKEN_MINTER,
-      cap: String(TOKEN_CAP)
-    }
-  }
-
   // Instantiate contract
   const contractAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
   console.log(contractAddress)
   console.log(await queryContract(terra, contractAddress, { token_info: {} }))
   console.log(await queryContract(terra, contractAddress, { minter: {} }))
 
-  let balance = await queryContract(terra, contractAddress, { balance: { address: initialBalance.address } })
-  strictEqual(balance.balance, initialBalance.amount)
+  let balance = await queryContract(terra, contractAddress, { balance: { address: TOKEN_INFO.initial_balances[0].address } })
+  strictEqual(balance.balance, TOKEN_INFO.initial_balances[0].amount)
 
   // Mint tokens
   const mintAmount = 1_000_000000
@@ -97,7 +141,7 @@ async function main() {
 
   let fns: Array<string> = []
 
-  for (const key of MULTISIG_KEYS) {
+  for (const key of MULTISIG_KEYS.slice(0, MULTISIG_THRESHOLD)) {
     const cli = new CLIKey({ keyName: key, multisig: MULTISIG_ADDRESS })
     const sig = await cli.createSignature(tx)
 
@@ -106,7 +150,6 @@ async function main() {
     fns.push(fn)
   }
 
-  // TODO extend CLIKey class and encapsulate this logic
   const signedTxData = execSync(
     `terracli tx multisign unsigned_tx.json multi ${fns.join(" ")} ` +
     `--offline ` +
@@ -148,12 +191,12 @@ async function main() {
   }
 
   // Update contract owner
-  const newOwner = terra.wallets.test2
+  const newOwner = terra.wallets.test2.key.accAddress
 
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner.key.accAddress, contractAddress))
+  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, contractAddress))
 
   const contractInfo = await terra.wasm.contractInfo(contractAddress)
-  strictEqual(contractInfo.owner, newOwner.key.accAddress)
+  strictEqual(contractInfo.owner, newOwner)
 
   console.log("OK")
 }
