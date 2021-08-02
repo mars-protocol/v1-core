@@ -11,17 +11,19 @@ import {
 } from "./helpers.js"
 import { strictEqual } from "assert"
 import { execSync } from "child_process"
-import { readFileSync, writeFileSync } from "fs"
-
+import { unlinkSync, writeFileSync } from "fs"
 
 const MULTISIG_ADDRESS = "terra1e0fx0q9meawrcq7fmma9x60gk35lpr4xk3884m"
 const MULTISIG_NAME = "multi"
+const MULTISIG_KEYS = ["test1", "test2"]
 
 const TOKEN_NAME = "Mars"
 const TOKEN_SYMBOL = "MARS"
 const TOKEN_DECIMALS = 6
 const TOKEN_MINTER = MULTISIG_ADDRESS
 const TOKEN_CAP = 1_000_000_000_000000
+const TOKEN_INITIAL_AMOUNT = 1_000_000_000000
+const TOKEN_INITIAL_AMOUNT_ADDRESS = TOKEN_MINTER
 
 const COSMWASM_PLUS_PATH = "../../cosmwasm-plus"
 
@@ -36,8 +38,8 @@ async function main() {
   // Compile contract
   // TODO use rust-optimizer
   execSync(
-    `cd ${COSMWASM_PLUS_PATH}/contracts/cw20-base \
-      && RUSTFLAGS='-C link-arg=-s' cargo wasm`,
+    `cd ${COSMWASM_PLUS_PATH}/contracts/cw20-base ` +
+    `&& RUSTFLAGS='-C link-arg=-s' cargo wasm`,
     { encoding: 'utf-8' }
   )
 
@@ -46,31 +48,30 @@ async function main() {
   console.log(codeID)
 
   // Token info
-  // tmp: should be TOKEN_MINTER in prod
-  const minter = TOKEN_MINTER // wallet.key.accAddress
-
-  // tmp: check if we want initial balances in prod
-  const initialAmount = 1_000_000000
-  const initialBalance = { "address": minter, "amount": String(initialAmount) }
+  // TODO check if we want initial balances in prod
+  const initialBalance = {
+    address: TOKEN_INITIAL_AMOUNT_ADDRESS,
+    amount: String(TOKEN_INITIAL_AMOUNT)
+  }
 
   const TOKEN_INFO = {
-    "name": TOKEN_NAME,
-    "symbol": TOKEN_SYMBOL,
-    "decimals": TOKEN_DECIMALS,
-    "initial_balances": [initialBalance],
-    "mint": {
-      "minter": minter,
-      "cap": String(TOKEN_CAP)
+    name: TOKEN_NAME,
+    symbol: TOKEN_SYMBOL,
+    decimals: TOKEN_DECIMALS,
+    initial_balances: [initialBalance],
+    mint: {
+      minter: TOKEN_MINTER,
+      cap: String(TOKEN_CAP)
     }
   }
 
   // Instantiate contract
   const contractAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
   console.log(contractAddress)
-  console.log(await queryContract(terra, contractAddress, { "token_info": {} }))
-  console.log(await queryContract(terra, contractAddress, { "minter": {} }))
+  console.log(await queryContract(terra, contractAddress, { token_info: {} }))
+  console.log(await queryContract(terra, contractAddress, { minter: {} }))
 
-  let balance = await queryContract(terra, contractAddress, { "balance": { "address": initialBalance.address } })
+  let balance = await queryContract(terra, contractAddress, { balance: { address: initialBalance.address } })
   strictEqual(balance.balance, initialBalance.amount)
 
   // Mint tokens
@@ -83,7 +84,7 @@ async function main() {
     { uluna: 1_000_000000, uusd: 1_000_000000 }
   ))
 
-  const mintMsg = { "mint": { "recipient": recipient, "amount": String(mintAmount) } }
+  const mintMsg = { mint: { recipient: recipient, amount: String(mintAmount) } }
 
   const tx = await multisig.createTx({
     msgs: [new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg)],
@@ -92,21 +93,22 @@ async function main() {
     ]),
   })
 
-  // TODO use temp files
   writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
-  // TODO loop over arbitrary number of keys
-  let cli = new CLIKey({ keyName: "test1", multisig: MULTISIG_ADDRESS })
-  let sig = await cli.createSignature(tx)
-  writeFileSync('test1sig.json', sig.toJSON())
+  let fns: Array<string> = []
 
-  let cli2 = new CLIKey({ keyName: "test2", multisig: MULTISIG_ADDRESS })
-  let sig2 = await cli2.createSignature(tx)
-  writeFileSync('test2sig.json', sig2.toJSON())
+  for (const key of MULTISIG_KEYS) {
+    const cli = new CLIKey({ keyName: key, multisig: MULTISIG_ADDRESS })
+    const sig = await cli.createSignature(tx)
+
+    const fn = `${key}_sig.json`
+    writeFileSync(fn, sig.toJSON())
+    fns.push(fn)
+  }
 
   // TODO extend CLIKey class and encapsulate this logic
   const signedTxData = execSync(
-    `terracli tx multisign unsigned_tx.json multi test1sig.json test2sig.json ` +
+    `terracli tx multisign unsigned_tx.json multi ${fns.join(" ")} ` +
     `--offline ` +
     `--chain-id ${tx.chain_id} --account-number ${tx.account_number} --sequence ${tx.sequence} `,
     { encoding: 'utf-8' }
@@ -121,13 +123,18 @@ async function main() {
     );
   }
 
-  const tokenInfo = await queryContract(terra, contractAddress, { "token_info": {} })
+  const tokenInfo = await queryContract(terra, contractAddress, { token_info: {} })
   console.log(tokenInfo)
-  strictEqual(tokenInfo.total_supply, String(initialAmount + mintAmount))
+  strictEqual(tokenInfo.total_supply, String(TOKEN_INITIAL_AMOUNT + mintAmount))
 
-  balance = await queryContract(terra, contractAddress, { "balance": { "address": recipient } })
+  balance = await queryContract(terra, contractAddress, { balance: { address: recipient } })
   console.log(balance)
   strictEqual(balance.balance, String(mintAmount))
+
+  // Remove tmp files
+  for (const fn of [...fns, "unsigned_tx.json"]) {
+    unlinkSync(fn)
+  }
 
   // Migrate contract version
   try {
