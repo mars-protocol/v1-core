@@ -1,7 +1,9 @@
 import {
   Coin,
+  CreateTxOptions,
   isTxError,
   LCDClient,
+  LocalTerra,
   MnemonicKey,
   Msg,
   MsgExecuteContract,
@@ -26,13 +28,22 @@ export function getTimeoutDuration() {
   return TIMEOUT
 }
 
+// LocalTerra doesn't estimate fees properly, so we set the fee in this environment sufficiently high to
+// ensure all transactions succeed.
+const LOCAL_TERRA_FEE = new StdFee(
+  30000000,
+  [new Coin('uusd', 45000000)]
+)
+
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  const tx = await wallet.createAndSignTx({
-    msgs: [msg],
-    fee: new StdFee(30000000, [
-      new Coin('uusd', 45000000)
-    ]),
-  });
+  let options: CreateTxOptions = { msgs: [msg] }
+
+  if (terra instanceof LocalTerra) {
+    options.fee = LOCAL_TERRA_FEE
+  }
+
+  const tx = await wallet.createAndSignTx(options);
+
   const result = await terra.tx.broadcast(tx);
   if (isTxError(result)) {
     throw new Error(
@@ -41,6 +52,16 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
   }
   await new Promise(resolve => setTimeout(resolve, TIMEOUT));
   return result
+}
+
+export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
+  let options: CreateTxOptions = { msgs: [msg] }
+
+  if (terra instanceof LocalTerra) {
+    options.fee = LOCAL_TERRA_FEE
+  }
+
+  return await wallet.createTx(options)
 }
 
 export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
