@@ -1,23 +1,26 @@
 use crate::helpers::cw20_get_balance;
 use cosmwasm_std::{
-    log, to_binary, Api, Coin, CosmosMsg, Decimal, Empty, Env, Extern, HandleResponse, HumanAddr,
-    Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
+    attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response, StdError,
+    StdResult, SubMsg, Uint128, WasmMsg,
 };
-use cw20::Cw20HandleMsg;
+use cw20::Cw20ExecuteMsg;
 use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
-use terraswap::pair::HandleMsg as TerraswapPairHandleMsg;
+use terraswap::pair::ExecuteMsg as TerraswapPairExecuteMsg;
 use terraswap::querier::query_pair_info;
 
 /// Swap assets via terraswap
-pub fn handle_swap<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+// TODO: AssetInfo will contain unverified Addrs (as they come from user input). This is probably
+// not an issue as we are not transfering to that address and the transaction will fail if the
+// address is non existing. Check if this has a problem besdes the pair query failing. If there is we should verify the addresses. If there isn't just leave as is.
+pub fn execute_swap(
+    deps: DepsMut,
     env: Env,
     offer_asset_info: AssetInfo,
     ask_asset_info: AssetInfo,
     amount: Option<Uint128>,
-    terraswap_factory_human_addr: HumanAddr,
+    terraswap_factory_addr: Addr,
     terraswap_max_spread: Option<Decimal>,
-) -> StdResult<HandleResponse> {
+) -> StdResult<Response> {
     // Having the same asset as offer and ask asset doesn't make any sense
     if offer_asset_info == ask_asset_info {
         return Err(StdError::generic_err(format!(
@@ -61,8 +64,8 @@ pub fn handle_swap<S: Storage, A: Api, Q: Querier>(
     };
 
     let pair_info: PairInfo = query_pair_info(
-        &deps,
-        &terraswap_factory_human_addr,
+        &deps.querier,
+        terraswap_factory_addr,
         &[offer_asset_info.clone(), ask_asset_info],
     )?;
 
@@ -70,54 +73,49 @@ pub fn handle_swap<S: Storage, A: Api, Q: Querier>(
         info: offer_asset_info,
         amount: amount_to_swap,
     };
-    let send_msg = asset_into_swap_msg(
-        deps,
-        pair_info.contract_addr,
-        offer_asset,
-        terraswap_max_spread,
-    )?;
+    let send_msg = asset_into_swap_msg(pair_info.contract_addr, offer_asset, terraswap_max_spread)?;
 
-    Ok(HandleResponse {
-        messages: vec![send_msg],
-        log: vec![log("action", "swap"), log("asset", asset_label)],
+    Ok(Response {
+        messages: vec![SubMsg::new(send_msg)],
+        attributes: vec![attr("action", "swap"), attr("asset", asset_label)],
+        events: vec![],
         data: None,
     })
 }
 
 /// Construct terraswap message in order to swap assets
-fn asset_into_swap_msg<S: Storage, A: Api, Q: Querier>(
-    _deps: &Extern<S, A, Q>,
-    pair_contract: HumanAddr,
+fn asset_into_swap_msg(
+    pair_contract: Addr,
     offer_asset: TerraswapAsset,
     max_spread: Option<Decimal>,
 ) -> StdResult<CosmosMsg<Empty>> {
     let message = match offer_asset.info.clone() {
         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: pair_contract,
-            msg: to_binary(&TerraswapPairHandleMsg::Swap {
+            contract_addr: pair_contract.to_string(),
+            msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                 offer_asset: offer_asset.clone(),
                 belief_price: None,
                 max_spread,
                 to: None,
             })?,
-            send: vec![Coin {
+            funds: vec![Coin {
                 denom,
                 amount: offer_asset.amount,
             }],
         }),
         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
-            msg: to_binary(&Cw20HandleMsg::Send {
-                contract: pair_contract,
+            contract_addr: contract_addr.to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: pair_contract.to_string(),
                 amount: offer_asset.amount,
-                msg: Some(to_binary(&TerraswapPairHandleMsg::Swap {
+                msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                     offer_asset,
                     belief_price: None,
                     max_spread,
                     to: None,
-                })?),
+                })?,
             })?,
-            send: vec![],
+            funds: vec![],
         }),
     };
     Ok(message)
@@ -133,14 +131,14 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_same_assets() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
         let assets = vec![
             (
                 "somecoin_addr",
                 AssetInfo::Token {
-                    contract_addr: HumanAddr::from("somecoin_addr"),
+                    contract_addr: Addr::unchecked("somecoin_addr"),
                 },
             ),
             (
@@ -151,13 +149,13 @@ mod tests {
             ),
         ];
         for (asset_name, asset_info) in assets {
-            let response = handle_swap(
-                &mut deps,
+            let response = execute_swap(
+                deps.as_mut(),
                 env.clone(),
                 asset_info.clone(),
                 asset_info,
                 None,
-                HumanAddr::from("terraswap_factory"),
+                Addr::unchecked("terraswap_factory"),
                 None,
             );
             assert_generic_error_message(
@@ -169,13 +167,13 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_asset_with_zero_balance() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
-        let cw20_contract_address = HumanAddr::from("cw20_zero");
+        let cw20_contract_address = Addr::unchecked("cw20_zero");
         deps.querier.set_cw20_balances(
             cw20_contract_address.clone(),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), Uint128::zero())],
+            &[(Addr::unchecked(MOCK_CONTRACT_ADDR), Uint128::zero())],
         );
 
         let offer_asset_info = AssetInfo::Token {
@@ -185,13 +183,13 @@ mod tests {
             denom: "uusd".to_string(),
         };
 
-        let response = handle_swap(
-            &mut deps,
+        let response = execute_swap(
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
             None,
-            HumanAddr::from("terraswap_factory"),
+            Addr::unchecked("terraswap_factory"),
             None,
         );
         assert_generic_error_message(response, "Contract has no balance for the asset cw20_zero")
@@ -199,29 +197,26 @@ mod tests {
 
     #[test]
     fn test_cannot_swap_more_than_contract_balance() {
-        let mut deps = mock_dependencies(
-            20,
-            &[Coin {
-                denom: "somecoin".to_string(),
-                amount: Uint128(1_000_000),
-            }],
-        );
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[Coin {
+            denom: "somecoin".to_string(),
+            amount: Uint128::new(1_000_000),
+        }]);
+        let env = mock_env(MockEnvParams::default());
 
         let offer_asset_info = AssetInfo::NativeToken {
             denom: "somecoin".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: HumanAddr::from("cw20_token"),
+            contract_addr: Addr::unchecked("cw20_token"),
         };
 
-        let response = handle_swap(
-            &mut deps,
+        let response = execute_swap(
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
-            Some(Uint128(1_000_001)),
-            HumanAddr::from("terraswap_factory"),
+            Some(Uint128::new(1_000_001)),
+            Addr::unchecked("terraswap_factory"),
             None,
         );
         assert_generic_error_message(
@@ -232,117 +227,112 @@ mod tests {
 
     #[test]
     fn test_swap_contract_token_partial_balance() {
-        let mut deps = mock_dependencies(20, &[]);
-        let env = mock_env("owner", MockEnvParams::default());
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
 
-        let cw20_contract_address = HumanAddr::from("cw20");
-        let contract_asset_balance = Uint128(1_000_000);
+        let cw20_contract_address = Addr::unchecked("cw20");
+        let contract_asset_balance = Uint128::new(1_000_000);
         deps.querier.set_cw20_balances(
             cw20_contract_address.clone(),
-            &[(HumanAddr::from(MOCK_CONTRACT_ADDR), contract_asset_balance)],
+            &[(Addr::unchecked(MOCK_CONTRACT_ADDR), contract_asset_balance)],
         );
 
         let offer_asset_info = AssetInfo::Token {
             contract_addr: cw20_contract_address.clone(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: HumanAddr::from("mars"),
+            contract_addr: Addr::unchecked("mars"),
         };
 
         deps.querier.set_terraswap_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: HumanAddr::from("pair_cw20_mars"),
-            liquidity_token: HumanAddr::from("lp_cw20_mars"),
+            contract_addr: Addr::unchecked("pair_cw20_mars"),
+            liquidity_token: Addr::unchecked("lp_cw20_mars"),
         });
 
-        let res = handle_swap(
-            &mut deps,
+        let res = execute_swap(
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
-            Some(Uint128(999)),
-            HumanAddr::from("terraswap_factory"),
+            Some(Uint128::new(999)),
+            Addr::unchecked("terraswap_factory"),
             None,
         )
         .unwrap();
 
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: cw20_contract_address.clone(),
-                msg: to_binary(&Cw20HandleMsg::Send {
-                    contract: HumanAddr::from("pair_cw20_mars"),
-                    amount: Uint128(999),
-                    msg: Some(
-                        to_binary(&TerraswapPairHandleMsg::Swap {
-                            offer_asset: TerraswapAsset {
-                                info: AssetInfo::Token {
-                                    contract_addr: cw20_contract_address.clone(),
-                                },
-                                amount: Uint128(999),
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: cw20_contract_address.to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Send {
+                    contract: String::from("pair_cw20_mars"),
+                    amount: Uint128::new(999),
+                    msg: to_binary(&TerraswapPairExecuteMsg::Swap {
+                        offer_asset: TerraswapAsset {
+                            info: AssetInfo::Token {
+                                contract_addr: cw20_contract_address.clone(),
                             },
-                            belief_price: None,
-                            max_spread: None,
-                            to: None,
-                        })
-                        .unwrap()
-                    ),
+                            amount: Uint128::new(999),
+                        },
+                        belief_price: None,
+                        max_spread: None,
+                        to: None,
+                    })
+                    .unwrap(),
                 })
                 .unwrap(),
-                send: vec![],
-            })]
+                funds: vec![],
+            }))]
         );
 
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "swap"),
-                log("asset", cw20_contract_address.as_str()),
+                attr("action", "swap"),
+                attr("asset", cw20_contract_address.as_str()),
             ]
         );
     }
 
     #[test]
     fn test_swap_native_token_total_balance() {
-        let contract_asset_balance = Uint128(1_234_567);
-        let mut deps = mock_dependencies(
-            20,
-            &[Coin {
-                denom: "uusd".to_string(),
-                amount: contract_asset_balance,
-            }],
-        );
-        let env = mock_env("owner", MockEnvParams::default());
+        let contract_asset_balance = Uint128::new(1_234_567);
+        let mut deps = mock_dependencies(&[Coin {
+            denom: "uusd".to_string(),
+            amount: contract_asset_balance,
+        }]);
+        let env = mock_env(MockEnvParams::default());
 
         let offer_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: HumanAddr::from("mars"),
+            contract_addr: Addr::unchecked("mars"),
         };
 
         deps.querier.set_terraswap_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: HumanAddr::from("pair_uusd_mars"),
-            liquidity_token: HumanAddr::from("lp_uusd_mars"),
+            contract_addr: Addr::unchecked("pair_uusd_mars"),
+            liquidity_token: Addr::unchecked("lp_uusd_mars"),
         });
 
-        let res = handle_swap(
-            &mut deps,
+        let res = execute_swap(
+            deps.as_mut(),
             env,
             offer_asset_info,
             ask_asset_info,
             None,
-            HumanAddr::from("terraswap_factory"),
+            Addr::unchecked("terraswap_factory"),
             Some(Decimal::from_ratio(1u128, 100u128)),
         )
         .unwrap();
 
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("pair_uusd_mars"),
-                msg: to_binary(&TerraswapPairHandleMsg::Swap {
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("pair_uusd_mars"),
+                msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                     offer_asset: TerraswapAsset {
                         info: AssetInfo::NativeToken {
                             denom: "uusd".to_string(),
@@ -354,13 +344,16 @@ mod tests {
                     to: None,
                 })
                 .unwrap(),
-                send: vec![Coin {
+                funds: vec![Coin {
                     denom: "uusd".to_string(),
                     amount: contract_asset_balance,
                 }],
-            })]
+            }))]
         );
 
-        assert_eq!(res.log, vec![log("action", "swap"), log("asset", "uusd")]);
+        assert_eq!(
+            res.attributes,
+            vec![attr("action", "swap"), attr("asset", "uusd")]
+        );
     }
 }

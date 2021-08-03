@@ -1,66 +1,70 @@
 use cosmwasm_std::{
-    to_binary, Api, Binary, CanonicalAddr, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, MigrateResult, Querier, StdError, StdResult, Storage,
+    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
 };
 
-use crate::state;
-use crate::state::Config;
+use crate::error::ContractError;
+use crate::state::{Config, CONFIG};
 
 use mars::address_provider::msg::{
-    ConfigParams, ConfigResponse, HandleMsg, InitMsg, MarsContract, MigrateMsg, QueryMsg,
+    ConfigParams, ConfigResponse, ExecuteMsg, InstantiateMsg, MarsContract, MigrateMsg, QueryMsg,
 };
 
-use mars::helpers::human_addr_into_canonical;
+use mars::helpers::option_string_to_addr;
 
 // INIT
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut,
     _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     // Initialize config
     let config = Config {
-        owner: deps.api.canonical_address(&msg.owner)?,
-        council_address: CanonicalAddr::default(),
-        incentives_address: CanonicalAddr::default(),
-        insurance_fund_address: CanonicalAddr::default(),
-        mars_token_address: CanonicalAddr::default(),
-        red_bank_address: CanonicalAddr::default(),
-        staking_address: CanonicalAddr::default(),
-        treasury_address: CanonicalAddr::default(),
-        xmars_token_address: CanonicalAddr::default(),
+        owner: deps.api.addr_validate(&msg.owner)?,
+        council_address: Addr::unchecked(""),
+        incentives_address: Addr::unchecked(""),
+        insurance_fund_address: Addr::unchecked(""),
+        mars_token_address: Addr::unchecked(""),
+        red_bank_address: Addr::unchecked(""),
+        staking_address: Addr::unchecked(""),
+        treasury_address: Addr::unchecked(""),
+        xmars_token_address: Addr::unchecked(""),
     };
 
-    state::config(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    Ok(InitResponse::default())
+    Ok(Response::default())
 }
 
 // HANDLERS
 
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn execute(
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
-        HandleMsg::UpdateConfig {
+        ExecuteMsg::UpdateConfig {
             config: config_params,
-        } => handle_update_config(deps, env, config_params),
+        } => execute_update_config(deps, env, info, config_params),
     }
 }
 
 /// Update config
-pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
+pub fn execute_update_config(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
     config_params: ConfigParams,
-) -> StdResult<HandleResponse> {
-    let mut config = state::config_read(&deps.storage).load()?;
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
 
-    if deps.api.canonical_address(&env.message.sender)? != config.owner {
-        return Err(StdError::unauthorized());
+    if info.sender != config.owner {
+        return Err(ContractError::Unauthorized {});
     }
 
     let ConfigParams {
@@ -76,38 +80,36 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = config_params;
 
     // Update config
-    config.owner = human_addr_into_canonical(deps.api, owner, config.owner)?;
+    config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
     config.council_address =
-        human_addr_into_canonical(deps.api, council_address, config.council_address)?;
+        option_string_to_addr(deps.api, council_address, config.council_address)?;
     config.incentives_address =
-        human_addr_into_canonical(deps.api, incentives_address, config.incentives_address)?;
-    config.insurance_fund_address = human_addr_into_canonical(
+        option_string_to_addr(deps.api, incentives_address, config.incentives_address)?;
+    config.insurance_fund_address = option_string_to_addr(
         deps.api,
         insurance_fund_address,
         config.insurance_fund_address,
     )?;
     config.mars_token_address =
-        human_addr_into_canonical(deps.api, mars_token_address, config.mars_token_address)?;
+        option_string_to_addr(deps.api, mars_token_address, config.mars_token_address)?;
     config.red_bank_address =
-        human_addr_into_canonical(deps.api, red_bank_address, config.red_bank_address)?;
+        option_string_to_addr(deps.api, red_bank_address, config.red_bank_address)?;
     config.staking_address =
-        human_addr_into_canonical(deps.api, staking_address, config.staking_address)?;
+        option_string_to_addr(deps.api, staking_address, config.staking_address)?;
     config.treasury_address =
-        human_addr_into_canonical(deps.api, treasury_address, config.treasury_address)?;
+        option_string_to_addr(deps.api, treasury_address, config.treasury_address)?;
     config.xmars_token_address =
-        human_addr_into_canonical(deps.api, xmars_token_address, config.xmars_token_address)?;
+        option_string_to_addr(deps.api, xmars_token_address, config.xmars_token_address)?;
 
-    state::config(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    Ok(HandleResponse::default())
+    Ok(Response::default())
 }
 
 // QUERIES
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+#[entry_point]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Address { contract } => to_binary(&query_address(deps, contract)?),
@@ -115,67 +117,54 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn query_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ConfigResponse> {
-    let config = state::config_read(&deps.storage).load()?;
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        owner: deps.api.human_address(&config.owner)?,
-        council_address: deps.api.human_address(&config.council_address)?,
-        incentives_address: deps.api.human_address(&config.incentives_address)?,
-        insurance_fund_address: deps.api.human_address(&config.insurance_fund_address)?,
-        mars_token_address: deps.api.human_address(&config.mars_token_address)?,
-        red_bank_address: deps.api.human_address(&config.red_bank_address)?,
-        staking_address: deps.api.human_address(&config.staking_address)?,
-        treasury_address: deps.api.human_address(&config.treasury_address)?,
-        xmars_token_address: deps.api.human_address(&config.xmars_token_address)?,
+        owner: config.owner,
+        council_address: config.council_address,
+        incentives_address: config.incentives_address,
+        insurance_fund_address: config.insurance_fund_address,
+        mars_token_address: config.mars_token_address,
+        red_bank_address: config.red_bank_address,
+        staking_address: config.staking_address,
+        treasury_address: config.treasury_address,
+        xmars_token_address: config.xmars_token_address,
     })
 }
 
-fn query_address<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    contract: MarsContract,
-) -> StdResult<HumanAddr> {
-    let config = state::config_read(&deps.storage).load()?;
-    get_address(&deps.api, &config, contract)
+fn query_address(deps: Deps, contract: MarsContract) -> StdResult<Addr> {
+    let config = CONFIG.load(deps.storage)?;
+    Ok(get_address(&config, contract))
 }
 
-fn query_addresses<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    contracts: Vec<MarsContract>,
-) -> StdResult<Vec<HumanAddr>> {
-    let config = state::config_read(&deps.storage).load()?;
-    let mut ret: Vec<HumanAddr> = Vec::with_capacity(contracts.len());
+fn query_addresses(deps: Deps, contracts: Vec<MarsContract>) -> StdResult<Vec<Addr>> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
     for contract in contracts {
-        ret.push(get_address(&deps.api, &config, contract)?);
+        ret.push(get_address(&config, contract));
     }
 
     Ok(ret)
 }
 
-fn get_address<A: Api>(api: &A, config: &Config, address: MarsContract) -> StdResult<HumanAddr> {
-    let canonical_addr = match address {
-        MarsContract::Council => &config.council_address,
-        MarsContract::Incentives => &config.incentives_address,
-        MarsContract::InsuranceFund => &config.insurance_fund_address,
-        MarsContract::MarsToken => &config.mars_token_address,
-        MarsContract::RedBank => &config.red_bank_address,
-        MarsContract::Staking => &config.staking_address,
-        MarsContract::Treasury => &config.treasury_address,
-        MarsContract::XMarsToken => &config.xmars_token_address,
-    };
-
-    api.human_address(&canonical_addr)
+fn get_address(config: &Config, address: MarsContract) -> Addr {
+    match address {
+        MarsContract::Council => config.council_address.clone(),
+        MarsContract::Incentives => config.incentives_address.clone(),
+        MarsContract::InsuranceFund => config.insurance_fund_address.clone(),
+        MarsContract::MarsToken => config.mars_token_address.clone(),
+        MarsContract::RedBank => config.red_bank_address.clone(),
+        MarsContract::Staking => config.staking_address.clone(),
+        MarsContract::Treasury => config.treasury_address.clone(),
+        MarsContract::XMarsToken => config.xmars_token_address.clone(),
+    }
 }
 
 // MIGRATION
 
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> MigrateResult {
-    Ok(MigrateResponse::default())
+#[entry_point]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 // HELPERS
@@ -185,29 +174,28 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{from_binary, Coin};
-    use mars::testing::{
-        get_test_addresses, mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams,
-    };
-
-    use cosmwasm_std::testing::{MockApi, MockStorage};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
+    use cosmwasm_std::{from_binary, Coin, OwnedDeps};
 
     #[test]
     fn test_proper_initialization() {
-        let mut deps = mock_dependencies(20, &[]);
-        let (owner_address, owner_canonical_address) = get_test_addresses(&deps.api, "owner");
+        let mut deps = mock_dependencies(&[]);
+        let owner_address = Addr::unchecked("owner");
 
         // *
         // init config with empty params
         // *
-        let msg = InitMsg {
-            owner: owner_address,
+        let msg = InstantiateMsg {
+            owner: "owner".to_string(),
         };
-        let env = mock_env("owner", MockEnvParams::default());
-        init(&mut deps, env, msg).unwrap();
+        let info = MessageInfo {
+            sender: Addr::unchecked("whoever"),
+            funds: vec![],
+        };
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(owner_canonical_address, config.owner);
+        let config = CONFIG.load(&deps.storage).unwrap();
+        assert_eq!(owner_address, config.owner);
     }
 
     #[test]
@@ -217,115 +205,105 @@ mod tests {
         // non owner is not authorized
         // *
         {
-            let msg = HandleMsg::UpdateConfig {
+            let msg = ExecuteMsg::UpdateConfig {
                 config: ConfigParams::default(),
             };
-            let env = cosmwasm_std::testing::mock_env("somebody", &[]);
-            let error_res = handle(&mut deps, env, msg).unwrap_err();
-            assert_eq!(error_res, StdError::unauthorized());
+            let info = MessageInfo {
+                sender: Addr::unchecked("somebody"),
+                funds: vec![],
+            };
+            let error_res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+            assert_eq!(error_res, ContractError::Unauthorized {});
         }
 
         // *
         // update config
         // *
         {
-            let msg = HandleMsg::UpdateConfig {
+            let msg = ExecuteMsg::UpdateConfig {
                 config: ConfigParams {
-                    incentives_address: Some(HumanAddr::from("incentives")),
-                    mars_token_address: Some(HumanAddr::from("mars-token")),
-                    treasury_address: Some(HumanAddr::from("treasury")),
+                    incentives_address: Some("incentives".to_string()),
+                    mars_token_address: Some("mars-token".to_string()),
+                    treasury_address: Some("treasury".to_string()),
                     ..Default::default()
                 },
             };
-            let env = cosmwasm_std::testing::mock_env("owner", &[]);
-            // we can just call .unwrap() to assert this was a success
-            let res = handle(&mut deps, env, msg).unwrap();
+            let info = MessageInfo {
+                sender: Addr::unchecked("owner"),
+                funds: vec![],
+            };
+
+            let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
             assert_eq!(0, res.messages.len());
 
             // Read config from state
-            let new_config = state::config_read(&deps.storage).load().unwrap();
+            let new_config = CONFIG.load(&deps.storage).unwrap();
 
-            assert_eq!(
-                new_config.owner,
-                deps.api
-                    .canonical_address(&HumanAddr::from("owner"))
-                    .unwrap()
-            );
-            assert_eq!(new_config.xmars_token_address, CanonicalAddr::default(),);
-            assert_eq!(
-                new_config.incentives_address,
-                deps.api
-                    .canonical_address(&HumanAddr::from("incentives"))
-                    .unwrap()
-            );
-            assert_eq!(
-                new_config.mars_token_address,
-                deps.api
-                    .canonical_address(&HumanAddr::from("mars-token"))
-                    .unwrap()
-            );
-            assert_eq!(
-                new_config.treasury_address,
-                deps.api
-                    .canonical_address(&HumanAddr::from("treasury"))
-                    .unwrap()
-            );
+            assert_eq!(new_config.owner, Addr::unchecked("owner"));
+            assert_eq!(new_config.xmars_token_address, Addr::unchecked(""),);
+            assert_eq!(new_config.incentives_address, Addr::unchecked("incentives"));
+            assert_eq!(new_config.mars_token_address, Addr::unchecked("mars-token"));
+            assert_eq!(new_config.treasury_address, Addr::unchecked("treasury"));
         }
     }
 
     #[test]
     fn test_address_queries() {
         let mut deps = th_setup(&[]);
+        let env = mock_env();
 
-        let (council_address, council_canonical_address) = get_test_addresses(&deps.api, "council");
-        let (incentives_address, incentives_canonical_address) =
-            get_test_addresses(&deps.api, "incentives");
-        let (xmars_token_address, xmars_token_canonical_address) =
-            get_test_addresses(&deps.api, "xmars-token");
+        let council_address = Addr::unchecked("council");
+        let incentives_address = Addr::unchecked("incentives");
+        let xmars_token_address = Addr::unchecked("xmars_token");
 
-        state::config(&mut deps.storage)
-            .update(|mut config: Config| {
-                config.council_address = council_canonical_address;
-                config.incentives_address = incentives_canonical_address;
-                config.xmars_token_address = xmars_token_canonical_address;
-                Ok(config)
+        CONFIG
+            .update(&mut deps.storage, |mut c| -> StdResult<_> {
+                c.council_address = council_address.clone();
+                c.incentives_address = incentives_address.clone();
+                c.xmars_token_address = xmars_token_address.clone();
+                Ok(c)
             })
             .unwrap();
 
         {
             let address_query = query(
-                &deps,
+                deps.as_ref(),
+                env.clone(),
                 QueryMsg::Address {
                     contract: MarsContract::Incentives,
                 },
             )
             .unwrap();
-            let result: HumanAddr = from_binary(&address_query).unwrap();
+            let result: Addr = from_binary(&address_query).unwrap();
             assert_eq!(result, incentives_address);
         }
 
         {
             let addresses_query = query(
-                &deps,
+                deps.as_ref(),
+                env,
                 QueryMsg::Addresses {
                     contracts: vec![MarsContract::XMarsToken, MarsContract::Council],
                 },
             )
             .unwrap();
-            let result: Vec<HumanAddr> = from_binary(&addresses_query).unwrap();
+            let result: Vec<Addr> = from_binary(&addresses_query).unwrap();
             assert_eq!(result[0], xmars_token_address);
             assert_eq!(result[1], council_address);
         }
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
-        let mut deps = mock_dependencies(20, contract_balances);
-        let msg = InitMsg {
-            owner: HumanAddr::from("owner"),
+    fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MockQuerier> {
+        let mut deps = mock_dependencies(contract_balances);
+        let msg = InstantiateMsg {
+            owner: "owner".to_string(),
         };
-        let env = mock_env("owner", MockEnvParams::default());
-        init(&mut deps, env, msg).unwrap();
+        let info = MessageInfo {
+            sender: Addr::unchecked("someone"),
+            funds: vec![],
+        };
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         deps
     }
 }

@@ -1,24 +1,24 @@
 pub mod msg {
-    use cosmwasm_std::{CosmosMsg, HumanAddr, Uint128};
+    use cosmwasm_std::{Addr, CosmosMsg, Uint128};
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct InitMsg {
+    pub struct InstantiateMsg {
         /// Contract owner
-        pub owner: HumanAddr,
+        pub owner: String,
         /// Address provider returns addresses for all protocol contracts
-        pub address_provider_address: HumanAddr,
+        pub address_provider_address: String,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
     #[serde(rename_all = "snake_case")]
-    pub enum HandleMsg {
+    pub enum ExecuteMsg {
         /// Set emission per second for an asset
         /// ma_token_address
         SetAssetIncentive {
             /// Ma token address associated with the incentives
-            ma_token_address: HumanAddr,
+            ma_token_address: String,
             /// How many Mars will be assigned per second to be distributed among all liquidity
             /// providers
             emission_per_second: Uint128,
@@ -28,7 +28,7 @@ pub mod msg {
         /// Sent from an external contract, triggered on user balance changes
         /// Will return an empty response if no incentive is applied for the asset
         BalanceChange {
-            user_address: HumanAddr,
+            user_address: String,
             /// user balance up to the instant before the change
             user_balance_before: Uint128,
             /// total supply up to the instant before the change
@@ -41,8 +41,8 @@ pub mod msg {
 
         /// Update contract config (only callable by owner)
         UpdateConfig {
-            owner: Option<HumanAddr>,
-            address_provider_address: Option<HumanAddr>,
+            owner: Option<String>,
+            address_provider_address: Option<String>,
         },
 
         /// Execute Cosmos msg. Only callable by owner
@@ -58,7 +58,7 @@ pub mod msg {
     /// Query response with config values
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
-        pub owner: HumanAddr,
+        pub owner: Addr,
     }
 
     /// We currently take no arguments for migrations

@@ -1,11 +1,4 @@
-use cosmwasm_std::testing::MockApi;
-use cosmwasm_std::{Api, CanonicalAddr, HumanAddr, StdError, StdResult};
-
-pub fn get_test_addresses(api: &MockApi, address: &str) -> (HumanAddr, CanonicalAddr) {
-    let human_address = HumanAddr::from(address);
-    let canonical_address = api.canonical_address(&human_address).unwrap();
-    (human_address, canonical_address)
-}
+use cosmwasm_std::{StdError, StdResult};
 
 /// Assert elements in vecs one by one in order to get a more meaningful error
 /// when debugging tests

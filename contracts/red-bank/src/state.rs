@@ -2,33 +2,28 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{CanonicalAddr, StdError, StdResult, Storage, Uint128};
-use cosmwasm_storage::{
-    bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
-    Singleton,
-};
+use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
+use cw_storage_plus::{Item, Map, U32Key};
 use mars::helpers::all_conditions_valid;
 use mars::red_bank::msg::{AssetType, InitOrUpdateAssetParams};
 
-// keys (for singleton)
-pub static CONFIG_KEY: &[u8] = b"config";
-pub static RED_BANK_KEY: &[u8] = b"red_bank";
-
-// namespaces (for buckets)
-pub static MARKETS_NAMESPACE: &[u8] = b"markets";
-pub static DEBTS_NAMESPACE: &[u8] = b"debts";
-pub static USERS_NAMESPACE: &[u8] = b"users";
-pub static MARKET_REFERENCES_NAMESPACE: &[u8] = b"market_references";
-pub static MARKET_MA_TOKENS_NAMESPACE: &[u8] = b"market_ma_tokens";
-pub static UNCOLLATERALIZED_LOAN_LIMITS_NAMESPACE: &[u8] = b"uncollateralized_loan_limits";
+pub const CONFIG: Item<Config> = Item::new("config");
+pub const RED_BANK: Item<RedBank> = Item::new("red_bank");
+pub const USERS: Map<&Addr, User> = Map::new("users");
+pub const MARKETS: Map<&[u8], Market> = Map::new("markets");
+pub const MARKET_REFERENCES: Map<U32Key, MarketReferences> = Map::new("market_references");
+pub const MARKET_MA_TOKENS: Map<&Addr, Vec<u8>> = Map::new("market_ma_tokens");
+pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
+pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
+    Map::new("uncollateralized_loan_limits");
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
-    pub owner: CanonicalAddr,
+    pub owner: Addr,
     /// Address provider returns addresses for all protocol contracts
-    pub address_provider_address: CanonicalAddr,
+    pub address_provider_address: Addr,
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
     /// Maximum percentage of outstanding debt that can be covered by a liquidator
@@ -70,27 +65,11 @@ impl Config {
     }
 }
 
-pub fn config_state<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
-    singleton(storage, CONFIG_KEY)
-}
-
-pub fn config_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
-    singleton_read(storage, CONFIG_KEY)
-}
-
 /// RedBank global state
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct RedBank {
     /// Market count
     pub market_count: u32,
-}
-
-pub fn money_market_state<S: Storage>(storage: &mut S) -> Singleton<S, RedBank> {
-    singleton(storage, RED_BANK_KEY)
-}
-
-pub fn money_market_state_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, RedBank> {
-    singleton_read(storage, RED_BANK_KEY)
 }
 
 /// Asset markets
@@ -99,7 +78,7 @@ pub struct Market {
     /// Market index (Bit position on data)
     pub index: u32,
     /// maToken contract address
-    pub ma_token_address: CanonicalAddr,
+    pub ma_token_address: Addr,
 
     /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal256,
@@ -156,7 +135,7 @@ pub struct PidParameters {
 impl Market {
     /// Initialize new market
     pub fn create(
-        block_time: u64,
+        block_time: Timestamp,
         index: u32,
         asset_type: AssetType,
         params: InitOrUpdateAssetParams,
@@ -206,7 +185,7 @@ impl Market {
         let new_market = Market {
             index,
             asset_type,
-            ma_token_address: CanonicalAddr::default(),
+            ma_token_address: Addr::unchecked(""),
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::one(),
             borrow_rate: borrow_rate.unwrap(),
@@ -215,7 +194,7 @@ impl Market {
             liquidity_rate: Decimal256::zero(),
             max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
-            interests_last_updated: block_time,
+            interests_last_updated: block_time.seconds(),
             debt_total_scaled: Uint256::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
@@ -318,14 +297,6 @@ impl Market {
     }
 }
 
-pub fn markets_state<S: Storage>(storage: &mut S) -> Bucket<S, Market> {
-    bucket(MARKETS_NAMESPACE, storage)
-}
-
-pub fn markets_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Market> {
-    bucket_read(MARKETS_NAMESPACE, storage)
-}
-
 /// Data for individual users
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct User {
@@ -344,14 +315,6 @@ impl Default for User {
     }
 }
 
-pub fn users_state<S: Storage>(storage: &mut S) -> Bucket<S, User> {
-    bucket(USERS_NAMESPACE, storage)
-}
-
-pub fn users_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, User> {
-    bucket_read(USERS_NAMESPACE, storage)
-}
-
 /// Debt for each asset and user
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Debt {
@@ -363,54 +326,10 @@ pub struct Debt {
     pub uncollateralized: bool,
 }
 
-pub fn debts_asset_state<'a, S: Storage>(storage: &'a mut S, asset: &[u8]) -> Bucket<'a, S, Debt> {
-    Bucket::multilevel(&[DEBTS_NAMESPACE, asset], storage)
-}
-
-pub fn debts_asset_state_read<'a, S: Storage>(
-    storage: &'a S,
-    asset: &[u8],
-) -> ReadonlyBucket<'a, S, Debt> {
-    ReadonlyBucket::multilevel(&[DEBTS_NAMESPACE, asset], storage)
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 // TODO: If we do not use the struct for anything else this struct should be deleted and
 // the bucket should just store Vec<u8>
 pub struct MarketReferences {
     /// Reference of market
     pub reference: Vec<u8>,
-}
-
-pub fn market_references_state<S: Storage>(storage: &mut S) -> Bucket<S, MarketReferences> {
-    bucket(MARKET_REFERENCES_NAMESPACE, storage)
-}
-
-pub fn market_references_state_read<S: Storage>(
-    storage: &S,
-) -> ReadonlyBucket<S, MarketReferences> {
-    bucket_read(MARKET_REFERENCES_NAMESPACE, storage)
-}
-
-pub fn market_ma_tokens_state<S: Storage>(storage: &mut S) -> Bucket<S, Vec<u8>> {
-    bucket(MARKET_MA_TOKENS_NAMESPACE, storage)
-}
-
-pub fn market_ma_tokens_state_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Vec<u8>> {
-    bucket_read(MARKET_MA_TOKENS_NAMESPACE, storage)
-}
-
-/// Uncollateralized loan limits
-pub fn uncollateralized_loan_limits<'a, S: Storage>(
-    storage: &'a mut S,
-    asset: &[u8],
-) -> Bucket<'a, S, Uint128> {
-    Bucket::multilevel(&[UNCOLLATERALIZED_LOAN_LIMITS_NAMESPACE, asset], storage)
-}
-
-pub fn uncollateralized_loan_limits_read<'a, S: Storage>(
-    storage: &'a S,
-    asset: &[u8],
-) -> ReadonlyBucket<'a, S, Uint128> {
-    ReadonlyBucket::multilevel(&[UNCOLLATERALIZED_LOAN_LIMITS_NAMESPACE, asset], storage)
 }

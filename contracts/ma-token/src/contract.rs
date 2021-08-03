@@ -1,335 +1,328 @@
 use cosmwasm_std::{
-    log, to_binary, Api, Binary, CosmosMsg, Env, Extern, HandleResponse, HumanAddr, InitResponse,
-    MigrateResponse, Querier, StdError, StdResult, Storage, Uint128, WasmMsg,
+    attr, entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    StdResult, SubMsg, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
-use cw20::{BalanceResponse, Cw20CoinHuman, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
+use cw20::Cw20ReceiveMsg;
+use cw20_base::allowances::{
+    execute_decrease_allowance, execute_increase_allowance, query_allowance,
+};
+use cw20_base::contract::{create_accounts, query_balance, query_minter, query_token_info};
+use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
+use cw20_base::state::{BALANCES, TOKEN_INFO};
+use cw20_base::ContractError as Cw20BaseError;
 
-use crate::allowances::{
-    handle_decrease_allowance, handle_increase_allowance, handle_transfer_from, query_allowance,
-};
-use crate::core;
-use crate::enumerable::{query_all_accounts, query_all_allowances};
-use crate::state;
-use crate::state::{
-    balances, balances_read, token_info, token_info_read, Config, MinterData, TokenInfo,
-};
+use mars::cw20_core::instantiate_token_info;
 use mars::ma_token::msg::{
-    BalanceAndTotalSupplyResponse, HandleMsg, InitMsg, MigrateMsg, QueryMsg,
+    BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg,
 };
+
+use crate::allowances::{execute_send_from, execute_transfer_from};
+use crate::core;
+use crate::error::ContractError;
+use crate::state::{Config, CONFIG};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    mut deps: DepsMut,
     _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
-    set_contract_version(&mut deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-    // check valid token info
-    msg.validate()?;
-    // create initial accounts
-    let total_supply = create_accounts(deps, &msg.initial_balances)?;
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
+    set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
-    if let Some(limit) = msg.get_cap() {
-        if total_supply > limit {
-            return Err(StdError::generic_err("Initial supply greater than cap"));
-        }
-    }
-
-    let mint = match msg.mint {
-        Some(m) => Some(MinterData {
-            minter: deps.api.canonical_address(&m.minter)?,
-            cap: m.cap,
-        }),
-        None => None,
-    };
-
-    // store token info
-    let data = TokenInfo {
+    let base_msg = cw20_base::msg::InstantiateMsg {
         name: msg.name,
         symbol: msg.symbol,
         decimals: msg.decimals,
-        total_supply,
-        mint,
+        initial_balances: msg.initial_balances,
+        mint: msg.mint,
     };
-    token_info(&mut deps.storage).save(&data)?;
+    base_msg.validate()?;
+
+    let total_supply = create_accounts(&mut deps, &base_msg.initial_balances)?;
+    instantiate_token_info(&mut deps, base_msg, total_supply)?;
 
     // store token config
-    state::save_config(
-        &mut deps.storage,
+    CONFIG.save(
+        deps.storage,
         &Config {
-            red_bank_address: deps.api.canonical_address(&msg.red_bank_address)?,
-            incentives_address: deps.api.canonical_address(&msg.incentives_address)?,
+            red_bank_address: deps.api.addr_validate(&msg.red_bank_address)?,
+            incentives_address: deps.api.addr_validate(&msg.incentives_address)?,
         },
     )?;
 
-    if let Some(hook) = msg.init_hook {
-        Ok(InitResponse {
-            messages: vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: hook.contract_addr,
-                msg: hook.msg,
-                send: vec![],
-            })],
-            log: vec![],
-        })
-    } else {
-        Ok(InitResponse::default())
-    }
+    Ok(Response::default())
 }
 
-pub fn create_accounts<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    accounts: &[Cw20CoinHuman],
-) -> StdResult<Uint128> {
-    let mut total_supply = Uint128::zero();
-    let mut store = balances(&mut deps.storage);
-    for row in accounts {
-        let raw_address = deps.api.canonical_address(&row.address)?;
-        store.save(raw_address.as_slice(), &row.amount)?;
-        total_supply += row.amount;
-    }
-    Ok(total_supply)
-}
-
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn execute(
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
-        HandleMsg::Transfer { recipient, amount } => handle_transfer(deps, env, recipient, amount),
-        HandleMsg::TransferOnLiquidation {
+        ExecuteMsg::Transfer { recipient, amount } => {
+            execute_transfer(deps, env, info, recipient, amount)
+        }
+        ExecuteMsg::TransferOnLiquidation {
             sender,
             recipient,
             amount,
-        } => handle_transfer_on_liquidation(deps, env, sender, recipient, amount),
-        HandleMsg::Burn { user, amount } => handle_burn(deps, env, user, amount),
-        HandleMsg::Send {
+        } => execute_transfer_on_liquidation(deps, env, info, sender, recipient, amount),
+        ExecuteMsg::Burn { user, amount } => execute_burn(deps, env, info, user, amount),
+        ExecuteMsg::Send {
             contract,
             amount,
             msg,
-        } => handle_send(deps, env, contract, amount, msg),
-        HandleMsg::Mint { recipient, amount } => handle_mint(deps, env, recipient, amount),
-        HandleMsg::IncreaseAllowance {
+        } => execute_send(deps, env, info, contract, amount, msg),
+        ExecuteMsg::Mint { recipient, amount } => execute_mint(deps, env, info, recipient, amount),
+        ExecuteMsg::IncreaseAllowance {
             spender,
             amount,
             expires,
-        } => handle_increase_allowance(deps, env, spender, amount, expires),
-        HandleMsg::DecreaseAllowance {
+        } => Ok(execute_increase_allowance(
+            deps, env, info, spender, amount, expires,
+        )?),
+        ExecuteMsg::DecreaseAllowance {
             spender,
             amount,
             expires,
-        } => handle_decrease_allowance(deps, env, spender, amount, expires),
-        HandleMsg::TransferFrom {
+        } => Ok(execute_decrease_allowance(
+            deps, env, info, spender, amount, expires,
+        )?),
+        ExecuteMsg::TransferFrom {
             owner,
             recipient,
             amount,
-        } => handle_transfer_from(deps, env, owner, recipient, amount),
-        // TODO: Bring back SendFrom (Won't cause troubles anymore witht he new withdraw API)
+        } => execute_transfer_from(deps, env, info, owner, recipient, amount),
+        ExecuteMsg::SendFrom {
+            owner,
+            contract,
+            amount,
+            msg,
+        } => execute_send_from(deps, env, info, owner, contract, amount, msg),
     }
 }
 
-pub fn handle_transfer<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    recipient: HumanAddr,
+pub fn execute_transfer(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    recipient_unchecked: String,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     if amount == Uint128::zero() {
-        return Err(StdError::generic_err("Invalid zero amount"));
+        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
     }
 
-    let config = state::load_config(&deps.storage)?;
-    let messages = core::transfer(deps, &config, &env.message.sender, &recipient, amount, true)?;
+    let config = CONFIG.load(deps.storage)?;
 
-    let res = HandleResponse {
+    let recipient = deps.api.addr_validate(&recipient_unchecked)?;
+    let messages = core::transfer(
+        deps.storage,
+        &config,
+        info.sender.clone(),
+        recipient,
+        amount,
+        true,
+    )?;
+
+    let res = Response {
         messages,
-        log: vec![
-            log("action", "transfer"),
-            log("from", env.message.sender),
-            log("to", recipient),
-            log("amount", amount),
+        attributes: vec![
+            attr("action", "transfer"),
+            attr("from", info.sender.to_string()),
+            attr("to", recipient_unchecked),
+            attr("amount", amount),
         ],
+        events: vec![],
         data: None,
     };
     Ok(res)
 }
 
-pub fn handle_transfer_on_liquidation<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    sender: HumanAddr,
-    recipient: HumanAddr,
+pub fn execute_transfer_on_liquidation(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    sender_unchecked: String,
+    recipient_unchecked: String,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
-    // only money market can call
-    let config = state::load_config(&deps.storage)?;
-    if deps.api.canonical_address(&env.message.sender)? != config.red_bank_address {
-        return Err(StdError::unauthorized());
+) -> Result<Response, ContractError> {
+    // only red bank can call
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.red_bank_address {
+        return Err(Cw20BaseError::Unauthorized {}.into());
     }
 
-    if amount == Uint128::zero() {
-        return Err(StdError::generic_err("Invalid zero amount"));
-    }
+    let sender = deps.api.addr_validate(&sender_unchecked)?;
+    let recipient = deps.api.addr_validate(&recipient_unchecked)?;
 
-    let messages = core::transfer(deps, &config, &sender, &recipient, amount, false)?;
+    let messages = core::transfer(deps.storage, &config, sender, recipient, amount, false)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages,
-        log: vec![
-            log("action", "transfer_on_liquidation"),
-            log("from", env.message.sender),
-            log("to", recipient),
-            log("amount", amount),
+        attributes: vec![
+            attr("action", "transfer_on_liquidation"),
+            attr("from", sender_unchecked),
+            attr("to", recipient_unchecked),
+            attr("amount", amount),
         ],
+        events: vec![],
         data: None,
     };
     Ok(res)
 }
 
-pub fn handle_burn<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    user: HumanAddr,
+pub fn execute_burn(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    user_unchecked: String,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     // only money market can burn
-    let config = state::load_config(&deps.storage)?;
-    if deps.api.canonical_address(&env.message.sender)? != config.red_bank_address {
-        return Err(StdError::unauthorized());
+    let config = CONFIG.load(deps.storage)?;
+    if info.sender != config.red_bank_address {
+        return Err(Cw20BaseError::Unauthorized {}.into());
     }
 
     if amount == Uint128::zero() {
-        return Err(StdError::generic_err("Invalid zero amount"));
+        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
     }
-
-    let user_raw = deps.api.canonical_address(&user)?;
 
     // lower balance
-    let mut accounts = balances(&mut deps.storage);
-    let user_balance_before = accounts.load(user_raw.as_slice()).unwrap_or_default();
-    let user_balance_new = (user_balance_before - amount)?;
-    accounts.save(user_raw.as_slice(), &user_balance_new)?;
+    let user_address = deps.api.addr_validate(&user_unchecked)?;
+    let user_balance_before = core::decrease_balance(deps.storage, &user_address, amount)?;
 
     // reduce total_supply
     let mut total_supply_before = Uint128::zero();
-    token_info(&mut deps.storage).update(|mut info| {
+    TOKEN_INFO.update(deps.storage, |mut info| -> StdResult<_> {
         total_supply_before = info.total_supply;
-        info.total_supply = (info.total_supply - amount)?;
+        info.total_supply = info.total_supply.checked_sub(amount)?;
         Ok(info)
     })?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![core::balance_change_msg(
-            &deps.api,
-            &config.incentives_address,
-            user.clone(),
+            config.incentives_address,
+            user_address,
             user_balance_before,
             total_supply_before,
         )?],
-        log: vec![
-            log("action", "burn"),
-            log("user", user),
-            log("amount", amount),
+        attributes: vec![
+            attr("action", "burn"),
+            attr("user", user_unchecked),
+            attr("amount", amount),
         ],
+        events: vec![],
         data: None,
     };
     Ok(res)
 }
 
-pub fn handle_mint<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    recipient: HumanAddr,
+pub fn execute_mint(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    recipient_unchecked: String,
     amount: Uint128,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     if amount == Uint128::zero() {
-        return Err(StdError::generic_err("Invalid zero amount"));
+        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
     }
 
-    let mut info = token_info_read(&deps.storage).load()?;
-    if info.mint.is_none()
-        || info.mint.as_ref().unwrap().minter != deps.api.canonical_address(&env.message.sender)?
-    {
-        return Err(StdError::unauthorized());
+    let mut token_info = TOKEN_INFO.load(deps.storage)?;
+    if token_info.mint.is_none() || token_info.mint.as_ref().unwrap().minter != info.sender {
+        return Err(Cw20BaseError::Unauthorized {}.into());
     }
-    let total_supply_before = info.total_supply;
+
+    let total_supply_before = token_info.total_supply;
 
     // update supply and enforce cap
-    info.total_supply += amount;
-    if let Some(limit) = info.get_cap() {
-        if info.total_supply > limit {
-            return Err(StdError::generic_err("Minting cannot exceed the cap"));
+    token_info.total_supply += amount;
+    if let Some(limit) = token_info.get_cap() {
+        if token_info.total_supply > limit {
+            return Err(Cw20BaseError::CannotExceedCap {}.into());
         }
     }
-    token_info(&mut deps.storage).save(&info)?;
+    TOKEN_INFO.save(deps.storage, &token_info)?;
 
     // add amount to recipient balance
-    let mut accounts = balances(&mut deps.storage);
-    let rcpt_raw = deps.api.canonical_address(&recipient)?;
-    let rcpt_balance_before = accounts.load(rcpt_raw.as_slice()).unwrap_or_default();
-    let rcpt_balance_new = rcpt_balance_before + amount;
-    accounts.save(rcpt_raw.as_slice(), &rcpt_balance_new)?;
+    let rcpt_address = deps.api.addr_validate(&recipient_unchecked)?;
+    let rcpt_balance_before = core::increase_balance(deps.storage, &rcpt_address, amount)?;
 
-    let config = state::load_config(&deps.storage)?;
+    let config = CONFIG.load(deps.storage)?;
 
-    let res = HandleResponse {
+    let res = Response {
         messages: vec![core::balance_change_msg(
-            &deps.api,
-            &config.incentives_address,
-            recipient.clone(),
+            config.incentives_address,
+            rcpt_address,
             rcpt_balance_before,
             total_supply_before,
         )?],
-        log: vec![
-            log("action", "mint"),
-            log("to", recipient),
-            log("amount", amount),
+        attributes: vec![
+            attr("action", "mint"),
+            attr("to", recipient_unchecked),
+            attr("amount", amount),
         ],
+        events: vec![],
         data: None,
     };
     Ok(res)
 }
 
-pub fn handle_send<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    env: Env,
-    contract: HumanAddr,
+pub fn execute_send(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    contract_unchecked: String,
     amount: Uint128,
-    msg: Option<Binary>,
-) -> StdResult<HandleResponse> {
+    msg: Binary,
+) -> Result<Response, ContractError> {
     if amount == Uint128::zero() {
-        return Err(StdError::generic_err("Invalid zero amount"));
+        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
     }
 
     // move the tokens to the contract
-    let sender = env.message.sender;
-    let config = state::load_config(&deps.storage)?;
-    let mut messages = core::transfer(deps, &config, &sender, &contract, amount, true)?;
+    let config = CONFIG.load(deps.storage)?;
+    let contract_address = deps.api.addr_validate(&contract_unchecked)?;
+    let mut messages = core::transfer(
+        deps.storage,
+        &config,
+        info.sender.clone(),
+        contract_address,
+        amount,
+        true,
+    )?;
 
-    let logs = vec![
-        log("action", "send"),
-        log("from", &sender),
-        log("to", &contract),
-        log("amount", amount),
+    let attributes = vec![
+        attr("action", "send"),
+        attr("from", info.sender.to_string()),
+        attr("to", &contract_unchecked),
+        attr("amount", amount),
     ];
 
     // create a send message
-    messages.push(
+    messages.push(SubMsg::new(
         Cw20ReceiveMsg {
-            sender,
+            sender: info.sender.to_string(),
             amount,
             msg,
         }
-        .into_cosmos_msg(contract)?,
-    );
+        .into_cosmos_msg(contract_unchecked)?,
+    ));
 
-    let res = HandleResponse {
+    let res = Response {
         messages,
-        log: logs,
+        attributes,
+        events: vec![],
         data: None,
     };
 
@@ -338,10 +331,8 @@ pub fn handle_send<S: Storage, A: Api, Q: Querier>(
 
 // QUERY
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+#[entry_point]
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::BalanceAndTotalSupply { address } => {
@@ -363,71 +354,39 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-pub fn query_balance<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
-) -> StdResult<BalanceResponse> {
-    let addr_raw = deps.api.canonical_address(&address)?;
-    let balance = balances_read(&deps.storage)
-        .may_load(addr_raw.as_slice())?
-        .unwrap_or_default();
-    Ok(BalanceResponse { balance })
-}
-
-pub fn query_balance_and_total_supply<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    address: HumanAddr,
+fn query_balance_and_total_supply(
+    deps: Deps,
+    address_unchecked: String,
 ) -> StdResult<BalanceAndTotalSupplyResponse> {
-    let addr_raw = deps.api.canonical_address(&address)?;
-    let balance = balances_read(&deps.storage)
-        .may_load(addr_raw.as_slice())?
+    let address = deps.api.addr_validate(&address_unchecked)?;
+    let balance = BALANCES
+        .may_load(deps.storage, &address)?
         .unwrap_or_default();
-    let info = token_info_read(&deps.storage).load()?;
+    let info = TOKEN_INFO.load(deps.storage)?;
     Ok(BalanceAndTotalSupplyResponse {
         balance,
         total_supply: info.total_supply,
     })
 }
 
-pub fn query_token_info<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<TokenInfoResponse> {
-    let info = token_info_read(&deps.storage).load()?;
-    let res = TokenInfoResponse {
-        name: info.name,
-        symbol: info.symbol,
-        decimals: info.decimals,
-        total_supply: info.total_supply,
-    };
-    Ok(res)
-}
-
-pub fn query_minter<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<Option<MinterResponse>> {
-    let meta = token_info_read(&deps.storage).load()?;
-    let minter = match meta.mint {
-        Some(m) => Some(MinterResponse {
-            minter: deps.api.human_address(&m.minter)?,
-            cap: m.cap,
-        }),
-        None => None,
-    };
-    Ok(minter)
-}
-
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> StdResult<MigrateResponse> {
-    let old_version = get_contract_version(&deps.storage)?;
+#[entry_point]
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    let old_version = get_contract_version(deps.storage)?;
     if old_version.contract != CONTRACT_NAME {
         return Err(StdError::generic_err(format!(
             "This is {}, cannot migrate from {}",
             CONTRACT_NAME, old_version.contract
         )));
     }
+    // NOTE: v0.1.0 were not auto-generated and started with v0.
+    // more recent versions do not have the v prefix
+
+    // TODO: This is copied from the old cw20_base, see if it makes sense for us
+    if old_version.version.starts_with("v0.1.") {
+        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+        return Ok(Response::default());
+    }
+
     Err(StdError::generic_err(format!(
         "Unknown version {}",
         old_version.version
@@ -436,74 +395,65 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::testing::{mock_dependencies, mock_env};
-    use cosmwasm_std::{coins, from_binary, CosmosMsg, StdError, WasmMsg};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
+    use cosmwasm_std::{coins, Addr, CosmosMsg, StdError, WasmMsg};
+    use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
 
     use super::*;
-    use mars::testing::assert_generic_error_message;
 
-    const CANONICAL_LENGTH: usize = 20;
-
-    fn get_balance<S: Storage, A: Api, Q: Querier, T: Into<HumanAddr>>(
-        deps: &Extern<S, A, Q>,
-        address: T,
-    ) -> Uint128 {
-        query_balance(&deps, address.into()).unwrap().balance
+    fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
+        query_balance(deps, address.into()).unwrap().balance
     }
 
-    // this will set up the init for other tests
-    fn do_init_with_minter<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
-        addr: &HumanAddr,
+    // this will set up the instantiation for other tests
+    fn do_instantiate_with_minter(
+        deps: DepsMut,
+        addr: &str,
         amount: Uint128,
-        minter: &HumanAddr,
+        minter: &str,
         cap: Option<Uint128>,
     ) -> TokenInfoResponse {
-        _do_init(
+        _do_instantiate(
             deps,
             addr,
             amount,
             Some(MinterResponse {
-                minter: minter.into(),
+                minter: minter.to_string(),
                 cap,
             }),
         )
     }
 
-    // this will set up the init for other tests
-    fn do_init<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
-        addr: &HumanAddr,
-        amount: Uint128,
-    ) -> TokenInfoResponse {
-        _do_init(deps, addr, amount, None)
+    // this will set up the instantiation for other tests
+    fn do_instantiate(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
+        _do_instantiate(deps, addr, amount, None)
     }
 
-    // this will set up the init for other tests
-    fn _do_init<S: Storage, A: Api, Q: Querier>(
-        deps: &mut Extern<S, A, Q>,
-        addr: &HumanAddr,
+    // this will set up the instantiation for other tests
+    fn _do_instantiate(
+        mut deps: DepsMut,
+        addr: &str,
         amount: Uint128,
         mint: Option<MinterResponse>,
     ) -> TokenInfoResponse {
-        let init_msg = InitMsg {
+        let instantiate_msg = InstantiateMsg {
             name: "Auto Gen".to_string(),
             symbol: "AUTO".to_string(),
             decimals: 3,
-            initial_balances: vec![Cw20CoinHuman {
-                address: addr.into(),
+            initial_balances: vec![Cw20Coin {
+                address: addr.to_string(),
                 amount,
             }],
             mint: mint.clone(),
-            init_hook: None,
-            red_bank_address: HumanAddr::from("red_bank"),
-            incentives_address: HumanAddr::from("incentives"),
+            red_bank_address: String::from("red_bank"),
+            incentives_address: String::from("incentives"),
         };
-        let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(deps, env, init_msg).unwrap();
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        let meta = query_token_info(&deps).unwrap();
+        let meta = query_token_info(deps.as_ref()).unwrap();
         assert_eq!(
             meta,
             TokenInfoResponse {
@@ -513,47 +463,34 @@ mod tests {
                 total_supply: amount,
             }
         );
-        assert_eq!(get_balance(&deps, addr), amount);
-        assert_eq!(query_minter(&deps).unwrap(), mint,);
+        assert_eq!(get_balance(deps.as_ref(), addr), amount);
+        assert_eq!(query_minter(deps.as_ref()).unwrap(), mint,);
         meta
     }
 
     #[test]
-    fn proper_initialization() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
+    fn proper_instantiation() {
+        let mut deps = mock_dependencies(&[]);
         let amount = Uint128::from(11223344u128);
-        let red_bank_address = HumanAddr::from("red_bank");
-        let send_msg = Binary::from(br#"{"some":123}"#);
-
-        let init_msg = InitMsg {
+        let instantiate_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
-            initial_balances: vec![Cw20CoinHuman {
-                address: HumanAddr("addr0000".to_string()),
+            initial_balances: vec![Cw20Coin {
+                address: String::from("addr0000"),
                 amount,
             }],
             mint: None,
-            init_hook: Some(mars::ma_token::msg::InitHook {
-                msg: send_msg.clone(),
-                contract_addr: HumanAddr::from("some_contract"),
-            }),
-            red_bank_address: red_bank_address.clone(),
-            incentives_address: HumanAddr::from("incentives"),
+            red_bank_address: String::from("red_bank"),
+            incentives_address: String::from("incentives"),
         };
-        let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env, init_msg).unwrap();
-        assert_eq!(
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("some_contract"),
-                msg: send_msg,
-                send: vec![],
-            })],
-            res.messages
-        );
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
+        assert_eq!(0, res.messages.len());
 
         assert_eq!(
-            query_token_info(&deps).unwrap(),
+            query_token_info(deps.as_ref()).unwrap(),
             TokenInfoResponse {
                 name: "Cash Token".to_string(),
                 symbol: "CASH".to_string(),
@@ -561,42 +498,44 @@ mod tests {
                 total_supply: amount,
             }
         );
-        assert_eq!(get_balance(&deps, "addr0000"), Uint128(11223344));
-        let config = state::load_config(&deps.storage).unwrap();
         assert_eq!(
-            config.red_bank_address,
-            deps.api.canonical_address(&red_bank_address).unwrap()
+            get_balance(deps.as_ref(), "addr0000"),
+            Uint128::new(11223344)
         );
+
+        let config = CONFIG.load(&deps.storage).unwrap();
+        assert_eq!(config.red_bank_address, Addr::unchecked("red_bank"));
+        assert_eq!(config.incentives_address, Addr::unchecked("incentives"));
     }
 
     #[test]
-    fn init_mintable() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
-        let amount = Uint128(11223344);
-        let minter = HumanAddr::from("asmodat");
-        let limit = Uint128(511223344);
-        let init_msg = InitMsg {
+    fn instantiate_mintable() {
+        let mut deps = mock_dependencies(&[]);
+        let amount = Uint128::new(11223344);
+        let minter = String::from("asmodat");
+        let limit = Uint128::new(511223344);
+        let instantiate_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
-            initial_balances: vec![Cw20CoinHuman {
-                address: HumanAddr("addr0000".to_string()),
+            initial_balances: vec![Cw20Coin {
+                address: "addr0000".into(),
                 amount,
             }],
             mint: Some(MinterResponse {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
-            init_hook: None,
-            red_bank_address: HumanAddr::from("red_bank"),
-            incentives_address: HumanAddr::from("incentives"),
+            red_bank_address: String::from("red_bank"),
+            incentives_address: String::from("incentives"),
         };
-        let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env, init_msg).unwrap();
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         assert_eq!(
-            query_token_info(&deps).unwrap(),
+            query_token_info(deps.as_ref()).unwrap(),
             TokenInfoResponse {
                 name: "Cash Token".to_string(),
                 symbol: "CASH".to_string(),
@@ -604,169 +543,181 @@ mod tests {
                 total_supply: amount,
             }
         );
-        assert_eq!(get_balance(&deps, "addr0000"), Uint128(11223344));
         assert_eq!(
-            query_minter(&deps).unwrap(),
+            get_balance(deps.as_ref(), "addr0000"),
+            Uint128::new(11223344)
+        );
+        assert_eq!(
+            query_minter(deps.as_ref()).unwrap(),
             Some(MinterResponse {
                 minter,
-                cap: Some(limit)
+                cap: Some(limit),
             }),
         );
     }
 
     #[test]
-    fn init_mintable_over_cap() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
-        let amount = Uint128(11223344);
-        let minter = HumanAddr::from("asmodat");
-        let limit = Uint128(11223300);
-        let init_msg = InitMsg {
+    fn instantiate_mintable_over_cap() {
+        let mut deps = mock_dependencies(&[]);
+        let amount = Uint128::new(11223344);
+        let minter = String::from("asmodat");
+        let limit = Uint128::new(11223300);
+        let instantiate_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
             decimals: 9,
-            initial_balances: vec![Cw20CoinHuman {
-                address: HumanAddr("addr0000".to_string()),
+            initial_balances: vec![Cw20Coin {
+                address: String::from("addr0000"),
                 amount,
             }],
             mint: Some(MinterResponse {
                 minter,
                 cap: Some(limit),
             }),
-            init_hook: None,
-            red_bank_address: HumanAddr::from("red_bank"),
-            incentives_address: HumanAddr::from("incentives"),
+            red_bank_address: String::from("red_bank"),
+            incentives_address: String::from("incentives"),
         };
-        let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env, init_msg);
-        assert_generic_error_message(res, "Initial supply greater than cap");
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let err = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap_err();
+        assert_eq!(
+            err,
+            StdError::generic_err("Initial supply greater than cap")
+        );
     }
 
     #[test]
     fn can_mint_by_minter() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
+        let mut deps = mock_dependencies(&[]);
 
-        let genesis = HumanAddr::from("genesis");
-        let amount = Uint128(11223344);
-        let minter = HumanAddr::from("asmodat");
-        let limit = Uint128(511223344);
-        do_init_with_minter(&mut deps, &genesis, amount, &minter, Some(limit));
+        let genesis = String::from("genesis");
+        let amount = Uint128::new(11223344);
+        let minter = String::from("asmodat");
+        let limit = Uint128::new(511223344);
+        do_instantiate_with_minter(deps.as_mut(), &genesis, amount, &minter, Some(limit));
 
         // minter can mint coins to some winner
-        let winner = HumanAddr::from("lucky");
-        let prize = Uint128(222_222_222);
-        let msg = HandleMsg::Mint {
+        let winner = String::from("lucky");
+        let prize = Uint128::new(222_222_222);
+        let msg = ExecuteMsg::Mint {
             recipient: winner.clone(),
             amount: prize,
         };
 
-        let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg).unwrap();
+        let info = mock_info(minter.as_ref(), &[]);
+        let env = mock_env();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("incentives"),
-                msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
-                    user_address: winner.clone(),
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("incentives"),
+                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    user_address: winner.to_string(),
                     user_balance_before: Uint128::zero(),
                     total_supply_before: amount,
                 },)
                 .unwrap(),
-                send: vec![],
-            }),]
+                funds: vec![],
+            })),]
         );
-        assert_eq!(get_balance(&deps, &genesis), amount);
-        assert_eq!(get_balance(&deps, &winner), prize);
+        assert_eq!(get_balance(deps.as_ref(), genesis), amount);
+        assert_eq!(get_balance(deps.as_ref(), winner.clone()), prize);
         assert_eq!(
-            query_token_info(&deps).unwrap().total_supply,
+            query_token_info(deps.as_ref()).unwrap().total_supply,
             amount + prize
         );
 
         // but cannot mint nothing
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: winner.clone(),
             amount: Uint128::zero(),
         };
-        let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg);
-        assert_generic_error_message(res, "Invalid zero amount");
+        let info = mock_info(minter.as_ref(), &[]);
+        let env = mock_env();
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::InvalidZeroAmount {}.into());
 
         // but if it exceeds cap (even over multiple rounds), it fails
         // cap is enforced
-        let msg = HandleMsg::Mint {
+        let msg = ExecuteMsg::Mint {
             recipient: winner,
-            amount: Uint128(333_222_222),
+            amount: Uint128::new(333_222_222),
         };
-        let env = mock_env(&minter, &[]);
-        let res = handle(&mut deps, env, msg);
-        assert_generic_error_message(res, "Minting cannot exceed the cap");
+        let info = mock_info(minter.as_ref(), &[]);
+        let env = mock_env();
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::CannotExceedCap {}.into());
     }
 
     #[test]
     fn others_cannot_mint() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
-        do_init_with_minter(
-            &mut deps,
-            &HumanAddr::from("genesis"),
-            Uint128(1234),
-            &HumanAddr::from("minter"),
+        let mut deps = mock_dependencies(&[]);
+        do_instantiate_with_minter(
+            deps.as_mut(),
+            &String::from("genesis"),
+            Uint128::new(1234),
+            &String::from("minter"),
             None,
         );
 
-        let msg = HandleMsg::Mint {
-            recipient: HumanAddr::from("lucky"),
-            amount: Uint128(222),
+        let msg = ExecuteMsg::Mint {
+            recipient: String::from("lucky"),
+            amount: Uint128::new(222),
         };
-        let env = mock_env(&HumanAddr::from("anyone else"), &[]);
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::unauthorized());
+        let info = mock_info("anyone else", &[]);
+        let env = mock_env();
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::Unauthorized {}.into());
     }
 
     #[test]
     fn no_one_mints_if_minter_unset() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
-        do_init(&mut deps, &HumanAddr::from("genesis"), Uint128(1234));
+        let mut deps = mock_dependencies(&[]);
+        do_instantiate(deps.as_mut(), &String::from("genesis"), Uint128::new(1234));
 
-        let msg = HandleMsg::Mint {
-            recipient: HumanAddr::from("lucky"),
-            amount: Uint128(222),
+        let msg = ExecuteMsg::Mint {
+            recipient: String::from("lucky"),
+            amount: Uint128::new(222),
         };
-        let env = mock_env(&HumanAddr::from("genesis"), &[]);
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::unauthorized());
+        let info = mock_info("genesis", &[]);
+        let env = mock_env();
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::Unauthorized {}.into());
     }
 
     #[test]
-    fn init_multiple_accounts() {
-        let mut deps = mock_dependencies(CANONICAL_LENGTH, &[]);
+    fn instantiate_multiple_accounts() {
+        let mut deps = mock_dependencies(&[]);
         let amount1 = Uint128::from(11223344u128);
-        let addr1 = HumanAddr::from("addr0001");
+        let addr1 = String::from("addr0001");
         let amount2 = Uint128::from(7890987u128);
-        let addr2 = HumanAddr::from("addr0002");
-        let init_msg = InitMsg {
+        let addr2 = String::from("addr0002");
+        let instantiate_msg = InstantiateMsg {
             name: "Bash Shell".to_string(),
             symbol: "BASH".to_string(),
             decimals: 6,
             initial_balances: vec![
-                Cw20CoinHuman {
+                Cw20Coin {
                     address: addr1.clone(),
                     amount: amount1,
                 },
-                Cw20CoinHuman {
+                Cw20Coin {
                     address: addr2.clone(),
                     amount: amount2,
                 },
             ],
             mint: None,
-            init_hook: None,
-            red_bank_address: HumanAddr::from("red_bank"),
-            incentives_address: HumanAddr::from("incentives"),
+            red_bank_address: String::from("red_bank"),
+            incentives_address: String::from("incentives"),
         };
-        let env = mock_env(&HumanAddr("creator".to_string()), &[]);
-        let res = init(&mut deps, env, init_msg).unwrap();
+        let info = mock_info("creator", &[]);
+        let env = mock_env();
+        let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         assert_eq!(
-            query_token_info(&deps).unwrap(),
+            query_token_info(deps.as_ref()).unwrap(),
             TokenInfoResponse {
                 name: "Bash Shell".to_string(),
                 symbol: "BASH".to_string(),
@@ -774,97 +725,66 @@ mod tests {
                 total_supply: amount1 + amount2,
             }
         );
-        assert_eq!(get_balance(&deps, &addr1), amount1);
-        assert_eq!(get_balance(&deps, &addr2), amount2);
-    }
-
-    #[test]
-    fn queries_work() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let addr1 = HumanAddr::from("addr0001");
-        let amount1 = Uint128::from(12340000u128);
-
-        let expected = do_init(&mut deps, &addr1, amount1);
-
-        // check meta query
-        let loaded = query_token_info(&deps).unwrap();
-        assert_eq!(expected, loaded);
-
-        // check balance query (full)
-        let data = query(&deps, QueryMsg::Balance { address: addr1 }).unwrap();
-        let loaded: BalanceResponse = from_binary(&data).unwrap();
-        assert_eq!(loaded.balance, amount1);
-
-        // check balance query (empty)
-        let data = query(
-            &deps,
-            QueryMsg::Balance {
-                address: HumanAddr::from("addr0002"),
-            },
-        )
-        .unwrap();
-        let loaded: BalanceResponse = from_binary(&data).unwrap();
-        assert_eq!(loaded.balance, Uint128::zero());
+        assert_eq!(get_balance(deps.as_ref(), addr1), amount1);
+        assert_eq!(get_balance(deps.as_ref(), addr2), amount2);
     }
 
     #[test]
     fn transfer() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let addr1 = HumanAddr::from("addr0001");
-        let addr2 = HumanAddr::from("addr0002");
+        let mut deps = mock_dependencies(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
 
-        do_init(&mut deps, &addr1, amount1);
+        do_instantiate(deps.as_mut(), &addr1, amount1);
 
         // cannot transfer nothing
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: Uint128::zero(),
         };
-        let res = handle(&mut deps, env, msg);
-        assert_generic_error_message(res, "Invalid zero amount");
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::InvalidZeroAmount {}.into());
 
         // cannot send more than we have
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: too_much,
         };
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Underflow { .. } => {}
-            e => panic!("Unexpected error: {}", e),
-        }
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
         // cannot send from empty account
-        let env = mock_env(addr2.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let info = mock_info(addr2.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
             recipient: addr1.clone(),
             amount: transfer,
         };
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Underflow { .. } => {}
-            e => panic!("Unexpected error: {}", e),
-        }
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
         // valid transfer
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Transfer {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
             recipient: addr2.clone(),
             amount: transfer,
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.messages,
             vec![
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("red_bank"),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("red_bank"),
                     msg: to_binary(
-                        &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: addr1.clone(),
                             recipient_address: addr2.clone(),
                             sender_previous_balance: amount1,
@@ -873,277 +793,292 @@ mod tests {
                         }
                     )
                     .unwrap(),
-                    send: vec![],
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    funds: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: addr1.clone(),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
                     },)
                     .unwrap(),
-                    send: vec![],
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    funds: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: addr2.clone(),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,
                     },)
                     .unwrap(),
-                    send: vec![],
-                }),
+                    funds: vec![],
+                })),
             ],
         );
 
-        let remainder = (amount1 - transfer).unwrap();
-        assert_eq!(get_balance(&deps, &addr1), remainder);
-        assert_eq!(get_balance(&deps, &addr2), transfer);
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        let remainder = amount1.checked_sub(transfer).unwrap();
+        assert_eq!(get_balance(deps.as_ref(), addr1), remainder);
+        assert_eq!(get_balance(deps.as_ref(), addr2), transfer);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
     }
 
     #[test]
     fn transfer_on_liquidation() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let addr1 = HumanAddr::from("addr0001");
-        let addr2 = HumanAddr::from("addr0002");
-        let red_bank = HumanAddr::from("red_bank");
+        let mut deps = mock_dependencies(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let addr2 = String::from("addr0002");
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
 
-        do_init(&mut deps, &addr1, amount1);
+        do_instantiate(deps.as_mut(), &addr1, amount1);
 
         // cannot transfer nothing
         {
-            let env = mock_env(red_bank.clone(), &[]);
-            let msg = HandleMsg::TransferOnLiquidation {
+            let info = mock_info("red_bank", &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
                 amount: Uint128::zero(),
             };
-            let res = handle(&mut deps, env, msg);
-            assert_generic_error_message(res, "Invalid zero amount");
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, Cw20BaseError::InvalidZeroAmount {}.into());
         }
 
         // cannot send more than we have
         {
-            let env = mock_env(red_bank.clone(), &[]);
-            let msg = HandleMsg::TransferOnLiquidation {
+            let info = mock_info("red_bank", &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
                 amount: too_much,
             };
-            let res = handle(&mut deps, env, msg);
-            match res.unwrap_err() {
-                StdError::Underflow { .. } => {}
-                e => panic!("Unexpected error: {}", e),
-            }
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
         }
 
         // cannot send from empty account
         {
-            let env = mock_env(red_bank.clone(), &[]);
-            let msg = HandleMsg::TransferOnLiquidation {
+            let info = mock_info("red_bank", &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::TransferOnLiquidation {
                 sender: addr2.clone(),
                 recipient: addr1.clone(),
                 amount: transfer,
             };
-            let res = handle(&mut deps, env, msg);
-            match res.unwrap_err() {
-                StdError::Underflow { .. } => {}
-                e => panic!("Unexpected error: {}", e),
-            }
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
         }
 
         // only money market can call transfer on liquidation
         {
-            let env = mock_env(addr1.clone(), &[]);
-            let msg = HandleMsg::TransferOnLiquidation {
+            let info = mock_info(addr1.as_ref(), &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
                 amount: transfer,
             };
-            let res_error = handle(&mut deps, env, msg).unwrap_err();
-            assert_eq!(res_error, StdError::unauthorized());
+            let res_error = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(res_error, Cw20BaseError::Unauthorized {}.into());
         }
 
         // valid transfer on liquidation
         {
-            let env = mock_env(red_bank, &[]);
-            let msg = HandleMsg::TransferOnLiquidation {
+            let info = mock_info("red_bank", &[]);
+            let env = mock_env();
+            let msg = ExecuteMsg::TransferOnLiquidation {
                 sender: addr1.clone(),
                 recipient: addr2.clone(),
                 amount: transfer,
             };
-            let res = handle(&mut deps, env, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
             assert_eq!(
                 res.messages,
                 vec![
-                    CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: HumanAddr::from("incentives"),
-                        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: String::from("incentives"),
+                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: addr1.clone(),
                             user_balance_before: amount1,
                             total_supply_before: amount1,
                         },)
                         .unwrap(),
-                        send: vec![],
-                    }),
-                    CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: HumanAddr::from("incentives"),
-                        msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                        funds: vec![],
+                    })),
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: String::from("incentives"),
+                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: addr2.clone(),
                             user_balance_before: Uint128::zero(),
                             total_supply_before: amount1,
                         },)
                         .unwrap(),
-                        send: vec![],
-                    }),
+                        funds: vec![],
+                    })),
                 ]
             );
 
-            let remainder = (amount1 - transfer).unwrap();
-            assert_eq!(get_balance(&deps, &addr1), remainder);
-            assert_eq!(get_balance(&deps, &addr2), transfer);
-            assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+            let remainder = amount1.checked_sub(transfer).unwrap();
+            assert_eq!(get_balance(deps.as_ref(), addr1), remainder);
+            assert_eq!(get_balance(deps.as_ref(), addr2), transfer);
+            assert_eq!(
+                query_token_info(deps.as_ref()).unwrap().total_supply,
+                amount1
+            );
         }
     }
 
     #[test]
     fn burn() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let red_bank = HumanAddr::from("red_bank");
-        let addr1 = HumanAddr::from("addr0001");
+        let mut deps = mock_dependencies(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
         let amount1 = Uint128::from(12340000u128);
         let burn = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
 
-        do_init(&mut deps, &addr1, amount1);
+        do_instantiate(deps.as_mut(), &addr1, amount1);
 
         // cannot burn nothing
-        let env = mock_env(red_bank.clone(), &[]);
-        let msg = HandleMsg::Burn {
+        let info = mock_info("red_bank", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Burn {
             user: addr1.clone(),
             amount: Uint128::zero(),
         };
-        let res = handle(&mut deps, env, msg);
-        assert_generic_error_message(res, "Invalid zero amount");
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::InvalidZeroAmount {}.into());
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
 
         // cannot burn more than we have
-        let env = mock_env(red_bank.clone(), &[]);
-        let msg = HandleMsg::Burn {
+        let info = mock_info("red_bank", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Burn {
             user: addr1.clone(),
             amount: too_much,
         };
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Underflow { .. } => {}
-            e => panic!("Unexpected error: {}", e),
-        }
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
 
-        // only money market can burn
-        let env = mock_env(HumanAddr::from("someone_else"), &[]);
-        let msg = HandleMsg::Burn {
+        // only red bank can burn
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Burn {
             user: addr1.clone(),
             amount: burn,
         };
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::unauthorized());
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        let res_error = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(res_error, Cw20BaseError::Unauthorized {}.into());
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
 
         // valid burn reduces total supply
-        let env = mock_env(red_bank, &[]);
-        let msg = HandleMsg::Burn {
+        let info = mock_info("red_bank", &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Burn {
             user: addr1.clone(),
             amount: burn,
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("incentives"),
-                msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("incentives"),
+                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                     user_address: addr1.clone(),
                     user_balance_before: amount1,
                     total_supply_before: amount1,
                 },)
                 .unwrap(),
-                send: vec![],
-            }),]
+                funds: vec![],
+            })),]
         );
 
-        let remainder = (amount1 - burn).unwrap();
-        assert_eq!(get_balance(&deps, &addr1), remainder);
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, remainder);
+        let remainder = amount1.checked_sub(burn).unwrap();
+        assert_eq!(get_balance(deps.as_ref(), addr1), remainder);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            remainder
+        );
     }
 
     #[test]
     fn send() {
-        let mut deps = mock_dependencies(20, &coins(2, "token"));
-        let addr1 = HumanAddr::from("addr0001");
-        let contract = HumanAddr::from("addr0002");
+        let mut deps = mock_dependencies(&coins(2, "token"));
+        let addr1 = String::from("addr0001");
+        let contract = String::from("addr0002");
         let amount1 = Uint128::from(12340000u128);
         let transfer = Uint128::from(76543u128);
         let too_much = Uint128::from(12340321u128);
-        let send_msg = Binary::from(br#"{"some":123}"#);
+        let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
 
-        do_init(&mut deps, &addr1, amount1);
+        do_instantiate(deps.as_mut(), &addr1, amount1);
 
         // cannot send nothing
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: Uint128::zero(),
-            msg: Some(send_msg.clone()),
+            msg: send_msg.clone(),
         };
-        let res = handle(&mut deps, env, msg);
-        assert_generic_error_message(res, "Invalid zero amount");
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(err, Cw20BaseError::InvalidZeroAmount {}.into());
 
         // cannot send more than we have
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: too_much,
-            msg: Some(send_msg.clone()),
+            msg: send_msg.clone(),
         };
-        let res = handle(&mut deps, env, msg);
-        match res.unwrap_err() {
-            StdError::Underflow { .. } => {}
-            e => panic!("Unexpected error: {}", e),
-        }
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
         // valid transfer
-        let env = mock_env(addr1.clone(), &[]);
-        let msg = HandleMsg::Send {
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Send {
             contract: contract.clone(),
             amount: transfer,
-            msg: Some(send_msg.clone()),
+            msg: send_msg.clone(),
         };
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // ensure proper send message sent
         // this is the message we want delivered to the other side
         let binary_msg = Cw20ReceiveMsg {
             sender: addr1.clone(),
             amount: transfer,
-            msg: Some(send_msg),
+            msg: send_msg,
         }
         .into_binary()
         .unwrap();
 
-        // Ensure finalize liquidity token transfer msg is sent
         assert_eq!(
             res.messages,
             vec![
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("red_bank"),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("red_bank"),
                     msg: to_binary(
-                        &mars::red_bank::msg::HandleMsg::FinalizeLiquidityTokenTransfer {
+                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
                             sender_address: addr1.clone(),
                             recipient_address: contract.clone(),
                             sender_previous_balance: amount1,
@@ -1152,40 +1087,43 @@ mod tests {
                         }
                     )
                     .unwrap(),
-                    send: vec![],
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    funds: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: addr1.clone(),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
                     },)
                     .unwrap(),
-                    send: vec![],
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: HumanAddr::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::HandleMsg::BalanceChange {
+                    funds: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("incentives"),
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: contract.clone(),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,
                     },)
                     .unwrap(),
-                    send: vec![],
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
+                    funds: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: contract.clone(),
                     msg: binary_msg,
-                    send: vec![],
-                }),
+                    funds: vec![],
+                })),
             ]
         );
 
-        // ensure balance is properly transfered
-        let remainder = (amount1 - transfer).unwrap();
-        assert_eq!(get_balance(&deps, &addr1), remainder);
-        assert_eq!(get_balance(&deps, &contract), transfer);
-        assert_eq!(query_token_info(&deps).unwrap().total_supply, amount1);
+        // ensure balance is properly transferred
+        let remainder = amount1.checked_sub(transfer).unwrap();
+        assert_eq!(get_balance(deps.as_ref(), addr1), remainder);
+        assert_eq!(get_balance(deps.as_ref(), contract), transfer);
+        assert_eq!(
+            query_token_info(deps.as_ref()).unwrap().total_supply,
+            amount1
+        );
     }
 }

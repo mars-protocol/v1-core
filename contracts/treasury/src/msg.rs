@@ -1,15 +1,15 @@
-use cosmwasm_std::{CosmosMsg, HumanAddr};
+use cosmwasm_std::{Addr, CosmosMsg};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct InitMsg {
-    pub owner: HumanAddr,
+pub struct InstantiateMsg {
+    pub owner: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum HandleMsg {
+pub enum ExecuteMsg {
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
 }
@@ -20,10 +20,9 @@ pub enum QueryMsg {
     Config {},
 }
 
-// We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub owner: HumanAddr,
+    pub owner: Addr,
 }
 
 /// We currently take no arguments for migrations

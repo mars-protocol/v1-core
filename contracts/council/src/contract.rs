@@ -1,45 +1,45 @@
 use cosmwasm_std::{
-    from_binary, log, to_binary, Api, Binary, CanonicalAddr, CosmosMsg, Decimal, Env, Extern,
-    HandleResponse, HumanAddr, InitResponse, MigrateResponse, MigrateResult, Order, Querier,
-    QueryRequest, StdError, StdResult, Storage, Uint128, WasmMsg, WasmQuery,
+    attr, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
+    DepsMut, Env, MessageInfo, Order, Querier, QuerierWrapper, QueryRequest, Response, StdError,
+    StdResult, Storage, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
+use cw_storage_plus::{Bound, U64Key};
 
-use cw0::calc_range_start_human;
-use cw20::{Cw20HandleMsg, Cw20ReceiveMsg};
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::helpers::{human_addr_into_canonical, read_be_u64};
+use mars::error::MarsError;
+use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
 use mars::xmars_token;
 
+use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, HandleMsg, InitMsg, MigrateMsg, MsgExecuteCall,
+    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, MigrateMsg, MsgExecuteCall,
     ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesResponse,
     ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
-use crate::state;
 use crate::state::{
-    Config, Council, Proposal, ProposalExecuteCall, ProposalStatus, ProposalVote,
-    ProposalVoteOption,
+    Config, GlobalState, Proposal, ProposalExecuteCall, ProposalStatus, ProposalVote,
+    ProposalVoteOption, CONFIG, GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
 };
 
-// CONSTANTS
+// Proposal validation attributes
 const MIN_TITLE_LENGTH: usize = 4;
 const MAX_TITLE_LENGTH: usize = 64;
 const MIN_DESC_LENGTH: usize = 4;
 const MAX_DESC_LENGTH: usize = 1024;
 const MIN_LINK_LENGTH: usize = 12;
 const MAX_LINK_LENGTH: usize = 128;
-const DEFAULT_START: u64 = 1;
-const DEFAULT_LIMIT: u32 = 10;
-const MAX_LIMIT: u32 = 30;
 
 // INIT
 
-pub fn init<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+#[entry_point]
+pub fn instantiate(
+    deps: DepsMut,
     _env: Env,
-    msg: InitMsg,
-) -> StdResult<InitResponse> {
+    _info: MessageInfo,
+    msg: InstantiateMsg,
+) -> StdResult<Response> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -69,10 +69,11 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
 
     // initialize Config
     let config = Config {
-        address_provider_address: deps
-            .api
-            .canonical_address(&address_provider_address.unwrap())?,
-
+        address_provider_address: option_string_to_addr(
+            deps.api,
+            address_provider_address,
+            zero_address(),
+        )?,
         proposal_voting_period: proposal_voting_period.unwrap(),
         proposal_effective_delay: proposal_effective_delay.unwrap(),
         proposal_expiration_period: proposal_expiration_period.unwrap(),
@@ -84,135 +85,133 @@ pub fn init<S: Storage, A: Api, Q: Querier>(
     // Validate config
     config.validate()?;
 
-    state::config(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
     // initialize State
-    state::council(&mut deps.storage).save(&Council { proposal_count: 0 })?;
+    GLOBAL_STATE.save(deps.storage, &GlobalState { proposal_count: 0 })?;
 
     // Prepare response, should instantiate Mars and use the Register hook
-    Ok(InitResponse::default())
+    Ok(Response::default())
 }
 
 // HANDLERS
 
-pub fn handle<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute(
+    deps: DepsMut,
     env: Env,
-    msg: HandleMsg,
-) -> StdResult<HandleResponse> {
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
-        HandleMsg::Receive(cw20_msg) => handle_receive_cw20(deps, env, cw20_msg),
+        ExecuteMsg::Receive(cw20_msg) => execute_receive_cw20(deps, env, info, cw20_msg),
 
-        HandleMsg::CastVote { proposal_id, vote } => handle_cast_vote(deps, env, proposal_id, vote),
-        HandleMsg::EndProposal { proposal_id } => handle_end_proposal(deps, env, proposal_id),
-
-        HandleMsg::ExecuteProposal { proposal_id } => {
-            handle_execute_proposal(deps, env, proposal_id)
+        ExecuteMsg::CastVote { proposal_id, vote } => {
+            execute_cast_vote(deps, env, info, proposal_id, vote)
+        }
+        ExecuteMsg::EndProposal { proposal_id } => {
+            execute_end_proposal(deps, env, info, proposal_id)
         }
 
-        HandleMsg::UpdateConfig { config } => handle_update_config(deps, env, config),
+        ExecuteMsg::ExecuteProposal { proposal_id } => {
+            execute_execute_proposal(deps, env, info, proposal_id)
+        }
+
+        ExecuteMsg::UpdateConfig { config } => execute_update_config(deps, env, info, config),
     }
 }
 
 /// cw20 receive implementation
-pub fn handle_receive_cw20<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_receive_cw20(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
-) -> StdResult<HandleResponse> {
-    if let Some(msg) = cw20_msg.msg {
-        match from_binary(&msg)? {
-            ReceiveMsg::SubmitProposal {
-                title,
-                description,
-                link,
-                execute_calls,
-            } => handle_submit_proposal(
-                deps,
-                env,
-                cw20_msg.sender,
-                cw20_msg.amount,
-                title,
-                description,
-                link,
-                execute_calls,
-            ),
-        }
-    } else {
-        Err(StdError::generic_err("Invalid Cw20ReceiveMsg"))
+) -> Result<Response, ContractError> {
+    match from_binary(&cw20_msg.msg)? {
+        ReceiveMsg::SubmitProposal {
+            title,
+            description,
+            link,
+            execute_calls,
+        } => execute_submit_proposal(
+            deps,
+            env,
+            info,
+            cw20_msg.sender,
+            cw20_msg.amount,
+            title,
+            description,
+            link,
+            execute_calls,
+        ),
     }
 }
 
-pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_submit_proposal(
+    deps: DepsMut,
     env: Env,
-    submitter_address: HumanAddr,
+    info: MessageInfo,
+    submitter_address_unchecked: String,
     deposit_amount: Uint128,
     title: String,
     description: String,
     option_link: Option<String>,
     option_msg_execute_calls: Option<Vec<MsgExecuteCall>>,
-) -> StdResult<HandleResponse> {
+) -> Result<Response, ContractError> {
     // Validate title
     if title.len() < MIN_TITLE_LENGTH {
-        return Err(StdError::generic_err("Title too short"));
+        return Err(ContractError::invalid_proposal("title too short"));
     }
     if title.len() > MAX_TITLE_LENGTH {
-        return Err(StdError::generic_err("Title too long"));
+        return Err(ContractError::invalid_proposal("title too long"));
     }
 
     // Validate description
     if description.len() < MIN_DESC_LENGTH {
-        return Err(StdError::generic_err("Description too short"));
+        return Err(ContractError::invalid_proposal("description too short"));
     }
     if description.len() > MAX_DESC_LENGTH {
-        return Err(StdError::generic_err("Description too long"));
+        return Err(ContractError::invalid_proposal("description too long"));
     }
 
     // Validate Link
     if let Some(link) = &option_link {
         if link.len() < MIN_LINK_LENGTH {
-            return Err(StdError::generic_err("Link too short"));
+            return Err(ContractError::invalid_proposal("Link too short"));
         }
         if link.len() > MAX_LINK_LENGTH {
-            return Err(StdError::generic_err("Link too long"));
+            return Err(ContractError::invalid_proposal("Link too long"));
         }
     }
 
-    let config = state::config_read(&deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let mars_token_address = address_provider::helpers::query_address(
-        &deps,
-        &config.address_provider_address,
+        &deps.querier,
+        config.address_provider_address,
         MarsContract::MarsToken,
     )?;
 
-    if env.message.sender != mars_token_address {
-        return Err(StdError::unauthorized());
-    }
-
+    let is_mars = info.sender == mars_token_address;
     // Validate deposit amount
-    if deposit_amount < config.proposal_required_deposit {
-        return Err(StdError::generic_err(format!(
-            "Must deposit at least {} tokens",
+    if (deposit_amount < config.proposal_required_deposit) || !is_mars {
+        return Err(ContractError::invalid_proposal(format!(
+            "Must deposit at least {} Mars tokens",
             config.proposal_required_deposit
         )));
     }
 
     // Update proposal totals
-    let mut council_singleton = state::council(&mut deps.storage);
-    let mut council = council_singleton.load()?;
-    council.proposal_count += 1;
-    council_singleton.save(&council)?;
+    let mut global_state = GLOBAL_STATE.load(deps.storage)?;
+    global_state.proposal_count += 1;
+    GLOBAL_STATE.save(deps.storage, &global_state)?;
 
-    // Transform MsgExecuteCalls into ProposalExecuteCalls by canonicalizing the contract address
+    // Transform MsgExecuteCalls into ProposalExecuteCalls by validating the contract address
     let option_proposal_execute_calls = if let Some(calls) = option_msg_execute_calls {
         let mut proposal_execute_calls: Vec<ProposalExecuteCall> = vec![];
         for call in calls {
             proposal_execute_calls.push(ProposalExecuteCall {
                 execution_order: call.execution_order,
-                target_contract_canonical_address: deps
-                    .api
-                    .canonical_address(&call.target_contract_address)?,
+                target_contract_address: deps.api.addr_validate(&call.target_contract_address)?,
                 msg: call.msg,
             });
         }
@@ -222,7 +221,7 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
     };
 
     let new_proposal = Proposal {
-        submitter_canonical_address: deps.api.canonical_address(&submitter_address)?,
+        submitter_address: deps.api.addr_validate(&submitter_address_unchecked)?,
         status: ProposalStatus::Active,
         for_votes: Uint128::zero(),
         against_votes: Uint128::zero(),
@@ -234,50 +233,52 @@ pub fn handle_submit_proposal<S: Storage, A: Api, Q: Querier>(
         execute_calls: option_proposal_execute_calls,
         deposit_amount,
     };
-    state::proposals(&mut deps.storage)
-        .save(&council.proposal_count.to_be_bytes(), &new_proposal)?;
+    PROPOSALS.save(
+        deps.storage,
+        U64Key::new(global_state.proposal_count),
+        &new_proposal,
+    )?;
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages: vec![],
-        log: vec![
-            log("action", "submit_proposal"),
-            log("proposal_submitter", &submitter_address),
-            log("proposal_id", &council.proposal_count),
-            log("proposal_end_height", &new_proposal.end_height),
+        attributes: vec![
+            attr("action", "submit_proposal"),
+            attr("proposal_submitter", submitter_address_unchecked),
+            attr("proposal_id", &global_state.proposal_count),
+            attr("proposal_end_height", &new_proposal.end_height),
         ],
+        events: vec![],
         data: None,
     })
 }
 
-pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_cast_vote(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     proposal_id: u64,
     vote_option: ProposalVoteOption,
-) -> StdResult<HandleResponse> {
-    let mut proposal = state::proposals_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+) -> Result<Response, ContractError> {
+    let proposal_path = PROPOSALS.key(U64Key::new(proposal_id));
+    let mut proposal = proposal_path.load(deps.storage)?;
     if proposal.status != ProposalStatus::Active {
-        return Err(StdError::generic_err("Proposal is not active"));
+        return Err(ContractError::ProposalNotActive {});
     }
 
     if env.block.height > proposal.end_height {
-        return Err(StdError::generic_err("Proposal has expired"));
+        return Err(ContractError::VoteVotingPeriodEnded {});
     }
 
-    let voter_canonical_address = deps.api.canonical_address(&env.message.sender)?;
-    if state::proposal_votes_read(&deps.storage, proposal_id)
-        .may_load(voter_canonical_address.as_slice())?
-        .is_some()
-    {
-        return Err(StdError::generic_err(
-            "User has already voted in this proposal",
-        ));
+    let proposal_vote_path = PROPOSAL_VOTES.key((U64Key::new(proposal_id), &info.sender));
+
+    if proposal_vote_path.may_load(deps.storage)?.is_some() {
+        return Err(ContractError::VoteUserAlreadyVoted {});
     }
 
-    let config = state::config_read(&deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let xmars_token_address = address_provider::helpers::query_address(
-        &deps,
-        &config.address_provider_address,
+        &deps.querier,
+        config.address_provider_address,
         MarsContract::XMarsToken,
     )?;
 
@@ -285,15 +286,14 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
     let voting_power = xmars_get_balance_at(
         &deps.querier,
         xmars_token_address,
-        env.message.sender.clone(),
+        info.sender.clone(),
         balance_at_block,
     )?;
 
     if voting_power == Uint128::zero() {
-        return Err(StdError::generic_err(format!(
-            "User has no balance at block: {}",
-            balance_at_block
-        )));
+        return Err(ContractError::VoteNoVotingPower {
+            block: balance_at_block,
+        });
     }
 
     match vote_option {
@@ -301,74 +301,61 @@ pub fn handle_cast_vote<S: Storage, A: Api, Q: Querier>(
         ProposalVoteOption::Against => proposal.against_votes += voting_power,
     };
 
-    state::proposal_votes(&mut deps.storage, proposal_id).save(
-        voter_canonical_address.as_slice(),
+    proposal_vote_path.save(
+        deps.storage,
         &ProposalVote {
             option: vote_option.clone(),
             power: voting_power,
         },
     )?;
 
-    state::proposals(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
+    proposal_path.save(deps.storage, &proposal)?;
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages: vec![],
-        log: vec![
-            log("action", "cast_vote"),
-            log("proposal_id", proposal_id),
-            log("voter", &env.message.sender),
-            log("vote", vote_option),
-            log("voting_power", voting_power),
+        attributes: vec![
+            attr("action", "cast_vote"),
+            attr("proposal_id", proposal_id),
+            attr("voter", &info.sender),
+            attr("vote", vote_option),
+            attr("voting_power", voting_power),
         ],
+        events: vec![],
         data: None,
     })
 }
 
-pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_end_proposal(
+    deps: DepsMut,
     env: Env,
+    _info: MessageInfo,
     proposal_id: u64,
-) -> StdResult<HandleResponse> {
-    let proposals_bucket = state::proposals(&mut deps.storage);
-    let mut proposal = proposals_bucket.load(&proposal_id.to_be_bytes())?;
+) -> Result<Response, ContractError> {
+    let proposal_path = PROPOSALS.key(U64Key::new(proposal_id));
+    let mut proposal = proposal_path.load(deps.storage)?;
 
     if proposal.status != ProposalStatus::Active {
-        return Err(StdError::generic_err("Proposal is not active"));
+        return Err(ContractError::ProposalNotActive {});
     }
 
     if env.block.height <= proposal.end_height {
-        return Err(StdError::generic_err("Voting period has not ended"));
+        return Err(ContractError::EndProposalVotingPeriodNotEnded {});
     }
 
-    let config = state::config_read(&deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     let mars_contracts = vec![
         MarsContract::MarsToken,
         MarsContract::Staking,
         MarsContract::XMarsToken,
     ];
-    let expected_len = mars_contracts.len();
     let mut addresses_query = address_provider::helpers::query_addresses(
-        &deps,
-        &config.address_provider_address,
+        &deps.querier,
+        config.address_provider_address,
         mars_contracts,
     )?;
-
-    if addresses_query.len() != expected_len {
-        return Err(StdError::generic_err(format!(
-            "Incorrect number of addresses, expected {} got {}",
-            expected_len,
-            addresses_query.len()
-        )));
-    }
-    let xmars_token_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
-    let staking_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
-    let mars_token_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting address from provider"))?;
+    let xmars_token_address = addresses_query.pop().unwrap();
+    let staking_address = addresses_query.pop().unwrap();
+    let mars_token_address = addresses_query.pop().unwrap();
 
     // Compute proposal quorum and threshold
     let for_votes = proposal.for_votes;
@@ -396,120 +383,116 @@ pub fn handle_end_proposal<S: Storage, A: Api, Q: Querier>(
     {
         // if quorum and threshold are met then proposal passes
         // refund deposit amount to submitter
-        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: mars_token_address,
-            send: vec![],
-            msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: deps
-                    .api
-                    .human_address(&proposal.submitter_canonical_address)?,
+        let msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address.into(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: proposal.submitter_address.to_string(),
                 amount: proposal.deposit_amount,
             })?,
-        });
+        }));
 
         (ProposalStatus::Passed, "passed", vec![msg])
     } else {
         // Else proposal is rejected
-        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: mars_token_address,
-            msg: to_binary(&Cw20HandleMsg::Transfer {
-                recipient: staking_address,
+        let msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address.into(),
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: staking_address.into(),
                 amount: proposal.deposit_amount,
             })?,
-            send: vec![],
-        });
+            funds: vec![],
+        }));
 
         (ProposalStatus::Rejected, "rejected", vec![msg])
     };
 
     // Update proposal status
     proposal.status = new_proposal_status;
-    state::proposals(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
+    proposal_path.save(deps.storage, &proposal)?;
 
-    Ok(HandleResponse {
+    Ok(Response {
         messages,
-        log: vec![
-            log("action", "end_proposal"),
-            log("proposal_id", proposal_id),
-            log("proposal_result", log_proposal_result),
+        attributes: vec![
+            attr("action", "end_proposal"),
+            attr("proposal_id", proposal_id),
+            attr("proposal_result", log_proposal_result),
         ],
+        events: vec![],
         data: None,
     })
 }
 
-pub fn handle_execute_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_execute_proposal(
+    deps: DepsMut,
     env: Env,
+    _info: MessageInfo,
     proposal_id: u64,
-) -> StdResult<HandleResponse> {
-    let mut proposal = state::proposals_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+) -> Result<Response, ContractError> {
+    let proposal_path = PROPOSALS.key(U64Key::new(proposal_id));
+    let mut proposal = proposal_path.load(deps.storage)?;
 
     if proposal.status != ProposalStatus::Passed {
-        return Err(StdError::generic_err(
-            "Proposal has not passed or has already been executed",
-        ));
+        return Err(ContractError::ExecuteProposalNotPassed {});
     }
 
-    let config = state::config_read(&deps.storage).load()?;
+    let config = CONFIG.load(deps.storage)?;
     if env.block.height < (proposal.end_height + config.proposal_effective_delay) {
-        return Err(StdError::generic_err(
-            "Proposal has not ended its delay period",
-        ));
+        return Err(ContractError::ExecuteProposalDelayNotEnded {});
     }
     if env.block.height
         > (proposal.end_height
             + config.proposal_effective_delay
             + config.proposal_expiration_period)
     {
-        return Err(StdError::generic_err("Proposal has expired"));
+        return Err(ContractError::ExecuteProposalExpired {});
     }
 
     proposal.status = ProposalStatus::Executed;
-    state::proposals(&mut deps.storage).save(&proposal_id.to_be_bytes(), &proposal)?;
+    proposal_path.save(deps.storage, &proposal)?;
 
-    let messages: Vec<CosmosMsg> = if let Some(mut proposal_execute_calls) = proposal.execute_calls
-    {
-        let mut ret = Vec::<CosmosMsg>::with_capacity(proposal_execute_calls.len());
+    let messages: Vec<SubMsg> = proposal
+        .execute_calls
+        .map(|mut proposal_execute_calls| {
+            proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
 
-        proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
+            proposal_execute_calls
+                .into_iter()
+                .map(|execute_call| {
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: execute_call.target_contract_address.into(),
+                        msg: execute_call.msg,
+                        funds: vec![],
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_else(Vec::new);
 
-        for execute_call in proposal_execute_calls {
-            ret.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: deps
-                    .api
-                    .human_address(&execute_call.target_contract_canonical_address)?,
-                msg: execute_call.msg,
-                send: vec![],
-            }));
-        }
-
-        ret
-    } else {
-        vec![]
-    };
-
-    Ok(HandleResponse {
+    Ok(Response {
         messages,
-        log: vec![
-            log("action", "execute_proposal"),
-            log("proposal_id", proposal_id),
+        events: vec![],
+        attributes: vec![
+            attr("action", "execute_proposal"),
+            attr("proposal_id", proposal_id),
         ],
         data: None,
     })
 }
 
 /// Update config
-pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
-    deps: &mut Extern<S, A, Q>,
+pub fn execute_update_config(
+    deps: DepsMut,
     env: Env,
+    info: MessageInfo,
     new_config: CreateOrUpdateConfig,
-) -> StdResult<HandleResponse> {
-    let mut config = state::config_read(&deps.storage).load()?;
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
 
     // In council, config can be updated only by itself (through an approved proposal)
     // instead of by it's owner
-    if env.message.sender != env.contract.address {
-        return Err(StdError::unauthorized());
+    if info.sender != env.contract.address {
+        return Err(MarsError::Unauthorized {}.into());
     }
 
     // Destructuring a struct’s fields into separate variables in order to force
@@ -526,7 +509,7 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     } = new_config;
 
     // Update config
-    config.address_provider_address = human_addr_into_canonical(
+    config.address_provider_address = option_string_to_addr(
         deps.api,
         address_provider_address,
         config.address_provider_address,
@@ -547,17 +530,18 @@ pub fn handle_update_config<S: Storage, A: Api, Q: Querier>(
     // Validate config
     config.validate()?;
 
-    state::config(&mut deps.storage).save(&config)?;
+    CONFIG.save(deps.storage, &config)?;
 
-    Ok(HandleResponse::default())
+    Ok(Response::default())
 }
 
 // QUERIES
 
-pub fn query<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    msg: QueryMsg,
-) -> StdResult<Binary> {
+// Pagination defaults
+const PAGINATION_DEFAULT_LIMIT: u32 = 10;
+const PAGINATION_MAX_LIMIT: u32 = 30;
+
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Proposals { start, limit } => to_binary(&query_proposals(deps, start, limit)?),
@@ -575,19 +559,11 @@ pub fn query<S: Storage, A: Api, Q: Querier>(
     }
 }
 
-fn query_config<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-) -> StdResult<ConfigResponse> {
-    let config = state::config_read(&deps.storage).load()?;
-
-    let address_provider_address = deps
-        .api
-        .human_address(&config.address_provider_address)
-        .unwrap_or_default();
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        address_provider_address,
-
+        address_provider_address: config.address_provider_address.into(),
         proposal_voting_period: config.proposal_voting_period,
         proposal_effective_delay: config.proposal_effective_delay,
         proposal_expiration_period: config.proposal_expiration_period,
@@ -597,25 +573,27 @@ fn query_config<S: Storage, A: Api, Q: Querier>(
     })
 }
 
-fn query_proposals<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    start: Option<u64>,
-    limit: Option<u32>,
+fn query_proposals(
+    deps: Deps,
+    start_from: Option<u64>,
+    option_limit: Option<u32>,
 ) -> StdResult<ProposalsListResponse> {
-    let council = state::council_read(&deps.storage).load().unwrap();
-    let start = start.unwrap_or(DEFAULT_START).to_be_bytes();
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let proposals = state::proposals_read(&deps.storage);
-    let proposals_list: StdResult<Vec<_>> = proposals
-        .range(Option::from(&start[..]), None, Order::Ascending)
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+
+    let option_start = start_from.map(|start| Bound::inclusive(U64Key::new(start)));
+    let limit = option_limit
+        .unwrap_or(PAGINATION_DEFAULT_LIMIT)
+        .min(PAGINATION_MAX_LIMIT) as usize;
+
+    let proposals_list: StdResult<Vec<_>> = PROPOSALS
+        .range(deps.storage, option_start, None, Order::Ascending)
         .take(limit)
         .map(|item| {
             let (k, v) = item?;
-            let proposal_id = read_be_u64(k.as_slice())?;
 
             Ok(ProposalInfo {
-                proposal_id,
-                submitter_address: deps.api.human_address(&v.submitter_canonical_address)?,
+                proposal_id: read_be_u64(&k)?,
+                submitter_address: v.submitter_address.into(),
                 status: v.status,
                 for_votes: v.for_votes,
                 against_votes: v.against_votes,
@@ -624,29 +602,24 @@ fn query_proposals<S: Storage, A: Api, Q: Querier>(
                 title: v.title,
                 description: v.description,
                 link: v.link,
-                execute_calls: map_execute_calls_response(&deps, v.execute_calls)?,
+                execute_calls: map_execute_calls_response(v.execute_calls)?,
                 deposit_amount: v.deposit_amount,
             })
         })
         .collect();
 
     Ok(ProposalsListResponse {
-        proposal_count: council.proposal_count,
+        proposal_count: global_state.proposal_count,
         proposal_list: proposals_list?,
     })
 }
 
-fn query_proposal<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
-    proposal_id: u64,
-) -> StdResult<ProposalInfo> {
-    let proposal = state::proposals_read(&deps.storage).load(&proposal_id.to_be_bytes())?;
+fn query_proposal(deps: Deps, proposal_id: u64) -> StdResult<ProposalInfo> {
+    let proposal = PROPOSALS.load(deps.storage, U64Key::new(proposal_id))?;
 
     Ok(ProposalInfo {
         proposal_id,
-        submitter_address: deps
-            .api
-            .human_address(&proposal.submitter_canonical_address)?,
+        submitter_address: proposal.submitter_address.into(),
         status: proposal.status,
         for_votes: proposal.for_votes,
         against_votes: proposal.against_votes,
@@ -655,35 +628,37 @@ fn query_proposal<S: Storage, A: Api, Q: Querier>(
         title: proposal.title,
         description: proposal.description,
         link: proposal.link,
-        execute_calls: map_execute_calls_response(&deps, proposal.execute_calls)?,
+        execute_calls: map_execute_calls_response(proposal.execute_calls)?,
         deposit_amount: proposal.deposit_amount,
     })
 }
 
-fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn query_proposal_votes(
+    deps: Deps,
     proposal_id: u64,
-    start_after: Option<HumanAddr>,
-    limit: Option<u32>,
+    start_after: Option<String>,
+    option_limit: Option<u32>,
 ) -> StdResult<ProposalVotesResponse> {
-    let limit = limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT) as usize;
-    let start = calc_range_start_human(deps.api, start_after)?;
+    let limit = option_limit
+        .unwrap_or(PAGINATION_DEFAULT_LIMIT)
+        .min(PAGINATION_MAX_LIMIT) as usize;
+    let option_start = start_after.map(Bound::exclusive);
 
-    let votes: StdResult<Vec<ProposalVoteResponse>> =
-        state::proposal_votes_read(&deps.storage, proposal_id)
-            .range(start.as_deref(), None, Order::Ascending)
-            .take(limit)
-            .map(|vote| {
-                let (k, v) = vote?;
-                let voter_address = deps.api.human_address(&CanonicalAddr::from(k))?;
+    let votes: StdResult<Vec<ProposalVoteResponse>> = PROPOSAL_VOTES
+        .prefix(U64Key::new(proposal_id))
+        .range(deps.storage, option_start, None, Order::Ascending)
+        .take(limit)
+        .map(|vote| {
+            let (k, v) = vote?;
+            let voter_address = String::from_utf8(k)?;
 
-                Ok(ProposalVoteResponse {
-                    voter_address,
-                    option: v.option,
-                    power: v.power,
-                })
+            Ok(ProposalVoteResponse {
+                voter_address,
+                option: v.option,
+                power: v.power,
             })
-            .collect();
+        })
+        .collect();
 
     Ok(ProposalVotesResponse {
         proposal_id,
@@ -694,39 +669,39 @@ fn query_proposal_votes<S: Storage, A: Api, Q: Querier>(
 // MIGRATION
 
 pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    _deps: &mut Extern<S, A, Q>,
+    _deps: DepsMut,
     _env: Env,
     _msg: MigrateMsg,
-) -> MigrateResult {
-    Ok(MigrateResponse::default())
+) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 // HELPERS
 //
-fn xmars_get_total_supply_at<Q: Querier>(
-    querier: &Q,
-    xmars_address: HumanAddr,
+fn xmars_get_total_supply_at(
+    querier: &QuerierWrapper,
+    xmars_address: Addr,
     block: u64,
 ) -> StdResult<Uint128> {
     let query: xmars_token::msg::TotalSupplyResponse =
         querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: xmars_address,
+            contract_addr: xmars_address.into(),
             msg: to_binary(&xmars_token::msg::QueryMsg::TotalSupplyAt { block })?,
         }))?;
 
     Ok(query.total_supply)
 }
 
-fn xmars_get_balance_at<Q: Querier>(
-    querier: &Q,
-    xmars_address: HumanAddr,
-    user_address: HumanAddr,
+fn xmars_get_balance_at(
+    querier: &QuerierWrapper,
+    xmars_address: Addr,
+    user_address: Addr,
     block: u64,
 ) -> StdResult<Uint128> {
     let query: cw20::BalanceResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: xmars_address,
+        contract_addr: xmars_address.into(),
         msg: to_binary(&xmars_token::msg::QueryMsg::BalanceAt {
-            address: user_address,
+            address: user_address.to_string(),
             block,
         })?,
     }))?;
@@ -734,8 +709,7 @@ fn xmars_get_balance_at<Q: Querier>(
     Ok(query.balance)
 }
 
-fn map_execute_calls_response<S: Storage, A: Api, Q: Querier>(
-    deps: &Extern<S, A, Q>,
+fn map_execute_calls_response(
     execute_calls: Option<Vec<ProposalExecuteCall>>,
 ) -> Result<Option<Vec<ProposalExecuteCallResponse>>, StdError> {
     Ok(match execute_calls {
@@ -744,10 +718,7 @@ fn map_execute_calls_response<S: Storage, A: Api, Q: Querier>(
             .map(|execute_call| {
                 Some(ProposalExecuteCallResponse {
                     execution_order: execute_call.execution_order,
-                    target_contract_human_address: deps
-                        .api
-                        .human_address(&execute_call.target_contract_canonical_address)
-                        .unwrap(),
+                    target_contract_address: execute_call.target_contract_address.to_string(),
                     msg: execute_call.msg.clone(),
                 })
             })
@@ -762,401 +733,432 @@ fn map_execute_calls_response<S: Storage, A: Api, Q: Querier>(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::Coin;
+    use cosmwasm_std::{Coin, OwnedDeps};
     use mars::testing::{
-        assert_generic_error_message, get_test_addresses, mock_dependencies, mock_env,
-        MarsMockQuerier, MockEnvParams,
+        assert_generic_error_message, mock_dependencies, mock_env, mock_info, MarsMockQuerier,
+        MockEnvParams,
     };
 
-    use crate::msg::HandleMsg::UpdateConfig;
+    use crate::msg::ExecuteMsg::UpdateConfig;
 
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
     const TEST_PROPOSAL_EFFECTIVE_DELAY: u64 = 200;
     const TEST_PROPOSAL_EXPIRATION_PERIOD: u64 = 300;
-    const TEST_PROPOSAL_REQUIRED_DEPOSIT: Uint128 = Uint128(10000);
+    const TEST_PROPOSAL_REQUIRED_DEPOSIT: Uint128 = Uint128::new(10000);
 
     #[test]
     fn test_proper_initialization() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
 
-        // *
         // init config with empty params
-        // *
-        let empty_config = CreateOrUpdateConfig {
-            address_provider_address: None,
+        {
+            let empty_config = CreateOrUpdateConfig {
+                address_provider_address: None,
 
-            proposal_voting_period: None,
-            proposal_effective_delay: None,
-            proposal_expiration_period: None,
-            proposal_required_deposit: None,
-            proposal_required_threshold: None,
-            proposal_required_quorum: None,
-        };
-        let msg = InitMsg {
-            config: empty_config,
-        };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = init(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "All params should be available during initialization",
-        );
+                proposal_voting_period: None,
+                proposal_effective_delay: None,
+                proposal_expiration_period: None,
+                proposal_required_deposit: None,
+                proposal_required_threshold: None,
+                proposal_required_quorum: None,
+            };
+            let msg = InstantiateMsg {
+                config: empty_config,
+            };
+            let info = mock_info("someone");
+            let env = cosmwasm_std::testing::mock_env();
+            let response = instantiate(deps.as_mut(), env, info, msg);
+            assert_generic_error_message(
+                response,
+                "All params should be available during initialization",
+            );
+        }
 
-        // *
         // init with proposal_required_quorum, proposal_required_threshold greater than 1
-        // *
-        let config = CreateOrUpdateConfig {
-            address_provider_address: Some(HumanAddr::from("address_provider")),
+        {
+            let config = CreateOrUpdateConfig {
+                address_provider_address: Some(String::from("address_provider")),
 
-            proposal_voting_period: Some(1),
-            proposal_effective_delay: Some(1),
-            proposal_expiration_period: Some(1),
-            proposal_required_deposit: Some(Uint128(1)),
-            proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
-            proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
-        };
-        let msg = InitMsg { config };
-        let env = cosmwasm_std::testing::mock_env("owner", &[]);
-        let response = init(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                Invalid params: [proposal_required_quorum, proposal_required_threshold]",
-        );
+                proposal_voting_period: Some(1),
+                proposal_effective_delay: Some(1),
+                proposal_expiration_period: Some(1),
+                proposal_required_deposit: Some(Uint128::new(1)),
+                proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
+                proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+            };
+            let msg = InstantiateMsg { config };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info("someone");
+            let response = instantiate(deps.as_mut(), env, info, msg);
+            assert_generic_error_message(
+                response,
+                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                    Invalid params: [proposal_required_quorum, proposal_required_threshold]",
+            );
+        }
 
-        let config = CreateOrUpdateConfig {
-            address_provider_address: Some(HumanAddr::from("address_provider")),
+        // Successful Init
+        {
+            let config = CreateOrUpdateConfig {
+                address_provider_address: Some(String::from("address_provider")),
 
-            proposal_voting_period: Some(1),
-            proposal_effective_delay: Some(1),
-            proposal_expiration_period: Some(1),
-            proposal_required_deposit: Some(Uint128(1)),
-            proposal_required_threshold: Some(Decimal::one()),
-            proposal_required_quorum: Some(Decimal::one()),
-        };
-        let msg = InitMsg { config };
-        let env = mock_env("owner", MockEnvParams::default());
+                proposal_voting_period: Some(1),
+                proposal_effective_delay: Some(1),
+                proposal_expiration_period: Some(1),
+                proposal_required_deposit: Some(Uint128::new(1)),
+                proposal_required_threshold: Some(Decimal::one()),
+                proposal_required_quorum: Some(Decimal::one()),
+            };
+            let msg = InstantiateMsg { config };
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("someone");
 
-        let res = init(&mut deps, env, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+            let res = instantiate(deps.as_mut(), env, info, msg).unwrap();
+            assert_eq!(0, res.messages.len());
 
-        let config = state::config_read(&deps.storage).load().unwrap();
-        assert_eq!(
-            deps.api
-                .canonical_address(&HumanAddr::from("address_provider"))
-                .unwrap(),
-            config.address_provider_address
-        );
+            let config = CONFIG.load(&deps.storage).unwrap();
+            assert_eq!(
+                Addr::unchecked("address_provider"),
+                config.address_provider_address
+            );
 
-        let council = state::council_read(&deps.storage).load().unwrap();
-        assert_eq!(council.proposal_count, 0);
+            let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+            assert_eq!(global_state.proposal_count, 0);
+        }
     }
 
     #[test]
     fn test_update_config() {
-        let mut deps = mock_dependencies(20, &[]);
+        let mut deps = mock_dependencies(&[]);
 
         // *
         // init config with valid params
         // *
         let init_config = CreateOrUpdateConfig {
-            address_provider_address: Some(HumanAddr::from("address_provider")),
+            address_provider_address: Some(String::from("address_provider")),
 
             proposal_voting_period: Some(10),
             proposal_effective_delay: Some(11),
             proposal_expiration_period: Some(12),
-            proposal_required_deposit: Some(Uint128(111)),
+            proposal_required_deposit: Some(Uint128::new(111)),
             proposal_required_threshold: Some(Decimal::one()),
             proposal_required_quorum: Some(Decimal::one()),
         };
-        let msg = InitMsg {
+        let msg = InstantiateMsg {
             config: init_config.clone(),
         };
-        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
-        let _res = init(&mut deps, env, msg).unwrap();
+        let env = cosmwasm_std::testing::mock_env();
+        let info = mock_info(MOCK_CONTRACT_ADDR);
+        let _res = instantiate(deps.as_mut(), env, info, msg).unwrap();
 
         // *
         // update config with proposal_required_quorum, proposal_required_threshold greater than 1
         // *
-        let config = CreateOrUpdateConfig {
-            proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
-            proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
-            ..init_config.clone()
-        };
-        let msg = UpdateConfig { config };
-        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                Invalid params: [proposal_required_quorum, proposal_required_threshold]",
-        );
+        {
+            let config = CreateOrUpdateConfig {
+                proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
+                proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+                ..init_config.clone()
+            };
+            let msg = UpdateConfig { config };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info(MOCK_CONTRACT_ADDR);
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                response,
+                StdError::generic_err("[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
+                    Invalid params: [proposal_required_quorum, proposal_required_threshold]",
+                ).into()
+            );
+        }
 
         // *
         // only council itself is authorized
         // *
-        let msg = UpdateConfig {
-            config: init_config,
-        };
-        let env = cosmwasm_std::testing::mock_env("somebody", &[]);
-        let error_res = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(error_res, StdError::unauthorized());
+        {
+            let msg = UpdateConfig {
+                config: init_config,
+            };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info("somebody");
+            let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(error_res, MarsError::Unauthorized {}.into());
+        }
 
         // *
         // update config with all new params
         // *
-        let config = CreateOrUpdateConfig {
-            address_provider_address: Some(HumanAddr::from("new_address_provider")),
+        {
+            let config = CreateOrUpdateConfig {
+                address_provider_address: Some(String::from("new_address_provider")),
 
-            proposal_voting_period: Some(101),
-            proposal_effective_delay: Some(111),
-            proposal_expiration_period: Some(121),
-            proposal_required_deposit: Some(Uint128(1111)),
-            proposal_required_threshold: Some(Decimal::from_ratio(4u128, 5u128)),
-            proposal_required_quorum: Some(Decimal::from_ratio(1u128, 5u128)),
-        };
-        let msg = UpdateConfig {
-            config: config.clone(),
-        };
-        // sender as contract address
-        let env = cosmwasm_std::testing::mock_env(MOCK_CONTRACT_ADDR, &[]);
-        // we can just call .unwrap() to assert this was a success
-        let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+                proposal_voting_period: Some(101),
+                proposal_effective_delay: Some(111),
+                proposal_expiration_period: Some(121),
+                proposal_required_deposit: Some(Uint128::new(1111)),
+                proposal_required_threshold: Some(Decimal::from_ratio(4u128, 5u128)),
+                proposal_required_quorum: Some(Decimal::from_ratio(1u128, 5u128)),
+            };
+            let msg = UpdateConfig {
+                config: config.clone(),
+            };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info(MOCK_CONTRACT_ADDR);
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            assert_eq!(0, res.messages.len());
 
-        // Read config from state
-        let new_config = state::config_read(&deps.storage).load().unwrap();
+            // Read config from state
+            let new_config = CONFIG.load(&deps.storage).unwrap();
 
-        assert_eq!(
-            new_config.address_provider_address,
-            deps.api
-                .canonical_address(&HumanAddr::from("new_address_provider"))
-                .unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_voting_period,
-            config.proposal_voting_period.unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_effective_delay,
-            config.proposal_effective_delay.unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_expiration_period,
-            config.proposal_expiration_period.unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_required_deposit,
-            config.proposal_required_deposit.unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_required_threshold,
-            config.proposal_required_threshold.unwrap()
-        );
-        assert_eq!(
-            new_config.proposal_required_quorum,
-            config.proposal_required_quorum.unwrap()
-        );
+            assert_eq!(
+                new_config.address_provider_address,
+                Addr::unchecked("new_address_provider")
+            );
+            assert_eq!(
+                new_config.proposal_voting_period,
+                config.proposal_voting_period.unwrap()
+            );
+            assert_eq!(
+                new_config.proposal_effective_delay,
+                config.proposal_effective_delay.unwrap()
+            );
+            assert_eq!(
+                new_config.proposal_expiration_period,
+                config.proposal_expiration_period.unwrap()
+            );
+            assert_eq!(
+                new_config.proposal_required_deposit,
+                config.proposal_required_deposit.unwrap()
+            );
+            assert_eq!(
+                new_config.proposal_required_threshold,
+                config.proposal_required_threshold.unwrap()
+            );
+            assert_eq!(
+                new_config.proposal_required_quorum,
+                config.proposal_required_quorum.unwrap()
+            );
+        }
     }
 
     #[test]
     fn test_submit_proposal_invalid_params() {
         let mut deps = th_setup(&[]);
 
+        // *
         // Invalid title
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        // *
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "a".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Title too short");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::invalid_proposal("title too short"));
+        }
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: (0..100).map(|_| "a").collect::<String>(),
                     description: "A valid description".to_string(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Title too long");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::invalid_proposal("title too long"));
+        }
 
+        // *
         // Invalid description
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        // *
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "a".to_string(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Description too short");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                response,
+                ContractError::invalid_proposal("description too short")
+            );
+        }
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: (0..1030).map(|_| "a").collect::<String>(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Description too long");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                response,
+                ContractError::invalid_proposal("description too long")
+            );
+        }
 
+        // *
         // Invalid link
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        // *
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some("a".to_string()),
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Link too short");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::invalid_proposal("Link too short"));
+        }
 
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some((0..150).map(|_| "a").collect::<String>()),
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: Uint128(2_000_000),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Link too long");
+                sender: String::from("submitter"),
+                amount: Uint128::new(2_000_000),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::invalid_proposal("Link too long"));
+        }
 
+        // *
         // Invalid deposit amount
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        // *
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: (TEST_PROPOSAL_REQUIRED_DEPOSIT - Uint128(100)).unwrap(),
-        });
-        let env = mock_env("mars_token", MockEnvParams::default());
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Must deposit at least 10000 tokens");
+                sender: String::from("submitter"),
+                amount: TEST_PROPOSAL_REQUIRED_DEPOSIT - Uint128::new(100),
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("mars_token");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                response,
+                ContractError::invalid_proposal("Must deposit at least 10000 Mars tokens")
+            );
+        }
 
+        // *
         // Invalid deposit currency
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
+        // *
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::SubmitProposal {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
                     execute_calls: None,
                 })
                 .unwrap(),
-            ),
-            sender: HumanAddr::from("submitter"),
-            amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
-        });
-        let env = mock_env("someothertoken", MockEnvParams::default());
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(res_error, StdError::unauthorized());
+                sender: String::from("submitter"),
+                amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
+            });
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("other_token");
+            let res_error = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                res_error,
+                ContractError::invalid_proposal("Must deposit at least 10000 Mars tokens")
+            );
+        }
     }
 
     #[test]
     fn test_submit_proposal() {
         let mut deps = th_setup(&[]);
-        let submitter_address = HumanAddr::from("submitter");
-        let submitter_canonical_address = deps.api.canonical_address(&submitter_address).unwrap();
+        let submitter_address = Addr::unchecked("submitter");
 
         // Submit Proposal without link or call data
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
-                    title: "A valid title".to_string(),
-                    description: "A valid description".to_string(),
-                    link: None,
-                    execute_calls: None,
-                })
-                .unwrap(),
-            ),
-            sender: submitter_address.clone(),
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            msg: to_binary(&ReceiveMsg::SubmitProposal {
+                title: "A valid title".to_string(),
+                description: "A valid description".to_string(),
+                link: None,
+                execute_calls: None,
+            })
+            .unwrap(),
+            sender: submitter_address.to_string(),
             amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
-        let env = mock_env(
-            "mars_token",
-            MockEnvParams {
-                block_height: 100_000,
-                ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, msg).unwrap();
+        let env = mock_env(MockEnvParams {
+            block_height: 100_000,
+            ..Default::default()
+        });
+        let info = mock_info("mars_token");
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "submit_proposal"),
-                log("proposal_submitter", "submitter"),
-                log("proposal_id", 1),
-                log("proposal_end_height", expected_end_height),
+                attr("action", "submit_proposal"),
+                attr("proposal_submitter", "submitter"),
+                attr("proposal_id", 1),
+                attr("proposal_end_height", expected_end_height),
             ]
         );
 
-        let council = state::council_read(&deps.storage).load().unwrap();
-        assert_eq!(council.proposal_count, 1);
+        let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+        assert_eq!(global_state.proposal_count, 1);
 
-        let proposal = state::proposals_read(&deps.storage)
-            .load(&1_u64.to_be_bytes())
-            .unwrap();
-        assert_eq!(
-            proposal.submitter_canonical_address,
-            submitter_canonical_address
-        );
+        let proposal = PROPOSALS.load(&deps.storage, U64Key::new(1_u64)).unwrap();
+        assert_eq!(proposal.submitter_address, submitter_address);
         assert_eq!(proposal.status, ProposalStatus::Active);
-        assert_eq!(proposal.for_votes, Uint128(0));
-        assert_eq!(proposal.against_votes, Uint128(0));
+        assert_eq!(proposal.for_votes, Uint128::new(0));
+        assert_eq!(proposal.against_votes, Uint128::new(0));
         assert_eq!(proposal.start_height, 100_000);
         assert_eq!(proposal.end_height, expected_end_height);
         assert_eq!(proposal.title, "A valid title");
@@ -1166,51 +1168,45 @@ mod tests {
         assert_eq!(proposal.deposit_amount, TEST_PROPOSAL_REQUIRED_DEPOSIT);
 
         // Submit Proposal with link and call data
-        let msg = HandleMsg::Receive(Cw20ReceiveMsg {
-            msg: Some(
-                to_binary(&ReceiveMsg::SubmitProposal {
-                    title: "A valid title".to_string(),
-                    description: "A valid description".to_string(),
-                    link: Some("https://www.avalidlink.com".to_string()),
-                    execute_calls: Some(vec![MsgExecuteCall {
-                        execution_order: 0,
-                        target_contract_address: HumanAddr::from(MOCK_CONTRACT_ADDR),
-                        msg: to_binary(&HandleMsg::UpdateConfig {
-                            config: CreateOrUpdateConfig::default(),
-                        })
-                        .unwrap(),
-                    }]),
-                })
-                .unwrap(),
-            ),
-            sender: submitter_address,
+        let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+            msg: to_binary(&ReceiveMsg::SubmitProposal {
+                title: "A valid title".to_string(),
+                description: "A valid description".to_string(),
+                link: Some("https://www.avalidlink.com".to_string()),
+                execute_calls: Some(vec![MsgExecuteCall {
+                    execution_order: 0,
+                    target_contract_address: String::from(MOCK_CONTRACT_ADDR),
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
+                        config: CreateOrUpdateConfig::default(),
+                    })
+                    .unwrap(),
+                }]),
+            })
+            .unwrap(),
+            sender: submitter_address.to_string(),
             amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         });
-        let env = mock_env(
-            "mars_token",
-            MockEnvParams {
-                block_height: 100_000,
-                ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, msg).unwrap();
+        let env = mock_env(MockEnvParams {
+            block_height: 100_000,
+            ..Default::default()
+        });
+        let info = mock_info("mars_token");
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
         let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "submit_proposal"),
-                log("proposal_submitter", "submitter"),
-                log("proposal_id", 2),
-                log("proposal_end_height", expected_end_height),
+                attr("action", "submit_proposal"),
+                attr("proposal_submitter", "submitter"),
+                attr("proposal_id", 2),
+                attr("proposal_end_height", expected_end_height),
             ]
         );
 
-        let council = state::council_read(&deps.storage).load().unwrap();
-        assert_eq!(council.proposal_count, 2);
+        let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+        assert_eq!(global_state.proposal_count, 2);
 
-        let proposal = state::proposals_read(&deps.storage)
-            .load(&2_u64.to_be_bytes())
-            .unwrap();
+        let proposal = PROPOSALS.load(&deps.storage, U64Key::new(2_u64)).unwrap();
         assert_eq!(
             proposal.link,
             Some("https://www.avalidlink.com".to_string())
@@ -1219,11 +1215,8 @@ mod tests {
             proposal.execute_calls,
             Some(vec![ProposalExecuteCall {
                 execution_order: 0,
-                target_contract_canonical_address: deps
-                    .api
-                    .canonical_address(&HumanAddr::from(MOCK_CONTRACT_ADDR))
-                    .unwrap(),
-                msg: to_binary(&HandleMsg::UpdateConfig {
+                target_contract_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
+                msg: to_binary(&ExecuteMsg::UpdateConfig {
                     config: CreateOrUpdateConfig::default()
                 })
                 .unwrap(),
@@ -1234,21 +1227,19 @@ mod tests {
     #[test]
     fn test_invalid_cast_votes() {
         let mut deps = th_setup(&[]);
-        let (voter_address, _voter_canonical_address) =
-            get_test_addresses(&deps.api, "valid_voter");
-        let (invalid_voter_address, _invalid_voter_canonical_address) =
-            get_test_addresses(&deps.api, "invalid_voter");
+        let voter_address = Addr::unchecked("valid_voter");
+        let invalid_voter_address = Addr::unchecked("invalid_voter");
 
         deps.querier
-            .set_xmars_address(HumanAddr::from("xmars_token"));
+            .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_balance_at(voter_address, 99_999, Uint128(100));
+            .set_xmars_balance_at(voter_address, 99_999, Uint128::new(100));
         deps.querier
             .set_xmars_balance_at(invalid_voter_address, 99_999, Uint128::zero());
 
         let active_proposal_id = 1_u64;
-        let active_proposal = th_build_mock_proposal(
-            &mut deps,
+        th_build_mock_proposal(
+            deps.as_mut(),
             MockProposal {
                 id: active_proposal_id,
                 status: ProposalStatus::Active,
@@ -1257,13 +1248,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
-            .unwrap();
 
         let executed_proposal_id = 2_u64;
-        let executed_proposal = th_build_mock_proposal(
-            &mut deps,
+        th_build_mock_proposal(
+            deps.as_mut(),
             MockProposal {
                 id: executed_proposal_id,
                 status: ProposalStatus::Executed,
@@ -1272,92 +1260,97 @@ mod tests {
                 ..Default::default()
             },
         );
-        state::proposals(&mut deps.storage)
-            .save(&executed_proposal_id.to_be_bytes(), &executed_proposal)
-            .unwrap();
 
+        // *
         // voting on a non-existent proposal should fail
-        let msg = HandleMsg::CastVote {
-            proposal_id: 3,
-            vote: ProposalVoteOption::For,
-        };
-        let env = mock_env(
-            "valid_voter",
-            MockEnvParams {
+        // *
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: 3,
+                vote: ProposalVoteOption::For,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: 100_001,
                 ..Default::default()
-            },
-        );
-        let res_error = handle(&mut deps, env, msg).unwrap_err();
-        assert_eq!(
-            res_error,
-            StdError::NotFound {
-                kind: "council::state::Proposal".to_string(),
-                backtrace: None
-            }
-        );
+            });
+            let info = mock_info("valid_voter");
+            let res_error = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                res_error,
+                StdError::NotFound {
+                    kind: "council::state::Proposal".to_string(),
+                }
+                .into()
+            );
+        }
 
+        // *
         // voting on an inactive proposal should fail
-        let msg = HandleMsg::CastVote {
-            proposal_id: executed_proposal_id,
-            vote: ProposalVoteOption::For,
-        };
-        let env = mock_env(
-            "valid_voter",
-            MockEnvParams {
+        // *
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: executed_proposal_id,
+                vote: ProposalVoteOption::For,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: 100_001,
                 ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Proposal is not active");
+            });
+            let info = mock_info("valid_voter");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::ProposalNotActive {});
+        }
 
+        // *
         // voting after proposal end should fail
-        let msg = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::For,
-        };
-        let env = mock_env(
-            "valid_voter",
-            MockEnvParams {
+        // *
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: active_proposal_id,
+                vote: ProposalVoteOption::For,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: 100_200,
                 ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Proposal has expired");
+            });
+            let info = mock_info("valid_voter");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::VoteVotingPeriodEnded {});
+        }
 
+        // *
         // voting without any voting power should fail
-        let msg = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::For,
-        };
-        let env = mock_env(
-            "invalid_voter",
-            MockEnvParams {
+        // *
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: active_proposal_id,
+                vote: ProposalVoteOption::For,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: 100_001,
                 ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "User has no balance at block: 99999");
+            });
+            let info = mock_info("invalid_voter");
+            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(response, ContractError::VoteNoVotingPower { block: 99_999 });
+        }
     }
 
     #[test]
     fn test_cast_vote() {
         // setup
         let mut deps = th_setup(&[]);
-        let (voter_address, voter_canonical_address) = get_test_addresses(&deps.api, "voter");
+        let voter_address = Addr::unchecked("voter");
 
         let active_proposal_id = 1_u64;
 
         deps.querier
-            .set_xmars_address(HumanAddr::from("xmars_token"));
+            .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_balance_at(voter_address, 99_999, Uint128(100));
+            .set_xmars_balance_at(voter_address.clone(), 99_999, Uint128::new(100));
 
         let active_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: active_proposal_id,
                 status: ProposalStatus::Active,
@@ -1366,152 +1359,149 @@ mod tests {
                 ..Default::default()
             },
         );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
-            .unwrap();
 
         // Add another vote on an extra proposal to voter to validate voting on multiple proposals
         // is valid
-        state::proposal_votes(&mut deps.storage, 4_u64)
+        PROPOSAL_VOTES
             .save(
-                voter_canonical_address.as_slice(),
+                &mut deps.storage,
+                (U64Key::new(4_u64), &voter_address),
                 &ProposalVote {
                     option: ProposalVoteOption::Against,
-                    power: Uint128(100),
+                    power: Uint128::new(100),
                 },
             )
             .unwrap();
 
         // Valid vote for
-        let msg = HandleMsg::CastVote {
+        let msg = ExecuteMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::For,
         };
 
-        let env = mock_env(
-            "voter",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, msg).unwrap();
+        let env = mock_env(MockEnvParams {
+            block_height: active_proposal.start_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("voter");
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         assert_eq!(
             vec![
-                log("action", "cast_vote"),
-                log("proposal_id", active_proposal_id),
-                log("voter", "voter"),
-                log("vote", "for"),
-                log("voting_power", 100),
+                attr("action", "cast_vote"),
+                attr("proposal_id", active_proposal_id),
+                attr("voter", "voter"),
+                attr("vote", "for"),
+                attr("voting_power", 100),
             ],
-            res.log
+            res.attributes
         );
 
-        let proposal = state::proposals_read(&deps.storage)
-            .load(&active_proposal_id.to_be_bytes())
+        let proposal = PROPOSALS
+            .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128(100));
-        assert_eq!(proposal.against_votes, Uint128(0));
+        assert_eq!(proposal.for_votes, Uint128::new(100));
+        assert_eq!(proposal.against_votes, Uint128::new(0));
 
-        let proposal_vote = state::proposal_votes_read(&deps.storage, active_proposal_id)
-            .load(voter_canonical_address.as_slice())
+        let proposal_vote = PROPOSAL_VOTES
+            .load(
+                &deps.storage,
+                (U64Key::new(active_proposal_id), &voter_address),
+            )
             .unwrap();
 
         assert_eq!(proposal_vote.option, ProposalVoteOption::For);
-        assert_eq!(proposal_vote.power, Uint128(100));
+        assert_eq!(proposal_vote.power, Uint128::new(100));
 
         // Voting again with same address should fail
-        let msg = HandleMsg::CastVote {
+        let msg = ExecuteMsg::CastVote {
             proposal_id: active_proposal_id,
             vote: ProposalVoteOption::For,
         };
 
-        let env = mock_env(
-            "voter",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "User has already voted in this proposal");
+        let env = mock_env(MockEnvParams {
+            block_height: active_proposal.start_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("voter");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::VoteUserAlreadyVoted {});
 
         // Valid against vote
-        let msg = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::Against,
-        };
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: active_proposal_id,
+                vote: ProposalVoteOption::Against,
+            };
 
-        deps.querier.set_xmars_balance_at(
-            HumanAddr::from("voter2"),
-            active_proposal.start_height - 1,
-            Uint128(200),
-        );
+            deps.querier.set_xmars_balance_at(
+                Addr::unchecked("voter2"),
+                active_proposal.start_height - 1,
+                Uint128::new(200),
+            );
 
-        let env = mock_env(
-            "voter2",
-            MockEnvParams {
+            let env = mock_env(MockEnvParams {
                 block_height: active_proposal.start_height + 1,
                 ..Default::default()
-            },
-        );
-        let res = handle(&mut deps, env, msg).unwrap();
-        assert_eq!(
-            vec![
-                log("action", "cast_vote"),
-                log("proposal_id", active_proposal_id),
-                log("voter", "voter2"),
-                log("vote", "against"),
-                log("voting_power", 200),
-            ],
-            res.log
-        );
+            });
+            let info = mock_info("voter2");
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            assert_eq!(
+                vec![
+                    attr("action", "cast_vote"),
+                    attr("proposal_id", active_proposal_id),
+                    attr("voter", "voter2"),
+                    attr("vote", "against"),
+                    attr("voting_power", 200),
+                ],
+                res.attributes
+            );
+        }
 
         // Extra for and against votes to check aggregates are computed correctly
         deps.querier.set_xmars_balance_at(
-            HumanAddr::from("voter3"),
+            Addr::unchecked("voter3"),
             active_proposal.start_height - 1,
-            Uint128(300),
+            Uint128::new(300),
         );
 
         deps.querier.set_xmars_balance_at(
-            HumanAddr::from("voter4"),
+            Addr::unchecked("voter4"),
             active_proposal.start_height - 1,
-            Uint128(400),
+            Uint128::new(400),
         );
 
-        let msg = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::For,
-        };
-        let env = mock_env(
-            "voter3",
-            MockEnvParams {
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: active_proposal_id,
+                vote: ProposalVoteOption::For,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: active_proposal.start_height + 1,
                 ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg).unwrap();
+            });
+            let info = mock_info("voter3");
+            execute(deps.as_mut(), env, info, msg).unwrap();
+        }
 
-        let msg = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::Against,
-        };
-        let env = mock_env(
-            "voter4",
-            MockEnvParams {
+        {
+            let msg = ExecuteMsg::CastVote {
+                proposal_id: active_proposal_id,
+                vote: ProposalVoteOption::Against,
+            };
+            let env = mock_env(MockEnvParams {
                 block_height: active_proposal.start_height + 1,
                 ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg).unwrap();
+            });
+            let info = mock_info("voter4");
+            execute(deps.as_mut(), env, info, msg).unwrap();
+        }
 
-        let proposal = state::proposals_read(&deps.storage)
-            .load(&active_proposal_id.to_be_bytes())
+        let proposal = PROPOSALS
+            .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128(100 + 300));
-        assert_eq!(proposal.against_votes, Uint128(200 + 400));
+        assert_eq!(proposal.for_votes, Uint128::new(100 + 300));
+        assert_eq!(proposal.against_votes, Uint128::new(200 + 400));
     }
 
     #[test]
@@ -1520,8 +1510,8 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         let active_proposal_1_id = 1_u64;
-        let active_proposal_1 = th_build_mock_proposal(
-            &mut deps,
+        th_build_mock_proposal(
+            deps.as_mut(),
             MockProposal {
                 id: active_proposal_1_id,
                 status: ProposalStatus::Active,
@@ -1530,21 +1520,15 @@ mod tests {
                 ..Default::default()
             },
         );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_1_id.to_be_bytes(), &active_proposal_1)
-            .unwrap();
 
         let active_proposal_2_id = 2_u64;
         let execute_calls = Option::from(vec![ProposalExecuteCall {
             execution_order: 0,
-            target_contract_canonical_address: deps
-                .api
-                .canonical_address(&HumanAddr::from("test_address"))
-                .unwrap(),
+            target_contract_address: Addr::unchecked("test_address"),
             msg: Binary::from(br#"{"some":123}"#),
         }]);
-        let active_proposal_2 = th_build_mock_proposal(
-            &mut deps,
+        th_build_mock_proposal(
+            deps.as_mut(),
             MockProposal {
                 id: active_proposal_2_id,
                 status: ProposalStatus::Active,
@@ -1554,173 +1538,43 @@ mod tests {
                 ..Default::default()
             },
         );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_2_id.to_be_bytes(), &active_proposal_2)
-            .unwrap();
 
-        let council = Council {
+        let global_state = GlobalState {
             proposal_count: 2_u64,
         };
-        state::council(&mut deps.storage).save(&council).unwrap();
-
+        GLOBAL_STATE.save(&mut deps.storage, &global_state).unwrap();
         // Assert corectly sorts asc
-        let res = query_proposals(&deps, Option::None, Option::None).unwrap();
+        let res = query_proposals(deps.as_ref(), None, None).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_2_id);
         assert_eq!(
-            res.proposal_list[1].execute_calls.clone().unwrap()[0].target_contract_human_address,
-            HumanAddr::from("test_address")
+            res.proposal_list[1].execute_calls.clone().unwrap()[0].target_contract_address,
+            String::from("test_address")
         );
 
         // Assert start != 0
-        let res = query_proposals(&deps, Option::from(2), Option::None).unwrap();
+        let res = query_proposals(deps.as_ref(), Some(2), None).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 1);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_2_id);
 
         // Assert start > length of collection
-        let res = query_proposals(&deps, Option::from(99), Option::None).unwrap();
+        let res = query_proposals(deps.as_ref(), Some(99), None).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 0);
 
         // Assert limit
-        let res = query_proposals(&deps, Option::None, Option::from(1)).unwrap();
+        let res = query_proposals(deps.as_ref(), None, Some(1)).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 1);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
 
         // Assert limit greater than length of collection
-        let res = query_proposals(&deps, Option::None, Option::from(99)).unwrap();
+        let res = query_proposals(deps.as_ref(), None, Some(99)).unwrap();
         assert_eq!(res.proposal_count, 2);
         assert_eq!(res.proposal_list.len(), 2);
-    }
-
-    #[test]
-    fn test_query_proposal_votes() {
-        // Arrange
-        let mut deps = th_setup(&[]);
-
-        deps.querier
-            .set_xmars_address(HumanAddr::from("xmars_token"));
-        let active_proposal_id = 1_u64;
-
-        let (voter_address1, _voter_canonical_address1) = get_test_addresses(&deps.api, "voter1");
-        let (voter_address2, _voter_canonical_address2) = get_test_addresses(&deps.api, "voter2");
-        let (voter_address3, _voter_canonical_address3) = get_test_addresses(&deps.api, "voter3");
-        let (voter_address4, _voter_canonical_address4) = get_test_addresses(&deps.api, "voter4");
-        let (voter_address5, _voter_canonical_address5) = get_test_addresses(&deps.api, "voter5");
-        deps.querier
-            .set_xmars_balance_at(voter_address1, 99_999, Uint128(100));
-        deps.querier
-            .set_xmars_balance_at(voter_address2, 99_999, Uint128(200));
-        deps.querier
-            .set_xmars_balance_at(voter_address3, 99_999, Uint128(300));
-        deps.querier
-            .set_xmars_balance_at(voter_address4, 99_999, Uint128(400));
-        deps.querier
-            .set_xmars_balance_at(voter_address5, 99_999, Uint128(500));
-
-        let active_proposal = th_build_mock_proposal(
-            &mut deps,
-            MockProposal {
-                id: active_proposal_id,
-                status: ProposalStatus::Active,
-                start_height: 100_000,
-                end_height: 100_100,
-                ..Default::default()
-            },
-        );
-        state::proposals(&mut deps.storage)
-            .save(&active_proposal_id.to_be_bytes(), &active_proposal)
-            .unwrap();
-
-        let msg_vote_for = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::For,
-        };
-        let msg_vote_against = HandleMsg::CastVote {
-            proposal_id: active_proposal_id,
-            vote: ProposalVoteOption::Against,
-        };
-
-        // Act
-        let env = mock_env(
-            "voter1",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg_vote_for.clone()).unwrap();
-
-        let env = mock_env(
-            "voter2",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg_vote_for.clone()).unwrap();
-
-        let env = mock_env(
-            "voter3",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg_vote_for).unwrap();
-
-        let env = mock_env(
-            "voter4",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg_vote_against.clone()).unwrap();
-
-        let env = mock_env(
-            "voter5",
-            MockEnvParams {
-                block_height: active_proposal.start_height + 1,
-                ..Default::default()
-            },
-        );
-        handle(&mut deps, env, msg_vote_against).unwrap();
-
-        // Assert default params
-        let res =
-            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::None).unwrap();
-        assert_eq!(res.votes.len(), 5);
-        assert_eq!(res.proposal_id, active_proposal_id);
-
-        // Assert corectly sorts asc
-        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
-        assert_eq!(res.votes[0].option, ProposalVoteOption::For);
-        assert_eq!(res.votes[0].power, Uint128(100));
-        assert_eq!(res.votes[4].voter_address, HumanAddr::from("voter5"));
-        assert_eq!(res.votes[4].option, ProposalVoteOption::Against);
-        assert_eq!(res.votes[4].power, Uint128(500));
-
-        // Assert start_after
-        let res = query_proposal_votes(
-            &deps,
-            active_proposal_id,
-            Option::from(HumanAddr::from("voter4")),
-            Option::None,
-        )
-        .unwrap();
-        assert_eq!(res.votes.len(), 1);
-        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter5"));
-
-        // Assert take
-        let res =
-            query_proposal_votes(&deps, active_proposal_id, Option::None, Option::from(1)).unwrap();
-        assert_eq!(res.votes.len(), 1);
-        assert_eq!(res.votes[0].voter_address, HumanAddr::from("voter1"));
     }
 
     #[test]
@@ -1731,11 +1585,12 @@ mod tests {
         let executed_proposal_id = 2_u64;
 
         deps.querier
-            .set_xmars_address(HumanAddr::from("xmars_token"));
-        deps.querier.set_xmars_total_supply_at(99_999, Uint128(100));
+            .set_xmars_address(Addr::unchecked("xmars_token"));
+        deps.querier
+            .set_xmars_total_supply_at(99_999, Uint128::new(100));
 
         th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: active_proposal_id,
                 status: ProposalStatus::Active,
@@ -1744,7 +1599,7 @@ mod tests {
             },
         );
         th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: executed_proposal_id,
                 status: ProposalStatus::Executed,
@@ -1753,32 +1608,28 @@ mod tests {
         );
 
         // cannot end a proposal that has not ended its voting period
-        let msg = HandleMsg::EndProposal {
+        let msg = ExecuteMsg::EndProposal {
             proposal_id: active_proposal_id,
         };
-        let env = mock_env(
-            "ender",
-            MockEnvParams {
-                block_height: 100_000,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Voting period has not ended");
+        let env = mock_env(MockEnvParams {
+            block_height: 100_000,
+            ..Default::default()
+        });
+        let info = mock_info("sender");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::EndProposalVotingPeriodNotEnded {});
 
         // cannot end a non active proposal
-        let msg = HandleMsg::EndProposal {
+        let msg = ExecuteMsg::EndProposal {
             proposal_id: executed_proposal_id,
         };
-        let env = mock_env(
-            "ender",
-            MockEnvParams {
-                block_height: 100_001,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Proposal is not active");
+        let env = mock_env(MockEnvParams {
+            block_height: 100_001,
+            ..Default::default()
+        });
+        let info = mock_info("sender");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::ProposalNotActive {});
     }
 
     #[test]
@@ -1786,15 +1637,15 @@ mod tests {
         let mut deps = th_setup(&[]);
 
         deps.querier
-            .set_xmars_address(HumanAddr::from("xmars_token"));
+            .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_total_supply_at(89_999, Uint128(100_000));
+            .set_xmars_total_supply_at(89_999, Uint128::new(100_000));
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
         let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
         let proposal_end_height = 100_000u64;
 
-        state::config(&mut deps.storage)
-            .update(|mut config| {
+        CONFIG
+            .update(&mut deps.storage, |mut config| -> StdResult<Config> {
                 config.proposal_required_threshold = proposal_threshold;
                 config.proposal_required_quorum = proposal_quorum;
                 Ok(config)
@@ -1803,161 +1654,149 @@ mod tests {
 
         // end passed proposal
         let initial_passed_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: 1,
                 status: ProposalStatus::Active,
-                for_votes: Uint128(11_000),
-                against_votes: Uint128(10_000),
+                for_votes: Uint128::new(11_000),
+                against_votes: Uint128::new(10_000),
                 start_height: 90_000,
                 end_height: proposal_end_height + 1,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndProposal { proposal_id: 1 };
+        let msg = ExecuteMsg::EndProposal { proposal_id: 1 };
 
-        let env = mock_env(
-            "sender",
-            MockEnvParams {
-                block_height: initial_passed_proposal.end_height + 1,
-                ..Default::default()
-            },
-        );
+        let env = mock_env(MockEnvParams {
+            block_height: initial_passed_proposal.end_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("sender");
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "end_proposal"),
-                log("proposal_id", 1),
-                log("proposal_result", "passed"),
+                attr("action", "end_proposal"),
+                attr("proposal_id", 1),
+                attr("proposal_result", "passed"),
             ]
         );
 
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("mars_token"),
-                send: vec![],
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("submitter"),
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("mars_token"),
+                funds: vec![],
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: String::from("submitter"),
                     amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
-            }),]
+            })),]
         );
 
-        let final_passed_proposal = state::proposals_read(&deps.storage)
-            .load(&1u64.to_be_bytes())
-            .unwrap();
+        let final_passed_proposal = PROPOSALS.load(&deps.storage, U64Key::new(1u64)).unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Passed);
 
         // end rejected proposal (no quorum)
         let initial_passed_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: 2,
                 status: ProposalStatus::Active,
-                for_votes: Uint128(11),
-                against_votes: Uint128(10),
+                for_votes: Uint128::new(11),
+                against_votes: Uint128::new(10),
                 end_height: proposal_end_height + 1,
                 start_height: 90_000,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndProposal { proposal_id: 2 };
+        let msg = ExecuteMsg::EndProposal { proposal_id: 2 };
 
-        let env = mock_env(
-            "sender",
-            MockEnvParams {
-                block_height: initial_passed_proposal.end_height + 1,
-                ..Default::default()
-            },
-        );
+        let env = mock_env(MockEnvParams {
+            block_height: initial_passed_proposal.end_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("sender");
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "end_proposal"),
-                log("proposal_id", 2),
-                log("proposal_result", "rejected"),
+                attr("action", "end_proposal"),
+                attr("proposal_id", 2),
+                attr("proposal_result", "rejected"),
             ]
         );
 
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("mars_token"),
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("staking"),
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("mars_token"),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: String::from("staking"),
                     amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
-                send: vec![],
-            })]
+                funds: vec![],
+            }))]
         );
 
-        let final_passed_proposal = state::proposals_read(&deps.storage)
-            .load(&2u64.to_be_bytes())
-            .unwrap();
+        let final_passed_proposal = PROPOSALS.load(&deps.storage, U64Key::new(2_u64)).unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
 
         // end rejected proposal (no threshold)
         let initial_passed_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: 3,
                 status: ProposalStatus::Active,
-                for_votes: Uint128(10_000),
-                against_votes: Uint128(11_000),
+                for_votes: Uint128::new(10_000),
+                against_votes: Uint128::new(11_000),
                 start_height: 90_000,
                 end_height: proposal_end_height + 1,
                 ..Default::default()
             },
         );
 
-        let msg = HandleMsg::EndProposal { proposal_id: 3 };
+        let msg = ExecuteMsg::EndProposal { proposal_id: 3 };
 
-        let env = mock_env(
-            "sender",
-            MockEnvParams {
-                block_height: initial_passed_proposal.end_height + 1,
-                ..Default::default()
-            },
-        );
+        let env = mock_env(MockEnvParams {
+            block_height: initial_passed_proposal.end_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("sender");
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         assert_eq!(
-            res.log,
+            res.attributes,
             vec![
-                log("action", "end_proposal"),
-                log("proposal_id", 3),
-                log("proposal_result", "rejected"),
+                attr("action", "end_proposal"),
+                attr("proposal_id", 3),
+                attr("proposal_result", "rejected"),
             ]
         );
 
         assert_eq!(
             res.messages,
-            vec![CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: HumanAddr::from("mars_token"),
-                msg: to_binary(&Cw20HandleMsg::Transfer {
-                    recipient: HumanAddr::from("staking"),
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("mars_token"),
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: String::from("staking"),
                     amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
                 })
                 .unwrap(),
-                send: vec![],
-            })]
+                funds: vec![],
+            }))]
         );
 
-        let final_passed_proposal = state::proposals_read(&deps.storage)
-            .load(&3u64.to_be_bytes())
-            .unwrap();
+        let final_passed_proposal = PROPOSALS.load(&deps.storage, U64Key::new(3_u64)).unwrap();
         assert_eq!(final_passed_proposal.status, ProposalStatus::Rejected);
     }
 
@@ -1969,7 +1808,7 @@ mod tests {
         let executed_proposal_id = 2_u64;
 
         let passed_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: passed_proposal_id,
                 status: ProposalStatus::Passed,
@@ -1978,7 +1817,7 @@ mod tests {
             },
         );
         let executed_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: executed_proposal_id,
                 status: ProposalStatus::Executed,
@@ -1987,64 +1826,54 @@ mod tests {
         );
 
         // cannot execute a non Passed proposal
-        let msg = HandleMsg::ExecuteProposal {
+        let msg = ExecuteMsg::ExecuteProposal {
             proposal_id: executed_proposal_id,
         };
-        let env = mock_env(
-            "executer",
-            MockEnvParams {
-                block_height: executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(
-            response,
-            "Proposal has not passed or has already been executed",
-        );
+        let env = mock_env(MockEnvParams {
+            block_height: executed_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
+            ..Default::default()
+        });
+        let info = mock_info("executer");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::ExecuteProposalNotPassed {},);
 
         // cannot execute a proposal before the effective delay has passed
-        let msg = HandleMsg::ExecuteProposal {
+        let msg = ExecuteMsg::ExecuteProposal {
             proposal_id: passed_proposal_id,
         };
-        let env = mock_env(
-            "executer",
-            MockEnvParams {
-                block_height: passed_proposal.end_height + 1,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Proposal has not ended its delay period");
+        let env = mock_env(MockEnvParams {
+            block_height: passed_proposal.end_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("executer");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::ExecuteProposalDelayNotEnded {});
 
         // cannot execute an expired proposal
-        let msg = HandleMsg::ExecuteProposal {
+        let msg = ExecuteMsg::ExecuteProposal {
             proposal_id: passed_proposal_id,
         };
-        let env = mock_env(
-            "executer",
-            MockEnvParams {
-                block_height: passed_proposal.end_height
-                    + TEST_PROPOSAL_EFFECTIVE_DELAY
-                    + TEST_PROPOSAL_EXPIRATION_PERIOD
-                    + 1,
-                ..Default::default()
-            },
-        );
-        let response = handle(&mut deps, env, msg);
-        assert_generic_error_message(response, "Proposal has expired");
+        let env = mock_env(MockEnvParams {
+            block_height: passed_proposal.end_height
+                + TEST_PROPOSAL_EFFECTIVE_DELAY
+                + TEST_PROPOSAL_EXPIRATION_PERIOD
+                + 1,
+            ..Default::default()
+        });
+        let info = mock_info("executer");
+        let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(response, ContractError::ExecuteProposalExpired {});
     }
 
     #[test]
     fn test_execute_proposals() {
         let mut deps = th_setup(&[]);
-        let (contract_address, contract_canonical_address) =
-            get_test_addresses(&deps.api, MOCK_CONTRACT_ADDR);
-        let (other_address, other_canonical_address) = get_test_addresses(&deps.api, "other");
+        let contract_address = Addr::unchecked(MOCK_CONTRACT_ADDR);
+        let other_address = Addr::unchecked("other");
 
         let binary_msg = Binary::from(br#"{"key": 123}"#);
         let initial_proposal = th_build_mock_proposal(
-            &mut deps,
+            deps.as_mut(),
             MockProposal {
                 id: 1,
                 status: ProposalStatus::Passed,
@@ -2053,87 +1882,199 @@ mod tests {
                     ProposalExecuteCall {
                         execution_order: 2,
                         msg: binary_msg.clone(),
-                        target_contract_canonical_address: other_canonical_address,
+                        target_contract_address: other_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 3,
-                        msg: to_binary(&HandleMsg::UpdateConfig {
+                        msg: to_binary(&ExecuteMsg::UpdateConfig {
                             config: CreateOrUpdateConfig::default(),
                         })
                         .unwrap(),
-                        target_contract_canonical_address: contract_canonical_address.clone(),
+                        target_contract_address: contract_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 1,
-                        msg: to_binary(&HandleMsg::UpdateConfig {
+                        msg: to_binary(&ExecuteMsg::UpdateConfig {
                             config: CreateOrUpdateConfig::default(),
                         })
                         .unwrap(),
-                        target_contract_canonical_address: contract_canonical_address,
+                        target_contract_address: contract_address.clone(),
                     },
                 ]),
                 ..Default::default()
             },
         );
 
-        let env = mock_env(
-            "executer",
-            MockEnvParams {
-                block_height: initial_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
-                ..Default::default()
-            },
-        );
+        let env = mock_env(MockEnvParams {
+            block_height: initial_proposal.end_height + TEST_PROPOSAL_EFFECTIVE_DELAY + 1,
+            ..Default::default()
+        });
+        let info = mock_info("executer");
 
-        let msg = HandleMsg::ExecuteProposal { proposal_id: 1 };
+        let msg = ExecuteMsg::ExecuteProposal { proposal_id: 1 };
 
-        let res = handle(&mut deps, env, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         assert_eq!(
-            res.log,
-            vec![log("action", "execute_proposal"), log("proposal_id", 1),]
+            res.attributes,
+            vec![attr("action", "execute_proposal"), attr("proposal_id", 1),]
         );
 
         assert_eq!(
             res.messages,
             vec![
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_address.clone(),
-                    send: vec![],
-                    msg: to_binary(&HandleMsg::UpdateConfig {
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_address.to_string(),
+                    funds: vec![],
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
                         config: CreateOrUpdateConfig::default()
                     })
                     .unwrap(),
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: other_address,
-                    send: vec![],
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: other_address.to_string(),
+                    funds: vec![],
                     msg: binary_msg,
-                }),
-                CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: contract_address,
-                    send: vec![],
-                    msg: to_binary(&HandleMsg::UpdateConfig {
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: contract_address.to_string(),
+                    funds: vec![],
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
                         config: CreateOrUpdateConfig::default()
                     })
                     .unwrap(),
-                }),
+                })),
             ]
         );
 
-        let final_proposal = state::proposals_read(&deps.storage)
-            .load(&1_u64.to_be_bytes())
+        let final_passed_proposal = PROPOSALS
+            .load(&mut deps.storage, U64Key::new(1_u64))
             .unwrap();
 
-        assert_eq!(ProposalStatus::Executed, final_proposal.status);
+        assert_eq!(ProposalStatus::Executed, final_passed_proposal.status);
+    }
+
+    #[test]
+    fn test_query_proposal_votes() {
+        // Arrange
+        let mut deps = th_setup(&[]);
+
+        deps.querier
+            .set_xmars_address(Addr::unchecked("xmars_token"));
+        let active_proposal_id = 1_u64;
+
+        let voter_address1 = Addr::unchecked("voter1");
+        let voter_address2 = Addr::unchecked("voter2");
+        let voter_address3 = Addr::unchecked("voter3");
+        let voter_address4 = Addr::unchecked("voter4");
+        let voter_address5 = Addr::unchecked("voter5");
+        deps.querier
+            .set_xmars_balance_at(voter_address1, 99_999, Uint128::new(100));
+        deps.querier
+            .set_xmars_balance_at(voter_address2, 99_999, Uint128::new(200));
+        deps.querier
+            .set_xmars_balance_at(voter_address3, 99_999, Uint128::new(300));
+        deps.querier
+            .set_xmars_balance_at(voter_address4, 99_999, Uint128::new(400));
+        deps.querier
+            .set_xmars_balance_at(voter_address5, 99_999, Uint128::new(500));
+
+        let active_proposal = th_build_mock_proposal(
+            deps.as_mut(),
+            MockProposal {
+                id: active_proposal_id,
+                status: ProposalStatus::Active,
+                start_height: 100_000,
+                end_height: 100_100,
+                ..Default::default()
+            },
+        );
+        PROPOSALS
+            .save(
+                &mut deps.storage,
+                U64Key::new(active_proposal_id),
+                &active_proposal,
+            )
+            .unwrap();
+
+        let msg_vote_for = ExecuteMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::For,
+        };
+        let msg_vote_against = ExecuteMsg::CastVote {
+            proposal_id: active_proposal_id,
+            vote: ProposalVoteOption::Against,
+        };
+
+        // Act
+        let env = mock_env(MockEnvParams {
+            block_height: active_proposal.start_height + 1,
+            ..Default::default()
+        });
+        let info = mock_info("voter1");
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
+
+        let info = mock_info("voter2");
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
+
+        let info = mock_info("voter3");
+        execute(deps.as_mut(), env.clone(), info, msg_vote_for.clone()).unwrap();
+
+        let info = mock_info("voter4");
+        execute(deps.as_mut(), env.clone(), info, msg_vote_against.clone()).unwrap();
+
+        let info = mock_info("voter5");
+        execute(deps.as_mut(), env, info, msg_vote_against.clone()).unwrap();
+
+        // Assert default params
+        let res = query_proposal_votes(
+            deps.as_ref(),
+            active_proposal_id,
+            Option::None,
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 5);
+        assert_eq!(res.proposal_id, active_proposal_id);
+
+        // Assert corectly sorts asc
+        assert_eq!(res.votes[0].voter_address, Addr::unchecked("voter1"));
+        assert_eq!(res.votes[0].option, ProposalVoteOption::For);
+        assert_eq!(res.votes[0].power, Uint128::new(100));
+        assert_eq!(res.votes[4].voter_address, Addr::unchecked("voter5"));
+        assert_eq!(res.votes[4].option, ProposalVoteOption::Against);
+        assert_eq!(res.votes[4].power, Uint128::new(500));
+
+        // Assert start_after
+        let res = query_proposal_votes(
+            deps.as_ref(),
+            active_proposal_id,
+            Option::from(String::from("voter4")),
+            Option::None,
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, Addr::unchecked("voter5"));
+
+        // Assert take
+        let res = query_proposal_votes(
+            deps.as_ref(),
+            active_proposal_id,
+            Option::None,
+            Option::from(1),
+        )
+        .unwrap();
+        assert_eq!(res.votes.len(), 1);
+        assert_eq!(res.votes[0].voter_address, Addr::unchecked("voter1"));
     }
 
     // TEST HELPERS
-    fn th_setup(contract_balances: &[Coin]) -> Extern<MockStorage, MockApi, MarsMockQuerier> {
-        let mut deps = mock_dependencies(20, contract_balances);
+    fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
+        let mut deps = mock_dependencies(contract_balances);
 
         // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
-            address_provider_address: Some(HumanAddr::from("address_provider")),
+            address_provider_address: Some(String::from("address_provider")),
 
             proposal_voting_period: Some(TEST_PROPOSAL_VOTING_PERIOD),
             proposal_effective_delay: Some(TEST_PROPOSAL_EFFECTIVE_DELAY),
@@ -2142,9 +2083,11 @@ mod tests {
             proposal_required_quorum: Some(Decimal::one()),
             proposal_required_threshold: Some(Decimal::one()),
         };
-        let msg = InitMsg { config };
-        let env = mock_env("owner", MockEnvParams::default());
-        init(&mut deps, env, msg).unwrap();
+
+        let msg = InstantiateMsg { config };
+        let info = mock_info("initializer");
+        let env = mock_env(MockEnvParams::default());
+        instantiate(deps.as_mut(), env, info, msg).unwrap();
 
         deps
     }
@@ -2174,14 +2117,9 @@ mod tests {
         }
     }
 
-    fn th_build_mock_proposal(
-        deps: &mut Extern<MockStorage, MockApi, MarsMockQuerier>,
-        mock_proposal: MockProposal,
-    ) -> Proposal {
-        let (_, canonical_address) = get_test_addresses(&deps.api, "submitter");
-
+    fn th_build_mock_proposal(deps: DepsMut, mock_proposal: MockProposal) -> Proposal {
         let proposal = Proposal {
-            submitter_canonical_address: canonical_address,
+            submitter_address: Addr::unchecked("submitter"),
             status: mock_proposal.status,
             for_votes: mock_proposal.for_votes,
             against_votes: mock_proposal.against_votes,
@@ -2194,8 +2132,8 @@ mod tests {
             deposit_amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         };
 
-        state::proposals(&mut deps.storage)
-            .save(&mock_proposal.id.to_be_bytes(), &proposal)
+        PROPOSALS
+            .save(deps.storage, U64Key::new(mock_proposal.id), &proposal)
             .unwrap();
 
         proposal

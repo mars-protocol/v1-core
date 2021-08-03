@@ -1,19 +1,19 @@
 pub mod msg {
     use cosmwasm_bignumber::{Decimal256, Uint256};
-    use cosmwasm_std::{HumanAddr, Uint128};
+    use cosmwasm_std::{Addr, Uint128};
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct InitMsg {
+    pub struct InstantiateMsg {
         pub config: CreateOrUpdateConfig,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CreateOrUpdateConfig {
-        pub owner: Option<HumanAddr>,
-        pub address_provider_address: Option<HumanAddr>,
+        pub owner: Option<String>,
+        pub address_provider_address: Option<String>,
         pub insurance_fund_fee_share: Option<Decimal256>,
         pub treasury_fee_share: Option<Decimal256>,
         pub ma_token_code_id: Option<u64>,
@@ -22,7 +22,7 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
-    pub enum HandleMsg {
+    pub enum ExecuteMsg {
         /// Update LP config
         UpdateConfig { config: CreateOrUpdateConfig },
 
@@ -77,7 +77,7 @@ pub mod msg {
             /// Denom used in Terra (e.g: uluna, uusd) of the debt asset
             debt_asset: String,
             /// The address of the borrower getting liquidated
-            user_address: HumanAddr,
+            user_address: String,
             /// Sends maAsset to liquidator if true and underlying collateral asset if false
             receive_ma_token: bool,
         },
@@ -85,8 +85,8 @@ pub mod msg {
         /// Called by liquidity token. Validate liquidity token transfer is valid
         /// and update collateral status
         FinalizeLiquidityTokenTransfer {
-            sender_address: HumanAddr,
-            recipient_address: HumanAddr,
+            sender_address: String,
+            recipient_address: String,
             sender_previous_balance: Uint128,
             recipient_previous_balance: Uint128,
             amount: Uint128,
@@ -94,7 +94,7 @@ pub mod msg {
 
         /// Update uncollateralized loan limit
         UpdateUncollateralizedLoanLimit {
-            user_address: HumanAddr,
+            user_address: String,
             asset: Asset,
             new_limit: Uint128,
         },
@@ -129,9 +129,9 @@ pub mod msg {
             /// Details for collateral asset
             collateral_asset: Asset,
             /// Token address of the debt asset
-            debt_asset_address: HumanAddr,
+            debt_asset_address: String,
             /// The address of the borrower getting liquidated
-            user_address: HumanAddr,
+            user_address: String,
             /// Sends maAsset to liquidator if true and underlying collateral asset if false
             receive_ma_token: bool,
         },
@@ -141,27 +141,18 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
         Config {},
-        Market {
-            asset: Asset,
-        },
+        Market { asset: Asset },
         MarketsList {},
-        Debt {
-            address: HumanAddr,
-        },
-        Collateral {
-            address: HumanAddr,
-        },
-        UncollateralizedLoanLimit {
-            user_address: HumanAddr,
-            asset: Asset,
-        },
+        Debt { address: String },
+        UncollateralizedLoanLimit { user_address: String, asset: Asset },
+        Collateral { address: String },
     }
 
     // We define a custom struct for each query response
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct ConfigResponse {
-        pub owner: HumanAddr,
-        pub address_provider_address: HumanAddr,
+        pub owner: Addr,
+        pub address_provider_address: Addr,
         pub insurance_fund_fee_share: Decimal256,
         pub treasury_fee_share: Decimal256,
         pub ma_token_code_id: u64,
@@ -171,7 +162,7 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct MarketResponse {
-        pub ma_token_address: HumanAddr,
+        pub ma_token_address: Addr,
         pub borrow_index: Decimal256,
         pub liquidity_index: Decimal256,
         pub borrow_rate: Decimal256,
@@ -192,7 +183,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct MarketInfo {
         pub denom: String,
-        pub ma_token_address: HumanAddr,
+        pub ma_token_address: Addr,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -252,10 +243,12 @@ pub mod msg {
         pub kp_2: Option<Decimal256>,
     }
 
+    /// Represents either a native asset or a cw20. Meant to be used as part of a msg
+    /// in a contract call and not to be used internally
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum Asset {
-        Cw20 { contract_addr: HumanAddr },
+        Cw20 { contract_addr: String },
         Native { denom: String },
     }
 

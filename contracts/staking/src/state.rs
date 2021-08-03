@@ -1,27 +1,24 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{CanonicalAddr, Decimal, Storage, Uint128};
-use cosmwasm_storage::{
-    bucket, bucket_read, singleton, singleton_read, Bucket, ReadonlyBucket, ReadonlySingleton,
-    Singleton,
-};
+use cosmwasm_std::{Addr, Decimal, Uint128};
+use cw_storage_plus::{Item, Map};
 
 // keys (for singleton)
-pub static CONFIG_KEY: &[u8] = b"config";
+pub const CONFIG: Item<Config> = Item::new("config");
 
 // namespaces (for buckets)
-pub static COOLDOWNS_NAMESPACE: &[u8] = b"cooldowns";
+pub const COOLDOWNS: Map<&Addr, Cooldown> = Map::new("cooldowns");
 
 /// Treasury global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
-    pub owner: CanonicalAddr,
+    pub owner: Addr,
     /// Address provider address
-    pub address_provider_address: CanonicalAddr,
+    pub address_provider_address: Addr,
     /// Terraswap factory contract address
-    pub terraswap_factory_address: CanonicalAddr,
+    pub terraswap_factory_address: Addr,
     /// Terraswap max spread
     pub terraswap_max_spread: Decimal,
     /// Cooldown duration in seconds
@@ -31,14 +28,6 @@ pub struct Config {
     pub unstake_window: u64,
 }
 
-pub fn config<S: Storage>(storage: &mut S) -> Singleton<S, Config> {
-    singleton(storage, CONFIG_KEY)
-}
-
-pub fn config_read<S: Storage>(storage: &S) -> ReadonlySingleton<S, Config> {
-    singleton_read(storage, CONFIG_KEY)
-}
-
 /// Unstaking cooldown data
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Cooldown {
@@ -46,12 +35,4 @@ pub struct Cooldown {
     pub timestamp: u64,
     /// Amount that the user is allowed to unstake during the unstake window
     pub amount: Uint128,
-}
-
-pub fn cooldowns<S: Storage>(storage: &mut S) -> Bucket<S, Cooldown> {
-    bucket(COOLDOWNS_NAMESPACE, storage)
-}
-
-pub fn cooldowns_read<S: Storage>(storage: &S) -> ReadonlyBucket<S, Cooldown> {
-    bucket_read(COOLDOWNS_NAMESPACE, storage)
 }
