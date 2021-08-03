@@ -16,14 +16,12 @@ Dependencies to run on LocalTerra:
 */
 
 import {
-  Coin,
   isTxError,
   LCDClient,
   LocalTerra,
   MsgExecuteContract,
   MsgSend,
   MsgUpdateContractOwner,
-  StdFee,
   StdTx,
   Wallet
 } from "@terra-money/terra.js"
@@ -33,11 +31,13 @@ import { execSync } from "child_process"
 import { unlinkSync, writeFileSync } from "fs"
 import 'dotenv/config.js'
 import {
+  createTransaction,
   instantiateContract,
   migrate,
   performTransaction,
   queryContract,
   recover,
+  setEnvLocalTerra,
   setTimeoutDuration,
   uploadContract
 } from "./helpers.js"
@@ -81,6 +81,7 @@ async function main() {
 
   } else {
     setTimeoutDuration(0)
+    setEnvLocalTerra()
 
     terra = new LocalTerra()
 
@@ -88,7 +89,10 @@ async function main() {
 
     // Upload contract code
     codeID = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
+    console.log(codeID)
   }
+
+  const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
 
   // Token info
   const TOKEN_NAME = "Mars"
@@ -118,11 +122,8 @@ async function main() {
     }
   }
 
-  const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
-
   // Instantiate contract
   const contractAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
-  console.log(codeID)
   console.log(contractAddress)
   console.log(await queryContract(terra, contractAddress, { token_info: {} }))
   console.log(await queryContract(terra, contractAddress, { minter: {} }))
@@ -145,12 +146,7 @@ async function main() {
 
   // Create an unsigned tx
   const mintMsg = { mint: { recipient: recipient, amount: String(mintAmount) } }
-  const tx = await multisig.createTx({
-    msgs: [new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg)],
-    fee: new StdFee(30000000, [
-      new Coin('uusd', 45000000)
-    ]),
-  })
+  const tx = await createTransaction(multisig, new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg))
   writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
   // Create K of N signatures for the tx
@@ -177,7 +173,7 @@ async function main() {
   const result = await terra.tx.broadcast(signedTx);
   if (isTxError(result)) {
     throw new Error(
-      `transaction failed.code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
+      `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
     );
   }
 
@@ -194,17 +190,6 @@ async function main() {
     unlinkSync(fn)
   }
 
-  // Migrate contract version
-  try {
-    await migrate(terra, wallet, contractAddress, codeID)
-  } catch (err) {
-    // Contracts cannot be migrated to the same contract version, so we catch this error.
-    // If we get this error, then the wallet has permissions to migrate the contract.
-    if (!err.message.includes("migrate wasm contract failed: generic: Unknown version 0.2.0")) {
-      throw err
-    }
-  }
-
   // Update contract owner
   const newOwner = MULTISIG_ADDRESS
 
@@ -212,6 +197,18 @@ async function main() {
 
   const contractInfo = await terra.wasm.contractInfo(contractAddress)
   strictEqual(contractInfo.owner, newOwner)
+
+  // Migrate contract version
+  try {
+    await migrate(terra, multisig, contractAddress, codeID)
+  } catch (err) {
+    // Contracts cannot be migrated to the same contract version, so we catch this error.
+    // If we get this error, then the wallet has permissions to migrate the contract.
+    const errMsg = "migrate wasm contract failed: generic: Unknown version 0.2.0"
+    if (!(err.message.includes(errMsg) || err.response.data.error.includes(errMsg))) {
+      throw err
+    }
+  }
 
   console.log("OK")
 }

@@ -5,6 +5,7 @@ import {
   instantiateContract,
   queryContract,
   recover,
+  setEnvLocalTerra,
   setTimeoutDuration,
   setupRedBank,
   uploadContract,
@@ -36,6 +37,7 @@ async function main() {
     terra = new LocalTerra()
     wallet = (terra as LocalTerra).wallets.test1
     setTimeoutDuration(0)
+    setEnvLocalTerra()
   }
 
   let deployConfig: Config
