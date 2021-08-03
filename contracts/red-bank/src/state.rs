@@ -5,7 +5,8 @@ use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::helpers::all_conditions_valid;
-use mars::red_bank::msg::{AssetType, InitOrUpdateAssetParams};
+use mars::asset::{AssetType};
+use mars::red_bank::msg::{InitOrUpdateAssetParams};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const RED_BANK: Item<RedBank> = Item::new("red_bank");

@@ -12,9 +12,10 @@ use terra_cosmwasm::TerraQuerier;
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
+use mars::asset::{Asset, AssetType, asset_get_attributes};
 use mars::ma_token;
 use mars::red_bank::msg::{
-    Asset, AssetType, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+    CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
     DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
     MarketResponse, MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg,
     UncollateralizedLoanLimitResponse,
@@ -2362,18 +2363,6 @@ fn asset_get_price(
     Ok(asset_price)
 }
 
-fn asset_get_attributes(asset: &Asset) -> StdResult<(String, Vec<u8>, AssetType)> {
-    match asset {
-        Asset::Native { denom } => {
-            let asset_reference = denom.as_bytes().to_vec();
-            Ok((denom.to_string(), asset_reference, AssetType::Native))
-        }
-        Asset::Cw20 { contract_addr } => {
-            let asset_reference = contract_addr.as_bytes().to_vec();
-            Ok((contract_addr.to_string(), asset_reference, AssetType::Cw20))
-        }
-    }
-}
 
 fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec = match MARKET_REFERENCES.load(deps.storage, U32Key::new(index)) {
