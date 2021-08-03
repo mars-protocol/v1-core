@@ -239,7 +239,7 @@ pub fn execute_send(
 // QUERY
 
 #[entry_point]
-pub fn query(deps: Deps, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::BalanceAt { address, block } => {
