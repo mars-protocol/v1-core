@@ -1586,7 +1586,7 @@ pub fn execute_distribute_protocol_income(
 // QUERIES
 
 #[entry_point]
-pub fn query(deps: Deps, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
@@ -2629,11 +2629,11 @@ mod tests {
 
         // we can just call .unwrap() to assert this was a success
         let info = mock_info("owner");
-        let res = instantiate(deps.as_mut(), env, info, msg).unwrap();
+        let res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), QueryMsg::Config {}).unwrap();
+        let res = query(deps.as_ref(), env, QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.market_count);
