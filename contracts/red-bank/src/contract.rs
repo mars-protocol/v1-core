@@ -1585,6 +1585,7 @@ pub fn execute_distribute_protocol_income(
 
 // QUERIES
 
+#[entry_point]
 pub fn query(deps: Deps, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
