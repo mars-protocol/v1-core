@@ -5,7 +5,6 @@ import {
   instantiateContract,
   queryContract,
   recover,
-  setEnvLocalTerra,
   setTimeoutDuration,
   setupRedBank,
   uploadContract,
