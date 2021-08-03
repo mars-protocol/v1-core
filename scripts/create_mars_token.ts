@@ -6,46 +6,13 @@ This script is designed to work with Terra Columbus-4.
 Dependencies:
   - rust
   - terracli 58602320d2907814cfccdf43e9679468bb4bd8d3
-  - cosmwasm-plus v0.2.0 (NB set `COSMWASM_PLUS_PATH` below)
-  - Add test accounts and multisig to terracli (see below)
+  - cosmwasm-plus v0.2.0
+  - Add accounts and multisig to terracli
+  - Set environment variables in a .env file (see below for details of the required variables)
 
 Dependencies to run on LocalTerra:
   - docker
   - LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
-
-tequila-0004 testnet:
-```
-terracli keys add tequila1 --recover
-giggle ride master symbol south mail desert mother three endless edit draw flush aware hub parent tiny discover convince fox execute bulb promote walnut
-
-terracli keys add tequila2 --recover
-electric clarify defy one aisle south monitor float nature comic ring slice return try uncover evidence regret daughter shy rack shine dish bitter pulse
-
-terracli keys add tequila3 --recover
-save churn cousin clown valve exit worth wave major ozone hub pyramid speak dawn unusual pyramid gold hole lottery guilt solve urge join indoor
-
-# Multisig
-terracli keys add tequilamulti \
-  --multisig=tequila1,tequila2,tequila3 \
-  --multisig-threshold=2
-```
-
-LocalTerra:
-```
-terracli keys add test1 --recover
-notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius
-
-terracli keys add test2 --recover
-quality vacuum heart guard buzz spike sight swarm shove special gym robust assume sudden deposit grid alcohol choice devote leader tilt noodle tide penalty
-
-terracli keys add test3 --recover
-symbol force gallery make bulk round subway violin worry mixture penalty kingdom boring survey tool fringe patrol sausage hard admit remember broken alien absorb
-
-# Multisig
-terracli keys add multi \
-  --multisig=test1,test2,test3 \
-  --multisig-threshold=2
-```
 */
 
 import {
@@ -64,7 +31,7 @@ import { CLIKey } from "@terra-money/terra.js/dist/key/CLIKey.js"
 import { strictEqual } from "assert"
 import { execSync } from "child_process"
 import { unlinkSync, writeFileSync } from "fs"
-import { join } from "path"
+import 'dotenv/config.js'
 import {
   instantiateContract,
   migrate,
@@ -75,39 +42,42 @@ import {
   uploadContract
 } from "./helpers.js"
 
-const NETWORK: string = "localterra"
-// const NETWORK: string = "testnet"
+// Required environment variables:
 
-const COSMWASM_PLUS_PATH = join("..", "..", "cosmwasm-plus")
+// All:
+const MULTISIG_ADDRESS = process.env.MULTISIG_ADDRESS!
+// Name of the multisig in terracli
+const MULTISIG_NAME = process.env.MULTISIG_NAME!
+// Names of the multisig keys in terracli
+const MULTISIG_KEYS = process.env.MULTISIG_KEYS!.split(",")
+const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
+
+// Testnet:
+const CHAIN_ID = process.env.CHAIN_ID
+const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
+const CW20_CODE_ID = process.env.CW20_CODE_ID
+
+// LocalTerra:
+const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH
+
+// Main
 
 async function main() {
+  const isTestnet = CHAIN_ID !== undefined
+
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
-
-  let MULTISIG_ADDRESS: string
-  let MULTISIG_NAME: string
-  let MULTISIG_KEYS: Array<string>
-  let MULTISIG_THRESHOLD: number
-
   let codeID: number
-
-  const isTestnet = NETWORK === "testnet" || NETWORK === "tequila-0004"
 
   if (isTestnet) {
     terra = new LCDClient({
-      URL: 'https://tequila-lcd.terra.dev',
-      chainID: 'tequila-0004'
+      URL: LCD_CLIENT_URL!,
+      chainID: CHAIN_ID!
     })
 
-    wallet = recover(terra, "giggle ride master symbol south mail desert mother three endless edit draw flush aware hub parent tiny discover convince fox execute bulb promote walnut")
+    wallet = recover(terra, process.env.WALLET!)
 
-    MULTISIG_ADDRESS = "terra1sl6fqdmx9qexqz72qreg5lw8cnngu396u6gryu"
-    MULTISIG_NAME = "tequilamulti"
-    MULTISIG_KEYS = ["tequila1", "tequila2", "tequila3"]
-    MULTISIG_THRESHOLD = 2
-
-    // Code ID on tequila-0004 for cw20_base.wasm v0.2.0 built with workspace-optimizer:0.11.4
-    codeID = 7117
+    codeID = parseInt(CW20_CODE_ID!)
 
   } else {
     setTimeoutDuration(0)
@@ -116,27 +86,17 @@ async function main() {
 
     wallet = (terra as LocalTerra).wallets.test1
 
-    MULTISIG_ADDRESS = "terra1e0fx0q9meawrcq7fmma9x60gk35lpr4xk3884m"
-    MULTISIG_NAME = "multi"
-    MULTISIG_KEYS = ["test1", "test2", "test3"]
-    MULTISIG_THRESHOLD = 2
-
-    // Compile contract
-    execSync(
-      `cd ${join(COSMWASM_PLUS_PATH, "contracts", "cw20-base")} ` +
-      `&& RUSTFLAGS='-C link-arg=-s' cargo wasm `,
-      { encoding: 'utf-8' }
-    )
-
     // Upload contract code
-    codeID = await uploadContract(terra, wallet, join(COSMWASM_PLUS_PATH, "target", "wasm32-unknown-unknown", "release", "cw20_base.wasm"))
+    codeID = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
   }
 
   // Token info
   const TOKEN_NAME = "Mars"
   const TOKEN_SYMBOL = "MARS"
   const TOKEN_DECIMALS = 6
+  // The minter address cannot be changed after the contract is instantiated
   const TOKEN_MINTER = MULTISIG_ADDRESS
+  // The cap cannot be changed after the contract is instantiated
   const TOKEN_CAP = 1_000_000_000_000000
   // TODO check if we want initial balances in prod
   const TOKEN_INITIAL_AMOUNT = 1_000_000_000000
