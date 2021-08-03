@@ -54,14 +54,7 @@ pub fn execute_send_from(
     deduct_allowance(deps.storage, &owner_addr, &info.sender, &env.block, amount)?;
 
     let config = CONFIG.load(deps.storage)?;
-    let mut messages = core::transfer(
-        deps.storage,
-        &config,
-        owner_addr.clone(),
-        rcpt_addr.clone(),
-        amount,
-        true,
-    )?;
+    let mut messages = core::transfer(deps.storage, &config, owner_addr, rcpt_addr, amount, true)?;
 
     let attrs = vec![
         attr("action", "send_from"),

@@ -314,7 +314,7 @@ pub fn execute_update_config(
     let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {})?;
+        return Err(MarsError::Unauthorized {});
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
@@ -343,7 +343,7 @@ pub fn execute_execute_cosmos_msg(
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {})?;
+        return Err(MarsError::Unauthorized {});
     }
 
     Ok(Response {

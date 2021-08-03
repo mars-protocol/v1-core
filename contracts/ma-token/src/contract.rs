@@ -212,7 +212,7 @@ pub fn execute_burn(
     let res = Response {
         messages: vec![core::balance_change_msg(
             config.incentives_address,
-            user_address.clone(),
+            user_address,
             user_balance_before,
             total_supply_before,
         )?],
@@ -263,7 +263,7 @@ pub fn execute_mint(
     let res = Response {
         messages: vec![core::balance_change_msg(
             config.incentives_address,
-            rcpt_address.clone(),
+            rcpt_address,
             rcpt_balance_before,
             total_supply_before,
         )?],
