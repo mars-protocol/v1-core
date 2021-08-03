@@ -37,7 +37,6 @@ import {
   performTransaction,
   queryContract,
   recover,
-  setEnvLocalTerra,
   setTimeoutDuration,
   uploadContract
 } from "./helpers.js"
@@ -81,7 +80,6 @@ async function main() {
 
   } else {
     setTimeoutDuration(0)
-    setEnvLocalTerra()
 
     terra = new LocalTerra()
 
@@ -146,7 +144,7 @@ async function main() {
 
   // Create an unsigned tx
   const mintMsg = { mint: { recipient: recipient, amount: String(mintAmount) } }
-  const tx = await createTransaction(multisig, new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg))
+  const tx = await createTransaction(terra, multisig, new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg))
   writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
   // Create K of N signatures for the tx

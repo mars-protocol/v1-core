@@ -3,6 +3,7 @@ import {
   CreateTxOptions,
   isTxError,
   LCDClient,
+  LocalTerra,
   MnemonicKey,
   Msg,
   MsgExecuteContract,
@@ -29,12 +30,6 @@ export function getTimeoutDuration() {
 
 // LocalTerra doesn't estimate fees properly, so we set the fee in this environment sufficiently high to
 // ensure all transactions succeed.
-let LOCAL_TERRA = false
-
-export function setEnvLocalTerra() {
-  LOCAL_TERRA = true
-}
-
 const LOCAL_TERRA_FEE = new StdFee(
   30000000,
   [new Coin('uusd', 45000000)]
@@ -43,7 +38,7 @@ const LOCAL_TERRA_FEE = new StdFee(
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   let options: CreateTxOptions = { msgs: [msg] }
 
-  if (LOCAL_TERRA) {
+  if (terra instanceof LocalTerra) {
     options.fee = LOCAL_TERRA_FEE
   }
 
@@ -59,10 +54,10 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
   return result
 }
 
-export async function createTransaction(wallet: Wallet, msg: Msg) {
+export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   let options: CreateTxOptions = { msgs: [msg] }
 
-  if (LOCAL_TERRA) {
+  if (terra instanceof LocalTerra) {
     options.fee = LOCAL_TERRA_FEE
   }
 

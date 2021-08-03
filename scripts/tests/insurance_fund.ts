@@ -26,7 +26,6 @@ import {
   instantiateContract,
   performTransaction,
   queryContract,
-  setEnvLocalTerra,
   setTimeoutDuration,
   toEncodedBinary,
   uploadContract
