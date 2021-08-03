@@ -1,7 +1,6 @@
-use cosmwasm_std::{attr, Binary, Deps, DepsMut, Env, MessageInfo, Response, SubMsg, Uint128};
+use cosmwasm_std::{attr, Binary, DepsMut, Env, MessageInfo, Response, SubMsg, Uint128};
 use cw20::Cw20ReceiveMsg;
 use cw20_base::allowances::deduct_allowance;
-use cw20_base::ContractError as Cw20BaseError;
 
 use crate::core;
 use crate::error::ContractError;
@@ -95,10 +94,11 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{to_binary, Binary, CosmosMsg, StdError, WasmMsg};
+    use cosmwasm_std::{to_binary, Binary, CosmosMsg, Deps, StdError, WasmMsg};
     use cw20::{AllowanceResponse, Cw20Coin, Cw20ReceiveMsg, Expiration, TokenInfoResponse};
     use cw20_base::allowances::query_allowance;
     use cw20_base::contract::{query_balance, query_token_info};
+    use cw20_base::ContractError as Cw20BaseError;
 
     use crate::contract::{execute, instantiate};
     use mars::ma_token::msg::{ExecuteMsg, InstantiateMsg};

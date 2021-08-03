@@ -1,9 +1,9 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Api, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
-    Querier, Response, StdError, StdResult, Storage, SubMsg, Uint128,
+    attr, entry_point, to_binary, Api, Binary, Deps, DepsMut, Env, MessageInfo, Querier, Response,
+    StdError, StdResult, Storage, SubMsg, Uint128,
 };
 use cw2::{get_contract_version, set_contract_version};
-use cw20::{Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
+use cw20::Cw20ReceiveMsg;
 use cw20_base::allowances::{
     execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
@@ -334,9 +334,7 @@ pub fn execute_send(
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Balance { address } => {
-            to_binary(&cw20_base::contract::query_balance(deps, address)?)
-        }
+        QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::BalanceAndTotalSupply { address } => {
             to_binary(&query_balance_and_total_supply(deps, address)?)
         }
@@ -402,8 +400,8 @@ pub fn migrate<S: Storage, A: Api, Q: Querier>(
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, StdError, WasmMsg};
-    use cw20::Cw20Coin;
+    use cosmwasm_std::{coins, Addr, CosmosMsg, StdError, WasmMsg};
+    use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
 
     use super::*;
 
