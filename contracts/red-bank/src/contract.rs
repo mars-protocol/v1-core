@@ -1912,7 +1912,7 @@ pub fn market_update_interest_rates(
         contract_current_balance - liquidity_to_deduct_from_current_balance,
     );
     let total_debt = Decimal256::from_uint256(market.debt_total_scaled)
-        * get_updated_borrow_index(&market, env.block.time.seconds());
+        * get_updated_borrow_index(market, env.block.time.seconds());
     let current_utilization_rate = if total_debt > Decimal256::zero() {
         total_debt / (available_liquidity + total_debt)
     } else {
@@ -2130,14 +2130,14 @@ fn prepare_user_account_settlement(
 ) -> StdResult<(UserAccountSettlement, Vec<(String, Decimal256)>)> {
     let user_balances = user_get_balances(
         deps.as_ref(),
-        &money_market,
+        money_market,
         user,
         user_address,
         native_asset_prices_to_query,
         block_time,
     )?;
     let native_asset_prices =
-        get_native_asset_prices(&deps.querier, &native_asset_prices_to_query)?;
+        get_native_asset_prices(&deps.querier, native_asset_prices_to_query)?;
 
     let mut total_collateral_in_uusd = Uint256::zero();
     let mut total_debt_in_uusd = Uint256::zero();

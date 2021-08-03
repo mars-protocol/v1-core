@@ -35,7 +35,7 @@ pub fn capture_balance_snapshot(
     addr: &Addr,
     balance: Uint128,
 ) -> StdResult<()> {
-    BALANCE_SNAPSHOTS.save(storage, (&addr, U64Key::new(env.block.height)), &balance)
+    BALANCE_SNAPSHOTS.save(storage, (addr, U64Key::new(env.block.height)), &balance)
 }
 
 pub fn get_balance_snapshot_value_at(
@@ -43,7 +43,7 @@ pub fn get_balance_snapshot_value_at(
     addr: &Addr,
     block: u64,
 ) -> StdResult<Uint128> {
-    get_snapshot_value_at(storage, BALANCE_SNAPSHOTS.prefix(&addr), block)
+    get_snapshot_value_at(storage, BALANCE_SNAPSHOTS.prefix(addr), block)
 }
 
 // TOTAL SUPPLY
