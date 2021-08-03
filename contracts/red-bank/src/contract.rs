@@ -2136,8 +2136,7 @@ fn prepare_user_account_settlement(
         native_asset_prices_to_query,
         block_time,
     )?;
-    let native_asset_prices =
-        get_native_asset_prices(&deps.querier, native_asset_prices_to_query)?;
+    let native_asset_prices = get_native_asset_prices(&deps.querier, native_asset_prices_to_query)?;
 
     let mut total_collateral_in_uusd = Uint256::zero();
     let mut total_debt_in_uusd = Uint256::zero();

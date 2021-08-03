@@ -370,11 +370,7 @@ fn query_balance_and_total_supply(
 }
 
 #[entry_point]
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    deps: DepsMut,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> StdResult<Response> {
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     let old_version = get_contract_version(deps.storage)?;
     if old_version.contract != CONTRACT_NAME {
         return Err(StdError::generic_err(format!(
