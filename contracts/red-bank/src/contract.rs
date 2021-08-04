@@ -514,10 +514,10 @@ pub fn execute_init_asset(
             // Prepare response, should instantiate an maToken
             // and use the Register hook.
             // A new maToken should be created which callbacks this contract in order to be registered.
-            let incentives_address = address_provider::helpers::query_address(
+            let incentives_addresses = address_provider::helpers::query_addresses(
                 &deps.querier,
                 config.address_provider_address,
-                MarsContract::Incentives,
+                vec![MarsContract::Incentives, MarsContract::ProtocolAdmin],
             )?;
 
             Ok(Response {
@@ -1504,23 +1504,10 @@ pub fn execute_distribute_protocol_income(
         config.address_provider_address,
         mars_contracts,
     )?;
-    if addresses_query.len() != expected_len {
-        return Err(StdError::generic_err(format!(
-            "Incorrect number of addresses, expected {} got {}",
-            expected_len,
-            addresses_query.len()
-        ))
-        .into());
-    }
-    let treasury_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
-    let staking_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
-    let insurance_fund_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
+
+    let treasury_address = addresses_query.pop().unwrap();
+    let staking_address = addresses_query.pop().unwrap();
+    let insurance_fund_address = addresses_query.pop().unwrap();
 
     let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
     let treasury_amount = amount_to_distribute * config.treasury_fee_share;
