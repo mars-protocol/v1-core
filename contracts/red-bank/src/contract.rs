@@ -12,7 +12,7 @@ use terra_cosmwasm::TerraQuerier;
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
-use mars::asset::{Asset, AssetType, asset_get_attributes};
+use mars::asset::{Asset, AssetType};
 use mars::ma_token;
 use mars::red_bank::msg::{
     CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
@@ -335,7 +335,7 @@ pub fn execute_withdraw(
 ) -> Result<Response, ContractError> {
     let withdrawer_addr = info.sender;
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -481,7 +481,7 @@ pub fn execute_init_asset(
 
     let mut money_market = RED_BANK.load(deps.storage)?;
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         None => {
@@ -563,7 +563,7 @@ pub fn execute_update_asset(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    let (asset_label, asset_reference, _asset_type) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
@@ -682,7 +682,7 @@ pub fn execute_borrow(
 ) -> Result<Response, ContractError> {
     let borrower_address = info.sender;
 
-    let (asset_label, asset_reference, asset_type) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
 
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
@@ -959,7 +959,7 @@ pub fn execute_liquidate(
 ) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
 
-    let (debt_asset_label, debt_asset_reference, _) = asset_get_attributes(&debt_asset)?;
+    let (debt_asset_label, debt_asset_reference, _) = debt_asset.get_attributes();
     // 1. Validate liquidation
     // If user (contract) has a positive uncollateralized limit then the user
     // cannot be liquidated
@@ -988,7 +988,7 @@ pub fn execute_liquidate(
     }
 
     let (collateral_asset_label, collateral_asset_reference, _) =
-        asset_get_attributes(&collateral_asset)?;
+        collateral_asset.get_attributes();
 
     let mut collateral_market =
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
@@ -1375,7 +1375,7 @@ pub fn execute_update_uncollateralized_loan_limit(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    let (asset_label, asset_reference, _) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, _) = asset.get_attributes();
 
     UNCOLLATERALIZED_LOAN_LIMITS.save(
         deps.storage,
@@ -1423,7 +1423,7 @@ pub fn execute_update_user_collateral_asset_status(
         .may_load(deps.storage, &user_address)?
         .unwrap_or_default();
 
-    let (collateral_asset_label, collateral_asset_reference, _) = asset_get_attributes(&asset)?;
+    let (collateral_asset_label, collateral_asset_reference, _) = asset.get_attributes();
     let collateral_market = MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
     let has_collateral_asset = get_bit(user.collateral_assets, collateral_market.index)?;
     if !has_collateral_asset && enable {
@@ -1473,7 +1473,7 @@ pub fn execute_distribute_protocol_income(
     // Get config
     let config = CONFIG.load(deps.storage)?;
 
-    let (asset_label, asset_reference, _) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, _) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     let amount_to_distribute = match amount {
@@ -1742,7 +1742,7 @@ fn query_uncollateralized_loan_limit(
     user_address: Addr,
     asset: Asset,
 ) -> StdResult<UncollateralizedLoanLimitResponse> {
-    let (asset_label, asset_reference, _) = asset_get_attributes(&asset)?;
+    let (asset_label, asset_reference, _) = asset.get_attributes();
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
         .load(deps.storage, (asset_reference.as_slice(), &user_address));
 
@@ -2201,14 +2201,14 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
         .unwrap_or_else(Uint256::zero)
 }
 
-fn get_market_denom(deps: Deps, market_id: Vec<u8>, asset_type: AssetType) -> StdResult<String> {
+fn get_market_denom(deps: Deps, market_reference: Vec<u8>, asset_type: AssetType) -> StdResult<String> {
     match asset_type {
-        AssetType::Native => match String::from_utf8(market_id) {
+        AssetType::Native => match String::from_utf8(market_reference) {
             Ok(denom) => Ok(denom),
             Err(_) => Err(StdError::generic_err("failed to encode key into string")),
         },
         AssetType::Cw20 => {
-            let cw20_contract_address = match String::from_utf8(market_id) {
+            let cw20_contract_address = match String::from_utf8(market_reference) {
                 Ok(cw20_contract_address) => cw20_contract_address,
                 Err(_) => {
                     return Err(StdError::generic_err(
@@ -2317,25 +2317,6 @@ fn build_send_cw20_token_msg(
     }))
 }
 
-fn get_native_asset_prices(
-    querier: &QuerierWrapper,
-    assets_to_query: &[String],
-) -> StdResult<Vec<(String, Decimal256)>> {
-    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
-
-    if !assets_to_query.is_empty() {
-        let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-        let querier = TerraQuerier::new(querier);
-        let asset_prices_in_uusd = querier
-            .query_exchange_rates("uusd", assets_to_query)?
-            .exchange_rates;
-        for rate in asset_prices_in_uusd {
-            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
-        }
-    }
-
-    Ok(asset_prices)
-}
 
 fn asset_get_price(
     asset_label: &str,

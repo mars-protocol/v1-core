@@ -6,6 +6,7 @@ use cosmwasm_std::{
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
 use mars::error::MarsError;
+use mars::asset::{Asset, AssetType};
 
 // INIT
 
@@ -19,6 +20,7 @@ pub fn instantiate(
     // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
+        astroport_factory_address: deps.api.addr_validate(&msg.astroport_factory_address)?,
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -88,7 +90,8 @@ pub fn execute_update_config(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::AssetPrice {asset} => query_asset_price(&query_config(deps, asset)?),
+        QueryMsg::AssetPrice {asset} => to_binary(&query_config(deps, asset)?),
+        QueryMsg::AssetPrices {assets} => to_binary(&query_config(deps, assets)?),
     }
 }
 
@@ -99,7 +102,33 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     })
 }
 
-fn query_asset_price(
+fn query_asset_price(deps: Deps, _env: Env, asset: Asset) {
+}
+
+fn get_native_asset_prices(
+    querier: &QuerierWrapper,
+    assets_to_query: &[String],
+) -> StdResult<Vec<(String, Decimal256)>> {
+    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
+
+    if !assets_to_query.is_empty() {
+        let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
+        let querier = TerraQuerier::new(querier);
+        let asset_prices_in_uusd = querier
+            .query_exchange_rates("uusd", assets_to_query)?
+            .exchange_rates;
+        for rate in asset_prices_in_uusd {
+            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
+        }
+    }
+
+    Ok(asset_prices)
+}
+
+fn get_cw20_price(
+    querier: &QuerierWrapper,
+    asset: Asset) -> StdResult(Decimal256) {
+}
 
 // MIGRATION
 
