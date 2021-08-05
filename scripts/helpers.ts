@@ -36,7 +36,10 @@ const LOCAL_TERRA_FEE = new StdFee(
 )
 
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  let options: CreateTxOptions = { msgs: [msg] }
+  let options: CreateTxOptions = {
+    msgs: [msg],
+    gasPrices: [new Coin("uusd", 0.15)]
+  }
 
   if (terra instanceof LocalTerra) {
     options.fee = LOCAL_TERRA_FEE
@@ -55,7 +58,10 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
 }
 
 export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  let options: CreateTxOptions = { msgs: [msg] }
+  let options: CreateTxOptions = {
+    msgs: [msg],
+    gasPrices: [new Coin("uusd", 0.15)]
+  }
 
   if (terra instanceof LocalTerra) {
     options.fee = LOCAL_TERRA_FEE
