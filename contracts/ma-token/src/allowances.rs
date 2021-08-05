@@ -87,42 +87,14 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{to_binary, Binary, CosmosMsg, Deps, StdError, WasmMsg};
-    use cw20::{AllowanceResponse, Cw20Coin, Cw20ReceiveMsg, Expiration, TokenInfoResponse};
+    use cosmwasm_std::{to_binary, Binary, CosmosMsg, StdError, WasmMsg};
+    use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
     use cw20_base::allowances::query_allowance;
-    use cw20_base::contract::{query_balance, query_token_info};
     use cw20_base::ContractError as Cw20BaseError;
 
-    use crate::contract::{execute, instantiate};
-    use mars::ma_token::msg::{ExecuteMsg, InstantiateMsg};
-
-    fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
-        query_balance(deps, address.into()).unwrap().balance
-    }
-
-    // this will set up the instantiation for other tests
-    fn do_instantiate<T: Into<String>>(
-        mut deps: DepsMut,
-        addr: T,
-        amount: Uint128,
-    ) -> TokenInfoResponse {
-        let instantiate_msg = InstantiateMsg {
-            name: "Auto Gen".to_string(),
-            symbol: "AUTO".to_string(),
-            decimals: 3,
-            initial_balances: vec![Cw20Coin {
-                address: addr.into(),
-                amount,
-            }],
-            mint: None,
-            red_bank_address: String::from("red_bank"),
-            incentives_address: String::from("incentives"),
-        };
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
-        query_token_info(deps.as_ref()).unwrap()
-    }
+    use crate::contract::execute;
+    use crate::test_helpers::{do_instantiate, get_balance};
+    use mars::ma_token::msg::ExecuteMsg;
 
     #[test]
     fn transfer_from_respects_limits() {
