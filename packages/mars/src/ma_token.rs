@@ -14,8 +14,16 @@ pub mod msg {
         pub mint: Option<MinterResponse>,
 
         // custom_params
+        pub init_hook: Option<InitHook>,
         pub red_bank_address: String,
         pub incentives_address: String,
+    }
+
+    /// Hook to be called after token initialization
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct InitHook {
+        pub msg: Binary,
+        pub contract_addr: String,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

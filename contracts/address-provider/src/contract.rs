@@ -31,6 +31,7 @@ pub fn instantiate(
         staking_address: Addr::unchecked(""),
         treasury_address: Addr::unchecked(""),
         xmars_token_address: Addr::unchecked(""),
+        protocol_admin_address: Addr::unchecked(""),
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -73,6 +74,7 @@ pub fn execute_update_config(
         incentives_address,
         insurance_fund_address,
         mars_token_address,
+        protocol_admin_address,
         red_bank_address,
         staking_address,
         treasury_address,
@@ -92,6 +94,11 @@ pub fn execute_update_config(
     )?;
     config.mars_token_address =
         option_string_to_addr(deps.api, mars_token_address, config.mars_token_address)?;
+    config.protocol_admin_address = option_string_to_addr(
+        deps.api,
+        protocol_admin_address,
+        config.protocol_admin_address,
+    )?;
     config.red_bank_address =
         option_string_to_addr(deps.api, red_bank_address, config.red_bank_address)?;
     config.staking_address =
@@ -125,6 +132,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         incentives_address: config.incentives_address,
         insurance_fund_address: config.insurance_fund_address,
         mars_token_address: config.mars_token_address,
+        protocol_admin: config.protocol_admin_address,
         red_bank_address: config.red_bank_address,
         staking_address: config.staking_address,
         treasury_address: config.treasury_address,
@@ -153,6 +161,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
         MarsContract::Incentives => config.incentives_address.clone(),
         MarsContract::InsuranceFund => config.insurance_fund_address.clone(),
         MarsContract::MarsToken => config.mars_token_address.clone(),
+        MarsContract::ProtocolAdmin => config.protocol_admin_address.clone(),
         MarsContract::RedBank => config.red_bank_address.clone(),
         MarsContract::Staking => config.staking_address.clone(),
         MarsContract::Treasury => config.treasury_address.clone(),
@@ -166,8 +175,6 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
 pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
     Ok(Response::default())
 }
-
-// HELPERS
 
 // TESTS
 
