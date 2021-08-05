@@ -96,6 +96,7 @@ pub fn instantiate(
 
 // HANDLERS
 
+#[entry_point]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -541,6 +542,7 @@ pub fn execute_update_config(
 const PAGINATION_DEFAULT_LIMIT: u32 = 10;
 const PAGINATION_MAX_LIMIT: u32 = 30;
 
+#[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
