@@ -10,7 +10,7 @@ import {
   uploadContract,
 } from "./helpers.js"
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { testnet, local } from "./deploy_configs.js"
+import { testnet, bombay, local } from "./deploy_configs.js"
 import { join } from "path"
 
 // consts
@@ -22,28 +22,32 @@ const MARS_ARTIFACTS_PATH = "../artifacts"
 async function main() {
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
-  const isTestnet = process.env.NETWORK === "testnet"
+  let deployConfig: Config
+  const isTestnet = process.env.NETWORK === "testnet" || process.env.NETWORK === "bombay"
 
-  if (isTestnet) {
+  if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
       URL: 'https://tequila-lcd.terra.dev',
       chainID: 'tequila-0004'
     })
-
     wallet = recover(terra, process.env.TEST_MAIN!)
-    console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
+    deployConfig = testnet
+
+  } else if (process.env.NETWORK === "bombay") {
+    terra = new LCDClient({
+      URL: 'https://bombay-lcd.terra.dev',
+      chainID: 'bombay-0008'
+    })
+    wallet = recover(terra, process.env.TEST_MAIN!)
+    deployConfig = bombay
   } else {
     terra = new LocalTerra()
     wallet = (terra as LocalTerra).wallets.test1
     setTimeoutDuration(0)
-  }
-
-  let deployConfig: Config
-  if (isTestnet) {
-    deployConfig = testnet
-  } else {
     deployConfig = local
   }
+
+  console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
 
   /*************************************** Deploy Address Provider Contract *****************************************/
   console.log("Deploying Address Provider...")
@@ -113,23 +117,15 @@ async function main() {
   )
   console.log("Incentives Contract Address: " + incentivesContractAddress)
 
-  /************************************* Upload cw20 Token Contract *************************************/
-  console.log("Uploading cw20 token contract")
-  const cw20TokenCodeId = await uploadContract(
-    terra,
-    wallet,
-    join(MARS_ARTIFACTS_PATH, 'cw20_token.wasm'),
-  )
-  console.log(`Uploaded cw20 token contract, code: ${cw20TokenCodeId}`)
-
   /************************************* Instantiate Mars Token Contract *************************************/
   console.log("Deploying Mars token...")
   const marsTokenContractAddress = await instantiateContract(
     terra,
     wallet,
-    cw20TokenCodeId,
+    // TODO we should deploy our own token here so that it works on any env. This code ID is on testnet & bombay
+    148, // This is terraswap-token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
     {
-      "name": "Mars token",
+      name: "Mars token",
       symbol: "Mars",
       decimals: 6,
       initial_balances: isTestnet ? [
