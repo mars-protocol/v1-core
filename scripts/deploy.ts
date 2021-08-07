@@ -132,6 +132,10 @@ async function main() {
         {
           "address": wallet.key.accAddress,
           "amount": "1000000000000"
+        },
+        {
+          "address": "terra1z926ax906k0ycsuckele6x5hh66e2m4m5udwep", // Fields developers address
+          "amount": "1000000000000"
         }
       ] : [],
       mint: {
@@ -220,7 +224,7 @@ async function main() {
   )
   console.log("Address Provider config successfully setup: ", await queryContract(terra, addressProviderContractAddress, { "config": {} }))
 
-  /************************************* Setup Initial Liquidity Pools **************************************/
+  /************************************* Setup Initial Red Bank Markets **************************************/
   await setupRedBank(
     terra,
     wallet,
@@ -230,6 +234,41 @@ async function main() {
     }
   )
   console.log("Initial assets setup successfully")
+
+  // Add some uncollateralised loan limits for the Fields of Mars MIR-UST and ANC-UST strategies
+  if (deployConfig.mirFarmingStratContractAddress) {
+    await executeContract(terra, wallet, redBankContractAddress, {
+      "update_uncollateralized_loan_limit": {
+        "user_address": deployConfig.mirFarmingStratContractAddress,
+        "asset": {
+          "native": {
+            "denom": "uusd"
+          }
+        },
+        // TODO should we do this in the production deploy? What initial limit should we give this strategy
+        "new_limit": "1000000000000000" // one billion UST
+      }
+    })
+    console.log(`Uncollateralized loan limit for contract ${deployConfig.mirFarmingStratContractAddress} (Fields MIR-UST):`,
+      await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.mirFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
+  }
+
+  if (deployConfig.ancFarmingStratContractAddress) {
+    await executeContract(terra, wallet, redBankContractAddress, {
+      "update_uncollateralized_loan_limit": {
+        "user_address": deployConfig.ancFarmingStratContractAddress,
+        "asset": {
+          "native": {
+            "denom": "uusd"
+          }
+        },
+        // TODO should we do this in the production deploy? What initial limit should we give this strategy
+        "new_limit": "1000000000000000" // one billion UST
+      }
+    })
+    console.log(`Uncollateralized loan limit for contract ${deployConfig.ancFarmingStratContractAddress} (Fields ANC-UST):`,
+      await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.ancFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
+  }
 
   // Once initial assets initialized, set the owner of Red Bank to be Council rather than EOA
   console.log(`Updating Red Bank to be owned by Council contract ${councilContractAddress}`)

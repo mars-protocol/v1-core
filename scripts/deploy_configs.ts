@@ -96,7 +96,9 @@ export const testnet: Config = {
       kp_augmentation_threshold: "0.15",
       kp_2: "0.05"
     },
-  ]
+  ],
+  mirFarmingStratContractAddress: undefined,
+  ancFarmingStratContractAddress: undefined,
 }
 
 export const bombay: Config = {
@@ -198,7 +200,9 @@ export const bombay: Config = {
     //   kp_augmentation_threshold: "0.15",
     //   kp_2: "0.05"
     // },
-  ]
+  ],
+  mirFarmingStratContractAddress: "terra18vx7zwn9mmygqtg35aptdx6s59p4zlrl9kx4z3",
+  ancFarmingStratContractAddress: "terra1zdwqr84m7sgx7vg82n48p6dgwn7p57hzwu0ht4",
 }
 
 export const local: Config = {
@@ -239,5 +243,7 @@ export const local: Config = {
       "close_factor": "0.5"
     }
   },
-  initialAssets: []
+  initialAssets: [],
+  mirFarmingStratContractAddress: undefined,
+  ancFarmingStratContractAddress: undefined,
 }
