@@ -2,12 +2,13 @@
 
 ## Instructions for multisig key holders
 
-As a key holder to a multisig, you will be required to sign transactions.
+As a multisig key holder, you will be required to sign transactions.
 The instructions below explain how to do this.
 
 ### Dependencies
 
-- terracli
+- go (https://golang.org/dl/)
+- terracli (https://github.com/terra-money/core)
 
 ### Install terracli
 
@@ -21,6 +22,10 @@ terracli
 ### Setup key in terracli
 
 ```sh
+# Setup a new private key
+terracli keys add <name>
+
+# Or recover an existing private key
 terracli keys add <name> --recover
 # Then enter your 24 word mnemonic
 
@@ -32,7 +37,7 @@ terracli keys show <name>
 
 You will be sent:
 - An unsigned transaction `.json` file
-- A signing command that looks like this:
+- A signing command that is similar to this:
 
 ```sh
 # Set `from` to your address that is a key to the multisig terra1sl6fqdmx9qexqz72qreg5lw8cnngu396u6gryu
@@ -62,6 +67,7 @@ The instructions below explain how to do this.
 
 ### Dependencies
 
+- go
 - terracli
 
 ### Create an unsigned transaction
