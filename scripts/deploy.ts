@@ -10,7 +10,7 @@ import {
   uploadContract,
 } from "./helpers.js"
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { testnet, local } from "./deploy_configs.js"
+import { testnet, bombay, local } from "./deploy_configs.js"
 import { join } from "path"
 
 // consts
@@ -22,28 +22,37 @@ const MARS_ARTIFACTS_PATH = "../artifacts"
 async function main() {
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
-  const isTestnet = process.env.NETWORK === "testnet"
+  let deployConfig: Config
+  const isTestnet = process.env.NETWORK === "testnet" || process.env.NETWORK === "bombay"
 
-  if (isTestnet) {
+  if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
       URL: 'https://tequila-lcd.terra.dev',
       chainID: 'tequila-0004'
     })
-
     wallet = recover(terra, process.env.TEST_MAIN!)
-    console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
+    deployConfig = testnet
+
+  } else if (process.env.NETWORK === "bombay") {
+    terra = new LCDClient({
+      URL: 'https://bombay-lcd.terra.dev',
+      chainID: 'bombay-0008'
+    })
+    wallet = recover(terra, process.env.TEST_MAIN!)
+    deployConfig = bombay
   } else {
     terra = new LocalTerra()
     wallet = (terra as LocalTerra).wallets.test1
     setTimeoutDuration(0)
-  }
-
-  let deployConfig: Config
-  if (isTestnet) {
-    deployConfig = testnet
-  } else {
     deployConfig = local
   }
+
+  if (!deployConfig.cw20_code_id) {
+    console.log("Please set cw20_code_id for network in deploy_config.ts")
+    return
+  }
+
+  console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
 
   /*************************************** Deploy Address Provider Contract *****************************************/
   console.log("Deploying Address Provider...")
@@ -113,28 +122,23 @@ async function main() {
   )
   console.log("Incentives Contract Address: " + incentivesContractAddress)
 
-  /************************************* Upload cw20 Token Contract *************************************/
-  console.log("Uploading cw20 token contract")
-  const cw20TokenCodeId = await uploadContract(
-    terra,
-    wallet,
-    join(MARS_ARTIFACTS_PATH, 'cw20_token.wasm'),
-  )
-  console.log(`Uploaded cw20 token contract, code: ${cw20TokenCodeId}`)
-
   /************************************* Instantiate Mars Token Contract *************************************/
   console.log("Deploying Mars token...")
   const marsTokenContractAddress = await instantiateContract(
     terra,
     wallet,
-    cw20TokenCodeId,
+    deployConfig.cw20_code_id,
     {
-      "name": "Mars token",
+      name: "Mars token",
       symbol: "Mars",
       decimals: 6,
       initial_balances: isTestnet ? [
         {
           "address": wallet.key.accAddress,
+          "amount": "1000000000000"
+        },
+        {
+          "address": "terra1z926ax906k0ycsuckele6x5hh66e2m4m5udwep", // Fields developers address
           "amount": "1000000000000"
         }
       ] : [],
@@ -224,7 +228,7 @@ async function main() {
   )
   console.log("Address Provider config successfully setup: ", await queryContract(terra, addressProviderContractAddress, { "config": {} }))
 
-  /************************************* Setup Initial Liquidity Pools **************************************/
+  /************************************* Setup Initial Red Bank Markets **************************************/
   await setupRedBank(
     terra,
     wallet,
@@ -234,6 +238,41 @@ async function main() {
     }
   )
   console.log("Initial assets setup successfully")
+
+  // Add some uncollateralised loan limits for the Fields of Mars MIR-UST and ANC-UST strategies
+  if (deployConfig.mirFarmingStratContractAddress) {
+    await executeContract(terra, wallet, redBankContractAddress, {
+      "update_uncollateralized_loan_limit": {
+        "user_address": deployConfig.mirFarmingStratContractAddress,
+        "asset": {
+          "native": {
+            "denom": "uusd"
+          }
+        },
+        // TODO should we do this in the production deploy? What initial limit should we give this strategy
+        "new_limit": "1000000000000000" // one billion UST
+      }
+    })
+    console.log(`Uncollateralized loan limit for contract ${deployConfig.mirFarmingStratContractAddress} (Fields MIR-UST):`,
+      await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.mirFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
+  }
+
+  if (deployConfig.ancFarmingStratContractAddress) {
+    await executeContract(terra, wallet, redBankContractAddress, {
+      "update_uncollateralized_loan_limit": {
+        "user_address": deployConfig.ancFarmingStratContractAddress,
+        "asset": {
+          "native": {
+            "denom": "uusd"
+          }
+        },
+        // TODO should we do this in the production deploy? What initial limit should we give this strategy
+        "new_limit": "1000000000000000" // one billion UST
+      }
+    })
+    console.log(`Uncollateralized loan limit for contract ${deployConfig.ancFarmingStratContractAddress} (Fields ANC-UST):`,
+      await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.ancFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
+  }
 
   // Once initial assets initialized, set the owner of Red Bank to be Council rather than EOA
   console.log(`Updating Red Bank to be owned by Council contract ${councilContractAddress}`)
