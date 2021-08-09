@@ -70,11 +70,20 @@ The instructions below explain how to do this.
 - go
 - terracli
 
+### Add a multisig key to terracli
+
+```sh
+terracli keys add <multisig_name> \
+  --multisig <terra1...>,<terra1...>[,<terra1...>] \
+  --multisig-threshold <k>
+```
+
 ### Create an unsigned transaction
 
-1. Populate a `.env` file with the required environment variables from `create_unsigned_tx.ts`
-2. Run `ts-node create_unsigned_tx.ts`
-3. Distribute `unsigned_tx.json` to multisig key holders
+1. Add a multisig to terracli
+2. Populate a `.env` file with the required environment variables from `create_unsigned_tx.ts`
+3. Run `ts-node create_unsigned_tx.ts`
+4. Distribute `unsigned_tx.json` to multisig key holders
 
 ### Broadcast a transaction
 
