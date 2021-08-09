@@ -99,6 +99,7 @@ export const testnet: Config = {
   ],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
+  cw20_code_id: 148, // This is terraswap token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
 }
 
 export const bombay: Config = {
@@ -203,6 +204,7 @@ export const bombay: Config = {
   ],
   mirFarmingStratContractAddress: "terra18vx7zwn9mmygqtg35aptdx6s59p4zlrl9kx4z3",
   ancFarmingStratContractAddress: "terra1zdwqr84m7sgx7vg82n48p6dgwn7p57hzwu0ht4",
+  cw20_code_id: 148, // This is terraswap token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
 }
 
 export const local: Config = {
@@ -246,4 +248,5 @@ export const local: Config = {
   initialAssets: [],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
+  cw20_code_id: undefined,
 }

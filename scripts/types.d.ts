@@ -63,4 +63,5 @@ interface Config {
   initialAssets: Asset[]
   mirFarmingStratContractAddress: string | undefined
   ancFarmingStratContractAddress: string | undefined
+  cw20_code_id: number | undefined
 }

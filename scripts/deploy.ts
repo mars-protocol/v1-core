@@ -47,6 +47,11 @@ async function main() {
     deployConfig = local
   }
 
+  if (!deployConfig.cw20_code_id) {
+    console.log("Please set cw20_code_id for network in deploy_config.ts")
+    return
+  }
+
   console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
 
   /*************************************** Deploy Address Provider Contract *****************************************/
@@ -122,8 +127,7 @@ async function main() {
   const marsTokenContractAddress = await instantiateContract(
     terra,
     wallet,
-    // TODO we should deploy our own token here so that it works on any env. This code ID is on testnet & bombay
-    148, // This is terraswap-token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
+    deployConfig.cw20_code_id,
     {
       name: "Mars token",
       symbol: "Mars",
