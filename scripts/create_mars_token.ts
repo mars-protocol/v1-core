@@ -33,7 +33,6 @@ import { unlinkSync, writeFileSync } from "fs"
 import 'dotenv/config.js'
 import {
   createTransaction,
-  deployContract,
   executeContract,
   instantiateContract,
   performTransaction,
@@ -59,9 +58,11 @@ const MARS_MINTER_BINARY_PATH = process.env.MARS_MINTER_BINARY_PATH!
 const CHAIN_ID = process.env.CHAIN_ID
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
 const CW20_CODE_ID = process.env.CW20_CODE_ID
+const MARS_MINTER_CODE_ID = process.env.MARS_MINTER_CODE_ID
 
 // LocalTerra:
 const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH
+const MARS_MINTER_BINARY_PATH = process.env.MARS_MINTER_BINARY_PATH!
 
 // Main
 
@@ -70,7 +71,8 @@ async function main() {
 
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
-  let codeID: number
+  let cw20CodeID: number
+  let marsMinterCodeID: number
 
   if (isTestnet) {
     terra = new LCDClient({
@@ -80,7 +82,8 @@ async function main() {
 
     wallet = recover(terra, process.env.WALLET!)
 
-    codeID = parseInt(CW20_CODE_ID!)
+    cw20CodeID = parseInt(CW20_CODE_ID!)
+    marsMinterCodeID = parseInt(MARS_MINTER_CODE_ID!)
 
   } else {
     setTimeoutDuration(0)
@@ -90,14 +93,16 @@ async function main() {
     wallet = (terra as LocalTerra).wallets.test1
 
     // Upload contract code
-    codeID = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
-    console.log(codeID)
+    cw20CodeID = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
+    console.log(cw20CodeID)
+    marsMinterCodeID = await uploadContract(terra, wallet, MARS_MINTER_BINARY_PATH!)
+    console.log(marsMinterCodeID)
   }
 
   const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
 
   // Instantiate mars-minter
-  const minterAddress = await deployContract(terra, wallet, MARS_MINTER_BINARY_PATH, { admins: [wallet.key.accAddress, MULTISIG_ADDRESS] })
+  const minterAddress = await instantiateContract(terra, wallet, marsMinterCodeID, { admins: [wallet.key.accAddress, MULTISIG_ADDRESS] })
   console.log("minter:", minterAddress)
 
   // Token info
@@ -129,7 +134,7 @@ async function main() {
   }
 
   // Instantiate Mars token contract
-  const marsAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
+  const marsAddress = await instantiateContract(terra, wallet, cw20CodeID, TOKEN_INFO)
   console.log("mars:", marsAddress)
   console.log(await queryContract(terra, marsAddress, { token_info: {} }))
   console.log(await queryContract(terra, marsAddress, { minter: {} }))
