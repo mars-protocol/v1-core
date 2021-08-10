@@ -97,7 +97,7 @@ async function main() {
   const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
 
   // Instantiate mars-minter
-  const minterAddress = await deployContract(terra, wallet, MARS_MINTER_BINARY_PATH, { admins: [wallet.key.accAddress] })
+  const minterAddress = await deployContract(terra, wallet, MARS_MINTER_BINARY_PATH, { admins: [wallet.key.accAddress, MULTISIG_ADDRESS] })
   console.log("minter:", minterAddress)
 
   // Token info
