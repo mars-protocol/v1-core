@@ -1,5 +1,5 @@
 /*
-Script to deploy a cw20 token from a multisig account, mint tokens, and migrate the contract.
+Script to deploy a cw20 token from a multisig account using the mars-minter contract as the token minter.
 
 This script is designed to work with Terra Columbus-4.
 
@@ -152,7 +152,22 @@ async function main() {
   const multisigCanMint = await queryContract(terra, minterAddress, { can_mint: { sender: MULTISIG_ADDRESS } })
   strictEqual(multisigCanMint.can_mint, true)
 
+  // Update mars-minter owner
+  const newOwner = MULTISIG_ADDRESS
+
+  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, minterAddress))
+
+  const minterContractInfo = await terra.wasm.contractInfo(minterAddress)
+  strictEqual(minterContractInfo.owner, newOwner)
+
+  // Update Mars token owner
+  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
+
+  const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
+  strictEqual(marsContractInfo.owner, newOwner)
+
   // Mint tokens
+  // NOTE this is for testnet use only -- do not mint tokens like this on mainnet
   const mintAmount = 1_000_000000
   const recipient = wallet.key.accAddress
 
@@ -210,20 +225,6 @@ async function main() {
   for (const fn of [...fns, "unsigned_tx.json"]) {
     unlinkSync(fn)
   }
-
-  // Update mars-minter owner
-  const newOwner = MULTISIG_ADDRESS
-
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, minterAddress))
-
-  const minterContractInfo = await terra.wasm.contractInfo(minterAddress)
-  strictEqual(minterContractInfo.owner, newOwner)
-
-  // Update Mars token contract owner
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
-
-  const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
-  strictEqual(marsContractInfo.owner, newOwner)
 
   console.log("OK")
 }
