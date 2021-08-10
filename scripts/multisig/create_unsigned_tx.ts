@@ -44,7 +44,7 @@ async function main() {
   // Prints a command that should be run by the multisig key holders to generate signatures
   // TODO add Ledger support
   console.log(`
-# Set \`from\` to your address that is a key to the multisig ${MULTISIG_ADDRESS}
+# Set \`from\` to your address that is a key to the multisig: ${MULTISIG_ADDRESS}
 from=terra1...
 
 terracli tx sign ${unsignedTx} \\

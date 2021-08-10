@@ -37,26 +37,22 @@ terracli keys show <name>
 
 You will be sent:
 - An unsigned transaction `.json` file
-- A signing command that is similar to this:
+- A signing command that will look similar to this:
 
 ```sh
-# Set `from` to your address that is a key to the multisig terra1sl6fqdmx9qexqz72qreg5lw8cnngu396u6gryu
+# Set `from` to your address that is a key to the multisig: terra1multisigaddress
 from=terra1...
 
 terracli tx sign unsigned_tx.json \
-  --multisig=terra1sl6fqdmx9qexqz72qreg5lw8cnngu396u6gryu \
+  --multisig=terra1multisigaddress \
   --from=$from \
-  --chain-id=tequila-0004 \
-  --offline \
-  --account-number=58002 \
-  --sequence=13 \
-  --output-document=${from}_sig.json
+  ...
 ```
 
 You need to:
 1. Open a terminal
 2. Change directory to the location of the unsigned transaction `.json` file, e.g. `cd path/to/directory`
-3. Replace `terra1...` in the signing command with your address, e.g. `from=terra1myaddress`
+3. Replace `terra1...` in the signing command with your address, e.g. `from=terra1youraddress`
 4. Run the modified signing command
 5. Return the signature `.json` file that is generated
 
