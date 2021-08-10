@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Query contract config",
       "type": "object",
       "required": [
         "config"
@@ -15,24 +16,98 @@
       "additionalProperties": false
     },
     {
+      "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
       "type": "object",
       "required": [
-        "cooldown"
+        "asset_price"
       ],
       "properties": {
-        "cooldown": {
+        "asset_price": {
           "type": "object",
           "required": [
-            "sender_address"
+            "asset_reference"
           ],
           "properties": {
-            "sender_address": {
-              "type": "string"
+            "asset_reference": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get asset's price config",
+      "type": "object",
+      "required": [
+        "asset_price_config"
+      ],
+      "properties": {
+        "asset_price_config": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
             }
           }
         }
       },
       "additionalProperties": false
     }
-  ]
+  ],
+  "definitions": {
+    "Asset": {
+      "description": "Represents either a native asset or a cw20. Meant to be used as part of a msg in a contract call and not to be used internally",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "cw20"
+          ],
+          "properties": {
+            "cw20": {
+              "type": "object",
+              "required": [
+                "contract_addr"
+              ],
+              "properties": {
+                "contract_addr": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "native"
+          ],
+          "properties": {
+            "native": {
+              "type": "object",
+              "required": [
+                "denom"
+              ],
+              "properties": {
+                "denom": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
 }

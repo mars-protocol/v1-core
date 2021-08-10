@@ -1,10 +1,10 @@
 pub mod msg {
+    use crate::asset::{Asset, AssetType};
     use cosmwasm_bignumber::{Decimal256, Uint256};
     use cosmwasm_std::{Addr, Uint128};
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
-    use crate::asset::{Asset, AssetType};
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InstantiateMsg {

@@ -10,6 +10,7 @@ pub enum Asset {
     Native { denom: String },
 }
 
+// TODO: Should we implement a checked/unchecked version of this?
 impl Asset {
     /// Get symbol (denom/addres), reference (bytes used as key for storage) and asset type
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
@@ -24,6 +25,14 @@ impl Asset {
             }
         }
     }
+
+    /// Return bytes used as key for storage
+    pub fn get_reference(&self) -> Vec<u8> {
+        match &self {
+            Asset::Native { denom } => denom.as_bytes().to_vec(),
+            Asset::Cw20 { contract_addr } => contract_addr.as_bytes().to_vec(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -32,4 +41,3 @@ pub enum AssetType {
     Cw20,
     Native,
 }
-

@@ -1,12 +1,17 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, SubMsg,
+    entry_point, to_binary, Binary, Decimal, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    StdResult,
 };
+use terra_cosmwasm::TerraQuerier;
 
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
-use crate::state::{Config, CONFIG};
+use mars::asset::Asset;
 use mars::error::MarsError;
-use mars::asset::{Asset, AssetType};
+use mars::helpers::option_string_to_addr;
+
+use mars::oracle::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use mars::oracle::{PriceSourceChecked, PriceSourceUnchecked};
+
+use crate::state::{Config, PriceConfig, CONFIG, PRICE_CONFIGS};
 
 // INIT
 
@@ -20,17 +25,11 @@ pub fn instantiate(
     // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
-        astroport_factory_address: deps.api.addr_validate(&msg.astroport_factory_address)?,
     };
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![],
-        events: vec![],
-        data: None,
-    })
+    Ok(Response::default())
 }
 
 // HANDLERS
@@ -43,17 +42,49 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, MarsError> {
     match msg {
-        ExecuteMsg::UpdateConfig {
-            owner,
-            astroport_factory_address,
-        } => execute_update_config(
-            deps,
-            env,
-            info,
-            owner,
-            astroport_factory_address,
-        )
+        ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
+
+        ExecuteMsg::SetAsset {
+            asset,
+            price_source,
+        } => execute_set_asset(deps, env, info, asset, price_source),
     }
+}
+
+pub fn execute_set_asset(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    asset: Asset,
+    price_source_unchecked: PriceSourceUnchecked,
+) -> Result<Response, MarsError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    let asset_reference = asset.get_reference();
+
+    if info.sender != config.owner {
+        return Err(MarsError::Unauthorized {}.into());
+    }
+
+    let price_source: PriceSourceChecked = match price_source_unchecked {
+        PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native { denom },
+        PriceSourceUnchecked::TerraswapUusdPair { pair_address } => {
+            PriceSourceChecked::TerraswapUusdPair {
+                pair_address: deps.api.addr_validate(&pair_address)?,
+            }
+        }
+        PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed { price },
+    };
+
+    PRICE_CONFIGS.save(
+        deps.storage,
+        asset_reference.as_slice(),
+        &PriceConfig {
+            price_source: price_source,
+        },
+    )?;
+
+    Ok(Response::default())
 }
 
 pub fn execute_update_config(
@@ -61,80 +92,73 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
-    astroport_factory_address: Option<String>,
 ) -> Result<Response, MarsError> {
     let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {});
+        return Err(MarsError::Unauthorized {}.into());
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
-    config.astroport_factory_address = option_string_to_addr(
-        deps.api,
-        astroport_factory_address,
-        config.astroport_factory_address,
-    )?;
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response {
-        attributes: vec![attr("action", "update_config")],
-        ..Response::default(),
-    })
+    Ok(Response::default())
 }
 
 // QUERIES
 
 #[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::AssetPrice {asset} => to_binary(&query_config(deps, asset)?),
-        QueryMsg::AssetPrices {assets} => to_binary(&query_config(deps, assets)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
+        QueryMsg::AssetPrice { asset_reference } => {
+            to_binary(&query_asset_price(deps, env, asset_reference)?)
+        }
+        QueryMsg::AssetPriceConfig { asset } => {
+            to_binary(&query_asset_price_config(deps, env, asset)?)
+        }
     }
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+fn query_config(deps: Deps, _env: Env) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
-        owner: config.owner,
+        owner: config.owner.into(),
     })
 }
 
-fn query_asset_price(deps: Deps, _env: Env, asset: Asset) {
-}
+fn query_asset_price(deps: Deps, _env: Env, asset_reference: Vec<u8>) -> StdResult<Decimal> {
+    let price_config = PRICE_CONFIGS.load(deps.storage, asset_reference.as_slice())?;
 
-fn get_native_asset_prices(
-    querier: &QuerierWrapper,
-    assets_to_query: &[String],
-) -> StdResult<Vec<(String, Decimal256)>> {
-    let mut asset_prices: Vec<(String, Decimal256)> = vec![];
+    match price_config.price_source {
+        PriceSourceChecked::Native { denom } => {
+            let terra_querier = TerraQuerier::new(&deps.querier);
+            let asset_prices_query = terra_querier
+                .query_exchange_rates("uusd", vec![&denom])?
+                .exchange_rates
+                .pop();
 
-    if !assets_to_query.is_empty() {
-        let assets_to_query: Vec<&str> = assets_to_query.iter().map(AsRef::as_ref).collect(); // type conversion
-        let querier = TerraQuerier::new(querier);
-        let asset_prices_in_uusd = querier
-            .query_exchange_rates("uusd", assets_to_query)?
-            .exchange_rates;
-        for rate in asset_prices_in_uusd {
-            asset_prices.push((rate.quote_denom, Decimal256::from(rate.exchange_rate)));
+            match asset_prices_query {
+                Some(exchange_rate_item) => Ok(exchange_rate_item.exchange_rate),
+                None => Err(StdError::generic_err("No native price found")),
+            }
         }
+
+        PriceSourceChecked::TerraswapUusdPair { .. } => {
+            // TODO: implement
+            Ok(Decimal::one())
+        }
+
+        PriceSourceChecked::Fixed { price } => Ok(price),
     }
-
-    Ok(asset_prices)
 }
 
-fn get_cw20_price(
-    querier: &QuerierWrapper,
-    asset: Asset) -> StdResult(Decimal256) {
-}
+fn query_asset_price_config(deps: Deps, _env: Env, asset: Asset) -> StdResult<PriceConfig> {
+    let (_, asset_reference, _) = asset.get_attributes();
+    let price_config = PRICE_CONFIGS.load(deps.storage, asset_reference.as_slice())?;
 
-// MIGRATION
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
+    Ok(price_config)
 }
 
 // TESTS
@@ -142,9 +166,9 @@ pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Respons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::mock_info;
-    use cosmwasm_std::{Addr, BankMsg, Coin, CosmosMsg, Uint128};
-    use mars::testing::{mock_dependencies, mock_env, MockEnvParams};
+    use cosmwasm_std::testing::{mock_info, MockApi, MockStorage};
+    use cosmwasm_std::{from_binary, Addr, OwnedDeps};
+    use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
@@ -152,17 +176,238 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner: String::from("owner"),
-            astroport_factory_address: String::from("astroport"),
         };
         let info = mock_info("owner", &[]);
 
         let res =
             instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
-        let empty_vec: Vec<SubMsg> = vec![];
-        assert_eq!(empty_vec, res.messages);
+        assert_eq!(0, res.messages.len());
 
         let config = CONFIG.load(&deps.storage).unwrap();
         assert_eq!(Addr::unchecked("owner"), config.owner);
-        assert_eq!(Addr::unchecked("astroport"), config.astroport_factory_address);
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut deps = th_setup();
+        let env = mock_env(MockEnvParams::default());
+
+        // only owner can update
+        {
+            let msg = ExecuteMsg::UpdateConfig {
+                owner: Some(String::from("new_owner")),
+            };
+            let info = mock_info("another_one", &[]);
+            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(err, MarsError::Unauthorized {}.into());
+        }
+
+        let info = mock_info("owner", &[]);
+        // no change
+        {
+            let msg = ExecuteMsg::UpdateConfig { owner: None };
+            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
+            let config = CONFIG.load(&deps.storage).unwrap();
+            assert_eq!(config.owner, Addr::unchecked("owner"));
+        }
+
+        // new owner
+        {
+            let msg = ExecuteMsg::UpdateConfig {
+                owner: Some(String::from("new_owner")),
+            };
+            execute(deps.as_mut(), env, info, msg).unwrap();
+
+            let config = CONFIG.load(&deps.storage).unwrap();
+            assert_eq!(config.owner, Addr::unchecked("new_owner"));
+        }
+    }
+
+    #[test]
+    fn test_set_asset() {
+        let mut deps = th_setup();
+        let env = mock_env(MockEnvParams::default());
+
+        // only owner can set asset
+        {
+            let msg = ExecuteMsg::SetAsset {
+                asset: Asset::Native {
+                    denom: "luna".to_string(),
+                },
+                price_source: PriceSourceUnchecked::Native {
+                    denom: "luna".to_string(),
+                },
+            };
+            let info = mock_info("another_one", &[]);
+            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(err, MarsError::Unauthorized {}.into());
+        }
+
+        let info = mock_info("owner", &[]);
+        // native
+        {
+            let asset = Asset::Native {
+                denom: String::from("luna"),
+            };
+            let reference = asset.get_reference();
+            let msg = ExecuteMsg::SetAsset {
+                asset: asset,
+                price_source: PriceSourceUnchecked::Native {
+                    denom: "luna".to_string(),
+                },
+            };
+            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            let price_config = PRICE_CONFIGS
+                .load(&deps.storage, reference.as_slice())
+                .unwrap();
+            assert_eq!(
+                price_config.price_source,
+                PriceSourceChecked::Native {
+                    denom: "luna".to_string()
+                }
+            );
+        }
+
+        // cw20 terraswap
+        {
+            let asset = Asset::Cw20 {
+                contract_addr: String::from("token"),
+            };
+            let reference = asset.get_reference();
+            let msg = ExecuteMsg::SetAsset {
+                asset: asset,
+                price_source: PriceSourceUnchecked::TerraswapUusdPair {
+                    pair_address: "token".to_string(),
+                },
+            };
+            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            let price_config = PRICE_CONFIGS
+                .load(&deps.storage, reference.as_slice())
+                .unwrap();
+            assert_eq!(
+                price_config.price_source,
+                PriceSourceChecked::TerraswapUusdPair {
+                    pair_address: Addr::unchecked("token")
+                }
+            );
+        }
+
+        // cw20 fixed
+        {
+            let asset = Asset::Cw20 {
+                contract_addr: String::from("token"),
+            };
+            let reference = asset.get_reference();
+            let msg = ExecuteMsg::SetAsset {
+                asset: asset,
+                price_source: PriceSourceUnchecked::Fixed {
+                    price: Decimal::from_ratio(1_u128, 2_u128),
+                },
+            };
+            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            let price_config = PRICE_CONFIGS
+                .load(&deps.storage, reference.as_slice())
+                .unwrap();
+            assert_eq!(
+                price_config.price_source,
+                PriceSourceChecked::Fixed {
+                    price: Decimal::from_ratio(1_u128, 2_u128)
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_query_price_native() {
+        let mut deps = th_setup();
+        let asset = Asset::Native {
+            denom: String::from("nativecoin"),
+        };
+        let reference = asset.get_reference();
+
+        deps.querier.set_native_exchange_rates(
+            "uusd".to_string(),
+            &[(
+                "nativecoin".to_string(),
+                Decimal::from_ratio(4_u128, 1_u128),
+            )],
+        );
+
+        PRICE_CONFIGS
+            .save(
+                &mut deps.storage,
+                reference.as_slice(),
+                &PriceConfig {
+                    price_source: PriceSourceChecked::Native {
+                        denom: "nativecoin".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(MockEnvParams::default());
+        let query: Decimal = from_binary(
+            &query(
+                deps.as_ref(),
+                env,
+                QueryMsg::AssetPrice {
+                    asset_reference: b"nativecoin".to_vec(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(query, Decimal::from_ratio(4_u128, 1_u128));
+    }
+
+    #[test]
+    fn test_query_price_fixed() {
+        let mut deps = th_setup();
+        let asset = Asset::Cw20 {
+            contract_addr: String::from("cw20token"),
+        };
+        let reference = asset.get_reference();
+
+        PRICE_CONFIGS
+            .save(
+                &mut deps.storage,
+                reference.as_slice(),
+                &PriceConfig {
+                    price_source: PriceSourceChecked::Fixed {
+                        price: Decimal::from_ratio(3_u128, 2_u128),
+                    },
+                },
+            )
+            .unwrap();
+
+        let env = mock_env(MockEnvParams::default());
+        let query: Decimal = from_binary(
+            &query(
+                deps.as_ref(),
+                env,
+                QueryMsg::AssetPrice {
+                    asset_reference: Addr::unchecked("cw20token").as_bytes().to_vec(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(query, Decimal::from_ratio(3_u128, 2_u128));
+    }
+
+    // TEST_HELPERS
+    fn th_setup() -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
+        let mut deps = mock_dependencies(&[]);
+
+        let msg = InstantiateMsg {
+            owner: String::from("owner"),
+        };
+        let info = mock_info("owner", &[]);
+        instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+
+        deps
     }
 }

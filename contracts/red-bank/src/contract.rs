@@ -11,14 +11,13 @@ use terra_cosmwasm::TerraQuerier;
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::asset::{Asset, AssetType};
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::ma_token;
 use mars::red_bank::msg::{
-    CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
-    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
-    MarketResponse, MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg,
-    UncollateralizedLoanLimitResponse,
+    CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig, DebtInfo,
+    DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo, MarketResponse,
+    MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
 
 use crate::error::ContractError;
@@ -996,8 +995,7 @@ pub fn execute_liquidate(
         .into());
     }
 
-    let (collateral_asset_label, collateral_asset_reference, _) =
-        collateral_asset.get_attributes();
+    let (collateral_asset_label, collateral_asset_reference, _) = collateral_asset.get_attributes();
 
     let mut collateral_market =
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
@@ -2195,7 +2193,11 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
         .unwrap_or_else(Uint256::zero)
 }
 
-fn get_market_denom(deps: Deps, market_reference: Vec<u8>, asset_type: AssetType) -> StdResult<String> {
+fn get_market_denom(
+    deps: Deps,
+    market_reference: Vec<u8>,
+    asset_type: AssetType,
+) -> StdResult<String> {
     match asset_type {
         AssetType::Native => match String::from_utf8(market_reference) {
             Ok(denom) => Ok(denom),
@@ -2311,7 +2313,6 @@ fn build_send_cw20_token_msg(
     }))
 }
 
-
 fn asset_get_price(
     asset_label: &str,
     asset_prices: &[(String, Decimal256)],
@@ -2337,7 +2338,6 @@ fn asset_get_price(
 
     Ok(asset_price)
 }
-
 
 fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec = match MARKET_REFERENCES.load(deps.storage, U32Key::new(index)) {
