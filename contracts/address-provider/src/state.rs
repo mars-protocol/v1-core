@@ -20,6 +20,8 @@ pub struct Config {
     pub insurance_fund_address: Addr,
     /// Mars token address
     pub mars_token_address: Addr,
+    /// Protocol admin address (admin for all the contracts)
+    pub protocol_admin_address: Addr,
     /// Red bank contract address
     pub red_bank_address: Addr,
     /// Staking contract address

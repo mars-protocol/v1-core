@@ -107,14 +107,14 @@ pub fn execute(
             asset_params,
         } => execute_init_asset(deps, env, info, asset, asset_params),
 
+        ExecuteMsg::InitAssetTokenCallback { reference } => {
+            execute_init_asset_token_callback(deps, env, info, reference)
+        }
+
         ExecuteMsg::UpdateAsset {
             asset,
             asset_params,
         } => execute_update_asset(deps, env, info, asset, asset_params),
-
-        ExecuteMsg::InitAssetTokenCallback { reference } => {
-            init_asset_token_callback(deps, env, info, reference)
-        }
 
         ExecuteMsg::DepositNative { denom } => {
             let deposit_amount = get_denom_amount_from_coins(&info.funds, &denom);
@@ -514,18 +514,21 @@ pub fn execute_init_asset(
             // Prepare response, should instantiate an maToken
             // and use the Register hook.
             // A new maToken should be created which callbacks this contract in order to be registered.
-            let incentives_address = address_provider::helpers::query_address(
+            let mut addresses_query = address_provider::helpers::query_addresses(
                 &deps.querier,
                 config.address_provider_address,
-                MarsContract::Incentives,
+                vec![MarsContract::Incentives, MarsContract::ProtocolAdmin],
             )?;
+
+            let protocol_admin_address = addresses_query.pop().unwrap();
+            let incentives_address = addresses_query.pop().unwrap();
 
             Ok(Response {
                 attributes: vec![attr("action", "init_asset"), attr("asset", asset_label)],
                 events: vec![],
                 data: None,
                 messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Instantiate {
-                    admin: None,
+                    admin: Some(protocol_admin_address.to_string()),
                     code_id: config.ma_token_code_id,
                     msg: to_binary(&ma_token::msg::InstantiateMsg {
                         name: format!("mars {} liquidity token", symbol),
@@ -536,6 +539,12 @@ pub fn execute_init_asset(
                             minter: env.contract.address.to_string(),
                             cap: None,
                         }),
+                        init_hook: Some(ma_token::msg::InitHook {
+                            contract_addr: env.contract.address.to_string(),
+                            msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
+                                reference: asset_reference,
+                            })?,
+                        }),
                         red_bank_address: env.contract.address.to_string(),
                         incentives_address: incentives_address.into(),
                     })?,
@@ -545,6 +554,30 @@ pub fn execute_init_asset(
             })
         }
         Some(_) => Err(StdError::generic_err("Asset already initialized").into()),
+    }
+}
+
+pub fn execute_init_asset_token_callback(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    reference: Vec<u8>,
+) -> Result<Response, ContractError> {
+    let mut market = MARKETS.load(deps.storage, reference.as_slice())?;
+
+    if market.ma_token_address == zero_address() {
+        let ma_contract_addr = info.sender;
+
+        market.ma_token_address = ma_contract_addr.clone();
+        MARKETS.save(deps.storage, reference.as_slice(), &market)?;
+
+        // save ma token contract to reference mapping
+        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference)?;
+
+        Ok(Response::default())
+    } else {
+        // Can do this only once
+        Err(MarsError::Unauthorized {}.into())
     }
 }
 
@@ -579,30 +612,6 @@ pub fn execute_update_asset(
             })
         }
         None => Err(StdError::generic_err("Asset not initialized").into()),
-    }
-}
-
-pub fn init_asset_token_callback(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    reference: Vec<u8>,
-) -> Result<Response, ContractError> {
-    let mut market = MARKETS.load(deps.storage, reference.as_slice())?;
-
-    if market.ma_token_address == zero_address() {
-        let ma_contract_addr = info.sender;
-
-        market.ma_token_address = ma_contract_addr.clone();
-        MARKETS.save(deps.storage, reference.as_slice(), &market)?;
-
-        // save ma token contract to reference mapping
-        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference)?;
-
-        Ok(Response::default())
-    } else {
-        // Can do this only once
-        Err(MarsError::Unauthorized {}.into())
     }
 }
 
@@ -1491,36 +1500,20 @@ pub fn execute_distribute_protocol_income(
         market.protocol_income_to_distribute - amount_to_distribute;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
-    let mut messages = vec![];
-
     let mars_contracts = vec![
         MarsContract::InsuranceFund,
         MarsContract::Staking,
         MarsContract::Treasury,
     ];
-    let expected_len = mars_contracts.len();
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
         mars_contracts,
     )?;
-    if addresses_query.len() != expected_len {
-        return Err(StdError::generic_err(format!(
-            "Incorrect number of addresses, expected {} got {}",
-            expected_len,
-            addresses_query.len()
-        ))
-        .into());
-    }
-    let treasury_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
-    let staking_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
-    let insurance_fund_address = addresses_query
-        .pop()
-        .ok_or_else(|| StdError::generic_err("error while getting addresses from provider"))?;
+
+    let treasury_address = addresses_query.pop().unwrap();
+    let staking_address = addresses_query.pop().unwrap();
+    let insurance_fund_address = addresses_query.pop().unwrap();
 
     let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
     let treasury_amount = amount_to_distribute * config.treasury_fee_share;
@@ -1534,6 +1527,7 @@ pub fn execute_distribute_protocol_income(
     }
     let staking_amount = amount_to_distribute - (amount_to_distribute_before_staking_rewards);
 
+    let mut messages = vec![];
     // only build and add send message if fee is non-zero
     if !insurance_fund_amount.is_zero() {
         let insurance_fund_msg = build_send_asset_msg(
@@ -2945,7 +2939,7 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Instantiate {
-                admin: None,
+                admin: Some(String::from("protocol_admin")),
                 code_id: 5u64,
                 msg: to_binary(&ma_token::msg::InstantiateMsg {
                     name: String::from("mars someasset liquidity token"),
@@ -2955,6 +2949,13 @@ mod tests {
                     mint: Some(MinterResponse {
                         minter: MOCK_CONTRACT_ADDR.to_string(),
                         cap: None,
+                    }),
+                    init_hook: Some(ma_token::msg::InitHook {
+                        contract_addr: MOCK_CONTRACT_ADDR.to_string(),
+                        msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
+                            reference: market_reference.reference,
+                        })
+                        .unwrap()
                     }),
                     red_bank_address: MOCK_CONTRACT_ADDR.to_string(),
                     incentives_address: "incentives".to_string(),

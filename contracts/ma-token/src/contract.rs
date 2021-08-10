@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult, SubMsg, Uint128,
+    attr, entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
+    StdError, StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw2::{get_contract_version, set_contract_version};
 use cw20::Cw20ReceiveMsg;
@@ -56,7 +56,18 @@ pub fn instantiate(
         },
     )?;
 
-    Ok(Response::default())
+    if let Some(hook) = msg.init_hook {
+        Ok(Response {
+            messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: hook.contract_addr,
+                msg: hook.msg,
+                funds: vec![],
+            }))],
+            ..Response::default()
+        })
+    } else {
+        Ok(Response::default())
+    }
 }
 
 #[entry_point]
@@ -398,80 +409,16 @@ mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, Addr, CosmosMsg, StdError, WasmMsg};
     use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
+    use mars::ma_token::msg::InitHook;
 
     use super::*;
-
-    fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
-        query_balance(deps, address.into()).unwrap().balance
-    }
-
-    // this will set up the instantiation for other tests
-    fn do_instantiate_with_minter(
-        deps: DepsMut,
-        addr: &str,
-        amount: Uint128,
-        minter: &str,
-        cap: Option<Uint128>,
-    ) -> TokenInfoResponse {
-        _do_instantiate(
-            deps,
-            addr,
-            amount,
-            Some(MinterResponse {
-                minter: minter.to_string(),
-                cap,
-            }),
-        )
-    }
-
-    // this will set up the instantiation for other tests
-    fn do_instantiate(deps: DepsMut, addr: &str, amount: Uint128) -> TokenInfoResponse {
-        _do_instantiate(deps, addr, amount, None)
-    }
-
-    // this will set up the instantiation for other tests
-    fn _do_instantiate(
-        mut deps: DepsMut,
-        addr: &str,
-        amount: Uint128,
-        mint: Option<MinterResponse>,
-    ) -> TokenInfoResponse {
-        let instantiate_msg = InstantiateMsg {
-            name: "Auto Gen".to_string(),
-            symbol: "AUTO".to_string(),
-            decimals: 3,
-            initial_balances: vec![Cw20Coin {
-                address: addr.to_string(),
-                amount,
-            }],
-            mint: mint.clone(),
-            red_bank_address: String::from("red_bank"),
-            incentives_address: String::from("incentives"),
-        };
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let res = instantiate(deps.branch(), env, info, instantiate_msg).unwrap();
-        assert_eq!(0, res.messages.len());
-
-        let meta = query_token_info(deps.as_ref()).unwrap();
-        assert_eq!(
-            meta,
-            TokenInfoResponse {
-                name: "Auto Gen".to_string(),
-                symbol: "AUTO".to_string(),
-                decimals: 3,
-                total_supply: amount,
-            }
-        );
-        assert_eq!(get_balance(deps.as_ref(), addr), amount);
-        assert_eq!(query_minter(deps.as_ref()).unwrap(), mint,);
-        meta
-    }
+    use crate::test_helpers::{do_instantiate, do_instantiate_with_minter, get_balance};
 
     #[test]
     fn proper_instantiation() {
         let mut deps = mock_dependencies(&[]);
         let amount = Uint128::from(11223344u128);
+        let hook_msg = Binary::from(r#"{"some": 123}"#.as_bytes());
         let instantiate_msg = InstantiateMsg {
             name: "Cash Token".to_string(),
             symbol: "CASH".to_string(),
@@ -481,13 +428,24 @@ mod tests {
                 amount,
             }],
             mint: None,
+            init_hook: Some(InitHook {
+                contract_addr: String::from("hook_dest"),
+                msg: hook_msg.clone(),
+            }),
             red_bank_address: String::from("red_bank"),
             incentives_address: String::from("incentives"),
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
         let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("hook_dest"),
+                msg: hook_msg,
+                funds: vec![],
+            }))]
+        );
 
         assert_eq!(
             query_token_info(deps.as_ref()).unwrap(),
@@ -526,6 +484,7 @@ mod tests {
                 minter: minter.clone(),
                 cap: Some(limit),
             }),
+            init_hook: None,
             red_bank_address: String::from("red_bank"),
             incentives_address: String::from("incentives"),
         };
@@ -574,6 +533,7 @@ mod tests {
                 minter,
                 cap: Some(limit),
             }),
+            init_hook: None,
             red_bank_address: String::from("red_bank"),
             incentives_address: String::from("incentives"),
         };
@@ -708,6 +668,7 @@ mod tests {
                 },
             ],
             mint: None,
+            init_hook: None,
             red_bank_address: String::from("red_bank"),
             incentives_address: String::from("incentives"),
         };

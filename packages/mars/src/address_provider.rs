@@ -31,6 +31,7 @@ pub mod msg {
         pub staking_address: Option<String>,
         pub treasury_address: Option<String>,
         pub xmars_token_address: Option<String>,
+        pub protocol_admin_address: Option<String>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -44,6 +45,7 @@ pub mod msg {
         Staking,
         Treasury,
         XMarsToken,
+        ProtocolAdmin,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -68,6 +70,7 @@ pub mod msg {
         pub staking_address: Addr,
         pub treasury_address: Addr,
         pub xmars_token_address: Addr,
+        pub protocol_admin: Addr,
     }
 
     /// We currently take no arguments for migrations

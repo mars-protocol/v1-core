@@ -73,7 +73,9 @@ npm install
 echo "TEST_MAIN=<MNEMONIC_OF_YOUR_DEPLOYING_WALLET>" >> .env
 
 # set the network, defaults to LocalTerra if unset
-echo "NETWORK=testnet" >> .env
+echo "NETWORK=bombay" >> .env
+
+# ensure the deploy_config.ts has a cw20_code_id specified for above network
 
 ts-node deploy.ts
 ```
@@ -103,7 +105,7 @@ Env variables:
 ### Generating a whitelist.json
 
 1. Create a .env file in the top level of the scripts directory if doesn't already exist
-2. Add the env variable NETWORK=[network_to_generate_from_e.g._NETWORK=testnet]
+2. Add the env variable NETWORK=[network_to_generate_from_e.g._NETWORK=bombay]
 3. Add the env variable REDBANK_ADDRESS=[your_deployed_red_bank_contract_address]
 4. Run `ts-node whitelist.ts`
 5. Check the whitelists folder for [NETWORK].json output
