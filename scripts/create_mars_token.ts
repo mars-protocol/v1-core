@@ -1,5 +1,5 @@
 /*
-Script to deploy a cw20 token from a multisig account, mint tokens, and migrate the contract.
+Script to deploy a cw20 token from a multisig account using the mars-minter contract as the token minter.
 
 This script is designed to work with Terra Columbus-4.
 
@@ -7,6 +7,7 @@ Dependencies:
   - rust
   - terracli 58602320d2907814cfccdf43e9679468bb4bd8d3
   - cosmwasm-plus v0.2.0
+  - mars-minter
   - Add accounts and multisig to terracli
   - Set environment variables in a .env file (see below for details of the required variables)
 
@@ -32,8 +33,9 @@ import { unlinkSync, writeFileSync } from "fs"
 import 'dotenv/config.js'
 import {
   createTransaction,
+  deployContract,
+  executeContract,
   instantiateContract,
-  migrate,
   performTransaction,
   queryContract,
   recover,
@@ -50,6 +52,8 @@ const MULTISIG_NAME = process.env.MULTISIG_NAME!
 // Names of the multisig keys in terracli
 const MULTISIG_KEYS = process.env.MULTISIG_KEYS!.split(",")
 const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
+
+const MARS_MINTER_BINARY_PATH = process.env.MARS_MINTER_BINARY_PATH!
 
 // Testnet:
 const CHAIN_ID = process.env.CHAIN_ID
@@ -92,12 +96,16 @@ async function main() {
 
   const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
 
+  // Instantiate mars-minter
+  const minterAddress = await deployContract(terra, wallet, MARS_MINTER_BINARY_PATH, { admins: [wallet.key.accAddress, MULTISIG_ADDRESS] })
+  console.log("minter:", minterAddress)
+
   // Token info
   const TOKEN_NAME = "Mars"
   const TOKEN_SYMBOL = "MARS"
   const TOKEN_DECIMALS = 6
   // The minter address cannot be changed after the contract is instantiated
-  const TOKEN_MINTER = MULTISIG_ADDRESS
+  const TOKEN_MINTER = minterAddress
   // The cap cannot be changed after the contract is instantiated
   const TOKEN_CAP = 1_000_000_000_000000
   // TODO check if we want initial balances in prod
@@ -120,16 +128,46 @@ async function main() {
     }
   }
 
-  // Instantiate contract
-  const contractAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
-  console.log(contractAddress)
-  console.log(await queryContract(terra, contractAddress, { token_info: {} }))
-  console.log(await queryContract(terra, contractAddress, { minter: {} }))
+  // Instantiate Mars token contract
+  const marsAddress = await instantiateContract(terra, wallet, codeID, TOKEN_INFO)
+  console.log("mars:", marsAddress)
+  console.log(await queryContract(terra, marsAddress, { token_info: {} }))
+  console.log(await queryContract(terra, marsAddress, { minter: {} }))
 
-  let balance = await queryContract(terra, contractAddress, { balance: { address: TOKEN_INFO.initial_balances[0].address } })
+  let balance = await queryContract(terra, marsAddress, { balance: { address: TOKEN_INFO.initial_balances[0].address } })
   strictEqual(balance.balance, TOKEN_INFO.initial_balances[0].amount)
 
+  // Add Mars token address to mars-minter config
+  await executeContract(terra, wallet, minterAddress, { update_config: { config: { mars_token_address: marsAddress } } })
+
+  const newConfig = await queryContract(terra, minterAddress, { config: {} })
+  strictEqual(newConfig.mars_token_address, marsAddress)
+
+  // Remove wallet from mars-minter admins
+  await executeContract(terra, wallet, minterAddress, { update_admins: { admins: [MULTISIG_ADDRESS] } })
+
+  const walletCanMint = await queryContract(terra, minterAddress, { can_mint: { sender: wallet.key.accAddress } })
+  strictEqual(walletCanMint.can_mint, false)
+
+  const multisigCanMint = await queryContract(terra, minterAddress, { can_mint: { sender: MULTISIG_ADDRESS } })
+  strictEqual(multisigCanMint.can_mint, true)
+
+  // Update mars-minter owner
+  const newOwner = MULTISIG_ADDRESS
+
+  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, minterAddress))
+
+  const minterContractInfo = await terra.wasm.contractInfo(minterAddress)
+  strictEqual(minterContractInfo.owner, newOwner)
+
+  // Update Mars token owner
+  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
+
+  const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
+  strictEqual(marsContractInfo.owner, newOwner)
+
   // Mint tokens
+  // NOTE this is for testnet use only -- do not mint tokens like this on mainnet
   const mintAmount = 1_000_000000
   const recipient = wallet.key.accAddress
 
@@ -144,7 +182,7 @@ async function main() {
 
   // Create an unsigned tx
   const mintMsg = { mint: { recipient: recipient, amount: String(mintAmount) } }
-  const tx = await createTransaction(terra, multisig, new MsgExecuteContract(MULTISIG_ADDRESS, contractAddress, mintMsg))
+  const tx = await createTransaction(terra, multisig, new MsgExecuteContract(MULTISIG_ADDRESS, minterAddress, mintMsg))
   writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
   // Create K of N signatures for the tx
@@ -175,37 +213,17 @@ async function main() {
     );
   }
 
-  const tokenInfo = await queryContract(terra, contractAddress, { token_info: {} })
+  const tokenInfo = await queryContract(terra, marsAddress, { token_info: {} })
   console.log(tokenInfo)
   strictEqual(tokenInfo.total_supply, String(TOKEN_INITIAL_AMOUNT + mintAmount))
 
-  balance = await queryContract(terra, contractAddress, { balance: { address: recipient } })
+  balance = await queryContract(terra, marsAddress, { balance: { address: recipient } })
   console.log(balance)
   strictEqual(balance.balance, String(mintAmount))
 
   // Remove tmp files
   for (const fn of [...fns, "unsigned_tx.json"]) {
     unlinkSync(fn)
-  }
-
-  // Update contract owner
-  const newOwner = MULTISIG_ADDRESS
-
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, contractAddress))
-
-  const contractInfo = await terra.wasm.contractInfo(contractAddress)
-  strictEqual(contractInfo.owner, newOwner)
-
-  // Migrate contract version
-  try {
-    await migrate(terra, multisig, contractAddress, codeID)
-  } catch (err) {
-    // Contracts cannot be migrated to the same contract version, so we catch this error.
-    // If we get this error, then the wallet has permissions to migrate the contract.
-    const errMsg = "migrate wasm contract failed: generic: Unknown version 0.2.0"
-    if (!(err.message.includes(errMsg) || err.response.data.error.includes(errMsg))) {
-      throw err
-    }
   }
 
   console.log("OK")
