@@ -52,8 +52,6 @@ const MULTISIG_NAME = process.env.MULTISIG_NAME!
 const MULTISIG_KEYS = process.env.MULTISIG_KEYS!.split(",")
 const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 
-const MARS_MINTER_BINARY_PATH = process.env.MARS_MINTER_BINARY_PATH!
-
 // Testnet:
 const CHAIN_ID = process.env.CHAIN_ID
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
