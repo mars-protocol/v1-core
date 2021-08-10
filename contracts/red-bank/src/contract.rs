@@ -24,10 +24,8 @@ use mars::tax::deduct_tax;
 
 use crate::accounts::{get_user_position, UserHealthStatus};
 use crate::error::ContractError;
-use crate::state::{
-    Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
-    MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
-};
+use crate::interest_rate_models::InterestRateModel;
+use crate::state::{Config, Debt, Market, MarketReferences, GlobalState, User, CONFIG, DEBTS, DYNAMIC_INTEREST_RATE_MODELS, LINEAR_INTEREST_RATE_MODELS, MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS, GLOBAL_STATE};
 
 // CONSTANTS
 
@@ -1936,7 +1934,7 @@ pub fn market_update_interest_rates(
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
-        get_updated_interest_rates(market, current_utilization_rate);
+        get_updated_interest_rates(&deps.as_ref(), market, current_utilization_rate)?;
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
@@ -1945,59 +1943,26 @@ pub fn market_update_interest_rates(
 
 /// Updates borrow and liquidity rates based on PID parameters
 fn get_updated_interest_rates(
+    deps: &Deps,
     market: &Market,
     current_utilization_rate: Decimal256,
-) -> (Decimal256, Decimal256) {
-    // Use PID params for calculating borrow interest rate
-    let pid_params = market.pid_parameters.clone();
-
-    // error_value should be represented as integer number so we do this with help from boolean flag
-    let (error_value, error_positive) =
-        if pid_params.optimal_utilization_rate > current_utilization_rate {
-            (
-                pid_params.optimal_utilization_rate - current_utilization_rate,
-                true,
-            )
-        } else {
-            (
-                current_utilization_rate - pid_params.optimal_utilization_rate,
-                false,
-            )
-        };
-
-    let kp = if error_value >= pid_params.kp_augmentation_threshold {
-        pid_params.kp_2
-    } else {
-        pid_params.kp_1
-    };
-
-    let p = kp * error_value;
-    let mut new_borrow_rate = if error_positive {
-        // error_positive = true (u_optimal > u) means we want utilization rate to go up
-        // we lower interest rate so more people borrow
-        if market.borrow_rate > p {
-            market.borrow_rate - p
-        } else {
-            Decimal256::zero()
+) -> StdResult<(Decimal256, Decimal256)> {
+    let ir_model: Box<dyn InterestRateModel> = match market.interest_rate_strategy.clone() {
+        None => return Err(StdError::generic_err("Missing interest rate strategy")),
+        Some(InterestRateStrategy::Dynamic) => {
+            let dynamic_ir_model =
+                DYNAMIC_INTEREST_RATE_MODELS.load(deps.storage, U32Key::new(market.index))?;
+            Box::new(dynamic_ir_model)
         }
-    } else {
-        // error_positive = false (u_optimal < u) means we want utilization rate to go down
-        // we increase interest rate so less people borrow
-        market.borrow_rate + p
+        Some(InterestRateStrategy::Linear) => {
+            let linear_ir_model =
+                LINEAR_INTEREST_RATE_MODELS.load(deps.storage, U32Key::new(market.index))?;
+            Box::new(linear_ir_model)
+        }
     };
 
-    // Check borrow rate conditions
-    if new_borrow_rate < market.min_borrow_rate {
-        new_borrow_rate = market.min_borrow_rate
-    } else if new_borrow_rate > market.max_borrow_rate {
-        new_borrow_rate = market.max_borrow_rate;
-    };
-
-    // This operation should not underflow as reserve_factor is checked to be <= 1
-    let new_liquidity_rate =
-        new_borrow_rate * current_utilization_rate * (Decimal256::one() - market.reserve_factor);
-
-    (new_borrow_rate, new_liquidity_rate)
+    let ir = ir_model.get_updated_interest_rates(current_utilization_rate, market);
+    Ok(ir)
 }
 
 fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) {
@@ -2174,6 +2139,7 @@ mod tests {
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
         mock_info, MarsMockQuerier, MockEnvParams,
     };
+    use crate::interest_rate_models::PidParameters;
 
     #[test]
     fn test_accumulated_index_calculation() {

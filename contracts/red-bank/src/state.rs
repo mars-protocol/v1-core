@@ -1,6 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::interest_rate_models::{LinearInterestRate, PidParameters};
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
@@ -17,6 +18,10 @@ pub const MARKET_MA_TOKENS: Map<&Addr, Vec<u8>> = Map::new("market_ma_tokens");
 pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
 pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
     Map::new("uncollateralized_loan_limits");
+pub const DYNAMIC_INTEREST_RATE_MODELS: Map<U32Key, PidParameters> =
+    Map::new("dynamic_interest_rate_models");
+pub const LINEAR_INTEREST_RATE_MODELS: Map<U32Key, LinearInterestRate> =
+    Map::new("linear_interest_rate_models");
 
 /// Lending pool global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -118,19 +123,8 @@ pub struct Market {
 
     /// PID parameters
     pub pid_parameters: PidParameters,
-}
 
-/// PID parameters
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct PidParameters {
-    /// Proportional parameter for the PID controller
-    pub kp_1: Decimal256,
-    /// Optimal utilization rate targeted by the PID controller. Interest rate will decrease when lower and increase when higher
-    pub optimal_utilization_rate: Decimal256,
-    /// Min error that triggers Kp augmentation
-    pub kp_augmentation_threshold: Decimal256,
-    /// Kp value when error threshold is exceeded
-    pub kp_2: Decimal256,
+    pub interest_rate_strategy: Option<InterestRateStrategy>,
 }
 
 impl Market {
@@ -201,6 +195,7 @@ impl Market {
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint256::zero(),
             pid_parameters: new_pid_params,
+            interest_rate_strategy: None,
         };
 
         new_market.validate()?;
