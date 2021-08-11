@@ -63,7 +63,7 @@ pub fn execute_set_asset(
     let asset_reference = asset.get_reference();
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {}.into());
+        return Err(MarsError::Unauthorized {});
     }
 
     let price_source: PriceSourceChecked = match price_source_unchecked {
@@ -79,9 +79,7 @@ pub fn execute_set_asset(
     PRICE_CONFIGS.save(
         deps.storage,
         asset_reference.as_slice(),
-        &PriceConfig {
-            price_source: price_source,
-        },
+        &PriceConfig { price_source },
     )?;
 
     Ok(Response::default())
@@ -96,7 +94,7 @@ pub fn execute_update_config(
     let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {}.into());
+        return Err(MarsError::Unauthorized {});
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;

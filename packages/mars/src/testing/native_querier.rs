@@ -26,7 +26,7 @@ impl Default for NativeQuerier {
 impl NativeQuerier {
     pub fn handle_query(&self, route: &TerraRoute, query_data: &TerraQuery) -> QuerierResult {
         match route {
-            &TerraRoute::Oracle => {
+            TerraRoute::Oracle => {
                 if let TerraQuery::ExchangeRates {
                     base_denom,
                     quote_denoms,
@@ -43,7 +43,7 @@ impl NativeQuerier {
                 Ok(err).into()
             }
 
-            &TerraRoute::Treasury => {
+            TerraRoute::Treasury => {
                 let ret: ContractResult<Binary> = match query_data {
                     TerraQuery::TaxRate {} => {
                         let res = TaxRateResponse {
@@ -86,7 +86,7 @@ impl NativeQuerier {
         }
     }
 
-    fn query_oracle(&self, base_denom: &String, quote_denoms: &Vec<String>) -> QuerierResult {
+    fn query_oracle(&self, base_denom: &str, quote_denoms: &[String]) -> QuerierResult {
         let base_exchange_rates = match self.exchange_rates.get(base_denom) {
             Some(res) => res,
             None => {

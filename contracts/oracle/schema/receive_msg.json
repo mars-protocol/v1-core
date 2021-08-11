@@ -1,108 +1,67 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "QueryMsg",
+  "title": "ReceiveMsg",
   "anyOf": [
     {
+      "description": "Deposit the sent cw20 tokens",
       "type": "object",
       "required": [
-        "config"
+        "deposit_cw20"
       ],
       "properties": {
-        "config": {
+        "deposit_cw20": {
           "type": "object"
         }
       },
       "additionalProperties": false
     },
     {
+      "description": "Repay the sent cw20 tokens",
       "type": "object",
       "required": [
-        "market"
+        "repay_cw20"
       ],
       "properties": {
-        "market": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "markets_list"
-      ],
-      "properties": {
-        "markets_list": {
+        "repay_cw20": {
           "type": "object"
         }
       },
       "additionalProperties": false
     },
     {
+      "description": "Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan",
       "type": "object",
       "required": [
-        "debt"
+        "liquidate_cw20"
       ],
       "properties": {
-        "debt": {
+        "liquidate_cw20": {
           "type": "object",
           "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "uncollateralized_loan_limit"
-      ],
-      "properties": {
-        "uncollateralized_loan_limit": {
-          "type": "object",
-          "required": [
-            "asset",
+            "collateral_asset",
+            "debt_asset_address",
+            "receive_ma_token",
             "user_address"
           ],
           "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
+            "collateral_asset": {
+              "description": "Details for collateral asset",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
+            },
+            "debt_asset_address": {
+              "description": "Token address of the debt asset",
+              "type": "string"
+            },
+            "receive_ma_token": {
+              "description": "Sends maAsset to liquidator if true and underlying collateral asset if false",
+              "type": "boolean"
             },
             "user_address": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "collateral"
-      ],
-      "properties": {
-        "collateral": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
+              "description": "The address of the borrower getting liquidated",
               "type": "string"
             }
           }

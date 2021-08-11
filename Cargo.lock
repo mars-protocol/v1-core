@@ -578,7 +578,6 @@ dependencies = [
  "schemars",
  "serde",
  "snafu",
- "terra-cosmwasm",
  "thiserror",
 ]
 

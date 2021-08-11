@@ -441,7 +441,7 @@ impl MarsMockQuerier {
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
-                return self.native_querier.handle_query(route, query_data)
+                self.native_querier.handle_query(route, query_data)
             }
 
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {

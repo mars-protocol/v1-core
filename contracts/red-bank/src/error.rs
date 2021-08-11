@@ -12,4 +12,15 @@ pub enum ContractError {
 
     #[error("{0}")]
     Overflow(#[from] OverflowError),
+
+    #[error("Price not found for asset: {label:?}")]
+    PriceNotFound { label: String },
+}
+
+impl ContractError {
+    pub fn price_not_found<S: Into<String>>(label: S) -> ContractError {
+        ContractError::PriceNotFound {
+            label: label.into(),
+        }
+    }
 }

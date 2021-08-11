@@ -3,15 +3,16 @@ use std::str;
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, Coin, CosmosMsg,
-    Deps, DepsMut, Env, MessageInfo, Order, QuerierWrapper, Response, StdError, StdResult, SubMsg,
-    Uint128, WasmMsg,
+    Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, SubMsg, Uint128,
+    WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
-use terra_cosmwasm::TerraQuerier;
+use cw_storage_plus::U32Key;
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::asset::{Asset, AssetType};
+use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::ma_token;
 use mars::red_bank::msg::{
@@ -19,15 +20,14 @@ use mars::red_bank::msg::{
     DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo, MarketResponse,
     MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
+use mars::tax::deduct_tax;
 
+use crate::accounts::{get_user_position, UserHealthStatus};
 use crate::error::ContractError;
 use crate::state::{
-    Config, Debt, Market, MarketReferences, RedBank, User, CONFIG, DEBTS, MARKETS,
-    MARKET_MA_TOKENS, MARKET_REFERENCES, RED_BANK, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+    Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
+    MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
-use cw_storage_plus::U32Key;
-use mars::error::MarsError;
-use mars::tax::deduct_tax;
 
 // CONSTANTS
 
@@ -83,7 +83,7 @@ pub fn instantiate(
 
     CONFIG.save(deps.storage, &config)?;
 
-    RED_BANK.save(deps.storage, &RedBank { market_count: 0 })?;
+    GLOBAL_STATE.save(deps.storage, &GlobalState { market_count: 0 })?;
 
     Ok(Response::default())
 }
@@ -334,7 +334,7 @@ pub fn execute_withdraw(
 ) -> Result<Response, ContractError> {
     let withdrawer_addr = info.sender;
 
-    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
+    let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -380,26 +380,34 @@ pub fn execute_withdraw(
     // if asset is used as collateral and user is borrowing we need to validate health factor after withdraw,
     // otherwise no reasons to block the withdraw
     if asset_as_collateral && user_is_borrowing {
-        let money_market = RED_BANK.load(deps.storage)?;
+        let global_state = GLOBAL_STATE.load(deps.storage)?;
+        let config = CONFIG.load(deps.storage)?;
 
-        let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
+        let oracle_address = address_provider::helpers::query_address(
+            &deps.querier,
+            config.address_provider_address,
+            MarsContract::Oracle,
+        )?;
+
+        let user_position = get_user_position(
             &deps,
             env.block.time.seconds(),
             &withdrawer_addr,
+            oracle_address,
             &withdrawer,
-            &money_market,
-            &mut vec![],
+            global_state.market_count,
         )?;
 
         let withdraw_asset_price =
-            asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+            user_position.get_asset_price(asset_reference.as_slice(), &asset_label)?;
+
         let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
         let health_factor_after_withdraw =
             Decimal256::from_uint256(
-                user_account_settlement.weighted_maintenance_margin_in_uusd
+                user_position.weighted_maintenance_margin_in_uusd
                     - (withdraw_amount_in_uusd * market.maintenance_margin),
-            ) / Decimal256::from_uint256(user_account_settlement.total_collateralized_debt_in_uusd);
+            ) / Decimal256::from_uint256(user_position.total_collateralized_debt_in_uusd);
         if health_factor_after_withdraw < Decimal256::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
@@ -478,7 +486,7 @@ pub fn execute_init_asset(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    let mut money_market = RED_BANK.load(deps.storage)?;
+    let mut money_market = GLOBAL_STATE.load(deps.storage)?;
 
     let (asset_label, asset_reference, asset_type) = asset.get_attributes();
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
@@ -501,7 +509,7 @@ pub fn execute_init_asset(
 
             // Increment market count
             money_market.market_count += 1;
-            RED_BANK.save(deps.storage, &money_market)?;
+            GLOBAL_STATE.save(deps.storage, &money_market)?;
 
             let symbol = match asset {
                 Asset::Native { denom } => denom,
@@ -689,7 +697,6 @@ pub fn execute_borrow(
     borrow_amount: Uint256,
 ) -> Result<Response, ContractError> {
     let borrower_address = info.sender;
-
     let (asset_label, asset_reference, asset_type) = asset.get_attributes();
 
     // Cannot borrow zero amount
@@ -701,7 +708,8 @@ pub fn execute_borrow(
         .into());
     }
 
-    let money_market = RED_BANK.load(deps.storage)?;
+    // Load market and user state
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
     let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
         Ok(borrow_market) => borrow_market,
         Err(_) => {
@@ -712,14 +720,12 @@ pub fn execute_borrow(
             .into());
         }
     };
-
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
         .may_load(
             deps.storage,
             (asset_reference.as_slice(), &borrower_address),
         )?
         .unwrap_or_else(Uint128::zero);
-
     let mut user: User = match USERS.may_load(deps.storage, &borrower_address)? {
         Some(user) => user,
         None => {
@@ -731,31 +737,44 @@ pub fn execute_borrow(
         }
     };
 
-    // TODO: Check the contract has enough funds to safely lend them
+    let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
 
+    // Check if user can borrow specified amount
     let mut uncollateralized_debt = false;
     if uncollateralized_loan_limit.is_zero() {
-        // Collateralized loan: validate user has enough collateral if they have no uncollateralized loan limit
-        let mut native_asset_prices_to_query: Vec<String> = match asset {
-            Asset::Native { .. } if asset_label != "uusd" => vec![asset_label.clone()],
-            _ => vec![],
-        };
+        // Collateralized loan: check max ltv is not exceeded
+        let config = CONFIG.load(deps.storage)?;
+        let oracle_address = address_provider::helpers::query_address(
+            &deps.querier,
+            config.address_provider_address,
+            MarsContract::Oracle,
+        )?;
 
-        let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
+        let user_position = get_user_position(
             &deps,
             env.block.time.seconds(),
             &borrower_address,
+            oracle_address.clone(),
             &user,
-            &money_market,
-            &mut native_asset_prices_to_query,
+            global_state.market_count,
         )?;
 
-        let borrow_asset_price =
-            asset_get_price(asset_label.as_str(), &native_asset_prices, &asset_type)?;
+        let borrow_asset_price = if is_borrowing_asset {
+            // if user was already borrowing, get price from user position
+            user_position.get_asset_price(asset_reference.as_slice(), &asset_label)?
+        } else {
+            Decimal256::from(mars::oracle::helpers::query_price(
+                deps.querier,
+                oracle_address,
+                &asset_label,
+                asset_reference.clone(),
+                asset_type,
+            )?)
+        };
+
         let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
-        if user_account_settlement.total_debt_in_uusd + borrow_amount_in_uusd
-            > user_account_settlement.max_debt_in_uusd
+        if user_position.total_debt_in_uusd + borrow_amount_in_uusd > user_position.max_debt_in_uusd
         {
             return Err(StdError::generic_err(
                 "borrow amount exceeds maximum allowed given current collateral value",
@@ -790,7 +809,6 @@ pub fn execute_borrow(
     market_apply_accumulated_interests(&env, &mut borrow_market);
 
     // Set borrowing asset for user
-    let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_market.index)?;
         USERS.save(deps.storage, &borrower_address, &user)?;
@@ -863,13 +881,9 @@ pub fn execute_repay(
     repay_amount: Uint256,
     asset_type: AssetType,
 ) -> Result<Response, ContractError> {
-    // TODO: assumes this will always be in 10^6 amounts (i.e: uluna, or uusd)
-    // but double check that's the case
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     // Get repay amount
-    // TODO: Evaluate refunding the rest of the coins sent (or failing if more
-    // than one coin sent)
     // Cannot repay zero amount
     if repay_amount.is_zero() {
         return Err(StdError::generic_err(format!(
@@ -1025,18 +1039,23 @@ pub fn execute_liquidate(
 
     // 2. Compute health factor
     let config = CONFIG.load(deps.storage)?;
-    let money_market = RED_BANK.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
     let user = USERS.load(deps.storage, &user_address)?;
-    let (user_account_settlement, native_asset_prices) = prepare_user_account_settlement(
+    let oracle_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::Oracle,
+    )?;
+    let user_position = get_user_position(
         &deps,
         block_time,
         &user_address,
+        oracle_address,
         &user,
-        &money_market,
-        &mut vec![],
+        global_state.market_count,
     )?;
 
-    let health_factor = match user_account_settlement.health_status {
+    let health_factor = match user_position.health_status {
         // NOTE: Should not get in practice as it would fail on the debt asset check
         UserHealthStatus::NotBorrowing => {
             return Err(StdError::generic_err(
@@ -1058,16 +1077,12 @@ pub fn execute_liquidate(
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
 
     // 3. Compute debt to repay and collateral to liquidate
-    let collateral_price = asset_get_price(
-        collateral_asset_label.as_str(),
-        &native_asset_prices,
-        &collateral_market.asset_type,
+    let collateral_price = user_position.get_asset_price(
+        collateral_asset_reference.as_slice(),
+        &collateral_asset_label,
     )?;
-    let debt_price = asset_get_price(
-        debt_asset_label.as_str(),
-        &native_asset_prices,
-        &debt_market.asset_type,
-    )?;
+    let debt_price =
+        user_position.get_asset_price(debt_asset_reference.as_slice(), &debt_asset_label)?;
 
     market_apply_accumulated_interests(&env, &mut debt_market);
 
@@ -1086,6 +1101,7 @@ pub fn execute_liquidate(
         );
 
     let mut messages = vec![];
+
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
@@ -1329,17 +1345,23 @@ pub fn execute_finalize_liquidity_token_transfer(
     // after a transfer call on an ma_asset. Double check this is the case when doing
     // integration tests. If it's not we would need to pass the updated balances to
     // the health factor somehow
-    let money_market = RED_BANK.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
     let mut from_user = USERS.load(deps.storage, &from_address)?;
-    let (user_account_settlement, _) = prepare_user_account_settlement(
+    let config = CONFIG.load(deps.storage)?;
+    let oracle_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::Oracle,
+    )?;
+    let user_position = get_user_position(
         &deps,
         env.block.time.seconds(),
         &from_address,
+        oracle_address,
         &from_user,
-        &money_market,
-        &mut vec![],
+        global_state.market_count,
     )?;
-    if let UserHealthStatus::Borrowing(health_factor) = user_account_settlement.health_status {
+    if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
         if health_factor < Decimal256::one() {
             return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender").into());
         }
@@ -1608,7 +1630,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
-    let money_market = RED_BANK.load(deps.storage)?;
+    let money_market = GLOBAL_STATE.load(deps.storage)?;
 
     Ok(ConfigResponse {
         owner: config.owner,
@@ -1800,7 +1822,7 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 {
+pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
@@ -1820,7 +1842,7 @@ fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 {
 /// Return applied interest rate for liquidity index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal256 {
+pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal256 {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
@@ -1988,200 +2010,6 @@ fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) 
     logs.append(&mut interest_logs);
 }
 
-/// User asset settlement
-struct UserAssetSettlement {
-    asset_label: String,
-    asset_type: AssetType,
-    collateral_amount: Uint256,
-    debt_amount: Uint256,
-    uncollateralized_debt: bool,
-    ltv: Decimal256,
-    maintenance_margin: Decimal256,
-}
-
-/// Goes through assets user has a position in and returns a vec containing the scaled debt
-/// (denominated in the asset), a result from a specified computation for the current collateral
-/// (denominated in asset) and some metadata to be used by the caller.
-/// Also adds the price to native_assets_prices_to_query in case the prices in uusd need to
-/// be retrieved by the caller later
-fn user_get_balances(
-    deps: Deps,
-    money_market: &RedBank,
-    user: &User,
-    user_address: &Addr,
-    native_asset_prices_to_query: &mut Vec<String>,
-    block_time: u64,
-) -> StdResult<Vec<UserAssetSettlement>> {
-    let mut ret: Vec<UserAssetSettlement> = vec![];
-
-    for i in 0_u32..money_market.market_count {
-        let user_is_using_as_collateral = get_bit(user.collateral_assets, i)?;
-        let user_is_borrowing = get_bit(user.borrowed_assets, i)?;
-        if !(user_is_using_as_collateral || user_is_borrowing) {
-            continue;
-        }
-
-        let (asset_reference_vec, market) = market_get_from_index(&deps, i)?;
-
-        let (collateral_amount, ltv, maintenance_margin) = if user_is_using_as_collateral {
-            // query asset balance (ma_token contract gives back a scaled value)
-            let asset_balance = cw20_get_balance(
-                &deps.querier,
-                market.ma_token_address.clone(),
-                user_address.clone(),
-            )?;
-
-            let liquidity_index = get_updated_liquidity_index(&market, block_time);
-            let collateral_amount = Uint256::from(asset_balance) * liquidity_index;
-
-            (
-                collateral_amount,
-                market.max_loan_to_value,
-                market.maintenance_margin,
-            )
-        } else {
-            (Uint256::zero(), Decimal256::zero(), Decimal256::zero())
-        };
-
-        let (debt_amount, uncollateralized_debt) = if user_is_borrowing {
-            // query debt
-            let user_debt: Debt =
-                DEBTS.load(deps.storage, (asset_reference_vec.as_slice(), user_address))?;
-
-            let borrow_index = get_updated_borrow_index(&market, block_time);
-
-            (
-                user_debt.amount_scaled * borrow_index,
-                user_debt.uncollateralized,
-            )
-        } else {
-            (Uint256::zero(), false)
-        };
-
-        // get asset label
-        let asset_label = match market.asset_type {
-            AssetType::Native => match String::from_utf8(asset_reference_vec) {
-                Ok(res) => res,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
-            },
-            AssetType::Cw20 => match String::from_utf8(asset_reference_vec) {
-                Ok(res) => res,
-                Err(_) => {
-                    return Err(StdError::generic_err(
-                        "failed to encode Cw20 address into string",
-                    ))
-                }
-            },
-        };
-
-        // Add price to query list
-        if market.asset_type == AssetType::Native && asset_label != "uusd" {
-            native_asset_prices_to_query.push(asset_label.clone());
-        }
-
-        let user_asset_settlement = UserAssetSettlement {
-            asset_label,
-            asset_type: market.asset_type,
-            collateral_amount,
-            debt_amount,
-            uncollateralized_debt,
-            ltv,
-            maintenance_margin,
-        };
-        ret.push(user_asset_settlement);
-    }
-
-    Ok(ret)
-}
-
-/// User account settlement
-struct UserAccountSettlement {
-    /// NOTE: Not used yet
-    _total_collateral_in_uusd: Uint256,
-    total_debt_in_uusd: Uint256,
-    total_collateralized_debt_in_uusd: Uint256,
-    max_debt_in_uusd: Uint256,
-    weighted_maintenance_margin_in_uusd: Uint256,
-    health_status: UserHealthStatus,
-}
-
-enum UserHealthStatus {
-    NotBorrowing,
-    Borrowing(Decimal256),
-}
-
-/// Calculates the user data across the markets.
-/// This includes the total debt/collateral balances in uusd,
-/// the average LTV, the average Liquidation threshold, and the Health factor.
-/// Moreover returns the list of asset prices that were used during the computation.
-fn prepare_user_account_settlement(
-    deps: &DepsMut,
-    block_time: u64,
-    user_address: &Addr,
-    user: &User,
-    money_market: &RedBank,
-    native_asset_prices_to_query: &mut Vec<String>,
-) -> StdResult<(UserAccountSettlement, Vec<(String, Decimal256)>)> {
-    let user_balances = user_get_balances(
-        deps.as_ref(),
-        money_market,
-        user,
-        user_address,
-        native_asset_prices_to_query,
-        block_time,
-    )?;
-    let native_asset_prices = get_native_asset_prices(&deps.querier, native_asset_prices_to_query)?;
-
-    let mut total_collateral_in_uusd = Uint256::zero();
-    let mut total_debt_in_uusd = Uint256::zero();
-    let mut total_collateralized_debt_in_uusd = Uint256::zero();
-    let mut weighted_ltv_in_uusd = Uint256::zero();
-    let mut weighted_maintenance_margin_in_uusd = Uint256::zero();
-
-    for user_asset_settlement in user_balances {
-        let asset_price = asset_get_price(
-            user_asset_settlement.asset_label.as_str(),
-            &native_asset_prices,
-            &user_asset_settlement.asset_type,
-        )?;
-
-        let collateral_in_uusd = user_asset_settlement.collateral_amount * asset_price;
-        total_collateral_in_uusd += collateral_in_uusd;
-
-        weighted_ltv_in_uusd += collateral_in_uusd * user_asset_settlement.ltv;
-        weighted_maintenance_margin_in_uusd +=
-            collateral_in_uusd * user_asset_settlement.maintenance_margin;
-
-        let debt_in_uusd = user_asset_settlement.debt_amount * asset_price;
-        total_debt_in_uusd += debt_in_uusd;
-
-        if !user_asset_settlement.uncollateralized_debt {
-            total_collateralized_debt_in_uusd += debt_in_uusd;
-        }
-    }
-
-    // When computing health factor we should not take debt into account that has been given
-    // an uncollateralized loan limit
-    let health_status = if total_collateralized_debt_in_uusd.is_zero() {
-        UserHealthStatus::NotBorrowing
-    } else {
-        let health_factor = Decimal256::from_uint256(weighted_maintenance_margin_in_uusd)
-            / Decimal256::from_uint256(total_collateralized_debt_in_uusd);
-        UserHealthStatus::Borrowing(health_factor)
-    };
-
-    let use_account_settlement = UserAccountSettlement {
-        _total_collateral_in_uusd: total_collateral_in_uusd,
-        total_debt_in_uusd,
-        total_collateralized_debt_in_uusd,
-        max_debt_in_uusd: weighted_ltv_in_uusd,
-        weighted_maintenance_margin_in_uusd,
-        health_status,
-    };
-
-    Ok((use_account_settlement, native_asset_prices))
-}
-
 // HELPERS
 
 // native coins
@@ -2228,7 +2056,7 @@ fn get_market_denom(
 
 // bitwise operations
 /// Gets bit: true: 1, false: 0
-fn get_bit(bitmap: Uint128, index: u32) -> StdResult<bool> {
+pub fn get_bit(bitmap: Uint128, index: u32) -> StdResult<bool> {
     if index >= 128 {
         return Err(StdError::generic_err("index out of range"));
     }
@@ -2313,33 +2141,7 @@ fn build_send_cw20_token_msg(
     }))
 }
 
-fn asset_get_price(
-    asset_label: &str,
-    asset_prices: &[(String, Decimal256)],
-    asset_type: &AssetType,
-) -> StdResult<Decimal256> {
-    if asset_label == "uusd" || *asset_type == AssetType::Cw20 {
-        return Ok(Decimal256::one());
-    }
-
-    let asset_price = match asset_prices
-        .iter()
-        .find(|asset| asset.0 == asset_label)
-        .map(|correct_asset| correct_asset.1)
-    {
-        Some(price) => price,
-        None => {
-            return Err(StdError::generic_err(format!(
-                "asset price for {} not found",
-                asset_label
-            )))
-        }
-    };
-
-    Ok(asset_price)
-}
-
-fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
+pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec = match MARKET_REFERENCES.load(deps.storage, U32Key::new(index)) {
         Ok(asset_reference_vec) => asset_reference_vec,
         Err(_) => {
@@ -2902,7 +2704,7 @@ mod tests {
         assert_eq!(b"someasset", market_reference.reference.as_slice());
 
         // Should have market count of 1
-        let money_market = RED_BANK.load(&deps.storage).unwrap();
+        let money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
         assert_eq!(money_market.market_count, 1);
 
         // should instantiate a liquidity token
@@ -3015,7 +2817,7 @@ mod tests {
         assert_eq!(AssetType::Cw20, market.asset_type);
 
         // Should have market count of 2
-        let money_market = RED_BANK.load(&deps.storage).unwrap();
+        let money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
         assert_eq!(2, money_market.market_count);
 
         assert_eq!(
@@ -3252,7 +3054,7 @@ mod tests {
             .unwrap();
         assert_eq!(b"someasset", new_market_reference.reference.as_slice());
 
-        let new_money_market = RED_BANK.load(&deps.storage).unwrap();
+        let new_money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
         assert_eq!(new_money_market.market_count, 1);
 
         assert_eq!(res.messages, vec![],);
@@ -3930,13 +3732,13 @@ mod tests {
         let token_1_exchange_rate = Decimal::from_ratio(3u128, 1u128);
         let token_2_exchange_rate = Decimal::from_ratio(2u128, 1u128);
         let token_3_exchange_rate = Decimal::from_ratio(1u128, 1u128);
-        let exchange_rates = [
-            (String::from("token1"), token_1_exchange_rate),
-            (String::from("token2"), token_2_exchange_rate),
-            (String::from("token3"), token_3_exchange_rate),
-        ];
+
         deps.querier
-            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
+            .set_oracle_price(b"token1".to_vec(), token_1_exchange_rate);
+        deps.querier
+            .set_oracle_price(b"token2".to_vec(), token_2_exchange_rate);
+        deps.querier
+            .set_oracle_price(b"token3".to_vec(), token_3_exchange_rate);
 
         let env = mock_env(MockEnvParams::default());
         let info = mock_info("withdrawer");
@@ -4182,12 +3984,13 @@ mod tests {
             )],
         );
 
-        let exchange_rates = [
-            (String::from("borrowedcoinnative"), Decimal::one()),
-            (String::from("depositedcoin"), Decimal::one()),
-        ];
         deps.querier
-            .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
+            .set_oracle_price(b"borrowedcoinnative".to_vec(), Decimal::one());
+        deps.querier
+            .set_oracle_price(b"depositedcoin".to_vec(), Decimal::one());
+        deps.querier
+            .set_oracle_price(b"borrowedcoincw20".to_vec(), Decimal::one());
+
         deps.querier.set_native_tax(
             Decimal::from_ratio(1u128, 100u128),
             &[(String::from("borrowedcoinnative"), Uint128::new(100u128))],
@@ -4892,6 +4695,12 @@ mod tests {
         let exchange_rate_2 = Decimal::from_ratio(15u128, 4u128);
         let exchange_rate_3 = Decimal::one();
 
+        deps.querier
+            .set_oracle_price(cw20_contract_addr.as_bytes().to_vec(), exchange_rate_1);
+        deps.querier
+            .set_oracle_price(b"depositedcoin2".to_vec(), exchange_rate_2);
+        // NOTE: uusd price (asset3) should be set to 1 by the oracle helper
+
         let exchange_rates = &[(String::from("depositedcoin2"), exchange_rate_2)];
         deps.querier
             .set_native_exchange_rates(String::from("uusd"), &exchange_rates[..]);
@@ -5027,10 +4836,8 @@ mod tests {
         let collateral_maintenance_margin = Decimal256::from_ratio(6, 10);
         let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
         let collateral_price = Decimal::from_ratio(2_u128, 1_u128);
-        let debt_price = Decimal::from_ratio(1_u128, 1_u128);
+        let debt_price = Decimal::from_ratio(11_u128, 10_u128);
         let user_collateral_balance = Uint128::new(2_000_000);
-        // TODO: As this is a cw20, it's price will be 1uusd, review this when oracle is
-        // implemented.
         let user_debt = Uint256::from(3_000_000_u64); // ltv = 0.75
         let close_factor = Decimal256::from_ratio(1, 2);
 
@@ -5063,6 +4870,11 @@ mod tests {
             "uusd".to_string(),
             &[("collateral".to_string(), collateral_price)],
         );
+
+        deps.querier
+            .set_oracle_price(b"collateral".to_vec(), collateral_price);
+        deps.querier
+            .set_oracle_price(debt_contract_addr.as_bytes().to_vec(), debt_price);
 
         let collateral_market_ma_token_addr = Addr::unchecked("ma_collateral");
         let collateral_market = Market {
@@ -5290,9 +5102,8 @@ mod tests {
                 .load(&deps.storage, debt_contract_addr.as_bytes())
                 .unwrap();
 
-            // TODO: not multiplying by collateral because it is a cw20 and Decimal::one
-            // is the default price. Set a different price when implementing the oracle
             let expected_liquidated_collateral_amount = first_debt_to_repay
+                * Decimal256::from(debt_price)
                 * (Decimal256::one() + collateral_liquidation_bonus)
                 / Decimal256::from(collateral_price);
 
@@ -5422,9 +5233,8 @@ mod tests {
                 },
             );
 
-            // TODO: not multiplying by collateral because it is a cw20 and Decimal::one
-            // is the default price. Set a different price when implementing the oracle
             let expected_liquidated_collateral_amount = expected_less_debt
+                * Decimal256::from(debt_price)
                 * (Decimal256::one() + collateral_liquidation_bonus)
                 / Decimal256::from(collateral_price);
 
@@ -5753,10 +5563,10 @@ mod tests {
             )],
         );
 
-        deps.querier.set_native_exchange_rates(
-            "uusd".to_string(),
-            &[("collateral".to_string(), Decimal::one())],
-        );
+        deps.querier
+            .set_oracle_price(b"collateral".to_vec(), Decimal::one());
+        deps.querier
+            .set_oracle_price(b"debt".to_vec(), Decimal::one());
 
         let collateral_ltv = Decimal256::from_ratio(5, 10);
         let collateral_maintenance_margin = Decimal256::from_ratio(7, 10);
@@ -5895,13 +5705,10 @@ mod tests {
         };
         let debt_market = th_init_market(deps.as_mut(), b"debtcoin", &debt_mock_market);
 
-        deps.querier.set_native_exchange_rates(
-            "uusd".to_string(),
-            &[
-                ("somecoin".to_string(), Decimal::from_ratio(1u128, 2u128)),
-                ("debtcoin".to_string(), Decimal::from_ratio(2u128, 1u128)),
-            ],
-        );
+        deps.querier
+            .set_oracle_price(b"somecoin".to_vec(), Decimal::from_ratio(1u128, 2u128));
+        deps.querier
+            .set_oracle_price(b"debtcoin".to_vec(), Decimal::from_ratio(2u128, 1u128));
 
         let sender_address = Addr::unchecked("fromaddr");
         let recipient_address = Addr::unchecked("toaddr");
@@ -6638,12 +6445,15 @@ mod tests {
     fn th_init_market(deps: DepsMut, key: &[u8], market: &Market) -> Market {
         let mut index = 0;
 
-        RED_BANK
-            .update(deps.storage, |mut mm: RedBank| -> StdResult<RedBank> {
-                index = mm.market_count;
-                mm.market_count += 1;
-                Ok(mm)
-            })
+        GLOBAL_STATE
+            .update(
+                deps.storage,
+                |mut mm: GlobalState| -> StdResult<GlobalState> {
+                    index = mm.market_count;
+                    mm.market_count += 1;
+                    Ok(mm)
+                },
+            )
             .unwrap();
 
         let new_market = Market {

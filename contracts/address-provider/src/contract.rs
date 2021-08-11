@@ -27,6 +27,7 @@ pub fn instantiate(
         incentives_address: Addr::unchecked(""),
         insurance_fund_address: Addr::unchecked(""),
         mars_token_address: Addr::unchecked(""),
+        oracle_address: Addr::unchecked(""),
         red_bank_address: Addr::unchecked(""),
         staking_address: Addr::unchecked(""),
         treasury_address: Addr::unchecked(""),
@@ -74,6 +75,7 @@ pub fn execute_update_config(
         incentives_address,
         insurance_fund_address,
         mars_token_address,
+        oracle_address,
         protocol_admin_address,
         red_bank_address,
         staking_address,
@@ -94,6 +96,7 @@ pub fn execute_update_config(
     )?;
     config.mars_token_address =
         option_string_to_addr(deps.api, mars_token_address, config.mars_token_address)?;
+    config.oracle_address = option_string_to_addr(deps.api, oracle_address, config.oracle_address)?;
     config.protocol_admin_address = option_string_to_addr(
         deps.api,
         protocol_admin_address,
@@ -132,6 +135,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         incentives_address: config.incentives_address,
         insurance_fund_address: config.insurance_fund_address,
         mars_token_address: config.mars_token_address,
+        oracle_address: config.oracle_address,
         protocol_admin: config.protocol_admin_address,
         red_bank_address: config.red_bank_address,
         staking_address: config.staking_address,
@@ -161,6 +165,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
         MarsContract::Incentives => config.incentives_address.clone(),
         MarsContract::InsuranceFund => config.insurance_fund_address.clone(),
         MarsContract::MarsToken => config.mars_token_address.clone(),
+        MarsContract::Oracle => config.oracle_address.clone(),
         MarsContract::ProtocolAdmin => config.protocol_admin_address.clone(),
         MarsContract::RedBank => config.red_bank_address.clone(),
         MarsContract::Staking => config.staking_address.clone(),

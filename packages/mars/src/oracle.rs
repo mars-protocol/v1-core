@@ -61,20 +61,29 @@ pub mod msg {
 }
 
 pub mod helpers {
-    use super::msg::QueryMsg;
     use cosmwasm_std::{
         to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdResult, WasmQuery,
     };
 
+    use crate::asset::AssetType;
+
+    use super::msg::QueryMsg;
+
     pub fn query_price(
         querier: QuerierWrapper,
         oracle_address: Addr,
+        asset_label: &str,
         asset_reference: Vec<u8>,
+        asset_type: AssetType,
     ) -> StdResult<Decimal> {
-        let query: Decimal = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: oracle_address.into(),
-            msg: to_binary(&QueryMsg::AssetPrice { asset_reference })?,
-        }))?;
+        let query: Decimal = if asset_type == AssetType::Native && asset_label == "uusd" {
+            Decimal::one()
+        } else {
+            querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: oracle_address.into(),
+                msg: to_binary(&QueryMsg::AssetPrice { asset_reference })?,
+            }))?
+        };
 
         Ok(query)
     }
