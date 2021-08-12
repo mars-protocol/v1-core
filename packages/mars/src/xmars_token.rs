@@ -56,8 +56,4 @@ pub mod msg {
     pub struct TotalSupplyResponse {
         pub total_supply: Uint128,
     }
-
-    /// We currently take no arguments for migrations
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct MigrateMsg {}
 }

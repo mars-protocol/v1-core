@@ -1,7 +1,7 @@
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Api, Binary, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, MessageInfo, Order, Querier, QuerierWrapper, QueryRequest, Response, StdError,
-    StdResult, Storage, SubMsg, Uint128, WasmMsg, WasmQuery,
+    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
+    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdError, StdResult, SubMsg,
+    Uint128, WasmMsg, WasmQuery,
 };
 use cw_storage_plus::{Bound, U64Key};
 
@@ -14,7 +14,7 @@ use mars::xmars_token;
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, MigrateMsg, MsgExecuteCall,
+    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, MsgExecuteCall,
     ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesResponse,
     ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
@@ -240,17 +240,14 @@ pub fn execute_submit_proposal(
         &new_proposal,
     )?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "submit_proposal"),
-            attr("proposal_submitter", submitter_address_unchecked),
-            attr("proposal_id", &global_state.proposal_count),
-            attr("proposal_end_height", &new_proposal.end_height),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attributes(vec![
+        attr("action", "submit_proposal"),
+        attr("proposal_submitter", submitter_address_unchecked),
+        attr("proposal_id", &global_state.proposal_count.to_string()),
+        attr("proposal_end_height", &new_proposal.end_height.to_string()),
+    ]);
+
+    Ok(response)
 }
 
 pub fn execute_cast_vote(
@@ -312,18 +309,15 @@ pub fn execute_cast_vote(
 
     proposal_path.save(deps.storage, &proposal)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "cast_vote"),
-            attr("proposal_id", proposal_id),
-            attr("voter", &info.sender),
-            attr("vote", vote_option),
-            attr("voting_power", voting_power),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attributes(vec![
+        attr("action", "cast_vote"),
+        attr("proposal_id", proposal_id.to_string()),
+        attr("voter", &info.sender),
+        attr("vote", vote_option.to_string()),
+        attr("voting_power", voting_power.to_string()),
+    ]);
+
+    Ok(response)
 }
 
 pub fn execute_end_proposal(
@@ -384,26 +378,26 @@ pub fn execute_end_proposal(
     {
         // if quorum and threshold are met then proposal passes
         // refund deposit amount to submitter
-        let msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.into(),
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: proposal.submitter_address.to_string(),
                 amount: proposal.deposit_amount,
             })?,
-        }));
+        });
 
         (ProposalStatus::Passed, "passed", vec![msg])
     } else {
         // Else proposal is rejected
-        let msg = SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: staking_address.into(),
                 amount: proposal.deposit_amount,
             })?,
             funds: vec![],
-        }));
+        });
 
         (ProposalStatus::Rejected, "rejected", vec![msg])
     };
@@ -412,16 +406,15 @@ pub fn execute_end_proposal(
     proposal.status = new_proposal_status;
     proposal_path.save(deps.storage, &proposal)?;
 
-    Ok(Response {
-        messages,
-        attributes: vec![
+    let response = Response::new()
+        .add_attributes(vec![
             attr("action", "end_proposal"),
-            attr("proposal_id", proposal_id),
+            attr("proposal_id", proposal_id.to_string()),
             attr("proposal_result", log_proposal_result),
-        ],
-        events: vec![],
-        data: None,
-    })
+        ])
+        .add_messages(messages);
+
+    Ok(response)
 }
 
 pub fn execute_execute_proposal(
@@ -452,7 +445,7 @@ pub fn execute_execute_proposal(
     proposal.status = ProposalStatus::Executed;
     proposal_path.save(deps.storage, &proposal)?;
 
-    let messages: Vec<SubMsg> = proposal
+    let messages: Vec<CosmosMsg> = proposal
         .execute_calls
         .map(|mut proposal_execute_calls| {
             proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
@@ -460,25 +453,24 @@ pub fn execute_execute_proposal(
             proposal_execute_calls
                 .into_iter()
                 .map(|execute_call| {
-                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: execute_call.target_contract_address.into(),
                         msg: execute_call.msg,
                         funds: vec![],
-                    }))
+                    })
                 })
                 .collect()
         })
         .unwrap_or_else(Vec::new);
 
-    Ok(Response {
-        messages,
-        events: vec![],
-        attributes: vec![
+    let response = Response::new()
+        .add_attributes(vec![
             attr("action", "execute_proposal"),
-            attr("proposal_id", proposal_id),
-        ],
-        data: None,
-    })
+            attr("proposal_id", proposal_id.to_string()),
+        ])
+        .add_messages(messages);
+
+    Ok(response)
 }
 
 /// Update config
@@ -666,16 +658,6 @@ fn query_proposal_votes(
         proposal_id,
         votes: votes?,
     })
-}
-
-// MIGRATION
-
-pub fn migrate<S: Storage, A: Api, Q: Querier>(
-    _deps: DepsMut,
-    _env: Env,
-    _msg: MigrateMsg,
-) -> StdResult<Response> {
-    Ok(Response::default())
 }
 
 // HELPERS
@@ -1148,8 +1130,8 @@ mod tests {
             vec![
                 attr("action", "submit_proposal"),
                 attr("proposal_submitter", "submitter"),
-                attr("proposal_id", 1),
-                attr("proposal_end_height", expected_end_height),
+                attr("proposal_id", 1.to_string()),
+                attr("proposal_end_height", expected_end_height.to_string()),
             ]
         );
 
@@ -1200,8 +1182,8 @@ mod tests {
             vec![
                 attr("action", "submit_proposal"),
                 attr("proposal_submitter", "submitter"),
-                attr("proposal_id", 2),
-                attr("proposal_end_height", expected_end_height),
+                attr("proposal_id", 2.to_string()),
+                attr("proposal_end_height", expected_end_height.to_string()),
             ]
         );
 
@@ -1391,10 +1373,10 @@ mod tests {
         assert_eq!(
             vec![
                 attr("action", "cast_vote"),
-                attr("proposal_id", active_proposal_id),
+                attr("proposal_id", active_proposal_id.to_string()),
                 attr("voter", "voter"),
                 attr("vote", "for"),
-                attr("voting_power", 100),
+                attr("voting_power", 100.to_string()),
             ],
             res.attributes
         );
@@ -1451,10 +1433,10 @@ mod tests {
             assert_eq!(
                 vec![
                     attr("action", "cast_vote"),
-                    attr("proposal_id", active_proposal_id),
+                    attr("proposal_id", active_proposal_id.to_string()),
                     attr("voter", "voter2"),
                     attr("vote", "against"),
-                    attr("voting_power", 200),
+                    attr("voting_power", 200.to_string()),
                 ],
                 res.attributes
             );
@@ -1682,7 +1664,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "end_proposal"),
-                attr("proposal_id", 1),
+                attr("proposal_id", 1.to_string()),
                 attr("proposal_result", "passed"),
             ]
         );
@@ -1731,7 +1713,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "end_proposal"),
-                attr("proposal_id", 2),
+                attr("proposal_id", 2.to_string()),
                 attr("proposal_result", "rejected"),
             ]
         );
@@ -1780,7 +1762,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "end_proposal"),
-                attr("proposal_id", 3),
+                attr("proposal_id", 3.to_string()),
                 attr("proposal_result", "rejected"),
             ]
         );
@@ -1919,7 +1901,10 @@ mod tests {
 
         assert_eq!(
             res.attributes,
-            vec![attr("action", "execute_proposal"), attr("proposal_id", 1),]
+            vec![
+                attr("action", "execute_proposal"),
+                attr("proposal_id", 1.to_string()),
+            ]
         );
 
         assert_eq!(

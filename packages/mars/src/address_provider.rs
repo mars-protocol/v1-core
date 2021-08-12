@@ -75,10 +75,6 @@ pub mod msg {
         pub xmars_token_address: Addr,
         pub protocol_admin: Addr,
     }
-
-    /// We currently take no arguments for migrations
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct MigrateMsg {}
 }
 
 pub mod helpers {

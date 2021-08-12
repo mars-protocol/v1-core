@@ -1,7 +1,7 @@
 use crate::helpers::cw20_get_balance;
 use cosmwasm_std::{
     attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response, StdError,
-    StdResult, SubMsg, Uint128, WasmMsg,
+    StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
 use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
