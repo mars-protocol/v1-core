@@ -2124,7 +2124,9 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, OwnedDeps};
-    use mars::interest_rate_models::{DynamicInterestRate, InterestRateStrategy};
+    use mars::interest_rate_models::{
+        DynamicInterestRate, InterestRateStrategy, LinearInterestRate,
+    };
     use mars::red_bank::msg::ExecuteMsg::UpdateConfig;
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
@@ -2987,6 +2989,83 @@ mod tests {
         } else {
             panic!("INCORRECT STRATEGY")
         }
+    }
+
+    #[test]
+    fn test_update_asset_with_new_interest_rate_strategy() {
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
+
+        let config = CreateOrUpdateConfig {
+            owner: Some("owner".to_string()),
+            address_provider_address: Some("address_provider".to_string()),
+            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
+            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            ma_token_code_id: Some(5u64),
+            close_factor: Some(Decimal256::from_ratio(1, 2)),
+        };
+        let msg = InstantiateMsg { config };
+        let info = mock_info("owner");
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(10, 100),
+            max_borrow_rate: Decimal256::from_ratio(60, 100),
+            kp_1: Decimal256::from_ratio(4, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(90, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
+            kp_2: Decimal256::from_ratio(3, 1),
+        };
+        let asset_params_with_dynamic_ir = InitOrUpdateAssetParams {
+            initial_borrow_rate: Some(Decimal256::from_ratio(15, 100)),
+            max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
+            reserve_factor: Some(Decimal256::from_ratio(2, 100)),
+            maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
+            liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+        };
+
+        let msg = ExecuteMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params_with_dynamic_ir.clone(),
+        };
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // Verify if IR strategy is saved correctly
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        assert_eq!(
+            new_market.interest_rate_strategy,
+            InterestRateStrategy::Dynamic(dynamic_ir)
+        );
+
+        let linear_ir = LinearInterestRate {
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            base: Decimal256::from_ratio(0, 100),
+            slope_1: Decimal256::from_ratio(8, 100),
+            slope_2: Decimal256::from_ratio(48, 100),
+        };
+        let asset_params_with_linear_ir = InitOrUpdateAssetParams {
+            interest_rate_strategy: Some(InterestRateStrategy::Linear(linear_ir.clone())),
+            ..asset_params_with_dynamic_ir
+        };
+        let msg = ExecuteMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params_with_linear_ir.clone(),
+        };
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // Verify if IR strategy is updated
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        assert_eq!(
+            new_market.interest_rate_strategy,
+            InterestRateStrategy::Linear(linear_ir)
+        );
     }
 
     #[test]
