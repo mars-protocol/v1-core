@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Query contract config",
       "type": "object",
       "required": [
         "config"
@@ -15,12 +16,39 @@
       "additionalProperties": false
     },
     {
+      "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
       "type": "object",
       "required": [
-        "market"
+        "asset_price"
       ],
       "properties": {
-        "market": {
+        "asset_price": {
+          "type": "object",
+          "required": [
+            "asset_reference"
+          ],
+          "properties": {
+            "asset_reference": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get asset's price config",
+      "type": "object",
+      "required": [
+        "asset_price_config"
+      ],
+      "properties": {
+        "asset_price_config": {
           "type": "object",
           "required": [
             "asset"
@@ -28,82 +56,6 @@
           "properties": {
             "asset": {
               "$ref": "#/definitions/Asset"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "markets_list"
-      ],
-      "properties": {
-        "markets_list": {
-          "type": "object"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "debt"
-      ],
-      "properties": {
-        "debt": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "uncollateralized_loan_limit"
-      ],
-      "properties": {
-        "uncollateralized_loan_limit": {
-          "type": "object",
-          "required": [
-            "asset",
-            "user_address"
-          ],
-          "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
-            },
-            "user_address": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "collateral"
-      ],
-      "properties": {
-        "collateral": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
             }
           }
         }

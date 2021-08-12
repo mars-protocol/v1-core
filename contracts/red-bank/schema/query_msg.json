@@ -17,16 +17,92 @@
     {
       "type": "object",
       "required": [
-        "cooldown"
+        "market"
       ],
       "properties": {
-        "cooldown": {
+        "market": {
           "type": "object",
           "required": [
-            "sender_address"
+            "asset"
           ],
           "properties": {
-            "sender_address": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "markets_list"
+      ],
+      "properties": {
+        "markets_list": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "debt"
+      ],
+      "properties": {
+        "debt": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "uncollateralized_loan_limit"
+      ],
+      "properties": {
+        "uncollateralized_loan_limit": {
+          "type": "object",
+          "required": [
+            "asset",
+            "user_address"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "user_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "collateral"
+      ],
+      "properties": {
+        "collateral": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
               "type": "string"
             }
           }
@@ -34,5 +110,52 @@
       },
       "additionalProperties": false
     }
-  ]
+  ],
+  "definitions": {
+    "Asset": {
+      "description": "Represents either a native asset or a cw20. Meant to be used as part of a msg in a contract call and not to be used internally",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "cw20"
+          ],
+          "properties": {
+            "cw20": {
+              "type": "object",
+              "required": [
+                "contract_addr"
+              ],
+              "properties": {
+                "contract_addr": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "native"
+          ],
+          "properties": {
+            "native": {
+              "type": "object",
+              "required": [
+                "denom"
+              ],
+              "properties": {
+                "denom": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
 }
