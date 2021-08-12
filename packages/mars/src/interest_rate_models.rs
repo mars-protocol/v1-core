@@ -193,3 +193,116 @@ impl InterestRateModel for LinearInterestRate {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::interest_rate_models::{DynamicInterestRate, InterestRateModel};
+    use cosmwasm_bignumber::Decimal256;
+
+    #[test]
+    fn test_dynamic_interest_rates_calculation() {
+        let borrow_rate = Decimal256::from_ratio(5, 100);
+        let reserve_factor = Default::default();
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(1, 100),
+            max_borrow_rate: Decimal256::from_ratio(90, 100),
+            kp_1: Decimal256::from_ratio(2, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(60, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(10, 100),
+            kp_2: Decimal256::from_ratio(3, 1),
+        };
+
+        // *
+        // current utilization rate > optimal utilization rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(61, 100);
+        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
+        // we want to increase borrow rate to decrease utilization rate
+        let expected_borrow_rate = borrow_rate + (dynamic_ir.kp_1 * expected_error);
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate < optimal utilization rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(59, 100);
+        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_error = dynamic_ir.optimal_utilization_rate - current_utilization_rate;
+        // we want to decrease borrow rate to increase utilization rate
+        let expected_borrow_rate = borrow_rate - (dynamic_ir.kp_1 * expected_error);
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate > optimal utilization rate, increment KP by a multiplier if error goes beyond threshold
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(72, 100);
+        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
+        // we want to increase borrow rate to decrease utilization rate
+        let expected_borrow_rate = borrow_rate + (dynamic_ir.kp_2 * expected_error);
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate < optimal utilization rate, borrow rate can't be less than min borrow rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(10, 100);
+        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        // we want to decrease borrow rate to increase utilization rate
+        let expected_borrow_rate = dynamic_ir.min_borrow_rate;
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate > optimal utilization rate, borrow rate can't be less than max borrow rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(90, 100);
+        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        // we want to increase borrow rate to decrease utilization rate
+        let expected_borrow_rate = dynamic_ir.max_borrow_rate;
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+    }
+}
