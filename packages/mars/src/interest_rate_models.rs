@@ -196,7 +196,7 @@ impl InterestRateModel for LinearInterestRate {
 
 #[cfg(test)]
 mod tests {
-    use crate::interest_rate_models::{DynamicInterestRate, InterestRateModel};
+    use crate::interest_rate_models::{DynamicInterestRate, InterestRateModel, LinearInterestRate};
     use cosmwasm_bignumber::Decimal256;
 
     #[test]
@@ -299,6 +299,56 @@ mod tests {
 
         // we want to increase borrow rate to decrease utilization rate
         let expected_borrow_rate = dynamic_ir.max_borrow_rate;
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+    }
+
+    #[test]
+    fn test_linear_interest_rates_calculation() {
+        let borrow_rate = Decimal256::from_ratio(8, 100);
+        let reserve_factor = Decimal256::from_ratio(1, 100);
+        let linear_ir = LinearInterestRate {
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            base: Decimal256::from_ratio(0, 100),
+            slope_1: Decimal256::from_ratio(7, 100),
+            slope_2: Decimal256::from_ratio(45, 100),
+        };
+
+        // *
+        // current utilization rate < optimal utilization rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(79, 100);
+        let (new_borrow_rate, new_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_borrow_rate = linear_ir.base
+            + linear_ir.slope_1 * current_utilization_rate / linear_ir.optimal_utilization_rate;
+        let expected_liquidity_rate =
+            expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate >= optimal utilization rate
+        // *
+        let current_utilization_rate = Decimal256::from_ratio(81, 100);
+        let (new_borrow_rate, new_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_borrow_rate = linear_ir.base
+            + linear_ir.slope_1
+            + linear_ir.slope_2 * (current_utilization_rate - linear_ir.optimal_utilization_rate)
+                / (Decimal256::one() - linear_ir.optimal_utilization_rate);
         let expected_liquidity_rate =
             expected_borrow_rate * current_utilization_rate * (Decimal256::one() - reserve_factor);
 
