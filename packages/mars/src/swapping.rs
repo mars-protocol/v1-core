@@ -39,7 +39,7 @@ pub fn execute_swap(
         AssetInfo::Token { contract_addr } => {
             let asset_label = String::from(contract_addr.as_str());
             (
-                cw20_get_balance(&deps.querier, contract_addr, env.contract.address)?,
+                cw20_get_balance(&deps.querier, deps.api.addr_validate(&contract_addr)?, env.contract.address)?,
                 asset_label,
             )
         }
@@ -73,14 +73,13 @@ pub fn execute_swap(
         info: offer_asset_info,
         amount: amount_to_swap,
     };
-    let send_msg = asset_into_swap_msg(pair_info.contract_addr, offer_asset, terraswap_max_spread)?;
+    let send_msg = asset_into_swap_msg(deps.api.addr_validate(&pair_info.contract_addr)?, offer_asset, terraswap_max_spread)?;
 
-    Ok(Response {
-        messages: vec![SubMsg::new(send_msg)],
-        attributes: vec![attr("action", "swap"), attr("asset", asset_label)],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new()
+        .add_message(send_msg)
+        .add_attributes(vec![attr("action", "swap"), attr("asset", asset_label)]);
+
+    Ok(response)
 }
 
 /// Construct terraswap message in order to swap assets
@@ -138,7 +137,7 @@ mod tests {
             (
                 "somecoin_addr",
                 AssetInfo::Token {
-                    contract_addr: Addr::unchecked("somecoin_addr"),
+                    contract_addr: String::from("somecoin_addr"),
                 },
             ),
             (
@@ -177,7 +176,7 @@ mod tests {
         );
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: cw20_contract_address,
+            contract_addr: cw20_contract_address.to_string(),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -207,7 +206,7 @@ mod tests {
             denom: "somecoin".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("cw20_token"),
+            contract_addr: String::from("cw20_token"),
         };
 
         let response = execute_swap(
@@ -238,16 +237,16 @@ mod tests {
         );
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: cw20_contract_address.clone(),
+            contract_addr: cw20_contract_address.to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("mars"),
+            contract_addr: String::from("mars"),
         };
 
         deps.querier.set_terraswap_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: Addr::unchecked("pair_cw20_mars"),
-            liquidity_token: Addr::unchecked("lp_cw20_mars"),
+            contract_addr: String::from("pair_cw20_mars"),
+            liquidity_token: String::from("lp_cw20_mars"),
         });
 
         let res = execute_swap(
@@ -271,7 +270,7 @@ mod tests {
                     msg: to_binary(&TerraswapPairExecuteMsg::Swap {
                         offer_asset: TerraswapAsset {
                             info: AssetInfo::Token {
-                                contract_addr: cw20_contract_address.clone(),
+                                contract_addr: cw20_contract_address.to_string(),
                             },
                             amount: Uint128::new(999),
                         },
@@ -308,13 +307,13 @@ mod tests {
             denom: "uusd".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("mars"),
+            contract_addr: String::from("mars"),
         };
 
         deps.querier.set_terraswap_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: Addr::unchecked("pair_uusd_mars"),
-            liquidity_token: Addr::unchecked("lp_uusd_mars"),
+            contract_addr: String::from("pair_uusd_mars"),
+            liquidity_token: String::from("lp_uusd_mars"),
         });
 
         let res = execute_swap(
