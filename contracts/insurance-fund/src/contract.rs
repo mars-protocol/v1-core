@@ -1,10 +1,10 @@
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Response, StdResult, SubMsg, Uint128,
+    Response, StdResult, Uint128,
 };
 use terraswap::asset::AssetInfo;
 
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
 
 use mars::error::MarsError;
@@ -29,12 +29,7 @@ pub fn instantiate(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![],
-        events: vec![],
-        data: None,
-    })
+    Ok(Response::new())
 }
 
 // HANDLERS
@@ -87,12 +82,11 @@ pub fn execute_execute_cosmos_msg(
         return Err(MarsError::Unauthorized {});
     }
 
-    Ok(Response {
-        messages: vec![SubMsg::new(msg)],
-        attributes: vec![attr("action", "execute_cosmos_msg")],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new()
+        .add_message(msg)
+        .add_attribute("action", "execute_cosmos_msg");
+
+    Ok(response)
 }
 
 pub fn execute_update_config(
@@ -119,12 +113,9 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![attr("action", "update_config")],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attribute("action", "update_config");
+
+    Ok(response)
 }
 
 /// Swap any asset on the contract to uusd
@@ -168,13 +159,6 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner,
     })
-}
-
-// MIGRATION
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
 }
 
 // TESTS
