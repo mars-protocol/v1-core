@@ -24,8 +24,11 @@ use mars::tax::deduct_tax;
 
 use crate::accounts::{get_user_position, UserHealthStatus};
 use crate::error::ContractError;
-use crate::interest_rate_models::InterestRateModel;
-use crate::state::{Config, Debt, Market, MarketReferences, GlobalState, User, CONFIG, DEBTS, DYNAMIC_INTEREST_RATE_MODELS, LINEAR_INTEREST_RATE_MODELS, MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS, GLOBAL_STATE};
+use crate::state::{
+    Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
+    MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+};
+use mars::interest_rate_models::InterestRateModel;
 
 // CONSTANTS
 
@@ -1934,7 +1937,7 @@ pub fn market_update_interest_rates(
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
-        get_updated_interest_rates(&deps.as_ref(), market, current_utilization_rate)?;
+        get_updated_interest_rates(market, current_utilization_rate)?;
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
@@ -1943,25 +1946,14 @@ pub fn market_update_interest_rates(
 
 /// Updates borrow and liquidity rates based on PID parameters
 fn get_updated_interest_rates(
-    deps: &Deps,
     market: &Market,
     current_utilization_rate: Decimal256,
 ) -> StdResult<(Decimal256, Decimal256)> {
-    let ir_model: Box<dyn InterestRateModel> = match market.interest_rate_strategy.clone() {
-        None => return Err(StdError::generic_err("Missing interest rate strategy")),
-        Some(InterestRateStrategy::Dynamic) => {
-            let dynamic_ir_model =
-                DYNAMIC_INTEREST_RATE_MODELS.load(deps.storage, U32Key::new(market.index))?;
-            Box::new(dynamic_ir_model)
-        }
-        Some(InterestRateStrategy::Linear) => {
-            let linear_ir_model =
-                LINEAR_INTEREST_RATE_MODELS.load(deps.storage, U32Key::new(market.index))?;
-            Box::new(linear_ir_model)
-        }
-    };
-
-    let ir = ir_model.get_updated_interest_rates(current_utilization_rate, market);
+    let ir = market.interest_rate_strategy.get_updated_interest_rates(
+        current_utilization_rate,
+        market.borrow_rate,
+        market.reserve_factor,
+    );
     Ok(ir)
 }
 
@@ -2131,6 +2123,7 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interest_rate_models::PidParameters;
     use crate::state::PidParameters;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, OwnedDeps};
@@ -2139,7 +2132,6 @@ mod tests {
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
         mock_info, MarsMockQuerier, MockEnvParams,
     };
-    use crate::interest_rate_models::PidParameters;
 
     #[test]
     fn test_accumulated_index_calculation() {
