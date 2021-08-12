@@ -1,4 +1,5 @@
 pub mod msg {
+    use crate::asset::{Asset, AssetType};
     use cosmwasm_bignumber::{Decimal256, Uint256};
     use cosmwasm_std::{Addr, Uint128};
     use cw20::Cw20ReceiveMsg;
@@ -241,21 +242,5 @@ pub mod msg {
         pub kp_augmentation_threshold: Option<Decimal256>,
         /// Kp value when error threshold is exceeded
         pub kp_2: Option<Decimal256>,
-    }
-
-    /// Represents either a native asset or a cw20. Meant to be used as part of a msg
-    /// in a contract call and not to be used internally
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    #[serde(rename_all = "snake_case")]
-    pub enum Asset {
-        Cw20 { contract_addr: String },
-        Native { denom: String },
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    #[serde(rename_all = "snake_case")]
-    pub enum AssetType {
-        Cw20,
-        Native,
     }
 }

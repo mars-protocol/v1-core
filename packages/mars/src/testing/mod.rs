@@ -1,7 +1,13 @@
 /// cosmwasm_std::testing overrides and custom test helpers
 mod helpers;
 mod mock_address_provider;
+mod native_querier;
+mod oracle_querier;
+
 pub use helpers::*;
+
+use native_querier::NativeQuerier;
+use oracle_querier::OracleQuerier;
 
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
@@ -11,13 +17,11 @@ use cosmwasm_std::{
 };
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::collections::HashMap;
-use terra_cosmwasm::{
-    ExchangeRateItem, ExchangeRatesResponse, TaxCapResponse, TaxRateResponse, TerraQuery,
-    TerraQueryWrapper, TerraRoute,
-};
+use terra_cosmwasm::TerraQueryWrapper;
 
 use crate::address_provider;
 use crate::ma_token;
+use crate::oracle;
 use crate::xmars_token;
 use terraswap::asset::PairInfo;
 use terraswap::factory::QueryMsg;
@@ -88,17 +92,6 @@ pub fn mock_dependencies(
         api: MockApi::default(),
         querier: custom_querier,
     }
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct NativeQuerier {
-    /// maps denom to exchange rates
-    pub exchange_rates: HashMap<String, HashMap<String, Decimal>>,
-
-    /// maps denom to tax caps
-    pub tax_caps: HashMap<String, Uint128>,
-
-    pub tax_rate: Decimal,
 }
 
 #[derive(Clone, Debug)]
@@ -340,6 +333,7 @@ pub struct MarsMockQuerier {
     cw20_querier: Cw20Querier,
     xmars_querier: XMarsQuerier,
     terraswap_pair_querier: TerraswapPairQuerier,
+    oracle_querier: OracleQuerier,
 }
 
 impl Querier for MarsMockQuerier {
@@ -365,6 +359,7 @@ impl MarsMockQuerier {
             base,
             native_querier: NativeQuerier::default(),
             cw20_querier: Cw20Querier::default(),
+            oracle_querier: OracleQuerier::default(),
             xmars_querier: XMarsQuerier::default(),
             terraswap_pair_querier: TerraswapPairQuerier::default(),
         }
@@ -419,6 +414,10 @@ impl MarsMockQuerier {
         token_info.symbol = symbol;
     }
 
+    pub fn set_oracle_price(&mut self, asset_reference: Vec<u8>, price: Decimal) {
+        self.oracle_querier.prices.insert(asset_reference, price);
+    }
+
     pub fn set_xmars_address(&mut self, address: Addr) {
         self.xmars_querier.xmars_address = address;
     }
@@ -442,92 +441,7 @@ impl MarsMockQuerier {
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
-                if &TerraRoute::Oracle == route {
-                    let ret: ContractResult<Binary> = match query_data {
-                        TerraQuery::ExchangeRates {
-                            base_denom,
-                            quote_denoms,
-                        } => {
-                            let base_exchange_rates =
-                                match self.native_querier.exchange_rates.get(base_denom) {
-                                    Some(res) => res,
-                                    None => {
-                                        let err: ContractResult<Binary> = Err(format!(
-                                        "no exchange rates available for provided base denom: {}",
-                                        base_denom
-                                    ))
-                                        .into();
-                                        return Ok(err).into();
-                                    }
-                                };
-
-                            let exchange_rate_items: Result<Vec<ExchangeRateItem>, String> =
-                                quote_denoms
-                                    .iter()
-                                    .map(|denom| {
-                                        let exchange_rate = match base_exchange_rates.get(denom) {
-                                            Some(rate) => rate,
-                                            None => {
-                                                return Err(format!(
-                                                    "no exchange rate available for {}",
-                                                    denom
-                                                ))
-                                            }
-                                        };
-
-                                        Ok(ExchangeRateItem {
-                                            quote_denom: denom.into(),
-                                            exchange_rate: *exchange_rate,
-                                        })
-                                    })
-                                    .collect();
-
-                            let res = ExchangeRatesResponse {
-                                base_denom: base_denom.into(),
-                                exchange_rates: exchange_rate_items.unwrap(),
-                            };
-                            to_binary(&res).into()
-                        }
-                        _ => panic!(
-                            "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
-                            query_data
-                        ),
-                    };
-                    Ok(ret).into()
-                } else if &TerraRoute::Treasury == route {
-                    let ret: ContractResult<Binary> = match query_data {
-                        TerraQuery::TaxRate {} => {
-                            let res = TaxRateResponse {
-                                rate: self.native_querier.tax_rate,
-                            };
-                            to_binary(&res).into()
-                        }
-                        TerraQuery::TaxCap { denom } => {
-                            match self.native_querier.tax_caps.get(denom) {
-                                Some(cap) => {
-                                    let res = TaxCapResponse { cap: *cap };
-                                    to_binary(&res).into()
-                                }
-                                None => Err(format!(
-                                    "no tax cap available for provided denom: {}",
-                                    denom
-                                ))
-                                .into(),
-                            }
-                        }
-                        _ => panic!(
-                            "[mock]: Unsupported query data for QueryRequest::Custom : {:?}",
-                            query_data
-                        ),
-                    };
-
-                    Ok(ret).into()
-                } else {
-                    panic!(
-                        "[mock]: Unsupported route for QueryRequest::Custom : {:?}",
-                        route
-                    )
-                }
+                self.native_querier.handle_query(route, query_data)
             }
 
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
@@ -562,6 +476,14 @@ impl MarsMockQuerier {
                         &contract_addr,
                         address_provider_query,
                     );
+                }
+
+                // Oracle Queries
+                let parse_oracle_query: StdResult<oracle::msg::QueryMsg> = from_binary(msg);
+                if let Ok(oracle_query) = parse_oracle_query {
+                    return self
+                        .oracle_querier
+                        .handle_query(&contract_addr, oracle_query);
                 }
 
                 // Terraswap Queries

@@ -1,5 +1,5 @@
 [package]
-name = "red-bank"
+name = "oracle"
 version = "0.1.0"
 authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
 edition = "2018"
@@ -21,18 +21,13 @@ backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
-
 cw20 = "0.7"
-
-cosmwasm-std = { "version" = "0.15.0", features = ["iterator"]}
-cw-storage-plus = { "version" = "0.7.0", features = ["iterator"]}
-
-cosmwasm-bignumber = "2.1.1"
+cosmwasm-std = "0.15.0"
+terra-cosmwasm = "2.1.0"
+cw-storage-plus = "0.7.0"
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
-snafu = "0.6.3"
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = { version = "0.15.0" }
-cosmwasm-storage = { version = "0.15.0", features = ["iterator"] }
+cosmwasm-schema = "0.15.0"

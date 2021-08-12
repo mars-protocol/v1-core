@@ -4,11 +4,12 @@ use serde::{Deserialize, Serialize};
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
+use mars::asset::AssetType;
 use mars::helpers::all_conditions_valid;
-use mars::red_bank::msg::{AssetType, InitOrUpdateAssetParams};
+use mars::red_bank::msg::InitOrUpdateAssetParams;
 
 pub const CONFIG: Item<Config> = Item::new("config");
-pub const RED_BANK: Item<RedBank> = Item::new("red_bank");
+pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
 pub const USERS: Map<&Addr, User> = Map::new("users");
 pub const MARKETS: Map<&[u8], Market> = Map::new("markets");
 pub const MARKET_REFERENCES: Map<U32Key, MarketReferences> = Map::new("market_references");
@@ -67,7 +68,7 @@ impl Config {
 
 /// RedBank global state
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct RedBank {
+pub struct GlobalState {
     /// Market count
     pub market_count: u32,
 }
