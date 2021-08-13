@@ -1937,23 +1937,15 @@ pub fn market_update_interest_rates(
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
-        get_updated_interest_rates(market, current_utilization_rate);
+        market.interest_rate_strategy.get_updated_interest_rates(
+            current_utilization_rate,
+            market.borrow_rate,
+            market.reserve_factor,
+        );
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
     Ok(())
-}
-
-/// Updates borrow and liquidity rates based on PID parameters
-fn get_updated_interest_rates(
-    market: &Market,
-    current_utilization_rate: Decimal256,
-) -> (Decimal256, Decimal256) {
-    market.interest_rate_strategy.get_updated_interest_rates(
-        current_utilization_rate,
-        market.borrow_rate,
-        market.reserve_factor,
-    )
 }
 
 fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) {
@@ -6491,7 +6483,11 @@ mod tests {
 
         // interest rates
         let (expected_borrow_rate, expected_liquidity_rate) =
-            get_updated_interest_rates(market, expected_utilization_rate);
+            market.interest_rate_strategy.get_updated_interest_rates(
+                expected_utilization_rate,
+                market.borrow_rate,
+                market.reserve_factor,
+            );
 
         TestInterestResults {
             borrow_index: expected_indices.borrow,
