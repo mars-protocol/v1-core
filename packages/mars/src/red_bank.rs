@@ -1,5 +1,6 @@
 pub mod msg {
     use crate::asset::{Asset, AssetType};
+    use crate::interest_rate_models::InterestRateStrategy;
     use cosmwasm_bignumber::{Decimal256, Uint256};
     use cosmwasm_std::{Addr, Uint128};
     use cw20::Cw20ReceiveMsg;
@@ -218,10 +219,6 @@ pub mod msg {
     pub struct InitOrUpdateAssetParams {
         /// Initial borrow rate
         pub initial_borrow_rate: Option<Decimal256>,
-        /// Min borrow rate
-        pub min_borrow_rate: Option<Decimal256>,
-        /// Max borrow rate
-        pub max_borrow_rate: Option<Decimal256>,
         /// Max percentage of collateral that can be borrowed
         pub max_loan_to_value: Option<Decimal256>,
         /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
@@ -230,13 +227,7 @@ pub mod msg {
         pub maintenance_margin: Option<Decimal256>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal256>,
-        /// Proportional parameter for the PID controller
-        pub kp_1: Option<Decimal256>,
-        /// Optimal utilization
-        pub optimal_utilization_rate: Option<Decimal256>,
-        /// Min error that triggers Kp augmentation
-        pub kp_augmentation_threshold: Option<Decimal256>,
-        /// Kp value when error threshold is exceeded
-        pub kp_2: Option<Decimal256>,
+        /// Interest rate strategy to calculate borrow_rate and liquidity_rate
+        pub interest_rate_strategy: Option<InterestRateStrategy>,
     }
 }

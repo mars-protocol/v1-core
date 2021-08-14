@@ -6,6 +6,7 @@ use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::helpers::all_conditions_valid;
+use mars::interest_rate_models::{InterestRateModel, InterestRateStrategy};
 use mars::red_bank::msg::InitOrUpdateAssetParams;
 
 pub const CONFIG: Item<Config> = Item::new("config");
@@ -87,10 +88,6 @@ pub struct Market {
     pub liquidity_index: Decimal256,
     /// Rate charged to borrowers
     pub borrow_rate: Decimal256,
-    /// Minimum borrow rate
-    pub min_borrow_rate: Decimal256,
-    /// Maximum borrow rate
-    pub max_borrow_rate: Decimal256,
     /// Rate paid to depositors
     pub liquidity_rate: Decimal256,
 
@@ -116,21 +113,8 @@ pub struct Market {
     /// Income to be distributed to other protocol contracts
     pub protocol_income_to_distribute: Uint256,
 
-    /// PID parameters
-    pub pid_parameters: PidParameters,
-}
-
-/// PID parameters
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct PidParameters {
-    /// Proportional parameter for the PID controller
-    pub kp_1: Decimal256,
-    /// Optimal utilization rate targeted by the PID controller. Interest rate will decrease when lower and increase when higher
-    pub optimal_utilization_rate: Decimal256,
-    /// Min error that triggers Kp augmentation
-    pub kp_augmentation_threshold: Decimal256,
-    /// Kp value when error threshold is exceeded
-    pub kp_2: Decimal256,
+    /// Interest rate strategy to calculate borrow_rate and liquidity_rate
+    pub interest_rate_strategy: InterestRateStrategy,
 }
 
 impl Market {
@@ -145,30 +129,20 @@ impl Market {
         // compile error if we add more params
         let InitOrUpdateAssetParams {
             initial_borrow_rate: borrow_rate,
-            min_borrow_rate,
-            max_borrow_rate,
             max_loan_to_value,
             reserve_factor,
             maintenance_margin,
             liquidation_bonus,
-            kp_1,
-            optimal_utilization_rate,
-            kp_augmentation_threshold,
-            kp_2,
+            interest_rate_strategy,
         } = params;
 
         // All fields should be available
         let available = borrow_rate.is_some()
-            && min_borrow_rate.is_some()
-            && max_borrow_rate.is_some()
             && max_loan_to_value.is_some()
             && reserve_factor.is_some()
             && maintenance_margin.is_some()
             && liquidation_bonus.is_some()
-            && kp_1.is_some()
-            && optimal_utilization_rate.is_some()
-            && kp_augmentation_threshold.is_some()
-            && kp_2.is_some();
+            && interest_rate_strategy.is_some();
 
         if !available {
             return Err(StdError::generic_err(
@@ -176,13 +150,6 @@ impl Market {
             ));
         }
 
-        // Unwraps on params are save (validated with `validate_availability_of_all_params`)
-        let new_pid_params = PidParameters {
-            kp_1: kp_1.unwrap(),
-            optimal_utilization_rate: optimal_utilization_rate.unwrap(),
-            kp_augmentation_threshold: kp_augmentation_threshold.unwrap(),
-            kp_2: kp_2.unwrap(),
-        };
         let new_market = Market {
             index,
             asset_type,
@@ -190,8 +157,6 @@ impl Market {
             borrow_index: Decimal256::one(),
             liquidity_index: Decimal256::one(),
             borrow_rate: borrow_rate.unwrap(),
-            min_borrow_rate: min_borrow_rate.unwrap(),
-            max_borrow_rate: max_borrow_rate.unwrap(),
             liquidity_rate: Decimal256::zero(),
             max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
@@ -200,7 +165,7 @@ impl Market {
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint256::zero(),
-            pid_parameters: new_pid_params,
+            interest_rate_strategy: interest_rate_strategy.unwrap(),
         };
 
         new_market.validate()?;
@@ -209,20 +174,7 @@ impl Market {
     }
 
     fn validate(&self) -> StdResult<()> {
-        if self.min_borrow_rate >= self.max_borrow_rate {
-            return Err(StdError::generic_err(format!(
-                "max_borrow_rate should be greater than min_borrow_rate. \
-                    max_borrow_rate: {}, \
-                    min_borrow_rate: {}",
-                self.max_borrow_rate, self.min_borrow_rate
-            )));
-        }
-
-        if self.pid_parameters.optimal_utilization_rate > Decimal256::one() {
-            return Err(StdError::generic_err(
-                "Optimal utilization rate can't be greater than one",
-            ));
-        }
+        self.interest_rate_strategy.validate()?;
 
         // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
         let conditions_and_names = vec![
@@ -261,34 +213,19 @@ impl Market {
         // compile error if we add more params
         let InitOrUpdateAssetParams {
             initial_borrow_rate: _,
-            min_borrow_rate,
-            max_borrow_rate,
             max_loan_to_value,
             reserve_factor,
             maintenance_margin,
             liquidation_bonus,
-            kp_1: kp,
-            optimal_utilization_rate: u_optimal,
-            kp_augmentation_threshold,
-            kp_2: kp_multiplier,
+            interest_rate_strategy,
         } = params;
 
-        let updated_pid_params = PidParameters {
-            kp_1: kp.unwrap_or(self.pid_parameters.kp_1),
-            optimal_utilization_rate: u_optimal
-                .unwrap_or(self.pid_parameters.optimal_utilization_rate),
-            kp_augmentation_threshold: kp_augmentation_threshold
-                .unwrap_or(self.pid_parameters.kp_augmentation_threshold),
-            kp_2: kp_multiplier.unwrap_or(self.pid_parameters.kp_2),
-        };
         let updated_market = Market {
-            min_borrow_rate: min_borrow_rate.unwrap_or(self.min_borrow_rate),
-            max_borrow_rate: max_borrow_rate.unwrap_or(self.max_borrow_rate),
             max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
             reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
             maintenance_margin: maintenance_margin.unwrap_or(self.maintenance_margin),
             liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
-            pid_parameters: updated_pid_params,
+            interest_rate_strategy: interest_rate_strategy.unwrap_or(self.interest_rate_strategy),
             ..self
         };
 

@@ -537,6 +537,68 @@
       "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal256(1_000_000_000_000_000_000) == 1.0 The greatest possible value that can be represented is 115792089237316195423570985008687907853269984665640564039457.584007913129639935 (which is (2^128 - 1) / 10^18)",
       "type": "string"
     },
+    "DynamicInterestRate": {
+      "description": "Dynamic interest rate model",
+      "type": "object",
+      "required": [
+        "kp_1",
+        "kp_2",
+        "kp_augmentation_threshold",
+        "max_borrow_rate",
+        "min_borrow_rate",
+        "optimal_utilization_rate"
+      ],
+      "properties": {
+        "kp_1": {
+          "description": "Proportional parameter for the PID controller",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "kp_2": {
+          "description": "Kp value when error threshold is exceeded",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "kp_augmentation_threshold": {
+          "description": "Min error that triggers Kp augmentation",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "max_borrow_rate": {
+          "description": "Maximum borrow rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "min_borrow_rate": {
+          "description": "Minimum borrow rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "optimal_utilization_rate": {
+          "description": "Optimal utilization rate targeted by the PID controller. Interest rate will decrease when lower and increase when higher",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        }
+      }
+    },
     "InitOrUpdateAssetParams": {
       "type": "object",
       "properties": {
@@ -551,33 +613,11 @@
             }
           ]
         },
-        "kp_1": {
-          "description": "Proportional parameter for the PID controller",
+        "interest_rate_strategy": {
+          "description": "Interest rate strategy to calculate borrow_rate and liquidity_rate",
           "anyOf": [
             {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "kp_2": {
-          "description": "Kp value when error threshold is exceeded",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "kp_augmentation_threshold": {
-          "description": "Min error that triggers Kp augmentation",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
+              "$ref": "#/definitions/InterestRateStrategy"
             },
             {
               "type": "null"
@@ -606,41 +646,8 @@
             }
           ]
         },
-        "max_borrow_rate": {
-          "description": "Max borrow rate",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "max_loan_to_value": {
           "description": "Max percentage of collateral that can be borrowed",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "min_borrow_rate": {
-          "description": "Min borrow rate",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal256"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "optimal_utilization_rate": {
-          "description": "Optimal utilization",
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal256"
@@ -658,6 +665,78 @@
             },
             {
               "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "InterestRateStrategy": {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "dynamic"
+          ],
+          "properties": {
+            "dynamic": {
+              "$ref": "#/definitions/DynamicInterestRate"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "linear"
+          ],
+          "properties": {
+            "linear": {
+              "$ref": "#/definitions/LinearInterestRate"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "LinearInterestRate": {
+      "description": "Linear interest rate model",
+      "type": "object",
+      "required": [
+        "base",
+        "optimal_utilization_rate",
+        "slope_1",
+        "slope_2"
+      ],
+      "properties": {
+        "base": {
+          "description": "Base rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "optimal_utilization_rate": {
+          "description": "Optimal utilization rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "slope_1": {
+          "description": "Slope parameter for interest rate model function when utilization_rate < optimal_utilization_rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
+            }
+          ]
+        },
+        "slope_2": {
+          "description": "Slope parameter for interest rate model function when utilization_rate >= optimal_utilization_rate",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Decimal256"
             }
           ]
         }

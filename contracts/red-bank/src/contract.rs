@@ -28,6 +28,7 @@ use crate::state::{
     Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
     MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
+use mars::interest_rate_models::InterestRateModel;
 
 // CONSTANTS
 
@@ -1936,68 +1937,15 @@ pub fn market_update_interest_rates(
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
-        get_updated_interest_rates(market, current_utilization_rate);
+        market.interest_rate_strategy.get_updated_interest_rates(
+            current_utilization_rate,
+            market.borrow_rate,
+            market.reserve_factor,
+        );
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
     Ok(())
-}
-
-/// Updates borrow and liquidity rates based on PID parameters
-fn get_updated_interest_rates(
-    market: &Market,
-    current_utilization_rate: Decimal256,
-) -> (Decimal256, Decimal256) {
-    // Use PID params for calculating borrow interest rate
-    let pid_params = market.pid_parameters.clone();
-
-    // error_value should be represented as integer number so we do this with help from boolean flag
-    let (error_value, error_positive) =
-        if pid_params.optimal_utilization_rate > current_utilization_rate {
-            (
-                pid_params.optimal_utilization_rate - current_utilization_rate,
-                true,
-            )
-        } else {
-            (
-                current_utilization_rate - pid_params.optimal_utilization_rate,
-                false,
-            )
-        };
-
-    let kp = if error_value >= pid_params.kp_augmentation_threshold {
-        pid_params.kp_2
-    } else {
-        pid_params.kp_1
-    };
-
-    let p = kp * error_value;
-    let mut new_borrow_rate = if error_positive {
-        // error_positive = true (u_optimal > u) means we want utilization rate to go up
-        // we lower interest rate so more people borrow
-        if market.borrow_rate > p {
-            market.borrow_rate - p
-        } else {
-            Decimal256::zero()
-        }
-    } else {
-        // error_positive = false (u_optimal < u) means we want utilization rate to go down
-        // we increase interest rate so less people borrow
-        market.borrow_rate + p
-    };
-
-    // Check borrow rate conditions
-    if new_borrow_rate < market.min_borrow_rate {
-        new_borrow_rate = market.min_borrow_rate
-    } else if new_borrow_rate > market.max_borrow_rate {
-        new_borrow_rate = market.max_borrow_rate;
-    };
-
-    // This operation should not underflow as reserve_factor is checked to be <= 1
-    let new_liquidity_rate =
-        new_borrow_rate * current_utilization_rate * (Decimal256::one() - market.reserve_factor);
-
-    (new_borrow_rate, new_liquidity_rate)
 }
 
 fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) {
@@ -2166,9 +2114,11 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::PidParameters;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{coin, from_binary, Decimal, OwnedDeps};
+    use mars::interest_rate_models::{
+        DynamicInterestRate, InterestRateStrategy, LinearInterestRate,
+    };
     use mars::red_bank::msg::ExecuteMsg::UpdateConfig;
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
@@ -2183,126 +2133,6 @@ mod tests {
         let accumulated = calculate_applied_linear_interest_rate(index, rate, time_elapsed);
 
         assert_eq!(accumulated, Decimal256::from_ratio(11, 100));
-    }
-
-    #[test]
-    fn test_pid_interest_rates_calculation() {
-        let market = Market {
-            // Params used for new rates calculations
-            borrow_rate: Decimal256::from_ratio(5, 100),
-            min_borrow_rate: Decimal256::from_ratio(1, 100),
-            max_borrow_rate: Decimal256::from_ratio(90, 100),
-            pid_parameters: PidParameters {
-                kp_1: Decimal256::from_ratio(2, 1),
-                optimal_utilization_rate: Decimal256::from_ratio(60, 100),
-                kp_augmentation_threshold: Decimal256::from_ratio(10, 100),
-                kp_2: Decimal256::from_ratio(3, 1),
-            },
-
-            // Rest params are not used
-            index: 0,
-            ma_token_address: zero_address(),
-            borrow_index: Default::default(),
-            liquidity_index: Default::default(),
-            liquidity_rate: Default::default(),
-            max_loan_to_value: Default::default(),
-            reserve_factor: Default::default(),
-            interests_last_updated: 0,
-            debt_total_scaled: Default::default(),
-            asset_type: AssetType::Cw20,
-            maintenance_margin: Default::default(),
-            liquidation_bonus: Default::default(),
-            protocol_income_to_distribute: Default::default(),
-        };
-
-        // *
-        // current utilization rate > optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal256::from_ratio(61, 100);
-        let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&market, current_utilization_rate);
-
-        let expected_error =
-            current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate =
-            market.borrow_rate + (market.pid_parameters.kp_1 * expected_error);
-        let expected_liquidity_rate = expected_borrow_rate
-            * current_utilization_rate
-            * (Decimal256::one() - market.reserve_factor);
-
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
-
-        // *
-        // current utilization rate < optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal256::from_ratio(59, 100);
-        let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&market, current_utilization_rate);
-
-        let expected_error =
-            market.pid_parameters.optimal_utilization_rate - current_utilization_rate;
-        // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate =
-            market.borrow_rate - (market.pid_parameters.kp_1 * expected_error);
-        let expected_liquidity_rate = expected_borrow_rate
-            * current_utilization_rate
-            * (Decimal256::one() - market.reserve_factor);
-
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
-
-        // *
-        // current utilization rate > optimal utilization rate, increment KP by a multiplier if error goes beyond threshold
-        // *
-        let current_utilization_rate = Decimal256::from_ratio(72, 100);
-        let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&market, current_utilization_rate);
-
-        let expected_error =
-            current_utilization_rate - market.pid_parameters.optimal_utilization_rate;
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate =
-            market.borrow_rate + (market.pid_parameters.kp_2 * expected_error);
-        let expected_liquidity_rate = expected_borrow_rate
-            * current_utilization_rate
-            * (Decimal256::one() - market.reserve_factor);
-
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
-
-        // *
-        // current utilization rate < optimal utilization rate, borrow rate can't be less than min borrow rate
-        // *
-        let current_utilization_rate = Decimal256::from_ratio(10, 100);
-        let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&market, current_utilization_rate);
-
-        // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate = market.min_borrow_rate;
-        let expected_liquidity_rate = expected_borrow_rate
-            * current_utilization_rate
-            * (Decimal256::one() - market.reserve_factor);
-
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
-
-        // *
-        // current utilization rate > optimal utilization rate, borrow rate can't be less than max borrow rate
-        // *
-        let current_utilization_rate = Decimal256::from_ratio(90, 100);
-        let (new_borrow_rate, new_liquidity_rate) =
-            get_updated_interest_rates(&market, current_utilization_rate);
-
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = market.max_borrow_rate;
-        let expected_liquidity_rate = expected_borrow_rate
-            * current_utilization_rate
-            * (Decimal256::one() - market.reserve_factor);
-
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
     }
 
     #[test]
@@ -2549,18 +2379,21 @@ mod tests {
         // *
         // non owner is not authorized
         // *
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(5, 100),
+            max_borrow_rate: Decimal256::from_ratio(50, 100),
+            kp_1: Decimal256::from_ratio(3, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
+            kp_2: Decimal256::from_ratio(2, 1),
+        };
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
-            max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
             max_loan_to_value: Some(Decimal256::from_ratio(8, 10)),
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::one()),
             liquidation_bonus: Some(Decimal256::zero()),
-            kp_1: Some(Decimal256::from_ratio(3, 1)),
-            optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
-            kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_2: Some(Decimal256::from_ratio(2, 1)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2579,7 +2412,7 @@ mod tests {
             max_loan_to_value: None,
             maintenance_margin: None,
             liquidation_bonus: None,
-            ..asset_params
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2600,7 +2433,7 @@ mod tests {
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal256::from_ratio(110, 10)),
             reserve_factor: Some(Decimal256::from_ratio(120, 100)),
-            ..asset_params
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2619,7 +2452,7 @@ mod tests {
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal256::from_ratio(5, 10)),
             maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
-            ..asset_params
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2642,10 +2475,14 @@ mod tests {
         // *
         // init asset where min borrow rate >= max borrow rate
         // *
+        let invalid_dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(5, 10),
+            max_borrow_rate: Decimal256::from_ratio(4, 10),
+            ..dynamic_ir.clone()
+        };
         let invalid_asset_params = InitOrUpdateAssetParams {
-            min_borrow_rate: Some(Decimal256::from_ratio(5, 10)),
-            max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
-            ..asset_params
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir)),
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2660,9 +2497,13 @@ mod tests {
         // *
         // init asset where optimal utilization rate > 1
         // *
+        let invalid_dynamic_ir = DynamicInterestRate {
+            optimal_utilization_rate: Decimal256::from_ratio(11, 10),
+            ..dynamic_ir.clone()
+        };
         let invalid_asset_params = InitOrUpdateAssetParams {
-            optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
-            ..asset_params
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir)),
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2872,18 +2713,21 @@ mod tests {
         // *
         // non owner is not authorized
         // *
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(5, 100),
+            max_borrow_rate: Decimal256::from_ratio(50, 100),
+            kp_1: Decimal256::from_ratio(3, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
+            kp_2: Decimal256::from_ratio(2, 1),
+        };
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
-            max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
             max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
             reserve_factor: Some(Decimal256::from_ratio(1, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
-            kp_1: Some(Decimal256::from_ratio(3, 1)),
-            optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
-            kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_2: Some(Decimal256::from_ratio(2, 1)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -2928,7 +2772,7 @@ mod tests {
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
             maintenance_margin: Some(Decimal256::from_ratio(110, 10)),
-            ..asset_params
+            ..asset_params.clone()
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -2970,9 +2814,13 @@ mod tests {
         // *
         // init asset where min borrow rate >= max borrow rate
         // *
+        let invalid_dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(4, 10),
+            max_borrow_rate: Decimal256::from_ratio(4, 10),
+            ..dynamic_ir
+        };
         let invalid_asset_params = InitOrUpdateAssetParams {
-            min_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
-            max_borrow_rate: Some(Decimal256::from_ratio(4, 10)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
             ..asset_params
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -2988,8 +2836,12 @@ mod tests {
         // *
         // init asset where optimal utilization rate > 1
         // *
+        let invalid_dynamic_ir = DynamicInterestRate {
+            optimal_utilization_rate: Decimal256::from_ratio(11, 10),
+            ..dynamic_ir
+        };
         let invalid_asset_params = InitOrUpdateAssetParams {
-            optimal_utilization_rate: Some(Decimal256::from_ratio(11, 10)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
             ..asset_params
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -3008,18 +2860,21 @@ mod tests {
         // *
         // update asset with new params
         // *
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(5, 100),
+            max_borrow_rate: Decimal256::from_ratio(50, 100),
+            kp_1: Decimal256::from_ratio(3, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
+            kp_2: Decimal256::from_ratio(2, 1),
+        };
         let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            min_borrow_rate: Some(Decimal256::from_ratio(5, 100)),
-            max_borrow_rate: Some(Decimal256::from_ratio(50, 100)),
             max_loan_to_value: Some(Decimal256::from_ratio(60, 100)),
             reserve_factor: Some(Decimal256::from_ratio(10, 100)),
             maintenance_margin: Some(Decimal256::from_ratio(90, 100)),
             liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
-            kp_1: Some(Decimal256::from_ratio(3, 1)),
-            optimal_utilization_rate: Some(Decimal256::from_ratio(80, 100)),
-            kp_augmentation_threshold: Some(Decimal256::from_ratio(2000, 1)),
-            kp_2: Some(Decimal256::from_ratio(2, 1)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3069,16 +2924,11 @@ mod tests {
         // *
         let empty_asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: None,
-            min_borrow_rate: None,
-            max_borrow_rate: None,
             max_loan_to_value: None,
             reserve_factor: None,
             maintenance_margin: None,
             liquidation_bonus: None,
-            kp_1: None,
-            optimal_utilization_rate: None,
-            kp_augmentation_threshold: None,
-            kp_2: None,
+            interest_rate_strategy: None,
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3097,14 +2947,6 @@ mod tests {
             new_market.borrow_rate
         );
         assert_eq!(
-            asset_params.min_borrow_rate.unwrap(),
-            new_market.min_borrow_rate
-        );
-        assert_eq!(
-            asset_params.max_borrow_rate.unwrap(),
-            new_market.max_borrow_rate
-        );
-        assert_eq!(
             asset_params.max_loan_to_value.unwrap(),
             new_market.max_loan_to_value
         );
@@ -3120,12 +2962,102 @@ mod tests {
             asset_params.liquidation_bonus.unwrap(),
             new_market.liquidation_bonus
         );
-        assert_eq!(asset_params.kp_1.unwrap(), new_market.pid_parameters.kp_1);
+        if let InterestRateStrategy::Dynamic(market_dynamic_ir) = new_market.interest_rate_strategy
+        {
+            assert_eq!(
+                dynamic_ir.min_borrow_rate,
+                market_dynamic_ir.min_borrow_rate
+            );
+            assert_eq!(
+                dynamic_ir.max_borrow_rate,
+                market_dynamic_ir.max_borrow_rate
+            );
+            assert_eq!(dynamic_ir.kp_1, market_dynamic_ir.kp_1);
+            assert_eq!(
+                dynamic_ir.kp_augmentation_threshold,
+                market_dynamic_ir.kp_augmentation_threshold
+            );
+            assert_eq!(dynamic_ir.kp_2, market_dynamic_ir.kp_2);
+        } else {
+            panic!("INCORRECT STRATEGY")
+        }
+    }
+
+    #[test]
+    fn test_update_asset_with_new_interest_rate_strategy() {
+        let mut deps = mock_dependencies(&[]);
+        let env = mock_env(MockEnvParams::default());
+
+        let config = CreateOrUpdateConfig {
+            owner: Some("owner".to_string()),
+            address_provider_address: Some("address_provider".to_string()),
+            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
+            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            ma_token_code_id: Some(5u64),
+            close_factor: Some(Decimal256::from_ratio(1, 2)),
+        };
+        let msg = InstantiateMsg { config };
+        let info = mock_info("owner");
+        instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal256::from_ratio(10, 100),
+            max_borrow_rate: Decimal256::from_ratio(60, 100),
+            kp_1: Decimal256::from_ratio(4, 1),
+            optimal_utilization_rate: Decimal256::from_ratio(90, 100),
+            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
+            kp_2: Decimal256::from_ratio(3, 1),
+        };
+        let asset_params_with_dynamic_ir = InitOrUpdateAssetParams {
+            initial_borrow_rate: Some(Decimal256::from_ratio(15, 100)),
+            max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
+            reserve_factor: Some(Decimal256::from_ratio(2, 100)),
+            maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
+            liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
+            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+        };
+
+        let msg = ExecuteMsg::InitAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params_with_dynamic_ir.clone(),
+        };
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // Verify if IR strategy is saved correctly
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(
-            asset_params.kp_augmentation_threshold.unwrap(),
-            new_market.pid_parameters.kp_augmentation_threshold
+            new_market.interest_rate_strategy,
+            InterestRateStrategy::Dynamic(dynamic_ir)
         );
-        assert_eq!(asset_params.kp_2.unwrap(), new_market.pid_parameters.kp_2);
+
+        let linear_ir = LinearInterestRate {
+            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
+            base: Decimal256::from_ratio(0, 100),
+            slope_1: Decimal256::from_ratio(8, 100),
+            slope_2: Decimal256::from_ratio(48, 100),
+        };
+        let asset_params_with_linear_ir = InitOrUpdateAssetParams {
+            interest_rate_strategy: Some(InterestRateStrategy::Linear(linear_ir.clone())),
+            ..asset_params_with_dynamic_ir
+        };
+        let msg = ExecuteMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "someasset".to_string(),
+            },
+            asset_params: asset_params_with_linear_ir.clone(),
+        };
+        let info = mock_info("owner");
+        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // Verify if IR strategy is updated
+        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        assert_eq!(
+            new_market.interest_rate_strategy,
+            InterestRateStrategy::Linear(linear_ir)
+        );
     }
 
     #[test]
@@ -6415,14 +6347,20 @@ mod tests {
 
     impl Default for Market {
         fn default() -> Self {
+            let dynamic_ir = DynamicInterestRate {
+                min_borrow_rate: Decimal256::zero(),
+                max_borrow_rate: Decimal256::one(),
+                kp_1: Default::default(),
+                optimal_utilization_rate: Default::default(),
+                kp_augmentation_threshold: Default::default(),
+                kp_2: Default::default(),
+            };
             Market {
                 index: 0,
                 ma_token_address: zero_address(),
                 liquidity_index: Default::default(),
                 borrow_index: Default::default(),
                 borrow_rate: Default::default(),
-                min_borrow_rate: Decimal256::zero(),
-                max_borrow_rate: Decimal256::one(),
                 liquidity_rate: Default::default(),
                 max_loan_to_value: Default::default(),
                 reserve_factor: Default::default(),
@@ -6432,12 +6370,7 @@ mod tests {
                 maintenance_margin: Decimal256::one(),
                 liquidation_bonus: Decimal256::zero(),
                 protocol_income_to_distribute: Uint256::zero(),
-                pid_parameters: PidParameters {
-                    kp_1: Default::default(),
-                    optimal_utilization_rate: Default::default(),
-                    kp_augmentation_threshold: Default::default(),
-                    kp_2: Default::default(),
-                },
+                interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
             }
         }
     }
@@ -6550,7 +6483,11 @@ mod tests {
 
         // interest rates
         let (expected_borrow_rate, expected_liquidity_rate) =
-            get_updated_interest_rates(market, expected_utilization_rate);
+            market.interest_rate_strategy.get_updated_interest_rates(
+                expected_utilization_rate,
+                market.borrow_rate,
+                market.reserve_factor,
+            );
 
         TestInterestResults {
             borrow_index: expected_indices.borrow,

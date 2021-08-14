@@ -1,5 +1,5 @@
 /*
-Script to deploy a cw20 token from a multisig account using the mars-minter contract as the token minter.
+Script to deploy a cw20 token, setting a multisig as the token minter.
 
 This script is designed to work with Terra Columbus-4.
 
@@ -7,7 +7,6 @@ Dependencies:
   - rust
   - terracli 58602320d2907814cfccdf43e9679468bb4bd8d3
   - cosmwasm-plus v0.2.0
-  - mars-minter
   - Add accounts and multisig to terracli
   - Set environment variables in a .env file (see below for details of the required variables)
 
@@ -33,7 +32,6 @@ import { unlinkSync, writeFileSync } from "fs"
 import 'dotenv/config.js'
 import {
   createTransaction,
-  executeContract,
   instantiateContract,
   performTransaction,
   queryContract,
@@ -56,11 +54,9 @@ const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 const CHAIN_ID = process.env.CHAIN_ID
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
 const CW20_CODE_ID = process.env.CW20_CODE_ID
-const MARS_MINTER_CODE_ID = process.env.MARS_MINTER_CODE_ID
 
 // LocalTerra:
 const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH
-const MARS_MINTER_BINARY_PATH = process.env.MARS_MINTER_BINARY_PATH!
 
 // Main
 
@@ -70,7 +66,6 @@ async function main() {
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
   let cw20CodeID: number
-  let marsMinterCodeID: number
 
   if (isTestnet) {
     terra = new LCDClient({
@@ -81,7 +76,6 @@ async function main() {
     wallet = recover(terra, process.env.WALLET!)
 
     cw20CodeID = parseInt(CW20_CODE_ID!)
-    marsMinterCodeID = parseInt(MARS_MINTER_CODE_ID!)
 
   } else {
     setTimeoutDuration(0)
@@ -93,22 +87,16 @@ async function main() {
     // Upload contract code
     cw20CodeID = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
     console.log(cw20CodeID)
-    marsMinterCodeID = await uploadContract(terra, wallet, MARS_MINTER_BINARY_PATH!)
-    console.log(marsMinterCodeID)
   }
 
   const multisig = new Wallet(terra, new CLIKey({ keyName: MULTISIG_NAME }))
-
-  // Instantiate mars-minter
-  const minterAddress = await instantiateContract(terra, wallet, marsMinterCodeID, { admins: [wallet.key.accAddress, MULTISIG_ADDRESS] })
-  console.log("minter:", minterAddress)
 
   // Token info
   const TOKEN_NAME = "Mars"
   const TOKEN_SYMBOL = "MARS"
   const TOKEN_DECIMALS = 6
   // The minter address cannot be changed after the contract is instantiated
-  const TOKEN_MINTER = minterAddress
+  const TOKEN_MINTER = MULTISIG_ADDRESS
   // The cap cannot be changed after the contract is instantiated
   const TOKEN_CAP = 1_000_000_000_000000
   // TODO check if we want initial balances in prod
@@ -140,30 +128,9 @@ async function main() {
   let balance = await queryContract(terra, marsAddress, { balance: { address: TOKEN_INFO.initial_balances[0].address } })
   strictEqual(balance.balance, TOKEN_INFO.initial_balances[0].amount)
 
-  // Add Mars token address to mars-minter config
-  await executeContract(terra, wallet, minterAddress, { update_config: { config: { mars_token_address: marsAddress } } })
-
-  const newConfig = await queryContract(terra, minterAddress, { config: {} })
-  strictEqual(newConfig.mars_token_address, marsAddress)
-
-  // Remove wallet from mars-minter admins
-  await executeContract(terra, wallet, minterAddress, { update_admins: { admins: [MULTISIG_ADDRESS] } })
-
-  const walletCanMint = await queryContract(terra, minterAddress, { can_mint: { sender: wallet.key.accAddress } })
-  strictEqual(walletCanMint.can_mint, false)
-
-  const multisigCanMint = await queryContract(terra, minterAddress, { can_mint: { sender: MULTISIG_ADDRESS } })
-  strictEqual(multisigCanMint.can_mint, true)
-
-  // Update mars-minter owner
+  // Update Mars token owner
   const newOwner = MULTISIG_ADDRESS
 
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, minterAddress))
-
-  const minterContractInfo = await terra.wasm.contractInfo(minterAddress)
-  strictEqual(minterContractInfo.owner, newOwner)
-
-  // Update Mars token owner
   await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
 
   const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
@@ -185,7 +152,7 @@ async function main() {
 
   // Create an unsigned tx
   const mintMsg = { mint: { recipient: recipient, amount: String(mintAmount) } }
-  const tx = await createTransaction(terra, multisig, new MsgExecuteContract(MULTISIG_ADDRESS, minterAddress, mintMsg))
+  const tx = await createTransaction(terra, multisig, new MsgExecuteContract(MULTISIG_ADDRESS, marsAddress, mintMsg))
   writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
   // Create K of N signatures for the tx

@@ -14,6 +14,7 @@ pub mod asset;
 // Helpers
 pub mod error;
 pub mod helpers;
+pub mod interest_rate_models;
 pub mod swapping;
 pub mod tax;
 
