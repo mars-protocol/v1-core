@@ -2,24 +2,26 @@ use std::str;
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, Coin, CosmosMsg,
-    Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, SubMsg, Uint128,
+    entry_point, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, Coin, CosmosMsg,
+    Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, Uint128,
     WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
+use cw20_base::msg::InstantiateMarketingInfo;
 use cw_storage_plus::U32Key;
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::asset::{Asset, AssetType};
-use mars::error::MarsError;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::ma_token;
 use mars::red_bank::msg::{
     CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig, DebtInfo,
     DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo, MarketResponse,
-    MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
+
+use mars::asset::{Asset, AssetType};
+use mars::error::MarsError;
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::tax::deduct_tax;
 
 use crate::accounts::{get_user_position, UserHealthStatus};
@@ -1768,11 +1770,6 @@ fn query_uncollateralized_loan_limit(
             user_address, asset_label
         ))),
     }
-}
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
 }
 
 // INTEREST
