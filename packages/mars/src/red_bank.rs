@@ -213,7 +213,7 @@ pub mod msg {
     pub struct UncollateralizedLoanLimitResponse {
         pub limit: Uint128,
     }
-    
+
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InitOrUpdateAssetParams {
         /// Initial borrow rate

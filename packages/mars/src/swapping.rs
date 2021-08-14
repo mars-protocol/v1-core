@@ -39,7 +39,11 @@ pub fn execute_swap(
         AssetInfo::Token { contract_addr } => {
             let asset_label = String::from(contract_addr.as_str());
             (
-                cw20_get_balance(&deps.querier, deps.api.addr_validate(&contract_addr)?, env.contract.address)?,
+                cw20_get_balance(
+                    &deps.querier,
+                    deps.api.addr_validate(&contract_addr)?,
+                    env.contract.address,
+                )?,
                 asset_label,
             )
         }
@@ -73,7 +77,11 @@ pub fn execute_swap(
         info: offer_asset_info,
         amount: amount_to_swap,
     };
-    let send_msg = asset_into_swap_msg(deps.api.addr_validate(&pair_info.contract_addr)?, offer_asset, terraswap_max_spread)?;
+    let send_msg = asset_into_swap_msg(
+        deps.api.addr_validate(&pair_info.contract_addr)?,
+        offer_asset,
+        terraswap_max_spread,
+    )?;
 
     let response = Response::new()
         .add_message(send_msg)
@@ -103,7 +111,7 @@ fn asset_into_swap_msg(
             }],
         }),
         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: contract_addr.to_string(),
+            contract_addr,
             msg: to_binary(&Cw20ExecuteMsg::Send {
                 contract: pair_contract.to_string(),
                 amount: offer_asset.amount,
@@ -127,6 +135,7 @@ mod tests {
         assert_generic_error_message, mock_dependencies, mock_env, MockEnvParams,
     };
     use cosmwasm_std::testing::MOCK_CONTRACT_ADDR;
+    use cosmwasm_std::SubMsg;
 
     #[test]
     fn test_cannot_swap_same_assets() {
