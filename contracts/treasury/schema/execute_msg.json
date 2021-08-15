@@ -3,53 +3,6 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
-      "description": "Update staking config",
-      "type": "object",
-      "required": [
-        "update_config"
-      ],
-      "properties": {
-        "update_config": {
-          "type": "object",
-          "required": [
-            "config"
-          ],
-          "properties": {
-            "config": {
-              "$ref": "#/definitions/CreateOrUpdateConfig"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Implementation cw20 receive msg",
-      "type": "object",
-      "required": [
-        "receive"
-      ],
-      "properties": {
-        "receive": {
-          "$ref": "#/definitions/Cw20ReceiveMsg"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Initialize or refresh cooldown",
-      "type": "object",
-      "required": [
-        "cooldown"
-      ],
-      "properties": {
-        "cooldown": {
-          "type": "object"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
       "description": "Execute Cosmos msg",
       "type": "object",
       "required": [
@@ -63,54 +16,19 @@
       "additionalProperties": false
     },
     {
-      "description": "Swap any asset on the contract to uusd",
+      "description": "Update contract config (only callable by owner)",
       "type": "object",
       "required": [
-        "swap_asset_to_uusd"
+        "update_config"
       ],
       "properties": {
-        "swap_asset_to_uusd": {
-          "type": "object",
-          "required": [
-            "offer_asset_info"
-          ],
-          "properties": {
-            "amount": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "offer_asset_info": {
-              "$ref": "#/definitions/AssetInfo"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Swap uusd on the contract to Mars",
-      "type": "object",
-      "required": [
-        "swap_uusd_to_mars"
-      ],
-      "properties": {
-        "swap_uusd_to_mars": {
+        "update_config": {
           "type": "object",
           "properties": {
-            "amount": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
+            "owner": {
+              "type": [
+                "string",
+                "null"
               ]
             }
           }
@@ -120,55 +38,6 @@
     }
   ],
   "definitions": {
-    "Addr": {
-      "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
-      "type": "string"
-    },
-    "AssetInfo": {
-      "description": "AssetInfo contract_addr is usually passed from the cw20 hook so we can trust the contract_addr is properly validated.",
-      "anyOf": [
-        {
-          "type": "object",
-          "required": [
-            "token"
-          ],
-          "properties": {
-            "token": {
-              "type": "object",
-              "required": [
-                "contract_addr"
-              ],
-              "properties": {
-                "contract_addr": {
-                  "$ref": "#/definitions/Addr"
-                }
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "native_token"
-          ],
-          "properties": {
-            "native_token": {
-              "type": "object",
-              "required": [
-                "denom"
-              ],
-              "properties": {
-                "denom": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "additionalProperties": false
-        }
-      ]
-    },
     "BankMsg": {
       "description": "The message types of the bank module.\n\nSee https://github.com/cosmos/cosmos-sdk/blob/v0.40.0/proto/cosmos/bank/v1beta1/tx.proto",
       "anyOf": [
@@ -284,79 +153,6 @@
           "additionalProperties": false
         }
       ]
-    },
-    "CreateOrUpdateConfig": {
-      "type": "object",
-      "properties": {
-        "address_provider_address": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "cooldown_duration": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "owner": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "terraswap_factory_address": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "terraswap_max_spread": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "unstake_window": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint64",
-          "minimum": 0.0
-        }
-      }
-    },
-    "Cw20ReceiveMsg": {
-      "description": "Cw20ReceiveMsg should be de/serialized under `Receive()` variant in a ExecuteMsg",
-      "type": "object",
-      "required": [
-        "amount",
-        "msg",
-        "sender"
-      ],
-      "properties": {
-        "amount": {
-          "$ref": "#/definitions/Uint128"
-        },
-        "msg": {
-          "$ref": "#/definitions/Binary"
-        },
-        "sender": {
-          "type": "string"
-        }
-      }
-    },
-    "Decimal": {
-      "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
-      "type": "string"
     },
     "Empty": {
       "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",

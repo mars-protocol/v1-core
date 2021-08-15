@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Response, StdResult, Uint128,
+    entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response,
+    StdResult, Uint128,
 };
 use terraswap::asset::AssetInfo;
 
@@ -168,6 +168,7 @@ mod tests {
     use super::*;
     use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::{
+        attr,
         testing::{mock_dependencies, mock_env, mock_info},
         Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
     };

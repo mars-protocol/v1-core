@@ -1,7 +1,7 @@
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdError, StdResult, SubMsg,
-    Uint128, WasmMsg, WasmQuery,
+    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdError, StdResult, Uint128,
+    WasmMsg, WasmQuery,
 };
 use cw_storage_plus::{Bound, U64Key};
 
@@ -716,7 +716,7 @@ fn map_execute_calls_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::testing::{MockApi, MockStorage, SubMsg, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{Coin, OwnedDeps};
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_info, MarsMockQuerier,

@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Order, QueryRequest, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
+    Order, QueryRequest, Response, StdResult, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -421,7 +421,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::{
         testing::{mock_env, mock_info, MockApi, MockStorage},
-        Addr, BankMsg, Coin, OwnedDeps, Timestamp, Uint128,
+        Addr, BankMsg, Coin, OwnedDeps, SubMsg, Timestamp, Uint128,
     };
     use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
