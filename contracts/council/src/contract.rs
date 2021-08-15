@@ -716,8 +716,8 @@ fn map_execute_calls_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{MockApi, MockStorage, SubMsg, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{Coin, OwnedDeps};
+    use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::{Coin, OwnedDeps, SubMsg};
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_info, MarsMockQuerier,
         MockEnvParams,
