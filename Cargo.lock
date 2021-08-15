@@ -560,6 +560,7 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus",
  "cw20",
+ "cw20-base",
  "mars",
  "schemars",
  "serde",
