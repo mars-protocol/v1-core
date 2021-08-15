@@ -50,6 +50,16 @@ pub mod msg {
             start_after: Option<String>,
             limit: Option<u32>,
         },
+        /// Only with "marketing" extension
+        /// Returns more metadata on the contract to display in the client:
+        /// - description, logo, project url, etc.
+        /// Return type: MarketingInfoResponse
+        MarketingInfo {},
+        /// Only with "marketing" extension
+        /// Downloads the mbeded logo data (if stored on chain). Errors if no logo data ftored for this
+        /// contract.
+        /// Return type: DownloadLogoResponse.
+        DownloadLogo {},
     }
 
     #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]

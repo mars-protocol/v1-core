@@ -1,21 +1,21 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult, SubMsg, Uint128,
+    entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128,
 };
-use cw2::{get_contract_version, set_contract_version};
+use cw2::set_contract_version;
 use cw20::{BalanceResponse, Cw20Coin, Cw20ReceiveMsg};
 use cw20_base::allowances::{
     execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
-use cw20_base::contract::{query_balance, query_minter, query_token_info};
+use cw20_base::contract::{
+    execute_update_marketing, execute_upload_logo, query_balance, query_download_logo,
+    query_marketing_info, query_minter, query_token_info,
+};
 use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
-use mars::cw20_core::instantiate_token_info;
-use mars::xmars_token::msg::{
-    ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, TotalSupplyResponse,
-};
+use mars::cw20_core::instantiate_token_info_and_marketing;
+use mars::xmars_token::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, TotalSupplyResponse};
 
 use crate::allowances::{execute_burn_from, execute_send_from, execute_transfer_from};
 use crate::core;
@@ -34,7 +34,7 @@ pub fn instantiate(
     env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     msg.validate()?;
@@ -44,7 +44,7 @@ pub fn instantiate(
         capture_total_supply_snapshot(deps.storage, &env, total_supply)?;
     }
 
-    instantiate_token_info(&mut deps, msg, total_supply)?;
+    instantiate_token_info_and_marketing(&mut deps, msg, total_supply)?;
 
     Ok(Response::default())
 }
@@ -100,6 +100,12 @@ pub fn execute(
             amount,
             msg,
         } => execute_send_from(deps, env, info, owner, contract, amount, msg),
+        ExecuteMsg::UpdateMarketing {
+            project,
+            description,
+            marketing,
+        } => execute_update_marketing(deps, env, info, project, description, marketing),
+        ExecuteMsg::UploadLogo(logo) => execute_upload_logo(deps, env, info, logo),
     }
 }
 
@@ -120,15 +126,11 @@ pub fn execute_transfer(
         amount,
     )?;
 
-    let res = Response {
-        attributes: vec![
-            attr("action", "transfer"),
-            attr("from", info.sender),
-            attr("to", recipient),
-            attr("amount", amount),
-        ],
-        ..Response::default()
-    };
+    let res = Response::new()
+        .add_attribute("action", "transfer")
+        .add_attribute("from", info.sender)
+        .add_attribute("to", recipient)
+        .add_attribute("amount", amount);
     Ok(res)
 }
 
@@ -140,14 +142,10 @@ pub fn execute_burn(
 ) -> Result<Response, ContractError> {
     core::burn(deps.storage, &env, &info.sender, amount)?;
 
-    let res = Response {
-        attributes: vec![
-            attr("action", "burn"),
-            attr("from", info.sender),
-            attr("amount", amount),
-        ],
-        ..Response::default()
-    };
+    let res = Response::new()
+        .add_attribute("action", "burn")
+        .add_attribute("user", info.sender)
+        .add_attribute("amount", amount);
     Ok(res)
 }
 
@@ -181,14 +179,10 @@ pub fn execute_mint(
     let rcpt_addr = deps.api.addr_validate(&recipient)?;
     core::transfer(deps.storage, &env, None, Some(&rcpt_addr), amount)?;
 
-    let res = Response {
-        attributes: vec![
-            attr("action", "mint"),
-            attr("to", recipient),
-            attr("amount", amount),
-        ],
-        ..Response::default()
-    };
+    let res = Response::new()
+        .add_attribute("action", "mint")
+        .add_attribute("to", recipient)
+        .add_attribute("amount", amount);
     Ok(res)
 }
 
@@ -211,28 +205,20 @@ pub fn execute_send(
         amount,
     )?;
 
-    let attributes = vec![
-        attr("action", "send"),
-        attr("from", &info.sender),
-        attr("to", &contract),
-        attr("amount", amount),
-    ];
+    let res = Response::new()
+        .add_attribute("action", "send")
+        .add_attribute("from", info.sender.to_string())
+        .add_attribute("to", &contract)
+        .add_attribute("amount", amount)
+        .add_message(
+            Cw20ReceiveMsg {
+                sender: info.sender.to_string(),
+                amount,
+                msg,
+            }
+            .into_cosmos_msg(contract)?,
+        );
 
-    // create a send message
-    let msg = SubMsg::new(
-        Cw20ReceiveMsg {
-            sender: info.sender.into(),
-            amount,
-            msg,
-        }
-        .into_cosmos_msg(contract)?,
-    );
-
-    let res = Response {
-        messages: vec![msg],
-        attributes,
-        ..Response::default()
-    };
     Ok(res)
 }
 
@@ -259,6 +245,8 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::AllAccounts { start_after, limit } => {
             to_binary(&query_all_accounts(deps, start_after, limit)?)
         }
+        QueryMsg::MarketingInfo {} => to_binary(&query_marketing_info(deps)?),
+        QueryMsg::DownloadLogo {} => to_binary(&query_download_logo(deps)?),
     }
 }
 
@@ -273,35 +261,14 @@ pub fn query_total_supply_at(deps: Deps, block: u64) -> StdResult<TotalSupplyRes
     Ok(TotalSupplyResponse { total_supply })
 }
 
-#[entry_point]
-pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    let old_version = get_contract_version(deps.storage)?;
-    if old_version.contract != CONTRACT_NAME {
-        return Err(StdError::generic_err(format!(
-            "This is {}, cannot migrate from {}",
-            CONTRACT_NAME, old_version.contract
-        )));
-    }
-    // NOTE: v0.1.0 were not auto-generated and started with v0.
-    // more recent versions do not have the v prefix
-
-    // TODO: This is copied from the old cw20_base, see if it makes sense for us
-    if old_version.version.starts_with("v0.1.") {
-        set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
-        return Ok(Response::default());
-    }
-
-    Err(StdError::generic_err(format!(
-        "Unknown version {}",
-        old_version.version
-    )))
-}
-
 #[cfg(test)]
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, CosmosMsg, StdError, WasmMsg};
-    use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
+    use cosmwasm_std::{coins, Addr, CosmosMsg, StdError, SubMsg, WasmMsg};
+    use cw20::{
+        Cw20Coin, Logo, LogoInfo, MarketingInfoResponse, MinterResponse, TokenInfoResponse,
+    };
+    use cw20_base::msg::InstantiateMarketingInfo;
 
     use mars::testing::MockEnvParams;
 
@@ -351,6 +318,7 @@ mod tests {
                 amount,
             }],
             mint: mint.clone(),
+            marketing: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
@@ -372,112 +340,192 @@ mod tests {
         meta
     }
 
-    #[test]
-    fn proper_instantiation() {
-        let mut deps = mock_dependencies(&[]);
-        let amount = Uint128::from(11223344u128);
-        let instantiate_msg = InstantiateMsg {
-            name: "Cash Token".to_string(),
-            symbol: "CASH".to_string(),
-            decimals: 9,
-            initial_balances: vec![Cw20Coin {
-                address: String::from("addr0000"),
-                amount,
-            }],
-            mint: None,
-        };
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
-        assert_eq!(0, res.messages.len());
+    mod instantiate {
+        use super::*;
 
-        assert_eq!(
-            query_token_info(deps.as_ref()).unwrap(),
-            TokenInfoResponse {
+        #[test]
+        fn basic() {
+            let mut deps = mock_dependencies(&[]);
+            let amount = Uint128::from(11223344u128);
+            let instantiate_msg = InstantiateMsg {
                 name: "Cash Token".to_string(),
                 symbol: "CASH".to_string(),
                 decimals: 9,
-                total_supply: amount,
-            }
-        );
-        assert_eq!(
-            get_balance(deps.as_ref(), "addr0000"),
-            Uint128::new(11223344)
-        );
-    }
+                initial_balances: vec![Cw20Coin {
+                    address: String::from("addr0000"),
+                    amount,
+                }],
+                mint: None,
+                marketing: None,
+            };
+            let info = mock_info("creator", &[]);
+            let env = mock_env();
+            let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
+            assert_eq!(0, res.messages.len());
 
-    #[test]
-    fn instantiate_mintable() {
-        let mut deps = mock_dependencies(&[]);
-        let amount = Uint128::new(11223344);
-        let minter = String::from("asmodat");
-        let limit = Uint128::new(511223344);
-        let instantiate_msg = InstantiateMsg {
-            name: "Cash Token".to_string(),
-            symbol: "CASH".to_string(),
-            decimals: 9,
-            initial_balances: vec![Cw20Coin {
-                address: "addr0000".into(),
-                amount,
-            }],
-            mint: Some(MinterResponse {
-                minter: minter.clone(),
-                cap: Some(limit),
-            }),
-        };
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
-        assert_eq!(0, res.messages.len());
+            assert_eq!(
+                query_token_info(deps.as_ref()).unwrap(),
+                TokenInfoResponse {
+                    name: "Cash Token".to_string(),
+                    symbol: "CASH".to_string(),
+                    decimals: 9,
+                    total_supply: amount,
+                }
+            );
+            assert_eq!(
+                get_balance(deps.as_ref(), "addr0000"),
+                Uint128::new(11223344)
+            );
+        }
 
-        assert_eq!(
-            query_token_info(deps.as_ref()).unwrap(),
-            TokenInfoResponse {
+        #[test]
+        fn mintable() {
+            let mut deps = mock_dependencies(&[]);
+            let amount = Uint128::new(11223344);
+            let minter = String::from("asmodat");
+            let limit = Uint128::new(511223344);
+            let instantiate_msg = InstantiateMsg {
                 name: "Cash Token".to_string(),
                 symbol: "CASH".to_string(),
                 decimals: 9,
-                total_supply: amount,
-            }
-        );
-        assert_eq!(
-            get_balance(deps.as_ref(), "addr0000"),
-            Uint128::new(11223344)
-        );
-        assert_eq!(
-            query_minter(deps.as_ref()).unwrap(),
-            Some(MinterResponse {
-                minter,
-                cap: Some(limit),
-            }),
-        );
-    }
+                initial_balances: vec![Cw20Coin {
+                    address: "addr0000".into(),
+                    amount,
+                }],
+                mint: Some(MinterResponse {
+                    minter: minter.clone(),
+                    cap: Some(limit),
+                }),
+                marketing: None,
+            };
+            let info = mock_info("creator", &[]);
+            let env = mock_env();
+            let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
+            assert_eq!(0, res.messages.len());
 
-    #[test]
-    fn instantiate_mintable_over_cap() {
-        let mut deps = mock_dependencies(&[]);
-        let amount = Uint128::new(11223344);
-        let minter = String::from("asmodat");
-        let limit = Uint128::new(11223300);
-        let instantiate_msg = InstantiateMsg {
-            name: "Cash Token".to_string(),
-            symbol: "CASH".to_string(),
-            decimals: 9,
-            initial_balances: vec![Cw20Coin {
-                address: String::from("addr0000"),
-                amount,
-            }],
-            mint: Some(MinterResponse {
-                minter,
-                cap: Some(limit),
-            }),
-        };
-        let info = mock_info("creator", &[]);
-        let env = mock_env();
-        let err = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap_err();
-        assert_eq!(
-            err,
-            StdError::generic_err("Initial supply greater than cap")
-        );
+            assert_eq!(
+                query_token_info(deps.as_ref()).unwrap(),
+                TokenInfoResponse {
+                    name: "Cash Token".to_string(),
+                    symbol: "CASH".to_string(),
+                    decimals: 9,
+                    total_supply: amount,
+                }
+            );
+            assert_eq!(
+                get_balance(deps.as_ref(), "addr0000"),
+                Uint128::new(11223344)
+            );
+            assert_eq!(
+                query_minter(deps.as_ref()).unwrap(),
+                Some(MinterResponse {
+                    minter,
+                    cap: Some(limit),
+                }),
+            );
+        }
+
+        #[test]
+        fn mintable_over_cap() {
+            let mut deps = mock_dependencies(&[]);
+            let amount = Uint128::new(11223344);
+            let minter = String::from("asmodat");
+            let limit = Uint128::new(11223300);
+            let instantiate_msg = InstantiateMsg {
+                name: "Cash Token".to_string(),
+                symbol: "CASH".to_string(),
+                decimals: 9,
+                initial_balances: vec![Cw20Coin {
+                    address: String::from("addr0000"),
+                    amount,
+                }],
+                mint: Some(MinterResponse {
+                    minter,
+                    cap: Some(limit),
+                }),
+                marketing: None,
+            };
+            let info = mock_info("creator", &[]);
+            let env = mock_env();
+            let err = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap_err();
+            assert_eq!(
+                err,
+                StdError::generic_err("Initial supply greater than cap").into()
+            );
+        }
+
+        mod marketing {
+            use super::*;
+
+            #[test]
+            fn basic() {
+                let mut deps = mock_dependencies(&[]);
+                let instantiate_msg = InstantiateMsg {
+                    name: "Cash Token".to_string(),
+                    symbol: "CASH".to_string(),
+                    decimals: 9,
+                    initial_balances: vec![],
+                    mint: None,
+                    marketing: Some(InstantiateMarketingInfo {
+                        project: Some("Project".to_owned()),
+                        description: Some("Description".to_owned()),
+                        marketing: Some("marketing".to_owned()),
+                        logo: Some(Logo::Url("url".to_owned())),
+                    }),
+                };
+
+                let info = mock_info("creator", &[]);
+                let env = mock_env();
+                let res = instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap();
+                assert_eq!(0, res.messages.len());
+
+                assert_eq!(
+                    query_marketing_info(deps.as_ref()).unwrap(),
+                    MarketingInfoResponse {
+                        project: Some("Project".to_owned()),
+                        description: Some("Description".to_owned()),
+                        marketing: Some(Addr::unchecked("marketing")),
+                        logo: Some(LogoInfo::Url("url".to_owned())),
+                    }
+                );
+
+                let err = query_download_logo(deps.as_ref()).unwrap_err();
+                assert!(
+                    matches!(err, StdError::NotFound { .. }),
+                    "Expected StdError::NotFound, received {}",
+                    err
+                );
+            }
+
+            #[test]
+            fn invalid_marketing() {
+                let mut deps = mock_dependencies(&[]);
+                let instantiate_msg = InstantiateMsg {
+                    name: "Cash Token".to_string(),
+                    symbol: "CASH".to_string(),
+                    decimals: 9,
+                    initial_balances: vec![],
+                    mint: None,
+                    marketing: Some(InstantiateMarketingInfo {
+                        project: Some("Project".to_owned()),
+                        description: Some("Description".to_owned()),
+                        marketing: Some("m".to_owned()),
+                        logo: Some(Logo::Url("url".to_owned())),
+                    }),
+                };
+
+                let info = mock_info("creator", &[]);
+                let env = mock_env();
+                instantiate(deps.as_mut(), env, info, instantiate_msg).unwrap_err();
+
+                let err = query_download_logo(deps.as_ref()).unwrap_err();
+                assert!(
+                    matches!(err, StdError::NotFound { .. }),
+                    "Expected StdError::NotFound, received {}",
+                    err
+                );
+            }
+        }
     }
 
     #[test]
@@ -585,6 +633,7 @@ mod tests {
                 },
             ],
             mint: None,
+            marketing: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();
