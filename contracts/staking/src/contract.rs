@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
+    entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use terraswap::asset::AssetInfo;
@@ -13,8 +13,8 @@ use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address};
 use mars::staking::msg::{
-    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, MigrateMsg,
-    QueryMsg, ReceiveMsg,
+    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg,
+    ReceiveMsg,
 };
 use mars::swapping::execute_swap;
 
@@ -203,25 +203,22 @@ pub fn execute_stake(
 
     let recipient = option_recipient.unwrap_or_else(|| staker.clone());
 
-    Ok(Response {
-        messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+    let res = Response::new()
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: xmars_token_address.to_string(),
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: recipient.clone(),
                 amount: mint_amount,
             })?,
-        }))],
-        attributes: vec![
-            attr("action", "stake"),
-            attr("staker", staker),
-            attr("recipient", recipient),
-            attr("mars_staked", stake_amount),
-            attr("xmars_minted", mint_amount),
-        ],
-        events: vec![],
-        data: None,
-    })
+        }))
+        .add_attribute("action", "stake")
+        .add_attribute("staker", staker)
+        .add_attribute("recipient", recipient)
+        .add_attribute("mars_staked", stake_amount)
+        .add_attribute("xmars_minted", mint_amount);
+
+    Ok(res)
 }
 
 /// Burn xMars tokens and send corresponding Mars
@@ -286,34 +283,28 @@ pub fn execute_unstake(
 
     let recipient = option_recipient.unwrap_or_else(|| staker.clone());
 
-    Ok(Response {
-        messages: vec![
-            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: xmars_token_address.to_string(),
-                funds: vec![],
-                msg: to_binary(&Cw20ExecuteMsg::Burn {
-                    amount: burn_amount,
-                })?,
-            })),
-            SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: mars_token_address.to_string(),
-                funds: vec![],
-                msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: recipient.clone(),
-                    amount: unstake_amount,
-                })?,
-            })),
-        ],
-        attributes: vec![
-            attr("action", "unstake"),
-            attr("staker", staker),
-            attr("recipient", recipient),
-            attr("mars_unstaked", unstake_amount),
-            attr("xmars_burned", burn_amount),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: xmars_token_address.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Burn {
+                amount: burn_amount,
+            })?,
+        }))
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: recipient.clone(),
+                amount: unstake_amount,
+            })?,
+        }))
+        .add_attribute("action", "unstake")
+        .add_attribute("staker", staker)
+        .add_attribute("recipient", recipient)
+        .add_attribute("mars_unstaked", unstake_amount)
+        .add_attribute("xmars_burned", burn_amount);
+    Ok(res)
 }
 
 /// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
@@ -371,17 +362,12 @@ pub fn execute_cooldown(
         },
     )?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "cooldown"),
-            attr("user", info.sender),
-            attr("cooldown_amount", xmars_balance),
-            attr("cooldown_timestamp", new_cooldown_timestamp),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_attribute("action", "cooldown")
+        .add_attribute("user", info.sender)
+        .add_attribute("cooldown_amount", xmars_balance.to_string())
+        .add_attribute("cooldown_timestamp", new_cooldown_timestamp.to_string());
+    Ok(res)
 }
 
 /// Execute Cosmos message
@@ -396,12 +382,10 @@ pub fn execute_execute_cosmos_msg(
         return Err(MarsError::Unauthorized {});
     }
 
-    Ok(Response {
-        messages: vec![SubMsg::new(msg)],
-        attributes: vec![attr("action", "execute_cosmos_msg")],
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_message(msg)
+        .add_attribute("action", "execute_cosmos_msg");
+    Ok(res)
 }
 
 /// Swap any asset on the contract to uusd
@@ -462,7 +446,7 @@ pub fn execute_swap_uusd_to_mars(
     )?;
 
     let ask_asset_info = AssetInfo::Token {
-        contract_addr: mars_token_address,
+        contract_addr: mars_token_address.to_string(),
     };
 
     let terraswap_max_spread = Some(config.terraswap_max_spread);
@@ -511,13 +495,6 @@ fn query_cooldown(deps: Deps, sender_address: String) -> StdResult<CooldownRespo
     }
 }
 
-// MIGRATION
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
-}
-
 // HELPERS
 
 /// Gets mars and xmars token addresses from address provider and returns them in a tuple.
@@ -539,8 +516,9 @@ fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), 
 mod tests {
     use super::*;
     use cosmwasm_std::{
+        attr,
         testing::{mock_env, mock_info},
-        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, Timestamp,
+        Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg, Timestamp,
     };
     use mars::testing::{self, mock_dependencies, MarsMockQuerier, MockEnvParams};
 
@@ -700,8 +678,8 @@ mod tests {
                 attr("action", "stake"),
                 attr("staker", String::from("staker")),
                 attr("recipient", String::from("staker")),
-                attr("mars_staked", 2_000_000),
-                attr("xmars_minted", 2_000_000),
+                attr("mars_staked", 2_000_000.to_string()),
+                attr("xmars_minted", 2_000_000.to_string()),
             ],
             res.attributes
         );
@@ -1014,8 +992,8 @@ mod tests {
             vec![
                 attr("action", "cooldown"),
                 attr("user", "staker"),
-                attr("cooldown_amount", initial_xmars_balance),
-                attr("cooldown_timestamp", initial_block_time)
+                attr("cooldown_amount", initial_xmars_balance.to_string()),
+                attr("cooldown_timestamp", initial_block_time.to_string())
             ],
             res.attributes
         );
@@ -1122,7 +1100,7 @@ mod tests {
         // *
         let msg = ExecuteMsg::SwapAssetToUusd {
             offer_asset_info: AssetInfo::Token {
-                contract_addr: Addr::unchecked("mars_token"),
+                contract_addr: String::from("mars_token"),
             },
             amount: None,
         };

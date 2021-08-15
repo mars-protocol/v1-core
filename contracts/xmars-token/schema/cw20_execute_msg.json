@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ExecuteMsg",
+  "title": "Cw20ExecuteMsg",
   "anyOf": [
     {
-      "description": "Transfer is a base message to move tokens to another account. Requires to be finalized by the money market.",
+      "description": "Transfer is a base message to move tokens to another account without triggering actions",
       "type": "object",
       "required": [
         "transfer"
@@ -28,36 +28,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Forced transfer called by the money market when an account is being liquidated",
-      "type": "object",
-      "required": [
-        "transfer_on_liquidation"
-      ],
-      "properties": {
-        "transfer_on_liquidation": {
-          "type": "object",
-          "required": [
-            "amount",
-            "recipient",
-            "sender"
-          ],
-          "properties": {
-            "amount": {
-              "$ref": "#/definitions/Uint128"
-            },
-            "recipient": {
-              "type": "string"
-            },
-            "sender": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Burns tokens from user. Only money market can call this. Used when user is being liquidated",
+      "description": "Burn is a base message to destroy tokens forever",
       "type": "object",
       "required": [
         "burn"
@@ -66,15 +37,11 @@
         "burn": {
           "type": "object",
           "required": [
-            "amount",
-            "user"
+            "amount"
           ],
           "properties": {
             "amount": {
               "$ref": "#/definitions/Uint128"
-            },
-            "user": {
-              "type": "string"
             }
           }
         }
@@ -104,31 +71,6 @@
             },
             "msg": {
               "$ref": "#/definitions/Binary"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Only with the \"mintable\" extension. If authorized, creates amount new tokens and adds to the recipient balance.",
-      "type": "object",
-      "required": [
-        "mint"
-      ],
-      "properties": {
-        "mint": {
-          "type": "object",
-          "required": [
-            "amount",
-            "recipient"
-          ],
-          "properties": {
-            "amount": {
-              "$ref": "#/definitions/Uint128"
-            },
-            "recipient": {
-              "type": "string"
             }
           }
         }
@@ -235,7 +177,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Only with \"approval\" extension. Sends amount tokens from owner -> contract if `info.sender` has sufficient pre-approval.",
+      "description": "Only with \"approval\" extension. Sends amount tokens from owner -> contract if `env.sender` has sufficient pre-approval.",
       "type": "object",
       "required": [
         "send_from"
@@ -260,6 +202,56 @@
               "$ref": "#/definitions/Binary"
             },
             "owner": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Only with \"approval\" extension. Destroys tokens forever",
+      "type": "object",
+      "required": [
+        "burn_from"
+      ],
+      "properties": {
+        "burn_from": {
+          "type": "object",
+          "required": [
+            "amount",
+            "owner"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "owner": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Only with the \"mintable\" extension. If authorized, creates amount new tokens and adds to the recipient balance.",
+      "type": "object",
+      "required": [
+        "mint"
+      ],
+      "properties": {
+        "mint": {
+          "type": "object",
+          "required": [
+            "amount",
+            "recipient"
+          ],
+          "properties": {
+            "amount": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "recipient": {
               "type": "string"
             }
           }

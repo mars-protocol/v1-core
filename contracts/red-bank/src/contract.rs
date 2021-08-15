@@ -2,24 +2,25 @@ use std::str;
 
 use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Attribute, BankMsg, Binary, Coin, CosmosMsg,
-    Deps, DepsMut, Env, MessageInfo, Order, Response, StdError, StdResult, SubMsg, Uint128,
-    WasmMsg,
+    entry_point, from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut,
+    Env, Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
+use cw20_base::msg::InstantiateMarketingInfo;
 use cw_storage_plus::U32Key;
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::asset::{Asset, AssetType};
-use mars::error::MarsError;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::ma_token;
 use mars::red_bank::msg::{
     CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig, DebtInfo,
     DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo, MarketResponse,
-    MarketsListResponse, MigrateMsg, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
+
+use mars::asset::{Asset, AssetType};
+use mars::error::MarsError;
+use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::tax::deduct_tax;
 
 use crate::accounts::{get_user_position, UserHealthStatus};
@@ -417,7 +418,7 @@ pub fn execute_withdraw(
         }
     }
 
-    // if max collateral to withdraw equals the user's balance then unset collateral bit
+    // if amount to withdraw equals the user's balance then unset collateral bit
     if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
         unset_bit(&mut withdrawer.collateral_assets, market.index)?;
         USERS.save(deps.storage, &withdrawer_addr, &withdrawer)?;
@@ -441,7 +442,6 @@ pub fn execute_withdraw(
         })?,
         funds: vec![],
     });
-    let burn_ma_tokens_msg = SubMsg::new(burn_ma_tokens_msg);
 
     let send_underlying_asset_msg = build_send_asset_msg(
         deps.as_ref(),
@@ -450,26 +450,17 @@ pub fn execute_withdraw(
         asset,
         withdraw_amount,
     )?;
-    let send_underlying_asset_msg = SubMsg::new(send_underlying_asset_msg);
 
-    let messages = vec![burn_ma_tokens_msg, send_underlying_asset_msg];
-
-    let mut attributes = vec![
-        attr("action", "withdraw"),
-        attr("market", asset_label.as_str()),
-        attr("user", withdrawer_addr.as_str()),
-        attr("burn_amount", withdraw_amount_scaled),
-        attr("withdraw_amount", withdraw_amount),
-    ];
-
-    append_indices_and_rates_to_logs(&mut attributes, &market);
-
-    Ok(Response {
-        messages,
-        attributes,
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_attribute("action", "withdraw")
+        .add_attribute("market", asset_label.as_str())
+        .add_attribute("user", withdrawer_addr.as_str())
+        .add_attribute("burn_amount", withdraw_amount_scaled)
+        .add_attribute("withdraw_amount", withdraw_amount)
+        .add_message(burn_ma_tokens_msg)
+        .add_message(send_underlying_asset_msg)
+        .add_event(build_interests_updated_event(asset_label.as_str(), &market));
+    Ok(res)
 }
 
 /// Initialize asset if not exist.
@@ -532,11 +523,10 @@ pub fn execute_init_asset(
             let protocol_admin_address = addresses_query.pop().unwrap();
             let incentives_address = addresses_query.pop().unwrap();
 
-            Ok(Response {
-                attributes: vec![attr("action", "init_asset"), attr("asset", asset_label)],
-                events: vec![],
-                data: None,
-                messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Instantiate {
+            let res = Response::new()
+                .add_attribute("action", "init_asset")
+                .add_attribute("asset", asset_label)
+                .add_message(CosmosMsg::Wasm(WasmMsg::Instantiate {
                     admin: Some(protocol_admin_address.to_string()),
                     code_id: config.ma_token_code_id,
                     msg: to_binary(&ma_token::msg::InstantiateMsg {
@@ -547,6 +537,15 @@ pub fn execute_init_asset(
                         mint: Some(MinterResponse {
                             minter: env.contract.address.to_string(),
                             cap: None,
+                        }),
+                        marketing: Some(InstantiateMarketingInfo {
+                            project: Some(String::from("Mars Protocol")),
+                            description: Some(format!(
+                                "Interest earning token representing deposits for {}",
+                                symbol
+                            )),
+                            marketing: Some(protocol_admin_address.to_string()),
+                            logo: None,
                         }),
                         init_hook: Some(ma_token::msg::InitHook {
                             contract_addr: env.contract.address.to_string(),
@@ -559,8 +558,8 @@ pub fn execute_init_asset(
                     })?,
                     funds: vec![],
                     label: String::from(""),
-                }))],
-            })
+                }));
+            Ok(res)
         }
         Some(_) => Err(StdError::generic_err("Asset already initialized").into()),
     }
@@ -613,12 +612,10 @@ pub fn execute_update_asset(
             // Save updated market
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
-            Ok(Response {
-                attributes: vec![attr("action", "update_asset"), attr("asset", asset_label)],
-                events: vec![],
-                data: None,
-                messages: vec![],
-            })
+            let res = Response::new()
+                .add_attribute("action", "update_asset")
+                .add_attribute("asset", asset_label);
+            Ok(res)
         }
         None => Err(StdError::generic_err("Asset not initialized").into()),
     }
@@ -665,28 +662,22 @@ pub fn execute_deposit(
     let mint_amount =
         deposit_amount / get_updated_liquidity_index(&market, env.block.time.seconds());
 
-    let mut attributes = vec![
-        attr("action", "deposit"),
-        attr("market", asset_label),
-        attr("user", depositor_address.as_str()),
-        attr("amount", deposit_amount),
-    ];
-
-    append_indices_and_rates_to_logs(&mut attributes, &market);
-
-    Ok(Response {
-        data: None,
-        attributes,
-        messages: vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+    let res = Response::new()
+        .add_attribute("action", "deposit")
+        .add_attribute("market", asset_label)
+        .add_attribute("user", depositor_address.as_str())
+        .add_attribute("amount", deposit_amount)
+        .add_event(build_interests_updated_event(asset_label, &market))
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: depositor_address.into(),
                 amount: mint_amount.into(),
             })?,
             funds: vec![],
-        }))],
-        events: vec![],
-    })
+        }));
+
+    Ok(res)
 }
 
 /// Add debt for the borrower and send the borrowed funds
@@ -845,30 +836,26 @@ pub fn execute_borrow(
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
 
-    let mut attributes = vec![
-        attr("action", "borrow"),
-        attr("market", asset_label.as_str()),
-        attr("user", borrower_address.as_str()),
-        attr("amount", borrow_amount),
-    ];
-
-    append_indices_and_rates_to_logs(&mut attributes, &borrow_market);
-
     // Send borrow amount to borrower
     let send_msg = build_send_asset_msg(
         deps.as_ref(),
         env.contract.address,
-        borrower_address,
+        borrower_address.clone(),
         asset,
         borrow_amount,
     )?;
 
-    Ok(Response {
-        data: None,
-        attributes,
-        messages: vec![SubMsg::new(send_msg)],
-        events: vec![],
-    })
+    let res = Response::new()
+        .add_attribute("action", "borrow")
+        .add_attribute("market", asset_label.as_str())
+        .add_attribute("user", borrower_address.as_str())
+        .add_attribute("amount", borrow_amount)
+        .add_event(build_interests_updated_event(
+            asset_label.as_str(),
+            &borrow_market,
+        ))
+        .add_message(send_msg);
+    Ok(res)
 }
 
 /// Handle the repay of native tokens. Refund extra funds if they exist
@@ -930,7 +917,7 @@ pub fn execute_repay(
                 )?
             }
         };
-        messages.push(SubMsg::new(refund_msg));
+        messages.push(refund_msg);
         repay_amount_scaled = debt.amount_scaled;
     }
 
@@ -951,21 +938,14 @@ pub fn execute_repay(
         USERS.save(deps.storage, &repayer_address, &user)?;
     }
 
-    let mut attributes = vec![
-        attr("action", "repay"),
-        attr("market", asset_label),
-        attr("user", repayer_address),
-        attr("amount", repay_amount - refund_amount),
-    ];
-
-    append_indices_and_rates_to_logs(&mut attributes, &market);
-
-    Ok(Response {
-        data: None,
-        messages,
-        attributes,
-        events: vec![],
-    })
+    let res = Response::new()
+        .add_attribute("action", "repay")
+        .add_attribute("market", asset_label)
+        .add_attribute("user", repayer_address)
+        .add_attribute("amount", repay_amount - refund_amount)
+        .add_messages(messages)
+        .add_event(build_interests_updated_event(asset_label, &market));
+    Ok(res)
 }
 
 /// Execute loan liquidations on under-collateralized loans
@@ -1123,7 +1103,7 @@ pub fn execute_liquidate(
         let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
             / get_updated_liquidity_index(&collateral_market, block_time);
 
-        messages.push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_market.ma_token_address.to_string(),
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
                 sender: user_address.to_string(),
@@ -1131,7 +1111,7 @@ pub fn execute_liquidate(
                 amount: collateral_amount_to_liquidate_scaled.into(),
             })?,
             funds: vec![],
-        })));
+        }));
     } else {
         // Burn ma_tokens from user and send underlying asset to liquidator
 
@@ -1191,8 +1171,8 @@ pub fn execute_liquidate(
             collateral_asset,
             collateral_amount_to_liquidate,
         )?;
-        messages.push(SubMsg::new(burn_ma_tokens_msg));
-        messages.push(SubMsg::new(send_underlying_asset_msg));
+        messages.push(burn_ma_tokens_msg);
+        messages.push(send_underlying_asset_msg);
     }
 
     // if max collateral to liquidate equals the user's balance then unset collateral bit
@@ -1247,35 +1227,35 @@ pub fn execute_liquidate(
             debt_asset,
             refund_amount,
         )?;
-        messages.push(SubMsg::new(refund_msg));
+        messages.push(refund_msg);
     }
 
-    let mut attributes = vec![
-        attr("action", "liquidate"),
-        attr("collateral_market", collateral_asset_label),
-        attr("debt_market", debt_asset_label),
-        attr("user", user_address.as_str()),
-        attr("liquidator", liquidator_address.as_str()),
-        attr(
+    let mut res = Response::new()
+        .add_attribute("action", "liquidate")
+        .add_attribute("collateral_market", collateral_asset_label.as_str())
+        .add_attribute("debt_market", debt_asset_label.as_str())
+        .add_attribute("user", user_address.as_str())
+        .add_attribute("liquidator", liquidator_address.as_str())
+        .add_attribute(
             "collateral_amount_liquidated",
-            collateral_amount_to_liquidate,
-        ),
-        attr("debt_amount_repaid", debt_amount_to_repay),
-        attr("refund_amount", refund_amount),
-    ];
+            collateral_amount_to_liquidate.to_string(),
+        )
+        .add_attribute("debt_amount_repaid", debt_amount_to_repay.to_string())
+        .add_attribute("refund_amount", refund_amount.to_string())
+        .add_event(build_interests_updated_event(
+            debt_asset_label.as_str(),
+            &debt_market,
+        ))
+        .add_messages(messages);
 
-    // TODO: we should distinguish between collateral and market values in some way
-    append_indices_and_rates_to_logs(&mut attributes, &debt_market);
     if !receive_ma_token {
-        append_indices_and_rates_to_logs(&mut attributes, &collateral_market);
+        res = res.add_event(build_interests_updated_event(
+            collateral_asset_label.as_str(),
+            &collateral_market,
+        ))
     }
 
-    Ok(Response {
-        data: None,
-        attributes,
-        messages,
-        events: vec![],
-    })
+    Ok(res)
 }
 
 /// Computes debt to repay (in debt asset),
@@ -1427,17 +1407,12 @@ pub fn execute_update_uncollateralized_loan_limit(
         },
     )?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "update_uncollateralized_loan_limit"),
-            attr("user", user_address.as_str()),
-            attr("asset", asset_label),
-            attr("new_allowance", new_limit),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_attribute("action", "update_uncollateralized_loan_limit")
+        .add_attribute("user", user_address.as_str())
+        .add_attribute("asset", asset_label)
+        .add_attribute("new_allowance", new_limit.to_string());
+    Ok(res)
 }
 
 /// Update (enable / disable) collateral asset for specific user
@@ -1478,18 +1453,13 @@ pub fn execute_update_user_collateral_asset_status(
         USERS.save(deps.storage, &user_address, &user)?;
     }
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "update_user_collateral_asset_status"),
-            attr("user", user_address.as_str()),
-            attr("asset", collateral_asset_label),
-            attr("has_collateral", has_collateral_asset),
-            attr("enable", enable),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let res = Response::new()
+        .add_attribute("action", "update_user_collateral_asset_status")
+        .add_attribute("user", user_address.as_str())
+        .add_attribute("asset", collateral_asset_label)
+        .add_attribute("has_collateral", has_collateral_asset.to_string())
+        .add_attribute("enable", enable.to_string());
+    Ok(res)
 }
 
 /// Send accumulated asset income to protocol contracts
@@ -1559,7 +1529,7 @@ pub fn execute_distribute_protocol_income(
             asset.clone(),
             insurance_fund_amount,
         )?;
-        messages.push(SubMsg::new(insurance_fund_msg));
+        messages.push(insurance_fund_msg);
     }
 
     if !treasury_amount.is_zero() {
@@ -1573,7 +1543,7 @@ pub fn execute_distribute_protocol_income(
             })?,
             funds: vec![],
         });
-        messages.push(SubMsg::new(treasury_fund_msg));
+        messages.push(treasury_fund_msg);
     }
 
     if !staking_amount.is_zero() {
@@ -1584,19 +1554,15 @@ pub fn execute_distribute_protocol_income(
             asset,
             staking_amount,
         )?;
-        messages.push(SubMsg::new(staking_msg));
+        messages.push(staking_msg);
     }
 
-    Ok(Response {
-        messages,
-        attributes: vec![
-            attr("action", "distribute_protocol_income"),
-            attr("asset", asset_label),
-            attr("amount", amount_to_distribute),
-        ],
-        data: None,
-        events: vec![],
-    })
+    let res = Response::new()
+        .add_attribute("action", "distribute_protocol_income")
+        .add_attribute("asset", asset_label)
+        .add_attribute("amount", amount_to_distribute)
+        .add_messages(messages);
+    Ok(res)
 }
 
 // QUERIES
@@ -1768,11 +1734,6 @@ fn query_uncollateralized_loan_limit(
             user_address, asset_label
         ))),
     }
-}
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
 }
 
 // INTEREST
@@ -1954,14 +1915,13 @@ pub fn market_update_interest_rates(
     Ok(())
 }
 
-fn append_indices_and_rates_to_logs(logs: &mut Vec<Attribute>, market: &Market) {
-    let mut interest_logs = vec![
-        attr("borrow_index", market.borrow_index),
-        attr("liquidity_index", market.liquidity_index),
-        attr("borrow_rate", market.borrow_rate),
-        attr("liquidity_rate", market.liquidity_rate),
-    ];
-    logs.append(&mut interest_logs);
+fn build_interests_updated_event(label: &str, market: &Market) -> Event {
+    Event::new("interests_updated")
+        .add_attribute("market", label)
+        .add_attribute("borrow_index", market.borrow_index.to_string())
+        .add_attribute("liquidity_index", market.liquidity_index.to_string())
+        .add_attribute("borrow_rate", market.borrow_rate.to_string())
+        .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
 }
 
 // HELPERS
@@ -2121,7 +2081,7 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{coin, from_binary, Decimal, OwnedDeps};
+    use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
     use mars::interest_rate_models::{
         DynamicInterestRate, InterestRateStrategy, LinearInterestRate,
     };
@@ -2558,7 +2518,7 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Instantiate {
-                admin: Some(String::from("protocol_admin")),
+                admin: Some("protocol_admin".to_string()),
                 code_id: 5u64,
                 msg: to_binary(&ma_token::msg::InstantiateMsg {
                     name: String::from("mars someasset liquidity token"),
@@ -2575,6 +2535,16 @@ mod tests {
                             reference: market_reference.reference,
                         })
                         .unwrap()
+                    }),
+                    marketing: Some(InstantiateMarketingInfo {
+                        project: Some("Mars Protocol".to_string()),
+                        description: Some(
+                            "Interest earning token representing deposits for someasset"
+                                .to_string()
+                        ),
+
+                        marketing: Some("protocol_admin".to_string()),
+                        logo: None,
                     }),
                     red_bank_address: MOCK_CONTRACT_ADDR.to_string(),
                     incentives_address: "incentives".to_string(),
@@ -3141,12 +3111,20 @@ mod tests {
                 attr("action", "deposit"),
                 attr("market", "somecoin"),
                 attr("user", "depositor"),
-                attr("amount", deposit_amount),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("amount", deposit_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
         );
 
         let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
@@ -3246,14 +3224,22 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "deposit"),
-                attr("market", cw20_addr),
+                attr("market", cw20_addr.clone()),
                 attr("user", "depositor"),
-                attr("amount", deposit_amount),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("amount", deposit_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", cw20_addr)
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string()),]
         );
         assert_eq!(
             market.protocol_income_to_distribute,
@@ -3395,13 +3381,21 @@ mod tests {
                 attr("action", "withdraw"),
                 attr("market", "somecoin"),
                 attr("user", "withdrawer"),
-                attr("burn_amount", withdraw_amount_scaled),
-                attr("withdraw_amount", withdraw_amount),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("burn_amount", withdraw_amount_scaled.to_string()),
+                attr("withdraw_amount", withdraw_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3525,13 +3519,21 @@ mod tests {
                 attr("action", "withdraw"),
                 attr("market", "somecontract"),
                 attr("user", "withdrawer"),
-                attr("burn_amount", withdraw_amount_scaled),
-                attr("withdraw_amount", withdraw_amount),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("burn_amount", withdraw_amount_scaled.to_string()),
+                attr("withdraw_amount", withdraw_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecontract")
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3882,13 +3884,21 @@ mod tests {
                 attr("action", "withdraw"),
                 attr("market", "somecoin"),
                 attr("user", "withdrawer"),
-                attr("burn_amount", withdrawer_balance_scaled),
-                attr("withdraw_amount", withdrawer_balance),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("burn_amount", withdrawer_balance_scaled.to_string()),
+                attr("withdraw_amount", withdrawer_balance.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -4043,12 +4053,26 @@ mod tests {
                 attr("action", "borrow"),
                 attr("market", "borrowedcoincw20"),
                 attr("user", "borrower"),
-                attr("amount", borrow_amount),
-                attr("borrow_index", expected_params_cw20.borrow_index),
-                attr("liquidity_index", expected_params_cw20.liquidity_index),
-                attr("borrow_rate", expected_params_cw20.borrow_rate),
-                attr("liquidity_rate", expected_params_cw20.liquidity_rate),
+                attr("amount", borrow_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "borrowedcoincw20")
+                .add_attribute(
+                    "borrow_index",
+                    expected_params_cw20.borrow_index.to_string()
+                )
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params_cw20.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params_cw20.borrow_rate.to_string())
+                .add_attribute(
+                    "liquidity_rate",
+                    expected_params_cw20.liquidity_rate.to_string()
+                )]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4197,12 +4221,29 @@ mod tests {
                 attr("action", "borrow"),
                 attr("market", "borrowedcoinnative"),
                 attr("user", "borrower"),
-                attr("amount", borrow_amount),
-                attr("borrow_index", expected_params_native.borrow_index),
-                attr("liquidity_index", expected_params_native.liquidity_index),
-                attr("borrow_rate", expected_params_native.borrow_rate),
-                attr("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("amount", borrow_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "borrowedcoinnative")
+                .add_attribute(
+                    "borrow_index",
+                    expected_params_native.borrow_index.to_string()
+                )
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params_native.liquidity_index.to_string()
+                )
+                .add_attribute(
+                    "borrow_rate",
+                    expected_params_native.borrow_rate.to_string()
+                )
+                .add_attribute(
+                    "liquidity_rate",
+                    expected_params_native.liquidity_rate.to_string()
+                )]
         );
 
         let debt2 = DEBTS
@@ -4294,12 +4335,29 @@ mod tests {
                 attr("action", "repay"),
                 attr("market", "borrowedcoinnative"),
                 attr("user", "borrower"),
-                attr("amount", repay_amount),
-                attr("borrow_index", expected_params_native.borrow_index),
-                attr("liquidity_index", expected_params_native.liquidity_index),
-                attr("borrow_rate", expected_params_native.borrow_rate),
-                attr("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("amount", repay_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "borrowedcoinnative")
+                .add_attribute(
+                    "borrow_index",
+                    expected_params_native.borrow_index.to_string()
+                )
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params_native.liquidity_index.to_string()
+                )
+                .add_attribute(
+                    "borrow_rate",
+                    expected_params_native.borrow_rate.to_string()
+                )
+                .add_attribute(
+                    "liquidity_rate",
+                    expected_params_native.liquidity_rate.to_string()
+                ),]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4370,12 +4428,29 @@ mod tests {
                 attr("action", "repay"),
                 attr("market", "borrowedcoinnative"),
                 attr("user", "borrower"),
-                attr("amount", repay_amount),
-                attr("borrow_index", expected_params_native.borrow_index),
-                attr("liquidity_index", expected_params_native.liquidity_index),
-                attr("borrow_rate", expected_params_native.borrow_rate),
-                attr("liquidity_rate", expected_params_native.liquidity_rate),
+                attr("amount", repay_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "borrowedcoinnative")
+                .add_attribute(
+                    "borrow_index",
+                    expected_params_native.borrow_index.to_string()
+                )
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params_native.liquidity_index.to_string()
+                )
+                .add_attribute(
+                    "borrow_rate",
+                    expected_params_native.borrow_rate.to_string()
+                )
+                .add_attribute(
+                    "liquidity_rate",
+                    expected_params_native.liquidity_rate.to_string()
+                ),]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4464,13 +4539,27 @@ mod tests {
                 attr("user", "borrower"),
                 attr(
                     "amount",
-                    Uint128::new(repay_amount - expected_refund_amount)
+                    Uint128::new(repay_amount - expected_refund_amount).to_string()
                 ),
-                attr("borrow_index", expected_params_cw20.borrow_index),
-                attr("liquidity_index", expected_params_cw20.liquidity_index),
-                attr("borrow_rate", expected_params_cw20.borrow_rate),
-                attr("liquidity_rate", expected_params_cw20.liquidity_rate),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "borrowedcoincw20")
+                .add_attribute(
+                    "borrow_index",
+                    expected_params_cw20.borrow_index.to_string()
+                )
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params_cw20.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params_cw20.borrow_rate.to_string())
+                .add_attribute(
+                    "liquidity_rate",
+                    expected_params_cw20.liquidity_rate.to_string()
+                ),]
         );
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(!get_bit(user.borrowed_assets, 0).unwrap());
@@ -5172,15 +5261,26 @@ mod tests {
                     attr("liquidator", liquidator_address.as_str()),
                     attr(
                         "collateral_amount_liquidated",
-                        expected_liquidated_collateral_amount,
+                        expected_liquidated_collateral_amount.to_string(),
                     ),
-                    attr("debt_amount_repaid", first_debt_to_repay),
-                    attr("refund_amount", 0),
-                    attr("borrow_index", expected_debt_rates.borrow_index),
-                    attr("liquidity_index", expected_debt_rates.liquidity_index),
-                    attr("borrow_rate", expected_debt_rates.borrow_rate),
-                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
+                    attr("debt_amount_repaid", first_debt_to_repay.to_string()),
+                    attr("refund_amount", "0"),
                 ],
+            );
+            assert_eq!(
+                res.events,
+                vec![Event::new("interests_updated")
+                    .add_attribute("market", "debt")
+                    .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
+                    .add_attribute(
+                        "liquidity_index",
+                        expected_debt_rates.liquidity_index.to_string()
+                    )
+                    .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
+                    .add_attribute(
+                        "liquidity_rate",
+                        expected_debt_rates.liquidity_rate.to_string()
+                    ),]
             );
 
             // check user still has deposited collateral asset and
@@ -5341,18 +5441,45 @@ mod tests {
                         "collateral_amount_liquidated",
                         expected_liquidated_collateral_amount,
                     ),
-                    attr("debt_amount_repaid", expected_less_debt),
-                    attr("refund_amount", expected_refund_amount),
-                    attr("borrow_index", expected_debt_rates.borrow_index),
-                    attr("liquidity_index", expected_debt_rates.liquidity_index),
-                    attr("borrow_rate", expected_debt_rates.borrow_rate),
-                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
-                    attr("borrow_index", expected_collateral_rates.borrow_index),
-                    attr("liquidity_index", expected_collateral_rates.liquidity_index),
-                    attr("borrow_rate", expected_collateral_rates.borrow_rate),
-                    attr("liquidity_rate", expected_collateral_rates.liquidity_rate),
+                    attr("debt_amount_repaid", expected_less_debt.to_string()),
+                    attr("refund_amount", expected_refund_amount.to_string()),
                 ],
                 res.attributes,
+            );
+            assert_eq!(
+                res.events,
+                vec![
+                    Event::new("interests_updated")
+                        .add_attribute("market", "debt")
+                        .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
+                        .add_attribute(
+                            "liquidity_index",
+                            expected_debt_rates.liquidity_index.to_string()
+                        )
+                        .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
+                        .add_attribute(
+                            "liquidity_rate",
+                            expected_debt_rates.liquidity_rate.to_string()
+                        ),
+                    Event::new("interests_updated")
+                        .add_attribute("market", "collateral")
+                        .add_attribute(
+                            "borrow_index",
+                            expected_collateral_rates.borrow_index.to_string()
+                        )
+                        .add_attribute(
+                            "liquidity_index",
+                            expected_collateral_rates.liquidity_index.to_string()
+                        )
+                        .add_attribute(
+                            "borrow_rate",
+                            expected_collateral_rates.borrow_rate.to_string()
+                        )
+                        .add_attribute(
+                            "liquidity_rate",
+                            expected_collateral_rates.liquidity_rate.to_string()
+                        ),
+                ]
             );
 
             // check user still has deposited collateral asset and
@@ -5530,19 +5657,49 @@ mod tests {
                     attr("debt_market", debt_contract_addr.as_str()),
                     attr("user", user_address.as_str()),
                     attr("liquidator", liquidator_address.as_str()),
-                    attr("collateral_amount_liquidated", user_collateral_balance),
-                    attr("debt_amount_repaid", expected_less_debt),
-                    attr("refund_amount", expected_refund_amount),
-                    attr("borrow_index", expected_debt_rates.borrow_index),
-                    attr("liquidity_index", expected_debt_rates.liquidity_index),
-                    attr("borrow_rate", expected_debt_rates.borrow_rate),
-                    attr("liquidity_rate", expected_debt_rates.liquidity_rate),
-                    attr("borrow_index", expected_collateral_rates.borrow_index),
-                    attr("liquidity_index", expected_collateral_rates.liquidity_index),
-                    attr("borrow_rate", expected_collateral_rates.borrow_rate),
-                    attr("liquidity_rate", expected_collateral_rates.liquidity_rate),
+                    attr(
+                        "collateral_amount_liquidated",
+                        user_collateral_balance.to_string(),
+                    ),
+                    attr("debt_amount_repaid", expected_less_debt.to_string()),
+                    attr("refund_amount", expected_refund_amount.to_string()),
                 ],
                 res.attributes,
+            );
+            assert_eq!(
+                res.events,
+                vec![
+                    Event::new("interests_updated")
+                        .add_attribute("market", "debt")
+                        .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
+                        .add_attribute(
+                            "liquidity_index",
+                            expected_debt_rates.liquidity_index.to_string()
+                        )
+                        .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
+                        .add_attribute(
+                            "liquidity_rate",
+                            expected_debt_rates.liquidity_rate.to_string()
+                        ),
+                    Event::new("interests_updated")
+                        .add_attribute("market", "collateral")
+                        .add_attribute(
+                            "borrow_index",
+                            expected_collateral_rates.borrow_index.to_string()
+                        )
+                        .add_attribute(
+                            "liquidity_index",
+                            expected_collateral_rates.liquidity_index.to_string()
+                        )
+                        .add_attribute(
+                            "borrow_rate",
+                            expected_collateral_rates.borrow_rate.to_string()
+                        )
+                        .add_attribute(
+                            "liquidity_rate",
+                            expected_collateral_rates.liquidity_rate.to_string()
+                        ),
+                ]
             );
 
             // check user doesn't have deposited collateral asset and
@@ -6003,12 +6160,20 @@ mod tests {
                 attr("action", "borrow"),
                 attr("market", "somecoin"),
                 attr("user", "borrower"),
-                attr("amount", initial_borrow_amount),
-                attr("borrow_index", expected_params.borrow_index),
-                attr("liquidity_index", expected_params.liquidity_index),
-                attr("borrow_rate", expected_params.borrow_rate),
-                attr("liquidity_rate", expected_params.liquidity_rate),
+                attr("amount", initial_borrow_amount.to_string()),
             ]
+        );
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
+                .add_attribute(
+                    "liquidity_index",
+                    expected_params.liquidity_index.to_string()
+                )
+                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
         );
 
         // Check debt

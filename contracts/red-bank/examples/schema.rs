@@ -4,7 +4,7 @@ use std::fs::create_dir_all;
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 use mars::red_bank::msg::{
     ConfigResponse, DebtResponse, ExecuteMsg, InstantiateMsg, MarketResponse, MarketsListResponse,
-    MigrateMsg, QueryMsg, ReceiveMsg,
+    QueryMsg, ReceiveMsg,
 };
 
 use red_bank::state::Config;
@@ -22,7 +22,6 @@ fn main() {
     export_schema(&schema_for!(ConfigResponse), &out_dir);
     export_schema(&schema_for!(MarketResponse), &out_dir);
     export_schema(&schema_for!(ReceiveMsg), &out_dir);
-    export_schema(&schema_for!(MigrateMsg), &out_dir);
     export_schema(&schema_for!(MarketsListResponse), &out_dir);
     export_schema(&schema_for!(DebtResponse), &out_dir);
 }

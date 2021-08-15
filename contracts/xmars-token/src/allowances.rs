@@ -1,4 +1,4 @@
-use cosmwasm_std::{attr, Binary, DepsMut, Env, MessageInfo, Response, SubMsg, Uint128};
+use cosmwasm_std::{attr, Binary, DepsMut, Env, MessageInfo, Response, Uint128};
 use cw20::Cw20ReceiveMsg;
 use cw20_base::allowances::deduct_allowance;
 use cw20_base::ContractError;
@@ -27,16 +27,13 @@ pub fn execute_transfer_from(
         amount,
     )?;
 
-    let res = Response {
-        attributes: vec![
-            attr("action", "transfer_from"),
-            attr("from", owner),
-            attr("to", recipient),
-            attr("by", info.sender),
-            attr("amount", amount),
-        ],
-        ..Response::default()
-    };
+    let res = Response::new().add_attributes(vec![
+        attr("action", "transfer_from"),
+        attr("from", owner),
+        attr("to", recipient),
+        attr("by", info.sender),
+        attr("amount", amount),
+    ]);
     Ok(res)
 }
 
@@ -54,15 +51,12 @@ pub fn execute_burn_from(
 
     core::burn(deps.storage, &env, &owner_addr, amount)?;
 
-    let res = Response {
-        attributes: vec![
-            attr("action", "burn_from"),
-            attr("from", owner),
-            attr("by", info.sender),
-            attr("amount", amount),
-        ],
-        ..Response::default()
-    };
+    let res = Response::new().add_attributes(vec![
+        attr("action", "burn_from"),
+        attr("from", owner),
+        attr("by", info.sender),
+        attr("amount", amount),
+    ]);
     Ok(res)
 }
 
@@ -99,20 +93,14 @@ pub fn execute_send_from(
     ];
 
     // create a send message
-    let msg = SubMsg::new(
-        Cw20ReceiveMsg {
-            sender: info.sender.into(),
-            amount,
-            msg,
-        }
-        .into_cosmos_msg(contract)?,
-    );
+    let msg = Cw20ReceiveMsg {
+        sender: info.sender.into(),
+        amount,
+        msg,
+    }
+    .into_cosmos_msg(contract)?;
 
-    let res = Response {
-        messages: vec![msg],
-        attributes: attrs,
-        ..Response::default()
-    };
+    let res = Response::new().add_message(msg).add_attributes(attrs);
     Ok(res)
 }
 
@@ -121,7 +109,7 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{CosmosMsg, Deps, StdError, WasmMsg};
+    use cosmwasm_std::{CosmosMsg, Deps, StdError, SubMsg, WasmMsg};
     use cw20::{AllowanceResponse, Cw20Coin, Expiration, TokenInfoResponse};
     use cw20_base::allowances::query_allowance;
     use cw20_base::contract::{query_balance, query_token_info};
@@ -148,6 +136,7 @@ mod tests {
                 amount,
             }],
             mint: None,
+            marketing: None,
         };
         let info = mock_info("creator", &[]);
         let env = mock_env();

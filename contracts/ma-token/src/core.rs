@@ -1,11 +1,8 @@
-use cosmwasm_std::{
-    to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, SubMsg, Uint128, WasmMsg,
-};
+use cosmwasm_std::{to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, Uint128, WasmMsg};
 
 use cw20_base::state::{BALANCES, TOKEN_INFO};
-use cw20_base::ContractError as Cw20BaseError;
+use cw20_base::ContractError;
 
-use crate::error::ContractError;
 use crate::state::Config;
 
 /// Deduct amount from sender balance and add it to recipient balance
@@ -17,9 +14,9 @@ pub fn transfer(
     recipient_address: Addr,
     amount: Uint128,
     finalize_on_red_bank: bool,
-) -> Result<Vec<SubMsg>, ContractError> {
+) -> Result<Vec<CosmosMsg>, ContractError> {
     if amount == Uint128::zero() {
-        return Err(Cw20BaseError::InvalidZeroAmount {}.into());
+        return Err(ContractError::InvalidZeroAmount {});
     }
 
     let sender_previous_balance = decrease_balance(storage, &sender_address, amount)?;
@@ -94,8 +91,8 @@ pub fn finalize_transfer_msg(
     sender_previous_balance: Uint128,
     recipient_previous_balance: Uint128,
     amount: Uint128,
-) -> StdResult<SubMsg> {
-    Ok(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+) -> StdResult<CosmosMsg> {
+    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.into(),
         msg: to_binary(
             &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
@@ -107,7 +104,7 @@ pub fn finalize_transfer_msg(
             },
         )?,
         funds: vec![],
-    })))
+    }))
 }
 
 pub fn balance_change_msg(
@@ -115,8 +112,8 @@ pub fn balance_change_msg(
     user_address: Addr,
     user_balance_before: Uint128,
     total_supply_before: Uint128,
-) -> StdResult<SubMsg> {
-    Ok(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+) -> StdResult<CosmosMsg> {
+    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: incentives_address.into(),
         msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
             user_address: user_address.to_string(), // TODO: Maybe we trust this to be Addr
@@ -124,5 +121,5 @@ pub fn balance_change_msg(
             total_supply_before,
         })?,
         funds: vec![],
-    })))
+    }))
 }

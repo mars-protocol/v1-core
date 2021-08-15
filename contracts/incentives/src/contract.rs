@@ -1,6 +1,6 @@
 use cosmwasm_std::{
     attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Order, QueryRequest, Response, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
+    Order, QueryRequest, Response, StdResult, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -10,7 +10,7 @@ use crate::state::{
 use mars::address_provider::{helpers::query_addresses, msg::MarsContract};
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
-use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
+use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 
 // INIT
 
@@ -116,16 +116,12 @@ pub fn execute_set_asset_incentive(
 
     ASSET_INCENTIVES.save(deps.storage, &ma_asset_address, &new_asset_incentive)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "set_asset_incentives"),
-            attr("ma_asset", ma_token_address),
-            attr("emission_per_second", emission_per_second),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attributes(vec![
+        attr("action", "set_asset_incentives"),
+        attr("ma_asset", ma_token_address),
+        attr("emission_per_second", emission_per_second),
+    ]);
+    Ok(response)
 }
 
 pub fn execute_balance_change(
@@ -190,17 +186,14 @@ pub fn execute_balance_change(
         user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
     }
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![
-            attr("action", "balance_change"),
-            attr("ma_asset", ma_token_address),
-            attr("user", user_address),
-            attr("rewards_accrued", accrued_rewards),
-        ],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attributes(vec![
+        attr("action", "balance_change"),
+        attr("ma_asset", ma_token_address),
+        attr("user", user_address),
+        attr("rewards_accrued", accrued_rewards),
+    ]);
+
+    Ok(response)
 }
 
 pub fn execute_claim_rewards(
@@ -276,8 +269,9 @@ pub fn execute_claim_rewards(
     let staking_address = addresses_query.pop().unwrap();
     let mars_token_address = addresses_query.pop().unwrap();
 
-    let messages = if accrued_rewards > Uint128::zero() {
-        vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+    let mut response = Response::new();
+    if accrued_rewards > Uint128::zero() {
+        response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.to_string(),
             msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
@@ -287,21 +281,16 @@ pub fn execute_claim_rewards(
                 })?,
             })?,
             funds: vec![],
-        }))]
-    } else {
-        vec![]
+        }));
     };
 
-    Ok(Response {
-        messages,
-        attributes: vec![
-            attr("action", "claim_rewards"),
-            attr("user", user_address),
-            attr("mars_staked_as_rewards", accrued_rewards),
-        ],
-        events: vec![],
-        data: None,
-    })
+    response = response.add_attributes(vec![
+        attr("action", "claim_rewards"),
+        attr("user", user_address),
+        attr("mars_staked_as_rewards", accrued_rewards),
+    ]);
+
+    Ok(response)
 }
 
 pub fn execute_update_config(
@@ -326,12 +315,9 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response {
-        messages: vec![],
-        attributes: vec![attr("action", "update_config")],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new().add_attribute("action", "update_config");
+
+    Ok(response)
 }
 
 pub fn execute_execute_cosmos_msg(
@@ -346,12 +332,11 @@ pub fn execute_execute_cosmos_msg(
         return Err(MarsError::Unauthorized {});
     }
 
-    Ok(Response {
-        messages: vec![SubMsg::new(msg)],
-        attributes: vec![attr("action", "execute_cosmos_msg")],
-        events: vec![],
-        data: None,
-    })
+    let response = Response::new()
+        .add_attribute("action", "execute_cosmos_msg")
+        .add_message(msg);
+
+    Ok(response)
 }
 
 // HELPERS
@@ -429,13 +414,6 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     })
 }
 
-// MIGRATION
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
-}
-
 // TESTS
 
 #[cfg(test)]
@@ -443,7 +421,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::{
         testing::{mock_env, mock_info, MockApi, MockStorage},
-        Addr, BankMsg, Coin, OwnedDeps, Timestamp, Uint128,
+        Addr, BankMsg, Coin, OwnedDeps, SubMsg, Timestamp, Uint128,
     };
     use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
@@ -507,7 +485,7 @@ mod tests {
             vec![
                 attr("action", "set_asset_incentives"),
                 attr("ma_asset", "ma_asset"),
-                attr("emission_per_second", 100),
+                attr("emission_per_second", "100"),
             ]
         );
 
@@ -560,7 +538,7 @@ mod tests {
             vec![
                 attr("action", "set_asset_incentives"),
                 attr("ma_asset", "ma_asset"),
-                attr("emission_per_second", 200),
+                attr("emission_per_second", "200"),
             ]
         );
 
@@ -711,7 +689,7 @@ mod tests {
                 attr("action", "balance_change"),
                 attr("ma_asset", "ma_asset"),
                 attr("user", "user"),
-                attr("rewards_accrued", 0),
+                attr("rewards_accrued", "0"),
             ]
         );
 
@@ -922,7 +900,7 @@ mod tests {
                     attr("action", "balance_change"),
                     attr("ma_asset", "ma_asset"),
                     attr("user", "user"),
-                    attr("rewards_accrued", 0),
+                    attr("rewards_accrued", "0"),
                 ]
             );
 
@@ -1167,7 +1145,7 @@ mod tests {
             vec![
                 attr("action", "claim_rewards"),
                 attr("user", "user"),
-                attr("mars_staked_as_rewards", 0),
+                attr("mars_staked_as_rewards", "0"),
             ]
         );
     }

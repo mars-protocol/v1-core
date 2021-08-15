@@ -84,7 +84,7 @@ pub enum ProposalStatus {
 }
 
 /// Execute call that will be done by the DAO if the proposal succeeds. As this is persisted,
-/// the contract canonical address is stored (vs the human address when the proposal submit message is
+/// the contract checked address is stored (vs the unchecked string when the proposal submit message is
 /// sent)
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalExecuteCall {

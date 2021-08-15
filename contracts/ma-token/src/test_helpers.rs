@@ -52,6 +52,7 @@ fn _do_instantiate(
             amount,
         }],
         mint: mint.clone(),
+        marketing: None,
         init_hook: None,
         red_bank_address: String::from("red_bank"),
         incentives_address: String::from("incentives"),

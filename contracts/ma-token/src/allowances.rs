@@ -1,9 +1,9 @@
-use cosmwasm_std::{attr, Binary, DepsMut, Env, MessageInfo, Response, SubMsg, Uint128};
+use cosmwasm_std::{Binary, DepsMut, Env, MessageInfo, Response, Uint128};
 use cw20::Cw20ReceiveMsg;
 use cw20_base::allowances::deduct_allowance;
+use cw20_base::ContractError;
 
 use crate::core;
-use crate::error::ContractError;
 use crate::state::CONFIG;
 
 pub fn execute_transfer_from(
@@ -23,18 +23,13 @@ pub fn execute_transfer_from(
     let config = CONFIG.load(deps.storage)?;
     let messages = core::transfer(deps.storage, &config, owner_addr, rcpt_addr, amount, true)?;
 
-    let res = Response {
-        messages,
-        attributes: vec![
-            attr("action", "transfer_from"),
-            attr("from", owner),
-            attr("to", recipient),
-            attr("by", info.sender),
-            attr("amount", amount),
-        ],
-        events: vec![],
-        data: None,
-    };
+    let res = Response::new()
+        .add_messages(messages)
+        .add_attribute("action", "transfer_from")
+        .add_attribute("from", owner)
+        .add_attribute("to", recipient)
+        .add_attribute("by", info.sender)
+        .add_attribute("amount", amount);
     Ok(res)
 }
 
@@ -54,31 +49,24 @@ pub fn execute_send_from(
     deduct_allowance(deps.storage, &owner_addr, &info.sender, &env.block, amount)?;
 
     let config = CONFIG.load(deps.storage)?;
-    let mut messages = core::transfer(deps.storage, &config, owner_addr, rcpt_addr, amount, true)?;
+    let transfer_messages =
+        core::transfer(deps.storage, &config, owner_addr, rcpt_addr, amount, true)?;
 
-    let attrs = vec![
-        attr("action", "send_from"),
-        attr("from", &owner),
-        attr("to", &contract),
-        attr("by", &info.sender),
-        attr("amount", amount),
-    ];
-
-    // create a send message
-    messages.push(SubMsg::new(
-        Cw20ReceiveMsg {
-            sender: info.sender.into(),
-            amount,
-            msg,
-        }
-        .into_cosmos_msg(contract)?,
-    ));
-
-    let res = Response {
-        messages,
-        attributes: attrs,
-        ..Response::default()
-    };
+    let res = Response::new()
+        .add_attribute("action", "send_from")
+        .add_attribute("from", &owner)
+        .add_attribute("to", &contract)
+        .add_attribute("by", &info.sender)
+        .add_attribute("amount", amount)
+        .add_messages(transfer_messages)
+        .add_message(
+            Cw20ReceiveMsg {
+                sender: info.sender.to_string(),
+                amount,
+                msg,
+            }
+            .into_cosmos_msg(contract)?,
+        );
     Ok(res)
 }
 
@@ -87,10 +75,9 @@ mod tests {
     use super::*;
 
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{to_binary, Binary, CosmosMsg, StdError, WasmMsg};
+    use cosmwasm_std::{attr, to_binary, Binary, CosmosMsg, StdError, SubMsg, WasmMsg};
     use cw20::{AllowanceResponse, Cw20ReceiveMsg, Expiration};
     use cw20_base::allowances::query_allowance;
-    use cw20_base::ContractError as Cw20BaseError;
 
     use crate::contract::execute;
     use crate::test_helpers::{do_instantiate, get_balance};
@@ -203,10 +190,7 @@ mod tests {
         let info = mock_info(spender.as_ref(), &[]);
         let env = mock_env();
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert!(matches!(
-            err,
-            ContractError::Cw20Base(Cw20BaseError::Std(StdError::Overflow { .. }))
-        ));
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
         // let us increase limit, but set the expiration (default env height is 12_345)
         let info = mock_info(owner.as_ref(), &[]);
@@ -227,7 +211,7 @@ mod tests {
         let info = mock_info(spender.as_ref(), &[]);
         let env = mock_env();
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert_eq!(err, Cw20BaseError::Expired {}.into());
+        assert_eq!(err, ContractError::Expired {});
     }
 
     #[test]
@@ -343,10 +327,7 @@ mod tests {
         let info = mock_info(spender.as_ref(), &[]);
         let env = mock_env();
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert!(matches!(
-            err,
-            ContractError::Cw20Base(Cw20BaseError::Std(StdError::Overflow { .. }))
-        ));
+        assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
         // let us increase limit, but set the expiration to current block (expired)
         let info = mock_info(owner.as_ref(), &[]);
@@ -368,6 +349,6 @@ mod tests {
         let info = mock_info(spender.as_ref(), &[]);
         let env = mock_env();
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert_eq!(err, Cw20BaseError::Expired {}.into());
+        assert_eq!(err, ContractError::Expired {});
     }
 }

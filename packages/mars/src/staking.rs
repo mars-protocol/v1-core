@@ -77,8 +77,4 @@ pub mod msg {
         /// Amount that the user is allowed to unstake during the unstake window
         pub amount: Uint128,
     }
-
-    /// We currently take no arguments for migrations
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct MigrateMsg {}
 }

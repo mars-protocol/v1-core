@@ -22,20 +22,18 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
 
-cw20 = "0.7"
+cw20 = "0.8"
 
-terra-cosmwasm = "2.1.0"
-cosmwasm-bignumber = "2.1.1"
+terra-cosmwasm = "2.2.0"
+cosmwasm-bignumber = "2.2.0"
 terraswap = "2.3.0"
 
-cosmwasm-std = "0.15.0"
-cw-storage-plus = "0.7.0"
+cosmwasm-std = "0.16.0"
+cw-storage-plus = "0.8.0"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
-snafu = "0.6.3"
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = "0.15.0"
-cosmwasm-storage = { version = "0.15.0", features = ["iterator"] }
+cosmwasm-schema = "0.16.0"

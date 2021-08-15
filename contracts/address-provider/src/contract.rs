@@ -6,7 +6,7 @@ use crate::error::ContractError;
 use crate::state::{Config, CONFIG};
 
 use mars::address_provider::msg::{
-    ConfigParams, ConfigResponse, ExecuteMsg, InstantiateMsg, MarsContract, MigrateMsg, QueryMsg,
+    ConfigParams, ConfigResponse, ExecuteMsg, InstantiateMsg, MarsContract, QueryMsg,
 };
 
 use mars::helpers::option_string_to_addr;
@@ -172,13 +172,6 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
         MarsContract::Treasury => config.treasury_address.clone(),
         MarsContract::XMarsToken => config.xmars_token_address.clone(),
     }
-}
-
-// MIGRATION
-
-#[entry_point]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
-    Ok(Response::default())
 }
 
 // TESTS

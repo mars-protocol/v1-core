@@ -60,8 +60,4 @@ pub mod msg {
     pub struct ConfigResponse {
         pub owner: Addr,
     }
-
-    /// We currently take no arguments for migrations
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct MigrateMsg {}
 }
