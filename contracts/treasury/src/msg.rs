@@ -12,6 +12,9 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     /// Execute Cosmos msg
     ExecuteCosmosMsg(CosmosMsg),
+
+    /// Update contract config (only callable by owner)
+    UpdateConfig { owner: Option<String> },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
