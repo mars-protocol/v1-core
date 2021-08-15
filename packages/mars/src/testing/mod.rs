@@ -365,6 +365,13 @@ impl MarsMockQuerier {
         }
     }
 
+    /// Set new balances for contract address
+    pub fn set_contract_balances(&mut self, contract_balances: &[Coin]) {
+        let contract_addr = Addr::unchecked(MOCK_CONTRACT_ADDR);
+        self.base
+            .update_balance(contract_addr.to_string(), contract_balances.to_vec());
+    }
+
     /// Set mock querier exchange rates query results for a given denom
     pub fn set_native_exchange_rates(
         &mut self,

@@ -1919,15 +1919,21 @@ pub fn market_update_interest_rates(
     let liquidity_to_deduct_from_current_balance =
         liquidity_taken + protocol_income_minus_treasury_amount;
 
-    if contract_current_balance < liquidity_to_deduct_from_current_balance {
-        return Err(StdError::generic_err(
-            "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
-        ));
-    }
+    let available_liquidity = if contract_current_balance < liquidity_to_deduct_from_current_balance
+    {
+        // liquidity_taken for deposit / repay is zero so we don't want to block these operations
+        if !liquidity_taken.is_zero() {
+            return Err(StdError::generic_err(
+                "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
+            ));
+        }
+        Decimal256::zero()
+    } else {
+        Decimal256::from_uint256(
+            contract_current_balance - liquidity_to_deduct_from_current_balance,
+        )
+    };
 
-    let available_liquidity = Decimal256::from_uint256(
-        contract_current_balance - liquidity_to_deduct_from_current_balance,
-    );
     let total_debt = Decimal256::from_uint256(market.debt_total_scaled)
         * get_updated_borrow_index(market, env.block.time.seconds());
     let current_utilization_rate = if total_debt > Decimal256::zero() {
@@ -4597,6 +4603,106 @@ mod tests {
     }
 
     #[test]
+    fn test_borrow_full_liquidity_and_then_repay() {
+        let initial_liquidity = 50000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
+        let info = mock_info("borrower");
+        let borrower_addr = Addr::unchecked("borrower");
+        let block_time = 1;
+        let ltv = Decimal256::one();
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("matoken"),
+            liquidity_index: Decimal256::one(),
+            max_loan_to_value: ltv,
+            borrow_index: Decimal256::one(),
+            borrow_rate: Decimal256::one(),
+            liquidity_rate: Decimal256::one(),
+            debt_total_scaled: Uint256::zero(),
+            reserve_factor: Decimal256::from_ratio(12, 100),
+            interests_last_updated: block_time,
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let market = th_init_market(deps.as_mut(), b"uusd", &mock_market);
+
+        // Set tax data for uusd
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("uusd"), Uint128::new(100u128))],
+        );
+
+        // User should have amount of collateral more than initial liquidity in order to borrow full liquidity
+        let deposit_amount = initial_liquidity + 1000u128;
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, market.index).unwrap();
+        USERS
+            .save(deps.as_mut().storage, &borrower_addr, &user)
+            .unwrap();
+
+        // Set the querier to return collateral balance
+        let deposit_coin_address = Addr::unchecked("matoken");
+        deps.querier.set_cw20_balances(
+            deposit_coin_address,
+            &[(borrower_addr.clone(), Uint128::from(deposit_amount))],
+        );
+
+        // Borrow full liquidity
+        {
+            let env = mock_env_at_block_time(block_time);
+            let msg = ExecuteMsg::Borrow {
+                asset: Asset::Native {
+                    denom: "uusd".to_string(),
+                },
+                amount: initial_liquidity.into(),
+            };
+            let _res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
+
+            let market_after_borrow = MARKETS.load(&deps.storage, b"uusd").unwrap();
+            assert_eq!(
+                market_after_borrow.debt_total_scaled,
+                initial_liquidity.into()
+            );
+        }
+
+        let new_block_time = 12000u64;
+        // We need to update balance after borrowing
+        deps.querier.set_contract_balances(&[coin(0, "uusd")]);
+
+        // Try to borrow more than available liquidity
+        {
+            let env = mock_env_at_block_time(new_block_time);
+            let msg = ExecuteMsg::Borrow {
+                asset: Asset::Native {
+                    denom: "uusd".to_string(),
+                },
+                amount: 100u128.into(),
+            };
+            let error_res = execute(deps.as_mut(), env, info.clone(), msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err(
+                    "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity"
+                )
+                    .into()
+            );
+        }
+
+        // Repay part of the debt
+        {
+            let env = mock_env_at_block_time(new_block_time);
+            let info = cosmwasm_std::testing::mock_info("borrower", &[coin(2000, "uusd")]);
+            let msg = ExecuteMsg::RepayNative {
+                denom: String::from("uusd"),
+            };
+            let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+            let market_after_deposit = MARKETS.load(&deps.storage, b"uusd").unwrap();
+            assert!(!market_after_deposit.protocol_income_to_distribute.is_zero());
+        }
+    }
+
+    #[test]
     fn test_collateral_check() {
         // NOTE: available liquidity stays fixed as the test environment does not get changes in
         // contract balances on subsequent calls. They would change from call to call in practice
@@ -6441,17 +6547,8 @@ mod tests {
     ) -> TestInterestResults {
         let expected_indices = th_get_expected_indices(market, block_time);
 
-        // Compute protocol income to be distributed (using values up to the instant
-        // before the contract call is made)
-        let previous_borrow_index = market.borrow_index;
-        let previous_debt_total = market.debt_total_scaled * previous_borrow_index;
-        let current_debt_total = market.debt_total_scaled * expected_indices.borrow;
-        let interest_accrued = if current_debt_total > previous_debt_total {
-            current_debt_total - previous_debt_total
-        } else {
-            Uint256::zero()
-        };
-        let expected_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
+        let expected_protocol_income_to_distribute =
+            th_get_expected_protocol_income(market, &expected_indices);
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_indices.borrow;
@@ -6496,6 +6593,23 @@ mod tests {
             liquidity_rate: expected_liquidity_rate,
             protocol_income_to_distribute: expected_protocol_income_to_distribute,
         }
+    }
+
+    /// Compute protocol income to be distributed (using values up to the instant
+    /// before the contract call is made)
+    fn th_get_expected_protocol_income(
+        market: &Market,
+        expected_indices: &TestExpectedIndices,
+    ) -> Uint256 {
+        let previous_borrow_index = market.borrow_index;
+        let previous_debt_total = market.debt_total_scaled * previous_borrow_index;
+        let current_debt_total = market.debt_total_scaled * expected_indices.borrow;
+        let interest_accrued = if current_debt_total > previous_debt_total {
+            current_debt_total - previous_debt_total
+        } else {
+            Uint256::zero()
+        };
+        interest_accrued * market.reserve_factor
     }
 
     /// Expected results for applying accumulated interest
