@@ -110,7 +110,11 @@ pub fn execute_update_config(
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
-        QueryMsg::AssetPrice { asset_reference } => {
+        QueryMsg::AssetPriceByReference { asset_reference } => {
+            to_binary(&query_asset_price(deps, env, asset_reference)?)
+        }
+        QueryMsg::AssetPrice { asset } => {
+            let asset_reference = asset.get_reference();
             to_binary(&query_asset_price(deps, env, asset_reference)?)
         }
         QueryMsg::AssetPriceConfig { asset } => {
@@ -349,7 +353,7 @@ mod tests {
             &query(
                 deps.as_ref(),
                 env,
-                QueryMsg::AssetPrice {
+                QueryMsg::AssetPriceByReference {
                     asset_reference: b"nativecoin".to_vec(),
                 },
             )
@@ -385,7 +389,7 @@ mod tests {
             &query(
                 deps.as_ref(),
                 env,
-                QueryMsg::AssetPrice {
+                QueryMsg::AssetPriceByReference {
                     asset_reference: Addr::unchecked("cw20token").as_bytes().to_vec(),
                 },
             )

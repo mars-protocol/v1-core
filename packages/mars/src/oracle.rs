@@ -45,7 +45,9 @@ pub mod msg {
         Config {},
         /// Query asset price given it's internal reference
         /// (meant to be used by protocol contracts only)
-        AssetPrice { asset_reference: Vec<u8> },
+        AssetPriceByReference { asset_reference: Vec<u8> },
+        /// Query asset price given an asset
+        AssetPrice { asset: Asset },
         /// Get asset's price config
         AssetPriceConfig { asset: Asset },
     }
@@ -77,7 +79,7 @@ pub mod helpers {
         } else {
             querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: oracle_address.into(),
-                msg: to_binary(&QueryMsg::AssetPrice { asset_reference })?,
+                msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
             }))?
         };
 
