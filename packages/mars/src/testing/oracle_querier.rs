@@ -26,7 +26,7 @@ impl OracleQuerier {
         }
 
         let ret: ContractResult<Binary> = match query {
-            QueryMsg::AssetPrice { asset_reference } => {
+            QueryMsg::AssetPriceByReference { asset_reference } => {
                 let option_price = self.prices.get(&asset_reference);
 
                 if let Some(price) = option_price {
