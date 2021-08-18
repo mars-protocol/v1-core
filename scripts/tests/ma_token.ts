@@ -145,15 +145,6 @@ async function testCollateralEnabled(terra: LocalTerra, redBank: string, maLuna:
     }
   )
 
-  // const collateral = await queryContract(terra, redBank,
-  //   {
-  //     collateral: {
-  //       address: provider.key.accAddress
-  //     }
-  //   }
-  // )
-  // console.log(collateral)
-
   assert(await checkCollateral(terra, provider, redBank, "uluna", false))
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
 }
