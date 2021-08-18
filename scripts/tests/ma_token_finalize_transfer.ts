@@ -13,14 +13,13 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert } from "assert"
+import { strict as assert, rejects } from "assert"
 
 // consts
 
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
-// TODO increase `USD_BORROW` once the oracle exchange rate bug is fixed
-const USD_BORROW = 2_000_000_000000
+const USD_BORROW = 100_000_000_000000
 
 // helpers
 
@@ -43,7 +42,7 @@ async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string
 
 // tests
 
-async function testFinalizeMaTokenTransfers(terra: LocalTerra, redBank: string, maLuna: string) {
+async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna: string) {
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
   const recipient = terra.wallets.test4
@@ -87,27 +86,28 @@ async function testFinalizeMaTokenTransfers(terra: LocalTerra, redBank: string, 
 
   console.log("transferring the entire maToken balance should fail")
 
-  try {
-    await executeContract(terra, borrower, maLuna,
+  await rejects(
+    executeContract(terra, borrower, maLuna,
       {
         transfer: {
-          amount: String(USD_BORROW),
+          amount: String(LUNA_COLLATERAL),
           recipient: recipient.key.accAddress
         }
       }
-    )
-  } catch (error) {
-    if (!error.message.includes("Cannot make token transfer if it results in a health factor lower than 1 for the sender")) {
-      throw error
+    ),
+    {
+      rawLog: /Cannot make token transfer if it results in a health factor lower than 1 for the sender/
     }
-  }
+  )
 
   console.log("transferring a small amount of the maToken balance should work")
+
+  assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
 
   await executeContract(terra, borrower, maLuna,
     {
       transfer: {
-        amount: String(Math.floor(USD_BORROW / 100)),
+        amount: String(Math.floor(LUNA_COLLATERAL / 100)),
         recipient: recipient.key.accAddress
       }
     }
@@ -116,7 +116,7 @@ async function testFinalizeMaTokenTransfers(terra: LocalTerra, redBank: string, 
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
 }
 
-async function testCollateralEnabled(terra: LocalTerra, redBank: string, maLuna: string) {
+async function testCollateralStatusChanges(terra: LocalTerra, redBank: string, maLuna: string) {
   const provider = terra.wallets.test5
   const recipient = terra.wallets.test6
 
@@ -341,11 +341,11 @@ async function main() {
 
   // tests
 
-  console.log("testFinalizeMaTokenTransfers")
-  await testFinalizeMaTokenTransfers(terra, redBank, maLuna)
+  console.log("testHealthFactorChecks")
+  await testHealthFactorChecks(terra, redBank, maLuna)
 
-  console.log("testCollateralEnabled")
-  await testCollateralEnabled(terra, redBank, maLuna)
+  console.log("testCollateralStatusChanges")
+  await testCollateralStatusChanges(terra, redBank, maLuna)
 
   console.log("OK")
 }
