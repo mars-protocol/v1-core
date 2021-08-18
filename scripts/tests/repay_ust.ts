@@ -17,8 +17,7 @@ import { strictEqual } from "assert"
 
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
-// TODO increase `USD_BORROW` once the oracle exchange rate bug is fixed
-const USD_BORROW = 2_000_000_000000
+const USD_BORROW = 100_000_000_000000
 
 async function getDebt(terra: LCDClient, borrower: Wallet, redBank: string) {
   const debts = await queryContract(terra, redBank,
