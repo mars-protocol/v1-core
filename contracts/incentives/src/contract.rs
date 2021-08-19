@@ -1103,17 +1103,6 @@ mod tests {
             )
             .unwrap();
 
-        // MSG
-        let info = mock_info("user", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(time_contract_call),
-            ..Default::default()
-        });
-        let msg = ExecuteMsg::ClaimRewards {};
-
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        // ASSERT
         let expected_ma_asset_incentive_index = asset_incentive_compute_index(
             Decimal::one(),
             Uint128::new(100),
@@ -1140,6 +1129,37 @@ mod tests {
         let expected_accrued_rewards = previous_unclaimed_rewards
             + expected_ma_asset_accrued_rewards
             + expected_ma_zero_accrued_rewards;
+
+        // MSG
+        let info = mock_info("user", &[]);
+        let env = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(time_contract_call),
+            ..Default::default()
+        });
+        let msg = ExecuteMsg::ClaimRewards {};
+
+        // query a bit before gives less rewards
+        let env_before = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(time_contract_call - 10_000),
+            ..Default::default()
+        });
+        let rewards_query_before =
+            query_user_unclaimed_rewards(deps.as_ref(), env_before, String::from("user")).unwrap();
+        assert!(rewards_query_before < expected_accrued_rewards);
+
+        // query before execution gives expected rewards
+        let rewards_query =
+            query_user_unclaimed_rewards(deps.as_ref(), env.clone(), String::from("user")).unwrap();
+        assert_eq!(rewards_query, expected_accrued_rewards);
+
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // query after execution gives 0 rewards
+        let rewards_query_after =
+            query_user_unclaimed_rewards(deps.as_ref(), env, String::from("user")).unwrap();
+        assert_eq!(rewards_query_after, Uint128::zero());
+
+        // ASSERT
 
         assert_eq!(
             res.messages,
