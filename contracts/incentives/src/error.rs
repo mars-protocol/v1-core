@@ -14,7 +14,4 @@ pub enum ContractError {
 
     #[error("{0}")]
     FromUtf8(#[from] FromUtf8Error),
-
-    #[error("Start time must be before end time")]
-    IndexStartEndTime {},
 }

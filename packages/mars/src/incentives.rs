@@ -52,7 +52,14 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
+        /// Query contract config
         Config {},
+
+        /// Query info about asset incentive for a given ma_token
+        AssetIncentive { ma_token_address: String },
+
+        /// Query user current unclaimed rewards
+        UserUnclaimedRewards { user_address: String },
     }
 
     /// Query response with config values
