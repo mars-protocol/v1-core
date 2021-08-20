@@ -14,6 +14,7 @@ import {
   Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
+import { CustomError } from 'ts-custom-error'
 
 // Tequila lcd is load balanced, so txs can't be sent too fast, otherwise account sequence queries
 // may resolve an older state depending on which lcd you end up with. Generally 1000 ms is is enough
@@ -35,6 +36,16 @@ const LOCAL_TERRA_FEE = new StdFee(
   [new Coin('uusd', 45000000)]
 )
 
+export class TransactionError extends CustomError {
+  public constructor(
+    public code: number,
+    public codespace: string | undefined,
+    public rawLog: string,
+  ) {
+    super("transaction failed")
+  }
+}
+
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   let options: CreateTxOptions = {
     msgs: [msg],
@@ -46,13 +57,11 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
   }
 
   const tx = await wallet.createAndSignTx(options);
-
   const result = await terra.tx.broadcast(tx);
   if (isTxError(result)) {
-    throw new Error(
-      `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
-    );
+    throw new TransactionError(result.code, result.codespace, result.raw_log)
   }
+
   await new Promise(resolve => setTimeout(resolve, TIMEOUT));
   return result
 }
