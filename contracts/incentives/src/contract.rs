@@ -185,6 +185,11 @@ pub fn execute_balance_change(
         }
 
         user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
+    } else if user_asset_index.is_zero() {
+        // This ensures asset counts for checking rewards. Handles the edge case of user being the
+        // first depositor and the incentives being initialized before any deposits happend befor.
+        //  Both indices will be 0 but we should track the asset for user to claim rewards.
+        user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
     }
 
     let response = Response::new().add_attributes(vec![
@@ -800,6 +805,68 @@ mod tests {
     }
 
     #[test]
+    fn test_with_zero_previous_balance_and_asset_with_zero_index_accumulates_rewards() {
+        let mut deps = th_setup(&[]);
+        let ma_asset_address = Addr::unchecked("ma_asset");
+        let user_address = Addr::unchecked("user");
+
+        let start_index = Decimal::zero();
+        let emission_per_second = Uint128::new(100);
+        let time_last_updated = 500_000_u64;
+        let time_contract_call = 600_000_u64;
+
+        ASSET_INCENTIVES
+            .save(
+                deps.as_mut().storage,
+                &ma_asset_address,
+                &AssetIncentive {
+                    emission_per_second,
+                    index: start_index,
+                    last_updated: time_last_updated,
+                },
+            )
+            .unwrap();
+
+        {
+            let info = mock_info("ma_asset", &[]);
+            let env = mars::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+            let msg = ExecuteMsg::BalanceChange {
+                user_address: user_address.to_string(),
+                user_balance_before: Uint128::zero(),
+                total_supply_before: Uint128::zero(),
+            };
+            // Execute balance changed, this is the first mint of the asset, so previous total
+            // supply and user balance is 0
+            execute(deps.as_mut(), env, info, msg).unwrap();
+        }
+
+        {
+            // Some time passes and we query the user rewards, expected value should not be 0
+            let user_balance = Uint128::new(100_000);
+            let total_supply = Uint128::new(100_000);
+            deps.querier
+                .set_cw20_total_supply(ma_asset_address.clone(), total_supply);
+            deps.querier.set_cw20_balances(
+                ma_asset_address.clone(),
+                &[(user_address.clone(), user_balance)],
+            );
+            let env = mars::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call + 1000),
+                ..Default::default()
+            });
+            let rewards_query =
+                query_user_unclaimed_rewards(deps.as_ref(), env, String::from("user")).unwrap();
+            assert_eq!(
+                Uint128::new(1000).checked_mul(emission_per_second).unwrap(),
+                rewards_query
+            );
+        }
+    }
+
+    #[test]
     fn test_balance_change_user_non_zero_balance() {
         let mut deps = th_setup(&[]);
         let ma_asset_address = Addr::unchecked("ma_asset");
@@ -1249,6 +1316,26 @@ mod tests {
             ]
         );
     }
+
+    /*
+    #[test]
+    fn test_asset_init_then_balance_change_then_claim() {
+        let mut deps = th_setup(&[]);
+        let ma_asset_address = Addr::unchecked("ma_asset");
+
+        let info = mock_info("owner", &[]);
+        let env = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(1_000_000),
+            ..Default::default()
+        });
+        let msg = ExecuteMsg::SetAssetIncentive {
+            ma_token_address: ma_asset_address.to_string(),
+            emission_per_second: Uint128::new(600),
+        };
+
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+    */
 
     #[test]
     fn test_update_config() {
