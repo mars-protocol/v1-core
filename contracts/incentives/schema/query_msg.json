@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Query contract config",
       "type": "object",
       "required": [
         "config"
@@ -15,18 +16,40 @@
       "additionalProperties": false
     },
     {
+      "description": "Query info about asset incentive for a given ma_token",
       "type": "object",
       "required": [
-        "cooldown"
+        "asset_incentive"
       ],
       "properties": {
-        "cooldown": {
+        "asset_incentive": {
           "type": "object",
           "required": [
-            "sender_address"
+            "ma_token_address"
           ],
           "properties": {
-            "sender_address": {
+            "ma_token_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Query user current unclaimed rewards",
+      "type": "object",
+      "required": [
+        "user_unclaimed_rewards"
+      ],
+      "properties": {
+        "user_unclaimed_rewards": {
+          "type": "object",
+          "required": [
+            "user_address"
+          ],
+          "properties": {
+            "user_address": {
               "type": "string"
             }
           }
