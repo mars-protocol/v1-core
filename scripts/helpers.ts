@@ -62,7 +62,7 @@ export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: M
   return await wallet.createTx(options)
 }
 
-export async function _performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
+async function _performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const tx = await createTransaction(terra, wallet, msg)
   const signedTx = await wallet.key.signTx(tx)
   return await terra.tx.broadcast(signedTx)
