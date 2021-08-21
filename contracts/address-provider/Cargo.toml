@@ -25,7 +25,6 @@ mars = { path = "../../packages/mars", version = "0.1.0" }
 cw20 = "0.8"
 
 terra-cosmwasm = "2.2.0"
-cosmwasm-bignumber = "2.2.0"
 terraswap = "2.3.0"
 
 cosmwasm-std = "0.16.0"
