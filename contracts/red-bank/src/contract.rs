@@ -12,10 +12,9 @@ use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::ma_token;
 use mars::red_bank::msg::{
-    CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig, DebtInfo,
-    DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo, MarketResponse,
-    MarketsListResponse, QueryMsg, ReceiveMsg, ScaledAmountResponse,
-    UncollateralizedLoanLimitResponse,
+    AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
+    MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
 };
 
 use mars::asset::{Asset, AssetType};
@@ -1599,6 +1598,15 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::ScaledDebtAmount { asset, amount } => {
             to_binary(&query_scaled_debt_amount(deps, env, asset, amount)?)
         }
+        QueryMsg::DescaledLiquidityAmount {
+            ma_token_address,
+            amount,
+        } => to_binary(&query_descaled_liquidity_amount(
+            deps,
+            env,
+            ma_token_address,
+            amount,
+        )?),
     }
 }
 
@@ -1748,7 +1756,7 @@ fn query_scaled_liquidity_amount(
     env: Env,
     asset: Asset,
     amount: Uint128,
-) -> StdResult<ScaledAmountResponse> {
+) -> StdResult<AmountResponse> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
     let scaled_amount = amount
@@ -1756,7 +1764,7 @@ fn query_scaled_liquidity_amount(
             &market,
             env.block.time.seconds(),
         ));
-    Ok(ScaledAmountResponse {
+    Ok(AmountResponse {
         amount: scaled_amount,
     })
 }
@@ -1766,13 +1774,28 @@ fn query_scaled_debt_amount(
     env: Env,
     asset: Asset,
     amount: Uint128,
-) -> StdResult<ScaledAmountResponse> {
+) -> StdResult<AmountResponse> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
     let scaled_amount =
         amount * reverse_decimal(get_updated_borrow_index(&market, env.block.time.seconds()));
-    Ok(ScaledAmountResponse {
+    Ok(AmountResponse {
         amount: scaled_amount,
+    })
+}
+
+fn query_descaled_liquidity_amount(
+    deps: Deps,
+    env: Env,
+    ma_token_address: String,
+    amount: Uint128,
+) -> StdResult<AmountResponse> {
+    let ma_token_address = deps.api.addr_validate(&ma_token_address)?;
+    let market_reference = MARKET_MA_TOKENS.load(deps.storage, &ma_token_address)?;
+    let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
+    let descaled_amount = amount * get_updated_liquidity_index(&market, env.block.time.seconds());
+    Ok(AmountResponse {
+        amount: descaled_amount,
     })
 }
 

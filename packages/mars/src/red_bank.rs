@@ -142,13 +142,32 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
         Config {},
-        Market { asset: Asset },
+        Market {
+            asset: Asset,
+        },
         MarketsList {},
-        Debt { address: String },
-        UncollateralizedLoanLimit { user_address: String, asset: Asset },
-        Collateral { address: String },
-        ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
-        ScaledDebtAmount { asset: Asset, amount: Uint128 },
+        Debt {
+            address: String,
+        },
+        UncollateralizedLoanLimit {
+            user_address: String,
+            asset: Asset,
+        },
+        Collateral {
+            address: String,
+        },
+        ScaledLiquidityAmount {
+            asset: Asset,
+            amount: Uint128,
+        },
+        ScaledDebtAmount {
+            asset: Asset,
+            amount: Uint128,
+        },
+        DescaledLiquidityAmount {
+            ma_token_address: String,
+            amount: Uint128,
+        },
     }
 
     // We define a custom struct for each query response
@@ -217,7 +236,7 @@ pub mod msg {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ScaledAmountResponse {
+    pub struct AmountResponse {
         pub amount: Uint128,
     }
 

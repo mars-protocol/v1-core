@@ -1,9 +1,9 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, Uint128, WasmMsg,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest,
+    Response, StdResult, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
-use cw20::Cw20ReceiveMsg;
+use cw20::{BalanceResponse, Cw20ReceiveMsg};
 use cw20_base::allowances::{
     execute_decrease_allowance, execute_increase_allowance, query_allowance,
 };
@@ -320,7 +320,7 @@ pub fn execute_send(
 // QUERY
 
 #[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::BalanceAndTotalSupply { address } => {
@@ -341,6 +341,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
         }
         QueryMsg::MarketingInfo {} => to_binary(&query_marketing_info(deps)?),
         QueryMsg::DownloadLogo {} => to_binary(&query_download_logo(deps)?),
+        QueryMsg::UnderlyingAssetBalance { address } => {
+            to_binary(&query_underlying_asset_balance(deps, env, address)?)
+        }
     }
 }
 
@@ -356,6 +359,32 @@ fn query_balance_and_total_supply(
     Ok(BalanceAndTotalSupplyResponse {
         balance,
         total_supply: info.total_supply,
+    })
+}
+
+pub fn query_underlying_asset_balance(
+    deps: Deps,
+    env: Env,
+    address: String,
+) -> StdResult<BalanceResponse> {
+    let address = deps.api.addr_validate(&address)?;
+    let balance = BALANCES
+        .may_load(deps.storage, &address)?
+        .unwrap_or_default();
+
+    let config = CONFIG.load(deps.storage)?;
+
+    let query: mars::red_bank::msg::AmountResponse =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: config.red_bank_address.into(),
+            msg: to_binary(&mars::red_bank::msg::QueryMsg::DescaledLiquidityAmount {
+                ma_token_address: env.contract.address.into(),
+                amount: balance,
+            })?,
+        }))?;
+
+    Ok(BalanceResponse {
+        balance: query.amount,
     })
 }
 
