@@ -147,6 +147,8 @@ pub mod msg {
         Debt { address: String },
         UncollateralizedLoanLimit { user_address: String, asset: Asset },
         Collateral { address: String },
+        ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
+        ScaledDebtAmount { asset: Asset, amount: Uint128 },
     }
 
     // We define a custom struct for each query response
@@ -212,6 +214,11 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct UncollateralizedLoanLimitResponse {
         pub limit: Uint128,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct ScaledAmountResponse {
+        pub amount: Uint128,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
