@@ -33,7 +33,7 @@ import 'dotenv/config.js'
 import {
   createTransaction,
   instantiateContract,
-  performTransaction,
+  mustPerformTransaction,
   queryContract,
   recover,
   setTimeoutDuration,
@@ -131,7 +131,7 @@ async function main() {
   // Update Mars token owner
   const newOwner = MULTISIG_ADDRESS
 
-  await performTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
+  await mustPerformTransaction(terra, wallet, new MsgUpdateContractOwner(wallet.key.accAddress, newOwner, marsAddress))
 
   const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
   strictEqual(marsContractInfo.owner, newOwner)
@@ -143,7 +143,7 @@ async function main() {
 
   // Send coins to the multisig address. On testnet, use the faucet to initialise the multisig balance.
   if (!isTestnet) {
-    await performTransaction(terra, wallet, new MsgSend(
+    await mustPerformTransaction(terra, wallet, new MsgSend(
       wallet.key.accAddress,
       MULTISIG_ADDRESS,
       { uluna: 1_000_000000, uusd: 1_000_000000 }

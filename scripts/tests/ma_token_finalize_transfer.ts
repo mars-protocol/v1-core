@@ -5,15 +5,16 @@ LocalTerra oracle needs ~1500 ms timeouts to work. Set these with:
 sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' config/config.toml
 ```
 */
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { isTxError, LCDClient, LocalTerra, MsgExecuteContract, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
+  performTransaction,
   queryContract,
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert, rejects } from "assert"
+import { strict as assert } from "assert"
 
 // consts
 
@@ -86,19 +87,16 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
 
   console.log("transferring the entire maToken balance should fail")
 
-  await rejects(
-    executeContract(terra, borrower, maLuna,
-      {
-        transfer: {
-          amount: String(LUNA_COLLATERAL),
-          recipient: recipient.key.accAddress
-        }
+  {
+    const executeMsg = new MsgExecuteContract(recipient.key.accAddress, maLuna, {
+      transfer: {
+        amount: String(LUNA_COLLATERAL),
+        recipient: recipient.key.accAddress
       }
-    ),
-    {
-      rawLog: /Cannot make token transfer if it results in a health factor lower than 1 for the sender/
-    }
-  )
+    })
+    const result = await performTransaction(terra, recipient, executeMsg)
+    assert(isTxError(result))
+  }
 
   console.log("transferring a small amount of the maToken balance should work")
 
