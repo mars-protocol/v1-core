@@ -29,6 +29,7 @@ const X = 10_000_000000
 
 // helpers
 
+
 async function maAssetAddress(terra: LCDClient, redBank: string, denom: string) {
   const market = await queryContract(terra, redBank, { market: { asset: { native: { denom: denom } } } })
   return market.ma_token_address
@@ -71,13 +72,13 @@ async function claimRewards(terra: LCDClient, wallet: Wallet, incentives: string
   return await txTimestamp(terra, result)
 }
 
-async function balance(terra: LCDClient, wallet: Wallet, token: string) {
+async function queryBalance(terra: LCDClient, wallet: Wallet, token: string) {
   const result = await queryContract(terra, token, { balance: { address: wallet.key.accAddress } })
   return parseInt(result.balance)
 }
 
-function rewards(start: number, end: number, rate: number) {
-  return (end - start) * rate
+function computeExpectedRewards(startTime: number, endTime: number, umarsRate: number) {
+  return (endTime - startTime) * umarsRate
 }
 
 async function withdrawUusd(terra: LCDClient, wallet: Wallet, redBank: string, amount: number) {
@@ -92,7 +93,7 @@ async function withdrawUusd(terra: LCDClient, wallet: Wallet, redBank: string, a
   return await txTimestamp(terra, result)
 }
 
-function assertBalance(balance: number, expectedBalance: number) {
+function assertqueryBalance(balance: number, expectedBalance: number) {
   return strictEqual(balance, Math.floor(expectedBalance))
 }
 
@@ -274,31 +275,31 @@ async function main() {
   const danUsdDepositTime = await deposit(terra, dan, redBank, "uusd", X)
 
   const aliceClaimRewardsTime = await claimRewards(terra, alice, incentives)
-  let aliceXmarsBalance = await balance(terra, alice, xMars)
+  let aliceXmarsBalance = await queryBalance(terra, alice, xMars)
   let expectedAliceXmarsBalance =
-    rewards(aliceLunaDepositTime, bobLunaDepositTime, ULUNA_UMARS_EMISSION_RATE) +
-    rewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
-    rewards(carolLunaDepositTime, aliceClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4) +
-    rewards(aliceUsdDepositTime, danUsdDepositTime, UUSD_UMARS_EMISSION_RATE) +
-    rewards(danUsdDepositTime, aliceClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
-  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+    computeExpectedRewards(aliceLunaDepositTime, bobLunaDepositTime, ULUNA_UMARS_EMISSION_RATE) +
+    computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
+    computeExpectedRewards(carolLunaDepositTime, aliceClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4) +
+    computeExpectedRewards(aliceUsdDepositTime, danUsdDepositTime, UUSD_UMARS_EMISSION_RATE) +
+    computeExpectedRewards(danUsdDepositTime, aliceClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
+  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   const bobClaimRewardsTime = await claimRewards(terra, bob, incentives)
-  let bobXmarsBalance = await balance(terra, bob, xMars)
+  let bobXmarsBalance = await queryBalance(terra, bob, xMars)
   let expectedBobXmarsBalance =
-    rewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
-    rewards(carolLunaDepositTime, bobClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4)
-  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
+    computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
+    computeExpectedRewards(carolLunaDepositTime, bobClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4)
+  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   const carolClaimRewardsTime = await claimRewards(terra, carol, incentives)
-  const carolXmarsBalance = await balance(terra, carol, xMars)
-  const expectedCarolXmarsBalance = rewards(carolLunaDepositTime, carolClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 2)
-  assertBalance(carolXmarsBalance, expectedCarolXmarsBalance)
+  const carolXmarsBalance = await queryBalance(terra, carol, xMars)
+  const expectedCarolXmarsBalance = computeExpectedRewards(carolLunaDepositTime, carolClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 2)
+  assertqueryBalance(carolXmarsBalance, expectedCarolXmarsBalance)
 
   const danClaimRewardsTime = await claimRewards(terra, dan, incentives)
-  const danXmarsBalance = await balance(terra, dan, xMars)
-  const expectedDanXmarsBalance = rewards(danUsdDepositTime, danClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
-  assertBalance(danXmarsBalance, expectedDanXmarsBalance)
+  const danXmarsBalance = await queryBalance(terra, dan, xMars)
+  const expectedDanXmarsBalance = computeExpectedRewards(danUsdDepositTime, danClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
+  assertqueryBalance(danXmarsBalance, expectedDanXmarsBalance)
 
   console.log("turn off uluna incentives")
 
@@ -316,18 +317,18 @@ async function main() {
 
   // Bob accrues rewards for uluna until the rewards were turned off
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await balance(terra, bob, xMars)
-  expectedBobXmarsBalance += rewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
-  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  bobXmarsBalance = await queryBalance(terra, bob, xMars)
+  expectedBobXmarsBalance += computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
+  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   // Alice accrues rewards for uluna until the rewards were turned off,
   // and continues to accrue rewards for uusd
   const aliceClaimRewardsTime2 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await balance(terra, alice, xMars)
+  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
   expectedAliceXmarsBalance +=
-    rewards(aliceClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4) +
-    rewards(aliceClaimRewardsTime, aliceClaimRewardsTime2, UUSD_UMARS_EMISSION_RATE / 2)
-  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+    computeExpectedRewards(aliceClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4) +
+    computeExpectedRewards(aliceClaimRewardsTime, aliceClaimRewardsTime2, UUSD_UMARS_EMISSION_RATE / 2)
+  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   console.log("transfer uusd")
 
@@ -346,17 +347,17 @@ async function main() {
   // Alice accrues rewards for X uusd until transferring X/2 uusd to Bob,
   // then accrues rewards for X/2 uusd
   const aliceClaimRewardsTime3 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await balance(terra, alice, xMars)
+  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
   expectedAliceXmarsBalance +=
-    rewards(aliceClaimRewardsTime2, uusdTransferTime, UUSD_UMARS_EMISSION_RATE / 2) +
-    rewards(uusdTransferTime, aliceClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+    computeExpectedRewards(aliceClaimRewardsTime2, uusdTransferTime, UUSD_UMARS_EMISSION_RATE / 2) +
+    computeExpectedRewards(uusdTransferTime, aliceClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
+  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
   const bobClaimRewardsTime3 = await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await balance(terra, bob, xMars)
-  expectedBobXmarsBalance += rewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  bobXmarsBalance = await queryBalance(terra, bob, xMars)
+  expectedBobXmarsBalance += computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
+  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("withdraw uusd")
 
@@ -365,17 +366,17 @@ async function main() {
 
   // Alice accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await balance(terra, alice, xMars)
-  expectedAliceXmarsBalance += rewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
-  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
+  expectedAliceXmarsBalance += computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
+  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await balance(terra, bob, xMars)
+  bobXmarsBalance = await queryBalance(terra, bob, xMars)
   expectedBobXmarsBalance +=
-    rewards(bobClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4) +
-    rewards(aliceWithdrawUusdTime, bobWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 3)
-  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
+    computeExpectedRewards(bobClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4) +
+    computeExpectedRewards(aliceWithdrawUusdTime, bobWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 3)
+  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("OK")
 }
