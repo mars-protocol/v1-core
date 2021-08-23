@@ -78,7 +78,7 @@ export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath:
 }
 
 export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object) {
-  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg, undefined);
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, wallet.key.accAddress, codeId, msg, undefined);
   let result = await performTransaction(terra, wallet, instantiateMsg)
   const attributes = result.logs[0].events[0].attributes
   return attributes[attributes.length - 1].value // contract address
@@ -117,6 +117,110 @@ export function initialize(terra: LCDClient) {
   return terra.wallet(mk);
 }
 
+export async function setupOracle(
+  terra: LCDClient, wallet: Wallet, contractAddress: string, initialAssets: Asset[], oracleFactoryAddress: string, isTestnet: boolean
+) {
+  console.log("Setting up oracle assets...");
+
+  for (let asset of initialAssets) {
+    console.log(`Setting price source for ${asset.denom || asset.symbol || asset.contract_addr}`);
+
+    let assetType
+    let assetPriceSource
+
+    if (asset.denom) {
+      assetType = {
+        "native": {
+          "denom": asset.denom,
+        }
+      }
+      assetPriceSource = assetType
+    } else if (asset.contract_addr) {
+      assetType = {
+        "cw20": {
+          "contract_addr": asset.contract_addr,
+        }
+      }
+
+      const pairQueryMsg = {
+        pair: {
+          asset_infos: [
+            {
+              token: {
+                contract_addr: asset.contract_addr,
+              },
+            },
+            {
+              native_token: {
+                denom: "uusd",
+              },
+            },
+          ],
+        },
+      }
+
+      let pairQueryResponse
+      try {
+        pairQueryResponse = await queryContract(terra, oracleFactoryAddress, pairQueryMsg)
+      } catch (error) {
+        if (error.response.data.error.includes("PairInfoRaw not found")) {
+          console.log("Pair not found, creating pair...");
+
+          const createPairMsg = {
+            "create_pair": {
+              "asset_infos": [
+                {
+                  "token": {
+                    "contract_addr": asset.contract_addr
+                  }
+                },
+                {
+                  "native_token": {
+                    "denom": "uusd"
+                  }
+                }
+              ]
+            }
+          }
+          await executeContract(terra, wallet, oracleFactoryAddress, createPairMsg);
+          console.log("Pair created");
+          // TODO, not sure this actually worked? I just called the factory contract directly, whereas I think I should have perhaps initalised a pair contract
+          // TODO with a call back to the factory token contract as per here: https://finder.terra.money/bombay-10/tx/6B1E44803ED9EB41AAF5BF18D6FD9AF72B7549F090593ED015C139362AEC2F9F
+          // TODO vs my version here: https://finder.terra.money/bombay-10/tx/4B579047BFFDABA25166AB1ADBC5B55F2C649DDF21D10FF95C5E837B15CF8A63
+
+          pairQueryResponse = await queryContract(terra, oracleFactoryAddress, pairQueryMsg)
+        } else {
+          console.log(error.response?.data?.error || "Error: pair contract query failed")
+          continue
+        }
+      }
+
+      if (!pairQueryResponse.contract_addr) {
+        console.log("Error: something bad happened while trying to get oracle pairs contract address")
+      }
+
+      assetPriceSource = {
+        "terraswap_uusd_pair": {
+          "pair_address": pairQueryResponse.contract_addr
+        }
+      }
+    } else {
+      console.log(`INVALID ASSET: no denom or contract_addr`);
+      return
+    }
+
+    let setAssetMsg = {
+      "set_asset": {
+        "asset": assetType,
+        "price_source": assetPriceSource,
+      },
+    };
+
+    await executeContract(terra, wallet, contractAddress, setAssetMsg);
+    console.log(`Set ${asset.denom || asset.symbol || asset.contract_addr}`);
+  }
+}
+
 export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAddress: string, options: any) {
   console.log("Setting up initial asset liquidity pools...");
 
@@ -140,24 +244,11 @@ export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAdd
           }
         }
         : undefined
-    let assetParams: Asset = {
-      initial_borrow_rate: asset.initial_borrow_rate,
-      min_borrow_rate: asset.min_borrow_rate,
-      max_borrow_rate: asset.max_borrow_rate,
-      max_loan_to_value: asset.max_loan_to_value,
-      reserve_factor: asset.reserve_factor,
-      maintenance_margin: asset.maintenance_margin,
-      liquidation_bonus: asset.liquidation_bonus,
-      kp_1: asset.kp_1,
-      optimal_utilization_rate: asset.optimal_utilization_rate,
-      kp_augmentation_threshold: asset.kp_augmentation_threshold,
-      kp_2: asset.kp_2
-    }
 
     let initAssetMsg = {
       "init_asset": {
         "asset": assetType,
-        "asset_params": assetParams,
+        "asset_params": asset.init_params,
       },
     };
 
