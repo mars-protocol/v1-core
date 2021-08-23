@@ -14,7 +14,7 @@ import {
   uploadContract
 } from "../helpers.js"
 
-// consts
+// CONSTS
 
 const CW_PLUS_ARTIFACTS_PATH = "../../cw-plus/artifacts"
 const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
@@ -27,8 +27,7 @@ const UUSD_UMARS_EMISSION_RATE = 4_000000
 // multiples of coins to deposit and withdraw from the red bank
 const X = 10_000_000000
 
-// helpers
-
+// HELPERS
 
 async function maAssetAddress(terra: LCDClient, redBank: string, denom: string) {
   const market = await queryContract(terra, redBank, { market: { asset: { native: { denom: denom } } } })
@@ -97,9 +96,11 @@ function assertqueryBalance(balance: number, expectedBalance: number) {
   return strictEqual(balance, Math.floor(expectedBalance))
 }
 
-// main
+// MAIN
 
 async function main() {
+  // SETUP
+
   setTimeoutDuration(100)
 
   const terra = new LocalTerra()
@@ -265,6 +266,8 @@ async function main() {
 
   await setAssetIncentive(terra, deployer, incentives, maUluna, ULUNA_UMARS_EMISSION_RATE)
   await setAssetIncentive(terra, deployer, incentives, maUusd, UUSD_UMARS_EMISSION_RATE)
+
+  // TESTS
 
   console.log("deposit assets")
 
