@@ -59,7 +59,7 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
     `${USD_COLLATERAL}uusd`
   )
 
-  console.log("provider provides Luna")
+  console.log("borrower provides Luna")
 
   await executeContract(terra, borrower, redBank,
     {
@@ -145,6 +145,85 @@ async function testCollateralStatusChanges(terra: LocalTerra, redBank: string, m
 
   assert(await checkCollateral(terra, provider, redBank, "uluna", false))
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
+}
+
+async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna: string) {
+  const provider = terra.wallets.test7
+  const borrower = terra.wallets.test8
+  const recipient = terra.wallets.test9
+
+  console.log("provider provides USD")
+
+  await executeContract(terra, provider, redBank,
+    { deposit_native: { denom: "uusd" } },
+    `${USD_COLLATERAL}uusd`
+  )
+
+  console.log("borrower provides Luna")
+
+  await executeContract(terra, borrower, redBank,
+    { deposit_native: { denom: "uluna" } },
+    `${LUNA_COLLATERAL}uluna`
+  )
+
+  console.log("borrower borrows USD")
+
+  await executeContract(terra, borrower, redBank,
+    {
+      borrow: {
+        asset: { native: { denom: "uusd" } },
+        amount: String(USD_COLLATERAL / 100)
+      }
+    }
+  )
+
+  console.log("disabling Luna as collateral should make transferring maLuna fail")
+
+  assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
+
+  await executeContract(terra, borrower, redBank,
+    {
+      update_user_collateral_asset_status: {
+        asset: { native: { denom: "uluna" } },
+        enable: false,
+      }
+    }
+  )
+
+  assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
+
+  {
+    const executeMsg = new MsgExecuteContract(borrower.key.accAddress, maLuna, {
+      transfer: {
+        amount: String(LUNA_COLLATERAL / 100),
+        recipient: recipient.key.accAddress
+      }
+    })
+    const result = await performTransaction(terra, borrower, executeMsg)
+    assert(isTxError(result))
+  }
+
+  console.log("enabling Luna as collateral should make transferring maLuna succeed")
+
+  await executeContract(terra, borrower, redBank,
+    {
+      update_user_collateral_asset_status: {
+        asset: { native: { denom: "uluna" } },
+        enable: true,
+      }
+    }
+  )
+
+  assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
+
+  await executeContract(terra, borrower, maLuna,
+    {
+      transfer: {
+        amount: String(LUNA_COLLATERAL / 100),
+        recipient: recipient.key.accAddress
+      }
+    }
+  )
 }
 
 // main
@@ -344,6 +423,9 @@ async function main() {
 
   console.log("testCollateralStatusChanges")
   await testCollateralStatusChanges(terra, redBank, maLuna)
+
+  console.log("testTransferCollateral")
+  await testTransferCollateral(terra, redBank, maLuna)
 
   console.log("OK")
 }
