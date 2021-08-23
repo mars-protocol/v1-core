@@ -188,7 +188,7 @@ pub fn execute_balance_change(
     } else if user_asset_index.is_zero() {
         // This ensures asset counts for checking rewards. Handles the edge case of user being the
         // first depositor and the incentives being initialized before any deposits happened before.
-        //  Both indices will be 0 but we should track the asset for user to claim rewards.
+        // Both indices will be 0 but we should track the asset for user to claim rewards.
         user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
     }
 
