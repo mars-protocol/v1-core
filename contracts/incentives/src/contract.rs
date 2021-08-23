@@ -1,6 +1,7 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Order, QueryRequest, Response, StdResult, Uint128, WasmMsg, WasmQuery,
+    attr, entry_point, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    MessageInfo, Order, OverflowError, OverflowOperation, QueryRequest, Response, StdError,
+    StdResult, Uint128, WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -184,6 +185,11 @@ pub fn execute_balance_change(
         }
 
         user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
+    } else if user_asset_index.is_zero() {
+        // This ensures asset counts for checking rewards. Handles the edge case of user being the
+        // first depositor and the incentives being initialized before any deposits happened before.
+        //  Both indices will be 0 but we should track the asset for user to claim rewards.
+        user_asset_index_key.save(deps.storage, &asset_incentive.index)?;
     }
 
     let response = Response::new().add_attributes(vec![
@@ -191,6 +197,7 @@ pub fn execute_balance_change(
         attr("ma_asset", ma_token_address),
         attr("user", user_address),
         attr("rewards_accrued", accrued_rewards),
+        attr("asset_index", asset_incentive.index.to_string()),
     ]);
 
     Ok(response)
@@ -202,56 +209,24 @@ pub fn execute_claim_rewards(
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
     let user_address = info.sender;
-    let mut accrued_rewards = USER_UNCLAIMED_REWARDS
-        .may_load(deps.storage, &user_address)?
-        .unwrap_or_else(Uint128::zero);
+    let (total_unclaimed_rewards, asset_incentive_statuses) =
+        compute_user_unclaimed_rewards(deps.as_ref(), &env, &user_address)?;
 
-    // Since we need the mutable storage reference while iterating we need to get all
-    // values on the range first
-    let result_user_asset_indices: StdResult<Vec<_>> = USER_ASSET_INDICES
-        .prefix(&user_address)
-        .range(deps.storage, None, None, Order::Ascending)
-        .collect();
+    // Commit updated asset_incentives and user indexes
+    for asset_incentive_status in asset_incentive_statuses {
+        let asset_incentive_updated = asset_incentive_status.asset_incentive_updated;
 
-    for result_kv_pair in result_user_asset_indices? {
-        let (ma_token_address_bytes, user_asset_index) = result_kv_pair;
-
-        let ma_token_address = deps
-            .api
-            .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
-
-        // Get asset user balances and total supply
-        let balance_and_total_supply: mars::ma_token::msg::BalanceAndTotalSupplyResponse =
-            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: ma_token_address.to_string(),
-                msg: to_binary(&mars::ma_token::msg::QueryMsg::BalanceAndTotalSupply {
-                    address: user_address.to_string(),
-                })?,
-            }))?;
-
-        // Get asset pending rewards
-        let mut asset_incentive = ASSET_INCENTIVES.load(deps.storage, &ma_token_address)?;
-
-        asset_incentive_update_index(
-            &mut asset_incentive,
-            balance_and_total_supply.total_supply,
-            env.block.time.seconds(),
+        ASSET_INCENTIVES.save(
+            deps.storage,
+            &asset_incentive_status.ma_token_address,
+            &asset_incentive_updated,
         )?;
-        ASSET_INCENTIVES.save(deps.storage, &ma_token_address, &asset_incentive)?;
 
-        if user_asset_index != asset_incentive.index {
-            // Compute user accrued rewards and update user index
-            let asset_accrued_rewards = user_compute_accrued_rewards(
-                balance_and_total_supply.balance,
-                user_asset_index,
-                asset_incentive.index,
-            )?;
-            accrued_rewards += asset_accrued_rewards;
-
+        if asset_incentive_updated.index != asset_incentive_status.user_index_current {
             USER_ASSET_INDICES.save(
                 deps.storage,
-                (&user_address, &ma_token_address),
-                &asset_incentive.index,
+                (&user_address, &asset_incentive_status.ma_token_address),
+                &asset_incentive_updated.index,
             )?
         }
     }
@@ -259,23 +234,24 @@ pub fn execute_claim_rewards(
     // clear unclaimed rewards
     USER_UNCLAIMED_REWARDS.save(deps.storage, &user_address, &Uint128::zero())?;
 
-    let config = CONFIG.load(deps.storage)?;
-    let mars_contracts = vec![MarsContract::MarsToken, MarsContract::Staking];
-    let mut addresses_query = query_addresses(
-        &deps.querier,
-        config.address_provider_address,
-        mars_contracts,
-    )?;
-    let staking_address = addresses_query.pop().unwrap();
-    let mars_token_address = addresses_query.pop().unwrap();
-
     let mut response = Response::new();
-    if accrued_rewards > Uint128::zero() {
+    if total_unclaimed_rewards > Uint128::zero() {
+        // Build message to stake mars and send resulting xmars to the user
+        let config = CONFIG.load(deps.storage)?;
+        let mars_contracts = vec![MarsContract::MarsToken, MarsContract::Staking];
+        let mut addresses_query = query_addresses(
+            &deps.querier,
+            config.address_provider_address,
+            mars_contracts,
+        )?;
+        let staking_address = addresses_query.pop().unwrap();
+        let mars_token_address = addresses_query.pop().unwrap();
+
         response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.to_string(),
             msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
-                amount: accrued_rewards,
+                amount: total_unclaimed_rewards,
                 msg: to_binary(&mars::staking::msg::ReceiveMsg::Stake {
                     recipient: Some(user_address.to_string()),
                 })?,
@@ -287,7 +263,7 @@ pub fn execute_claim_rewards(
     response = response.add_attributes(vec![
         attr("action", "claim_rewards"),
         attr("user", user_address),
-        attr("mars_staked_as_rewards", accrued_rewards),
+        attr("mars_staked_as_rewards", total_unclaimed_rewards),
     ]);
 
     Ok(response)
@@ -351,7 +327,7 @@ fn asset_incentive_update_index(
     asset_incentive: &mut AssetIncentive,
     total_supply: Uint128,
     current_block_time: u64,
-) -> Result<(), ContractError> {
+) -> StdResult<()> {
     if (current_block_time != asset_incentive.last_updated)
         && !total_supply.is_zero()
         && !asset_incentive.emission_per_second.is_zero()
@@ -374,9 +350,13 @@ fn asset_incentive_compute_index(
     total_supply: Uint128,
     time_start: u64,
     time_end: u64,
-) -> Result<Decimal, ContractError> {
+) -> StdResult<Decimal> {
     if time_start > time_end {
-        return Err(ContractError::IndexStartEndTime {});
+        return Err(StdError::overflow(OverflowError::new(
+            OverflowOperation::Sub,
+            time_start,
+            time_end,
+        )));
     }
     let seconds_elapsed = time_end - time_start;
     let new_index = previous_index
@@ -398,12 +378,91 @@ fn user_compute_accrued_rewards(
     Ok((user_balance * asset_incentive_index) - (user_balance * user_asset_index))
 }
 
+/// Result of querying and updating the status of the user and a give asset incentives in order to
+/// compute unclaimed rewards.
+struct UserAssetIncentiveStatus {
+    /// Address of the ma token that's the incentives target
+    ma_token_address: Addr,
+    /// Current user index's value on the contract store (not updated by current asset index)
+    user_index_current: Decimal,
+    /// Asset incentive with values updated to the current block (not neccesarily commited
+    /// to storage)
+    asset_incentive_updated: AssetIncentive,
+}
+
+fn compute_user_unclaimed_rewards(
+    deps: Deps,
+    env: &Env,
+    user_address: &Addr,
+) -> StdResult<(Uint128, Vec<UserAssetIncentiveStatus>)> {
+    let mut total_unclaimed_rewards = USER_UNCLAIMED_REWARDS
+        .may_load(deps.storage, user_address)?
+        .unwrap_or_else(Uint128::zero);
+
+    let result_user_asset_indices: StdResult<Vec<_>> = USER_ASSET_INDICES
+        .prefix(user_address)
+        .range(deps.storage, None, None, Order::Ascending)
+        .collect();
+
+    let mut user_asset_incentive_statuses: Vec<UserAssetIncentiveStatus> = vec![];
+
+    for result_kv_pair in result_user_asset_indices? {
+        let (ma_token_address_bytes, user_asset_index) = result_kv_pair;
+
+        let ma_token_address = deps
+            .api
+            .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
+
+        // Get asset user balances and total supply
+        let balance_and_total_supply: mars::ma_token::msg::BalanceAndTotalSupplyResponse =
+            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: ma_token_address.to_string(),
+                msg: to_binary(&mars::ma_token::msg::QueryMsg::BalanceAndTotalSupply {
+                    address: user_address.to_string(),
+                })?,
+            }))?;
+
+        // Get asset pending rewards
+        let mut asset_incentive = ASSET_INCENTIVES.load(deps.storage, &ma_token_address)?;
+
+        asset_incentive_update_index(
+            &mut asset_incentive,
+            balance_and_total_supply.total_supply,
+            env.block.time.seconds(),
+        )?;
+
+        if user_asset_index != asset_incentive.index {
+            // Compute user accrued rewards and update user index
+            let asset_accrued_rewards = user_compute_accrued_rewards(
+                balance_and_total_supply.balance,
+                user_asset_index,
+                asset_incentive.index,
+            )?;
+            total_unclaimed_rewards += asset_accrued_rewards;
+        }
+
+        user_asset_incentive_statuses.push(UserAssetIncentiveStatus {
+            ma_token_address,
+            user_index_current: user_asset_index,
+            asset_incentive_updated: asset_incentive,
+        });
+    }
+
+    Ok((total_unclaimed_rewards, user_asset_incentive_statuses))
+}
+
 // QUERIES
 
 #[entry_point]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::AssetIncentive { ma_token_address } => {
+            to_binary(&query_asset_incentive(deps, ma_token_address)?)
+        }
+        QueryMsg::UserUnclaimedRewards { user_address } => {
+            to_binary(&query_user_unclaimed_rewards(deps, env, user_address)?)
+        }
     }
 }
 
@@ -412,6 +471,26 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner,
     })
+}
+
+fn query_asset_incentive(
+    deps: Deps,
+    ma_token_address_unchecked: String,
+) -> StdResult<AssetIncentive> {
+    let ma_token_address = deps.api.addr_validate(&ma_token_address_unchecked)?;
+    let asset_incentive = ASSET_INCENTIVES.load(deps.storage, &ma_token_address)?;
+    Ok(asset_incentive)
+}
+
+fn query_user_unclaimed_rewards(
+    deps: Deps,
+    env: Env,
+    user_address_unchecked: String,
+) -> StdResult<Uint128> {
+    let user_address = deps.api.addr_validate(&user_address_unchecked)?;
+    let (unclaimed_rewards, _) = compute_user_unclaimed_rewards(deps, &env, &user_address)?;
+
+    Ok(unclaimed_rewards)
 }
 
 // TESTS
@@ -624,6 +703,7 @@ mod tests {
                 attr("ma_asset", "ma_asset"),
                 attr("user", "user"),
                 attr("rewards_accrued", expected_accrued_rewards),
+                attr("asset_index", asset_incentive_index.to_string()),
             ]
         );
 
@@ -683,15 +763,6 @@ mod tests {
         };
 
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
-        assert_eq!(
-            res.attributes,
-            vec![
-                attr("action", "balance_change"),
-                attr("ma_asset", "ma_asset"),
-                attr("user", "user"),
-                attr("rewards_accrued", "0"),
-            ]
-        );
 
         let expected_index = asset_incentive_compute_index(
             start_index,
@@ -701,6 +772,17 @@ mod tests {
             time_contract_call,
         )
         .unwrap();
+
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "balance_change"),
+                attr("ma_asset", "ma_asset"),
+                attr("user", "user"),
+                attr("rewards_accrued", "0"),
+                attr("asset_index", expected_index.to_string()),
+            ]
+        );
 
         // asset incentive gets updated
         let asset_incentive = ASSET_INCENTIVES
@@ -720,6 +802,68 @@ mod tests {
             .may_load(deps.as_ref().storage, &user_address)
             .unwrap();
         assert_eq!(user_unclaimed_rewards, None)
+    }
+
+    #[test]
+    fn test_with_zero_previous_balance_and_asset_with_zero_index_accumulates_rewards() {
+        let mut deps = th_setup(&[]);
+        let ma_asset_address = Addr::unchecked("ma_asset");
+        let user_address = Addr::unchecked("user");
+
+        let start_index = Decimal::zero();
+        let emission_per_second = Uint128::new(100);
+        let time_last_updated = 500_000_u64;
+        let time_contract_call = 600_000_u64;
+
+        ASSET_INCENTIVES
+            .save(
+                deps.as_mut().storage,
+                &ma_asset_address,
+                &AssetIncentive {
+                    emission_per_second,
+                    index: start_index,
+                    last_updated: time_last_updated,
+                },
+            )
+            .unwrap();
+
+        {
+            let info = mock_info("ma_asset", &[]);
+            let env = mars::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+            let msg = ExecuteMsg::BalanceChange {
+                user_address: user_address.to_string(),
+                user_balance_before: Uint128::zero(),
+                total_supply_before: Uint128::zero(),
+            };
+            // Execute balance changed, this is the first mint of the asset, so previous total
+            // supply and user balance is 0
+            execute(deps.as_mut(), env, info, msg).unwrap();
+        }
+
+        {
+            // Some time passes and we query the user rewards, expected value should not be 0
+            let user_balance = Uint128::new(100_000);
+            let total_supply = Uint128::new(100_000);
+            deps.querier
+                .set_cw20_total_supply(ma_asset_address.clone(), total_supply);
+            deps.querier.set_cw20_balances(
+                ma_asset_address.clone(),
+                &[(user_address.clone(), user_balance)],
+            );
+            let env = mars::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call + 1000),
+                ..Default::default()
+            });
+            let rewards_query =
+                query_user_unclaimed_rewards(deps.as_ref(), env, String::from("user")).unwrap();
+            assert_eq!(
+                Uint128::new(1000).checked_mul(emission_per_second).unwrap(),
+                rewards_query
+            );
+        }
     }
 
     #[test]
@@ -787,6 +931,7 @@ mod tests {
                     attr("ma_asset", "ma_asset"),
                     attr("user", "user"),
                     attr("rewards_accrued", expected_accrued_rewards),
+                    attr("asset_index", expected_asset_incentive_index.to_string()),
                 ]
             );
 
@@ -852,6 +997,7 @@ mod tests {
                     attr("ma_asset", "ma_asset"),
                     attr("user", "user"),
                     attr("rewards_accrued", expected_accrued_rewards),
+                    attr("asset_index", expected_asset_incentive_index.to_string()),
                 ]
             );
 
@@ -901,6 +1047,7 @@ mod tests {
                     attr("ma_asset", "ma_asset"),
                     attr("user", "user"),
                     attr("rewards_accrued", "0"),
+                    attr("asset_index", expected_asset_incentive_index.to_string()),
                 ]
             );
 
@@ -1023,17 +1170,6 @@ mod tests {
             )
             .unwrap();
 
-        // MSG
-        let info = mock_info("user", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(time_contract_call),
-            ..Default::default()
-        });
-        let msg = ExecuteMsg::ClaimRewards {};
-
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        // ASSERT
         let expected_ma_asset_incentive_index = asset_incentive_compute_index(
             Decimal::one(),
             Uint128::new(100),
@@ -1060,6 +1196,37 @@ mod tests {
         let expected_accrued_rewards = previous_unclaimed_rewards
             + expected_ma_asset_accrued_rewards
             + expected_ma_zero_accrued_rewards;
+
+        // MSG
+        let info = mock_info("user", &[]);
+        let env = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(time_contract_call),
+            ..Default::default()
+        });
+        let msg = ExecuteMsg::ClaimRewards {};
+
+        // query a bit before gives less rewards
+        let env_before = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(time_contract_call - 10_000),
+            ..Default::default()
+        });
+        let rewards_query_before =
+            query_user_unclaimed_rewards(deps.as_ref(), env_before, String::from("user")).unwrap();
+        assert!(rewards_query_before < expected_accrued_rewards);
+
+        // query before execution gives expected rewards
+        let rewards_query =
+            query_user_unclaimed_rewards(deps.as_ref(), env.clone(), String::from("user")).unwrap();
+        assert_eq!(rewards_query, expected_accrued_rewards);
+
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // query after execution gives 0 rewards
+        let rewards_query_after =
+            query_user_unclaimed_rewards(deps.as_ref(), env, String::from("user")).unwrap();
+        assert_eq!(rewards_query_after, Uint128::zero());
+
+        // ASSERT
 
         assert_eq!(
             res.messages,
@@ -1150,6 +1317,26 @@ mod tests {
         );
     }
 
+    /*
+    #[test]
+    fn test_asset_init_then_balance_change_then_claim() {
+        let mut deps = th_setup(&[]);
+        let ma_asset_address = Addr::unchecked("ma_asset");
+
+        let info = mock_info("owner", &[]);
+        let env = mars::testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(1_000_000),
+            ..Default::default()
+        });
+        let msg = ExecuteMsg::SetAssetIncentive {
+            ma_token_address: ma_asset_address.to_string(),
+            emission_per_second: Uint128::new(600),
+        };
+
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+    }
+    */
+
     #[test]
     fn test_update_config() {
         let mut deps = th_setup(&[]);
@@ -1226,7 +1413,11 @@ mod tests {
                 1000,
                 10
             ),
-            Err(ContractError::IndexStartEndTime {})
+            Err(StdError::overflow(OverflowError::new(
+                OverflowOperation::Sub,
+                1000,
+                10
+            )))
         );
 
         assert_eq!(

@@ -1322,10 +1322,6 @@ pub fn execute_finalize_liquidity_token_transfer(
     let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
 
     // Check user health factor is above 1
-    // TODO: this assumes new balances are already in state as this call will be made
-    // after a transfer call on an ma_asset. Double check this is the case when doing
-    // integration tests. If it's not we would need to pass the updated balances to
-    // the health factor somehow
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     let mut from_user = USERS.load(deps.storage, &from_address)?;
     let config = CONFIG.load(deps.storage)?;

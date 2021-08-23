@@ -110,7 +110,11 @@ pub fn execute_update_config(
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
-        QueryMsg::AssetPrice { asset_reference } => {
+        QueryMsg::AssetPriceByReference { asset_reference } => {
+            to_binary(&query_asset_price(deps, env, asset_reference)?)
+        }
+        QueryMsg::AssetPrice { asset } => {
+            let asset_reference = asset.get_reference();
             to_binary(&query_asset_price(deps, env, asset_reference)?)
         }
         QueryMsg::AssetPriceConfig { asset } => {
@@ -132,8 +136,11 @@ fn query_asset_price(deps: Deps, _env: Env, asset_reference: Vec<u8>) -> StdResu
     match price_config.price_source {
         PriceSourceChecked::Native { denom } => {
             let terra_querier = TerraQuerier::new(&deps.querier);
+            // NOTE: Exchange rate returns how much of the quote (second argument) is required to
+            // buy one unit of the base_denom (first argument).
+            // We want to know how much uusd we need to buy 1 of the target currency
             let asset_prices_query = terra_querier
-                .query_exchange_rates("uusd", vec![&denom])?
+                .query_exchange_rates(denom, vec!["uusd".to_string()])?
                 .exchange_rates
                 .pop();
 
@@ -325,11 +332,8 @@ mod tests {
         let reference = asset.get_reference();
 
         deps.querier.set_native_exchange_rates(
-            "uusd".to_string(),
-            &[(
-                "nativecoin".to_string(),
-                Decimal::from_ratio(4_u128, 1_u128),
-            )],
+            "nativecoin".to_string(),
+            &[("uusd".to_string(), Decimal::from_ratio(4_u128, 1_u128))],
         );
 
         PRICE_CONFIGS
@@ -349,7 +353,7 @@ mod tests {
             &query(
                 deps.as_ref(),
                 env,
-                QueryMsg::AssetPrice {
+                QueryMsg::AssetPriceByReference {
                     asset_reference: b"nativecoin".to_vec(),
                 },
             )
@@ -385,7 +389,7 @@ mod tests {
             &query(
                 deps.as_ref(),
                 env,
-                QueryMsg::AssetPrice {
+                QueryMsg::AssetPriceByReference {
                     asset_reference: Addr::unchecked("cw20token").as_bytes().to_vec(),
                 },
             )

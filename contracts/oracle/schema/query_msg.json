@@ -19,10 +19,10 @@
       "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
       "type": "object",
       "required": [
-        "asset_price"
+        "asset_price_by_reference"
       ],
       "properties": {
-        "asset_price": {
+        "asset_price_by_reference": {
           "type": "object",
           "required": [
             "asset_reference"
@@ -35,6 +35,27 @@
                 "format": "uint8",
                 "minimum": 0.0
               }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Query asset price given an asset",
+      "type": "object",
+      "required": [
+        "asset_price"
+      ],
+      "properties": {
+        "asset_price": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
             }
           }
         }
