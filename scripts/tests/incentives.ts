@@ -41,7 +41,7 @@ const UUSD_UMARS_EMISSION_RATE = 4_000000
 // }
 
 async function main() {
-  setTimeoutDuration(0)
+  setTimeoutDuration(100)
 
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
@@ -318,7 +318,6 @@ async function main() {
       },
       `${amount}${denom}`
     )
-    await new Promise(resolve => setTimeout(resolve, 100))
     const txInfo = await terra.tx.txInfo(result.txhash)
     return Date.parse(txInfo.timestamp) / 1000 // seconds
   }
@@ -334,7 +333,6 @@ async function main() {
   // claim rewards
   const claimRewards = async (wallet: Wallet) => {
     const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} })
-    await new Promise(resolve => setTimeout(resolve, 100))
     const txInfo = await terra.tx.txInfo(result.txhash)
     return Date.parse(txInfo.timestamp) / 1000 // seconds
   }
@@ -346,36 +344,30 @@ async function main() {
 
   const aliceClaimRewardsTime = await claimRewards(alice)
   let aliceXmarsBalance = await xMarsBalance(alice)
-  let expectedAliceXmarsBalance = (
+  let expectedAliceXmarsBalance =
     (bobLunaDepositTime - aliceLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE +
     (carolLunaDepositTime - bobLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 2 +
     (aliceClaimRewardsTime - carolLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 4 +
     (danUsdDepositTime - aliceUsdDepositTime) * UUSD_UMARS_EMISSION_RATE +
     (aliceClaimRewardsTime - danUsdDepositTime) * UUSD_UMARS_EMISSION_RATE / 2
-  )
-  strictEqual(expectedAliceXmarsBalance, aliceXmarsBalance)
+  strictEqual(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   const bobClaimRewardsTime = await claimRewards(bob)
   let bobXmarsBalance = await xMarsBalance(bob)
-  let expectedBobXmarsBalance = (
+  let expectedBobXmarsBalance =
     (carolLunaDepositTime - bobLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 2 +
     (bobClaimRewardsTime - carolLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 4
-  )
-  strictEqual(expectedBobXmarsBalance, bobXmarsBalance)
+  strictEqual(bobXmarsBalance, expectedBobXmarsBalance)
 
   const carolClaimRewardsTime = await claimRewards(carol)
   const carolXmarsBalance = await xMarsBalance(carol)
-  const expectedCarolXmarsBalance = (
-    (carolClaimRewardsTime - carolLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 2
-  )
-  strictEqual(expectedCarolXmarsBalance, carolXmarsBalance)
+  const expectedCarolXmarsBalance = (carolClaimRewardsTime - carolLunaDepositTime) * ULUNA_UMARS_EMISSION_RATE / 2
+  strictEqual(carolXmarsBalance, expectedCarolXmarsBalance)
 
   const danClaimRewardsTime = await claimRewards(dan)
   const danXmarsBalance = await xMarsBalance(dan)
-  const expectedDanXmarsBalance = (
-    (danClaimRewardsTime - danUsdDepositTime) * UUSD_UMARS_EMISSION_RATE / 2
-  )
-  strictEqual(expectedDanXmarsBalance, danXmarsBalance)
+  const expectedDanXmarsBalance = (danClaimRewardsTime - danUsdDepositTime) * UUSD_UMARS_EMISSION_RATE / 2
+  strictEqual(danXmarsBalance, expectedDanXmarsBalance)
 
   console.log("turn off uluna incentives")
 
@@ -390,20 +382,84 @@ async function main() {
   let txInfo = await terra.tx.txInfo(result.txhash)
   const ulunaIncentivesEndTime = Date.parse(txInfo.timestamp) / 1000
 
-  const aliceClaimRewardsTime2 = await claimRewards(alice)
-  aliceXmarsBalance = await xMarsBalance(alice)
-  expectedAliceXmarsBalance += (
-    (ulunaIncentivesEndTime - aliceClaimRewardsTime) * ULUNA_UMARS_EMISSION_RATE / 4 +
-    (aliceClaimRewardsTime2 - aliceClaimRewardsTime) * UUSD_UMARS_EMISSION_RATE / 2
-  )
-  strictEqual(expectedAliceXmarsBalance, aliceXmarsBalance)
-
+  // Bob accrues rewards for uluna until the rewards were turned off
   await claimRewards(bob)
   bobXmarsBalance = await xMarsBalance(bob)
-  expectedBobXmarsBalance += (
-    (ulunaIncentivesEndTime - bobClaimRewardsTime) * ULUNA_UMARS_EMISSION_RATE / 4
+  expectedBobXmarsBalance += (ulunaIncentivesEndTime - bobClaimRewardsTime) * ULUNA_UMARS_EMISSION_RATE / 4
+  strictEqual(bobXmarsBalance, expectedBobXmarsBalance)
+
+  // Alice accrues rewards for uluna until the rewards were turned off,
+  // and continues to accrue rewards for uusd
+  const aliceClaimRewardsTime2 = await claimRewards(alice)
+  aliceXmarsBalance = await xMarsBalance(alice)
+  expectedAliceXmarsBalance +=
+    (ulunaIncentivesEndTime - aliceClaimRewardsTime) * ULUNA_UMARS_EMISSION_RATE / 4 +
+    (aliceClaimRewardsTime2 - aliceClaimRewardsTime) * UUSD_UMARS_EMISSION_RATE / 2
+  strictEqual(aliceXmarsBalance, expectedAliceXmarsBalance)
+
+  console.log("transfer uusd")
+
+  result = await executeContract(terra, alice, maUusd,
+    {
+      transfer: {
+        recipient: bob.key.accAddress,
+        amount: String(Math.floor(X / 2)),
+      }
+    }
   )
-  strictEqual(expectedBobXmarsBalance, bobXmarsBalance)
+  txInfo = await terra.tx.txInfo(result.txhash)
+  const uusdTransferTime = Date.parse(txInfo.timestamp) / 1000
+
+  // Alice accrues rewards for X uusd until they transferred X/2 uusd to Bob,
+  // then accrues rewards for X/2 uusd
+  const aliceClaimRewardsTime3 = await claimRewards(alice)
+  aliceXmarsBalance = await xMarsBalance(alice)
+  expectedAliceXmarsBalance +=
+    (uusdTransferTime - aliceClaimRewardsTime2) * UUSD_UMARS_EMISSION_RATE / 2 +
+    (aliceClaimRewardsTime3 - uusdTransferTime) * UUSD_UMARS_EMISSION_RATE / 4
+  strictEqual(aliceXmarsBalance, expectedAliceXmarsBalance)
+
+  // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
+  const bobClaimRewardsTime3 = await claimRewards(bob)
+  bobXmarsBalance = await xMarsBalance(bob)
+  expectedBobXmarsBalance += (bobClaimRewardsTime3 - uusdTransferTime) * UUSD_UMARS_EMISSION_RATE / 4
+  strictEqual(bobXmarsBalance, expectedBobXmarsBalance)
+
+  console.log("withdraw uusd")
+
+  const withdrawUusd = async (wallet: Wallet, amount: number) => {
+    const result = await executeContract(terra, wallet, redBank,
+      {
+        withdraw: {
+          asset: {
+            native: {
+              denom: "uusd"
+            }
+          },
+          amount: String(amount),
+        }
+      }
+    )
+    const txInfo = await terra.tx.txInfo(result.txhash)
+    return Date.parse(txInfo.timestamp) / 1000
+  }
+
+  // Alice accrues rewards for X/2 uusd until withdrawing
+  const aliceWithdrawUusdTime = await withdrawUusd(alice, X / 2)
+  await claimRewards(alice)
+  aliceXmarsBalance = await xMarsBalance(alice)
+  expectedAliceXmarsBalance +=
+    (aliceWithdrawUusdTime - aliceClaimRewardsTime3) * UUSD_UMARS_EMISSION_RATE / 4
+  strictEqual(aliceXmarsBalance, expectedAliceXmarsBalance)
+
+  // Bob accrues rewards for X/2 uusd until withdrawing
+  const bobWithdrawUusdTime = await withdrawUusd(alice, X / 2)
+  await claimRewards(bob)
+  bobXmarsBalance = await xMarsBalance(bob)
+  expectedBobXmarsBalance +=
+    (aliceWithdrawUusdTime - bobClaimRewardsTime3) * UUSD_UMARS_EMISSION_RATE / 4 +
+    (bobWithdrawUusdTime - aliceWithdrawUusdTime) * UUSD_UMARS_EMISSION_RATE / 3
+  strictEqual(bobXmarsBalance, Math.floor(expectedBobXmarsBalance))
 
   console.log("OK")
 }
