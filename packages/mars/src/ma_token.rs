@@ -154,6 +154,11 @@ pub mod msg {
         /// contract.
         /// Return type: DownloadLogoResponse.
         DownloadLogo {},
+        /// Returns the underlying asset amount for given address.
+        /// Return type: BalanceResponse.
+        UnderlyingAssetBalance {
+            address: String,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
