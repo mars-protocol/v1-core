@@ -1,4 +1,15 @@
+use cosmwasm_std::Decimal;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserHealthStatus {
+    NotBorrowing,
+    Borrowing(Decimal),
+}
 pub mod msg {
+    use super::UserHealthStatus;
     use crate::asset::{Asset, AssetType};
     use crate::interest_rate_models::InterestRateStrategy;
     use cosmwasm_std::{Addr, Decimal, Uint128};
@@ -250,14 +261,7 @@ pub mod msg {
         pub total_collateralized_debt_in_uusd: Uint128,
         pub max_debt_in_uusd: Uint128,
         pub weighted_maintenance_margin_in_uusd: Uint128,
-        pub health_status: UserHealthStatusResponse,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    #[serde(rename_all = "snake_case")]
-    pub enum UserHealthStatusResponse {
-        NotBorrowing,
-        Borrowing(Decimal),
+        pub health_status: UserHealthStatus,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

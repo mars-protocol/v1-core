@@ -11,11 +11,14 @@ use cw_storage_plus::U32Key;
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::ma_token;
-use mars::red_bank::msg::{
-    AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
-    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
-    MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
-    UserHealthStatusResponse, UserPositionResponse,
+use mars::red_bank::{
+    msg::{
+        AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+        DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
+        MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg,
+        UncollateralizedLoanLimitResponse, UserPositionResponse,
+    },
+    UserHealthStatus,
 };
 
 use mars::asset::{Asset, AssetType};
@@ -23,7 +26,7 @@ use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::tax::deduct_tax;
 
-use crate::accounts::{get_user_position, UserHealthStatus};
+use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::state::{
     Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
@@ -1821,20 +1824,14 @@ fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPos
         &user,
         global_state.market_count,
     )?;
-    let health_status = match user_position.health_status {
-        UserHealthStatus::Borrowing(health_factor) => {
-            UserHealthStatusResponse::Borrowing(health_factor)
-        }
-        UserHealthStatus::NotBorrowing {} => UserHealthStatusResponse::NotBorrowing {},
-    };
 
     Ok(UserPositionResponse {
-        total_collateral_in_uusd: user_position._total_collateral_in_uusd,
+        total_collateral_in_uusd: user_position.total_collateral_in_uusd,
         total_debt_in_uusd: user_position.total_debt_in_uusd,
         total_collateralized_debt_in_uusd: user_position.total_collateralized_debt_in_uusd,
         max_debt_in_uusd: user_position.max_debt_in_uusd,
         weighted_maintenance_margin_in_uusd: user_position.weighted_maintenance_margin_in_uusd,
-        health_status,
+        health_status: user_position.health_status,
     })
 }
 

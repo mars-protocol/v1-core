@@ -2,6 +2,7 @@ use cosmwasm_std::{Addr, Decimal, Deps, StdError, StdResult, Uint128};
 
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
+use mars::red_bank::UserHealthStatus;
 
 use crate::contract::{
     get_bit, get_updated_borrow_index, get_updated_liquidity_index, market_get_from_index,
@@ -11,8 +12,7 @@ use crate::state::{Debt, User, DEBTS};
 
 /// User global position
 pub struct UserPosition {
-    /// NOTE: Not used yet
-    pub _total_collateral_in_uusd: Uint128,
+    pub total_collateral_in_uusd: Uint128,
     pub total_debt_in_uusd: Uint128,
     pub total_collateralized_debt_in_uusd: Uint128,
     pub max_debt_in_uusd: Uint128,
@@ -51,11 +51,6 @@ pub struct UserAssetPosition {
     pub max_ltv: Decimal,
     pub maintenance_margin: Decimal,
     pub asset_price: Decimal,
-}
-
-pub enum UserHealthStatus {
-    NotBorrowing,
-    Borrowing(Decimal),
 }
 
 /// Calculates the user data across the markets.
@@ -114,7 +109,7 @@ pub fn get_user_position(
     };
 
     let user_position = UserPosition {
-        _total_collateral_in_uusd: total_collateral_in_uusd,
+        total_collateral_in_uusd,
         total_debt_in_uusd,
         total_collateralized_debt_in_uusd,
         max_debt_in_uusd,
