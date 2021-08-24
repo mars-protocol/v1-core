@@ -1,9 +1,8 @@
 use std::str;
 
-use cosmwasm_bignumber::{Decimal256, Uint256};
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut,
-    Env, Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
+    entry_point, from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps,
+    DepsMut, Env, Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
@@ -30,6 +29,7 @@ use crate::state::{
     MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
 use mars::interest_rate_models::InterestRateModel;
+use mars::math::{decimal_multiplication, reverse_decimal};
 
 // CONSTANTS
 
@@ -275,7 +275,7 @@ pub fn execute_receive_cw20(
                 depositor_addr,
                 token_contract_address.as_bytes(),
                 token_contract_address.as_str(),
-                Uint256::from(cw20_msg.amount),
+                cw20_msg.amount,
             )
         }
         ReceiveMsg::RepayCw20 {} => {
@@ -288,7 +288,7 @@ pub fn execute_receive_cw20(
                 repayer_addr,
                 token_contract_address.as_bytes(),
                 token_contract_address.as_str(),
-                Uint256::from(cw20_msg.amount),
+                cw20_msg.amount,
                 AssetType::Cw20,
             )
         }
@@ -308,7 +308,6 @@ pub fn execute_receive_cw20(
             }
             let liquidator_addr = deps.api.addr_validate(&cw20_msg.sender)?;
             let user_addr = deps.api.addr_validate(&user_address)?;
-            let sent_debt_asset_amount = Uint256::from(cw20_msg.amount);
             execute_liquidate(
                 deps,
                 env,
@@ -319,7 +318,7 @@ pub fn execute_receive_cw20(
                     contract_addr: debt_asset_address,
                 },
                 user_addr,
-                sent_debt_asset_amount,
+                cw20_msg.amount,
                 receive_ma_token,
             )
         }
@@ -332,7 +331,7 @@ pub fn execute_withdraw(
     env: Env,
     info: MessageInfo,
     asset: Asset,
-    amount: Option<Uint256>,
+    amount: Option<Uint128>,
 ) -> Result<Response, ContractError> {
     let withdrawer_addr = info.sender;
 
@@ -340,11 +339,8 @@ pub fn execute_withdraw(
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     let asset_ma_addr = market.ma_token_address.clone();
-    let withdrawer_balance_scaled = Uint256::from(cw20_get_balance(
-        &deps.querier,
-        asset_ma_addr,
-        withdrawer_addr.clone(),
-    )?);
+    let withdrawer_balance_scaled =
+        cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
 
     if withdrawer_balance_scaled.is_zero() {
         return Err(StdError::generic_err(
@@ -356,8 +352,11 @@ pub fn execute_withdraw(
     // Check user has sufficient balance to send back
     let (withdraw_amount, withdraw_amount_scaled) = match amount {
         Some(amount) => {
-            let amount_scaled =
-                amount / get_updated_liquidity_index(&market, env.block.time.seconds());
+            let amount_scaled = amount
+                * reverse_decimal(get_updated_liquidity_index(
+                    &market,
+                    env.block.time.seconds(),
+                ));
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
                 return Err(StdError::generic_err(format!(
                     "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
@@ -405,12 +404,12 @@ pub fn execute_withdraw(
 
         let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
-        let health_factor_after_withdraw =
-            Decimal256::from_uint256(
-                user_position.weighted_maintenance_margin_in_uusd
-                    - (withdraw_amount_in_uusd * market.maintenance_margin),
-            ) / Decimal256::from_uint256(user_position.total_collateralized_debt_in_uusd);
-        if health_factor_after_withdraw < Decimal256::one() {
+        let health_factor_after_withdraw = Decimal::from_ratio(
+            user_position.weighted_maintenance_margin_in_uusd
+                - (withdraw_amount_in_uusd * market.maintenance_margin),
+            user_position.total_collateralized_debt_in_uusd,
+        );
+        if health_factor_after_withdraw < Decimal::one() {
             return Err(StdError::generic_err(
                 "User's health factor can't be less than 1 after withdraw",
             )
@@ -438,7 +437,7 @@ pub fn execute_withdraw(
         contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
             user: withdrawer_addr.to_string(),
-            amount: withdraw_amount_scaled.into(),
+            amount: withdraw_amount_scaled,
         })?,
         funds: vec![],
     });
@@ -629,7 +628,7 @@ pub fn execute_deposit(
     depositor_address: Addr,
     asset_reference: &[u8],
     asset_label: &str,
-    deposit_amount: Uint256,
+    deposit_amount: Uint128,
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
@@ -653,14 +652,17 @@ pub fn execute_deposit(
     }
 
     market_apply_accumulated_interests(&env, &mut market);
-    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint256::zero())?;
+    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
     if market.liquidity_index.is_zero() {
         return Err(StdError::generic_err("Cannot have 0 as liquidity index").into());
     }
-    let mint_amount =
-        deposit_amount / get_updated_liquidity_index(&market, env.block.time.seconds());
+    let mint_amount = deposit_amount
+        * reverse_decimal(get_updated_liquidity_index(
+            &market,
+            env.block.time.seconds(),
+        ));
 
     let res = Response::new()
         .add_attribute("action", "deposit")
@@ -672,7 +674,7 @@ pub fn execute_deposit(
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: depositor_address.into(),
-                amount: mint_amount.into(),
+                amount: mint_amount,
             })?,
             funds: vec![],
         }));
@@ -686,7 +688,7 @@ pub fn execute_borrow(
     env: Env,
     info: MessageInfo,
     asset: Asset,
-    borrow_amount: Uint256,
+    borrow_amount: Uint128,
 ) -> Result<Response, ContractError> {
     let borrower_address = info.sender;
     let (asset_label, asset_reference, asset_type) = asset.get_attributes();
@@ -755,13 +757,13 @@ pub fn execute_borrow(
             // if user was already borrowing, get price from user position
             user_position.get_asset_price(asset_reference.as_slice(), &asset_label)?
         } else {
-            Decimal256::from(mars::oracle::helpers::query_price(
+            mars::oracle::helpers::query_price(
                 deps.querier,
                 oracle_address,
                 &asset_label,
                 asset_reference.clone(),
                 asset_type,
-            )?)
+            )?
         };
 
         let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
@@ -783,14 +785,14 @@ pub fn execute_borrow(
                 (asset_reference.as_slice(), &borrower_address),
             )?
             .unwrap_or(Debt {
-                amount_scaled: Uint256::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: uncollateralized_debt,
             });
 
         let asset_market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
         let debt_amount = borrower_debt.amount_scaled
             * get_updated_borrow_index(&asset_market, env.block.time.seconds());
-        if borrow_amount + debt_amount > Uint256::from(uncollateralized_loan_limit) {
+        if borrow_amount + debt_amount > uncollateralized_loan_limit {
             return Err(StdError::generic_err(
                 "borrow amount exceeds uncollateralized loan limit given existing debt",
             )
@@ -813,11 +815,14 @@ pub fn execute_borrow(
             (asset_reference.as_slice(), &borrower_address),
         )?
         .unwrap_or(Debt {
-            amount_scaled: Uint256::zero(),
+            amount_scaled: Uint128::zero(),
             uncollateralized: uncollateralized_debt,
         });
-    let borrow_amount_scaled =
-        borrow_amount / get_updated_borrow_index(&borrow_market, env.block.time.seconds());
+    let borrow_amount_scaled = borrow_amount
+        * reverse_decimal(get_updated_borrow_index(
+            &borrow_market,
+            env.block.time.seconds(),
+        ));
     debt.amount_scaled += borrow_amount_scaled;
     DEBTS.save(
         deps.storage,
@@ -866,7 +871,7 @@ pub fn execute_repay(
     repayer_address: Addr,
     asset_reference: &[u8],
     asset_label: &str,
-    repay_amount: Uint256,
+    repay_amount: Uint128,
     asset_type: AssetType,
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
@@ -891,10 +896,10 @@ pub fn execute_repay(
     market_apply_accumulated_interests(&env, &mut market);
 
     let mut repay_amount_scaled =
-        repay_amount / get_updated_borrow_index(&market, env.block.time.seconds());
+        repay_amount * reverse_decimal(get_updated_borrow_index(&market, env.block.time.seconds()));
 
     let mut messages = vec![];
-    let mut refund_amount = Uint256::zero();
+    let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
         // TODO: Should we log this?
@@ -921,17 +926,17 @@ pub fn execute_repay(
         repay_amount_scaled = debt.amount_scaled;
     }
 
-    debt.amount_scaled = debt.amount_scaled - repay_amount_scaled;
+    debt.amount_scaled -= repay_amount_scaled;
     DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
         return Err(StdError::generic_err("Amount to repay is greater than total debt").into());
     }
-    market.debt_total_scaled = market.debt_total_scaled - repay_amount_scaled;
-    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint256::zero())?;
+    market.debt_total_scaled -= repay_amount_scaled;
+    market_update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
-    if debt.amount_scaled == Uint256::zero() {
+    if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
         let mut user = USERS.load(deps.storage, &repayer_address)?;
         unset_bit(&mut user.borrowed_assets, market.index)?;
@@ -957,7 +962,7 @@ pub fn execute_liquidate(
     collateral_asset: Asset,
     debt_asset: Asset,
     user_address: Addr,
-    sent_debt_asset_amount: Uint256,
+    sent_debt_asset_amount: Uint128,
     receive_ma_token: bool,
 ) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
@@ -997,12 +1002,12 @@ pub fn execute_liquidate(
 
     // check if user has available collateral in specified collateral asset to be liquidated
     let user_collateral_balance = get_updated_liquidity_index(&collateral_market, block_time)
-        * Uint256::from(cw20_get_balance(
+        * cw20_get_balance(
             &deps.querier,
             collateral_market.ma_token_address.clone(),
             user_address.clone(),
-        )?);
-    if user_collateral_balance == Uint256::zero() {
+        )?;
+    if user_collateral_balance.is_zero() {
         return Err(StdError::generic_err(
             "user has no balance in specified collateral asset to be liquidated",
         )
@@ -1048,7 +1053,7 @@ pub fn execute_liquidate(
     };
 
     // if health factor is not less than one the user cannot be liquidated
-    if health_factor >= Decimal256::one() {
+    if health_factor >= Decimal::one() {
         return Err(StdError::generic_err(
             "User's health factor is not less than 1 and thus cannot be liquidated",
         )
@@ -1101,14 +1106,14 @@ pub fn execute_liquidate(
         }
 
         let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
-            / get_updated_liquidity_index(&collateral_market, block_time);
+            * reverse_decimal(get_updated_liquidity_index(&collateral_market, block_time));
 
         messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_market.ma_token_address.to_string(),
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
                 sender: user_address.to_string(),
                 recipient: liquidator_address.to_string(),
-                amount: collateral_amount_to_liquidate_scaled.into(),
+                amount: collateral_amount_to_liquidate_scaled,
             })?,
             funds: vec![],
         }));
@@ -1117,20 +1122,16 @@ pub fn execute_liquidate(
 
         // Ensure contract has enough collateral to send back underlying asset
         let contract_collateral_balance = match collateral_asset.clone() {
-            Asset::Native { denom } => Uint256::from(
+            Asset::Native { denom } => {
                 deps.querier
                     .query_balance(env.contract.address.clone(), denom.as_str())?
-                    .amount,
-            ),
+                    .amount
+            }
             Asset::Cw20 {
                 contract_addr: token_addr,
             } => {
                 let token_addr = deps.api.addr_validate(&token_addr)?;
-                Uint256::from(cw20_get_balance(
-                    &deps.querier,
-                    token_addr,
-                    env.contract.address.clone(),
-                )?)
+                cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
             }
         };
         let contract_collateral_balance = contract_collateral_balance
@@ -1153,13 +1154,14 @@ pub fn execute_liquidate(
         )?;
 
         let collateral_amount_to_liquidate_scaled = collateral_amount_to_liquidate
-            / get_updated_liquidity_index(&collateral_market, block_time);
+            * reverse_decimal(get_updated_liquidity_index(&collateral_market, block_time));
 
         let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: collateral_market.ma_token_address.to_string(),
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
                 user: user_address.to_string(),
-                amount: collateral_amount_to_liquidate_scaled.into(),
+
+                amount: collateral_amount_to_liquidate_scaled,
             })?,
             funds: vec![],
         });
@@ -1185,7 +1187,7 @@ pub fn execute_liquidate(
     // 5. Update debt market and positions
 
     let debt_amount_to_repay_scaled =
-        debt_amount_to_repay / get_updated_borrow_index(&debt_market, block_time);
+        debt_amount_to_repay * reverse_decimal(get_updated_borrow_index(&debt_market, block_time));
 
     // update user and market debt
     let mut debt = DEBTS.load(
@@ -1193,13 +1195,13 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
-    debt.amount_scaled = debt.amount_scaled - debt_amount_to_repay_scaled;
+    debt.amount_scaled -= debt_amount_to_repay_scaled;
     DEBTS.save(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
         &debt,
     )?;
-    debt_market.debt_total_scaled = debt_market.debt_total_scaled - debt_amount_to_repay_scaled;
+    debt_market.debt_total_scaled -= debt_amount_to_repay_scaled;
 
     market_update_interest_rates(
         &deps,
@@ -1219,7 +1221,7 @@ pub fn execute_liquidate(
 
     // 6. Build response
     // refund sent amount in excess of actual debt amount to liquidate
-    if refund_amount > Uint256::zero() {
+    if refund_amount > Uint128::zero() {
         let refund_msg = build_send_asset_msg(
             deps.as_ref(),
             env.contract.address,
@@ -1262,14 +1264,14 @@ pub fn execute_liquidate(
 /// collateral to liquidate (in collateral asset) and
 /// amount to refund the liquidator (in debt asset)
 fn liquidation_compute_amounts(
-    collateral_price: Decimal256,
-    debt_price: Decimal256,
-    close_factor: Decimal256,
-    user_collateral_balance: Uint256,
-    liquidation_bonus: Decimal256,
-    user_debt_asset_total_debt: Uint256,
-    sent_debt_asset_amount: Uint256,
-) -> (Uint256, Uint256, Uint256) {
+    collateral_price: Decimal,
+    debt_price: Decimal,
+    close_factor: Decimal,
+    user_collateral_balance: Uint128,
+    liquidation_bonus: Decimal,
+    user_debt_asset_total_debt: Uint128,
+    sent_debt_asset_amount: Uint128,
+) -> (Uint128, Uint128, Uint128) {
     // Debt: Only up to a fraction of the total debt (determined by the close factor) can be
     // repayed.
     let max_repayable_debt = close_factor * user_debt_asset_total_debt;
@@ -1284,17 +1286,17 @@ fn liquidation_compute_amounts(
     // bonus
     let debt_amount_to_repay_in_uusd = debt_amount_to_repay * debt_price;
     let collateral_amount_to_liquidate_in_uusd =
-        debt_amount_to_repay_in_uusd * (Decimal256::one() + liquidation_bonus);
+        debt_amount_to_repay_in_uusd * (Decimal::one() + liquidation_bonus);
     let mut collateral_amount_to_liquidate =
-        collateral_amount_to_liquidate_in_uusd / collateral_price;
+        collateral_amount_to_liquidate_in_uusd * reverse_decimal(collateral_price);
 
     // If collateral amount to liquidate is higher than user_collateral_balance,
     // liquidate the full balance and adjust the debt amount to repay accordingly
     if collateral_amount_to_liquidate > user_collateral_balance {
         collateral_amount_to_liquidate = user_collateral_balance;
-        debt_amount_to_repay = collateral_price * collateral_amount_to_liquidate
-            / debt_price
-            / (Decimal256::one() + liquidation_bonus);
+        debt_amount_to_repay = (collateral_price * collateral_amount_to_liquidate)
+            * reverse_decimal(debt_price)
+            * reverse_decimal(Decimal::one() + liquidation_bonus);
     }
 
     let refund_amount = sent_debt_asset_amount - debt_amount_to_repay;
@@ -1339,7 +1341,7 @@ pub fn execute_finalize_liquidity_token_transfer(
         global_state.market_count,
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
-        if health_factor < Decimal256::one() {
+        if health_factor < Decimal::one() {
             return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender").into());
         }
     }
@@ -1347,12 +1349,12 @@ pub fn execute_finalize_liquidity_token_transfer(
     // Update users's positions
     // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
-        if from_previous_balance.checked_sub(amount)? == Uint128::zero() {
+        if from_previous_balance.checked_sub(amount)?.is_zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
             USERS.save(deps.storage, &from_address, &from_user)?;
         }
 
-        if (to_previous_balance == Uint128::zero()) && (amount != Uint128::zero()) {
+        if to_previous_balance.is_zero() && !amount.is_zero() {
             let mut to_user = USERS
                 .may_load(deps.storage, &to_address)?
                 .unwrap_or_default();
@@ -1394,7 +1396,7 @@ pub fn execute_update_uncollateralized_loan_limit(
         (asset_reference.as_slice(), &user_address),
         |debt_opt: Option<Debt>| -> StdResult<_> {
             let mut debt = debt_opt.unwrap_or(Debt {
-                amount_scaled: Uint256::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: false,
             });
             // if limit == 0 then uncollateralized = false, otherwise uncollateralized = true
@@ -1464,7 +1466,7 @@ pub fn execute_distribute_protocol_income(
     env: Env,
     _info: MessageInfo,
     asset: Asset,
-    amount: Option<Uint256>,
+    amount: Option<Uint128>,
 ) -> Result<Response, ContractError> {
     // Get config
     let config = CONFIG.load(deps.storage)?;
@@ -1484,8 +1486,7 @@ pub fn execute_distribute_protocol_income(
         .into());
     }
 
-    market.protocol_income_to_distribute =
-        market.protocol_income_to_distribute - amount_to_distribute;
+    market.protocol_income_to_distribute -= amount_to_distribute;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     let mars_contracts = vec![
@@ -1513,7 +1514,7 @@ pub fn execute_distribute_protocol_income(
         ))
         .into());
     }
-    let staking_amount = amount_to_distribute - (amount_to_distribute_before_staking_rewards);
+    let staking_amount = amount_to_distribute - amount_to_distribute_before_staking_rewards;
 
     let mut messages = vec![];
     // only build and add send message if fee is non-zero
@@ -1529,13 +1530,16 @@ pub fn execute_distribute_protocol_income(
     }
 
     if !treasury_amount.is_zero() {
-        let scaled_mint_amount =
-            treasury_amount / get_updated_liquidity_index(&market, env.block.time.seconds());
+        let scaled_mint_amount = treasury_amount
+            * reverse_decimal(get_updated_liquidity_index(
+                &market,
+                env.block.time.seconds(),
+            ));
         let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: treasury_address.into(),
-                amount: scaled_mint_amount.into(),
+                amount: scaled_mint_amount,
             })?,
             funds: vec![],
         });
@@ -1684,7 +1688,7 @@ fn query_debt(deps: Deps, address: Addr) -> StdResult<DebtResponse> {
             } else {
                 Ok(DebtInfo {
                     denom,
-                    amount: Uint256::zero(),
+                    amount: Uint128::zero(),
                 })
             }
         })
@@ -1747,14 +1751,14 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
     if market.interests_last_updated < current_timestamp {
         let time_elapsed = current_timestamp - market.interests_last_updated;
 
-        if market.borrow_rate > Decimal256::zero() {
+        if market.borrow_rate > Decimal::zero() {
             market.borrow_index = calculate_applied_linear_interest_rate(
                 market.borrow_index,
                 market.borrow_rate,
                 time_elapsed,
             );
         }
-        if market.liquidity_rate > Decimal256::zero() {
+        if market.liquidity_rate > Decimal::zero() {
             market.liquidity_index = calculate_applied_linear_interest_rate(
                 market.liquidity_index,
                 market.liquidity_rate,
@@ -1770,7 +1774,7 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
     let interest_accrued = if new_debt_total > previous_debt_total {
         new_debt_total - previous_debt_total
     } else {
-        Uint256::zero()
+        Uint128::zero()
     };
 
     let new_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
@@ -1780,11 +1784,11 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 {
+pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
-        if market.borrow_rate > Decimal256::zero() {
+        if market.borrow_rate > Decimal::zero() {
             let applied_interest_rate = calculate_applied_linear_interest_rate(
                 market.borrow_index,
                 market.borrow_rate,
@@ -1800,11 +1804,11 @@ pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal256 
 /// Return applied interest rate for liquidity index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal256 {
+pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
-        if market.liquidity_rate > Decimal256::zero() {
+        if market.liquidity_rate > Decimal::zero() {
             let applied_interest_rate = calculate_applied_linear_interest_rate(
                 market.liquidity_index,
                 market.liquidity_rate,
@@ -1818,13 +1822,15 @@ pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal2
 }
 
 fn calculate_applied_linear_interest_rate(
-    index: Decimal256,
-    rate: Decimal256,
+    index: Decimal,
+    rate: Decimal,
     time_elapsed: u64,
-) -> Decimal256 {
-    let rate_factor =
-        rate * Decimal256::from_uint256(time_elapsed) / Decimal256::from_uint256(SECONDS_PER_YEAR);
-    index * (Decimal256::one() + rate_factor)
+) -> Decimal {
+    let rate_factor = decimal_multiplication(
+        rate,
+        Decimal::from_ratio(Uint128::from(time_elapsed), Uint128::from(SECONDS_PER_YEAR)),
+    );
+    decimal_multiplication(index, Decimal::one() + rate_factor)
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -1834,7 +1840,7 @@ pub fn market_update_interest_rates(
     env: &Env,
     reference: &[u8],
     market: &mut Market,
-    liquidity_taken: Uint256,
+    liquidity_taken: Uint128,
 ) -> StdResult<()> {
     let contract_balance_amount = match market.asset_type {
         AssetType::Native => {
@@ -1865,14 +1871,14 @@ pub fn market_update_interest_rates(
     // TODO: Verify on integration tests that this balance includes the
     // amount sent by the user on deposits and repays(both for cw20 and native).
     // If it doesn't, we should include them on the available_liquidity
-    let contract_current_balance = Uint256::from(contract_balance_amount);
+    let contract_current_balance = contract_balance_amount;
 
     // Get protocol income to be deducted from liquidity (doesn't belong to the money market
     // anymore)
     let config = CONFIG.load(deps.storage)?;
     // NOTE: No check for underflow because this is done on config validations
     let protocol_income_minus_treasury_amount =
-        (Decimal256::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
+        (Decimal::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
     let liquidity_to_deduct_from_current_balance =
         liquidity_taken + protocol_income_minus_treasury_amount;
 
@@ -1884,19 +1890,17 @@ pub fn market_update_interest_rates(
                 "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
             ));
         }
-        Decimal256::zero()
+        Uint128::zero()
     } else {
-        Decimal256::from_uint256(
-            contract_current_balance - liquidity_to_deduct_from_current_balance,
-        )
+        contract_current_balance - liquidity_to_deduct_from_current_balance
     };
 
-    let total_debt = Decimal256::from_uint256(market.debt_total_scaled)
-        * get_updated_borrow_index(market, env.block.time.seconds());
-    let current_utilization_rate = if total_debt > Decimal256::zero() {
-        total_debt / (available_liquidity + total_debt)
+    let total_debt =
+        market.debt_total_scaled * get_updated_borrow_index(market, env.block.time.seconds());
+    let current_utilization_rate = if total_debt > Uint128::zero() {
+        Decimal::from_ratio(total_debt, available_liquidity + total_debt)
     } else {
-        Decimal256::zero()
+        Decimal::zero()
     };
 
     let (new_borrow_rate, new_liquidity_rate) =
@@ -1923,12 +1927,12 @@ fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 // HELPERS
 
 // native coins
-fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint256 {
+fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint128 {
     coins
         .iter()
         .find(|c| c.denom == denom)
-        .map(|c| Uint256::from(c.amount))
-        .unwrap_or_else(Uint256::zero)
+        .map(|c| c.amount)
+        .unwrap_or_else(Uint128::zero)
 }
 
 fn get_market_denom(
@@ -1996,7 +2000,7 @@ fn build_send_asset_msg(
     sender_address: Addr,
     recipient_address: Addr,
     asset: Asset,
-    amount: Uint256,
+    amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     match asset {
         Asset::Native { denom } => Ok(build_send_native_asset_msg(
@@ -2022,7 +2026,7 @@ fn build_send_native_asset_msg(
     _sender: Addr,
     recipient: Addr,
     denom: &str,
-    amount: Uint256,
+    amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Bank(BankMsg::Send {
         to_address: recipient.into(),
@@ -2030,7 +2034,7 @@ fn build_send_native_asset_msg(
             deps,
             Coin {
                 denom: denom.to_string(),
-                amount: amount.into(),
+                amount,
             },
         )?],
     }))
@@ -2039,13 +2043,13 @@ fn build_send_native_asset_msg(
 fn build_send_cw20_token_msg(
     recipient: Addr,
     token_contract_address: Addr,
-    amount: Uint256,
+    amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: token_contract_address.into(),
         msg: to_binary(&Cw20ExecuteMsg::Transfer {
             recipient: recipient.into(),
-            amount: amount.into(),
+            amount,
         })?,
         funds: vec![],
     }))
@@ -2089,12 +2093,12 @@ mod tests {
 
     #[test]
     fn test_accumulated_index_calculation() {
-        let index = Decimal256::from_ratio(1, 10);
-        let rate = Decimal256::from_ratio(2, 10);
+        let index = Decimal::from_ratio(1u128, 10u128);
+        let rate = Decimal::from_ratio(2u128, 10u128);
         let time_elapsed = 15768000; // half a year
         let accumulated = calculate_applied_linear_interest_rate(index, rate, time_elapsed);
 
-        assert_eq!(accumulated, Decimal256::from_ratio(11, 100));
+        assert_eq!(accumulated, Decimal::from_ratio(11u128, 100u128));
     }
 
     #[test]
@@ -2136,9 +2140,9 @@ mod tests {
         // *
         // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
         // *
-        let mut insurance_fund_fee_share = Decimal256::from_ratio(11, 10);
-        let mut treasury_fee_share = Decimal256::from_ratio(12, 10);
-        let mut close_factor = Decimal256::from_ratio(13, 10);
+        let mut insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
+        let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
+        let mut close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
@@ -2154,9 +2158,9 @@ mod tests {
         // *
         // init config with invalid fee share amounts
         // *
-        insurance_fund_fee_share = Decimal256::from_ratio(7, 10);
-        treasury_fee_share = Decimal256::from_ratio(4, 10);
-        close_factor = Decimal256::from_ratio(1, 2);
+        insurance_fund_fee_share = Decimal::from_ratio(7u128, 10u128);
+        treasury_fee_share = Decimal::from_ratio(4u128, 10u128);
+        close_factor = Decimal::from_ratio(1u128, 2u128);
         let config = CreateOrUpdateConfig {
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
@@ -2174,9 +2178,9 @@ mod tests {
         // *
         // init config with valid params
         // *
-        insurance_fund_fee_share = Decimal256::from_ratio(5, 10);
-        treasury_fee_share = Decimal256::from_ratio(3, 10);
-        close_factor = Decimal256::from_ratio(1, 2);
+        insurance_fund_fee_share = Decimal::from_ratio(5u128, 10u128);
+        treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
+        close_factor = Decimal::from_ratio(1u128, 2u128);
         let config = CreateOrUpdateConfig {
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
@@ -2207,9 +2211,9 @@ mod tests {
         // *
         // init config with valid params
         // *
-        let mut insurance_fund_fee_share = Decimal256::from_ratio(1, 10);
-        let mut treasury_fee_share = Decimal256::from_ratio(3, 10);
-        let mut close_factor = Decimal256::from_ratio(1, 4);
+        let mut insurance_fund_fee_share = Decimal::from_ratio(1u128, 10u128);
+        let mut treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
+        let mut close_factor = Decimal::from_ratio(1u128, 4u128);
         let init_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
@@ -2238,9 +2242,9 @@ mod tests {
         // *
         // update config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
         // *
-        insurance_fund_fee_share = Decimal256::from_ratio(11, 10);
-        treasury_fee_share = Decimal256::from_ratio(12, 10);
-        close_factor = Decimal256::from_ratio(13, 10);
+        insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
+        treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
+        close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
@@ -2257,7 +2261,7 @@ mod tests {
         // *
         // update config with invalid fee share amounts
         // *
-        insurance_fund_fee_share = Decimal256::from_ratio(10, 10);
+        insurance_fund_fee_share = Decimal::from_ratio(10u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
             insurance_fund_fee_share: Some(insurance_fund_fee_share),
@@ -2278,9 +2282,9 @@ mod tests {
         // *
         // update config with all new params
         // *
-        insurance_fund_fee_share = Decimal256::from_ratio(5, 100);
-        treasury_fee_share = Decimal256::from_ratio(3, 100);
-        close_factor = Decimal256::from_ratio(1, 20);
+        insurance_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
+        treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
+        close_factor = Decimal::from_ratio(1u128, 20u128);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
@@ -2329,10 +2333,10 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
-            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
+            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
-            close_factor: Some(Decimal256::from_ratio(1, 2)),
+            close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
         let msg = InstantiateMsg { config };
         let info = mock_info("owner");
@@ -2342,19 +2346,19 @@ mod tests {
         // non owner is not authorized
         // *
         let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(5, 100),
-            max_borrow_rate: Decimal256::from_ratio(50, 100),
-            kp_1: Decimal256::from_ratio(3, 1),
-            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
-            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
-            kp_2: Decimal256::from_ratio(2, 1),
+            min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
+            max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
+            kp_1: Decimal::from_ratio(3u128, 1u128),
+            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+            kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
+            kp_2: Decimal::from_ratio(2u128, 1u128),
         };
         let asset_params = InitOrUpdateAssetParams {
-            initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            max_loan_to_value: Some(Decimal256::from_ratio(8, 10)),
-            reserve_factor: Some(Decimal256::from_ratio(1, 100)),
-            maintenance_margin: Some(Decimal256::one()),
-            liquidation_bonus: Some(Decimal256::zero()),
+            initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
+            max_loan_to_value: Some(Decimal::from_ratio(8u128, 10u128)),
+            reserve_factor: Some(Decimal::from_ratio(1u128, 100u128)),
+            maintenance_margin: Some(Decimal::one()),
+            liquidation_bonus: Some(Decimal::zero()),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::InitAsset {
@@ -2393,8 +2397,8 @@ mod tests {
         // init asset with some params greater than 1
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
-            max_loan_to_value: Some(Decimal256::from_ratio(110, 10)),
-            reserve_factor: Some(Decimal256::from_ratio(120, 100)),
+            max_loan_to_value: Some(Decimal::from_ratio(110u128, 10u128)),
+            reserve_factor: Some(Decimal::from_ratio(120u128, 100u128)),
             ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
@@ -2412,8 +2416,8 @@ mod tests {
         // init asset where LTV >= liquidity threshold
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
-            max_loan_to_value: Some(Decimal256::from_ratio(5, 10)),
-            maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
+            max_loan_to_value: Some(Decimal::from_ratio(5u128, 10u128)),
+            maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
             ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
@@ -2438,8 +2442,8 @@ mod tests {
         // init asset where min borrow rate >= max borrow rate
         // *
         let invalid_dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(5, 10),
-            max_borrow_rate: Decimal256::from_ratio(4, 10),
+            min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+            max_borrow_rate: Decimal::from_ratio(4u128, 10u128),
             ..dynamic_ir.clone()
         };
         let invalid_asset_params = InitOrUpdateAssetParams {
@@ -2460,7 +2464,7 @@ mod tests {
         // init asset where optimal utilization rate > 1
         // *
         let invalid_dynamic_ir = DynamicInterestRate {
-            optimal_utilization_rate: Decimal256::from_ratio(11, 10),
+            optimal_utilization_rate: Decimal::from_ratio(11u128, 10u128),
             ..dynamic_ir.clone()
         };
         let invalid_asset_params = InitOrUpdateAssetParams {
@@ -2584,7 +2588,7 @@ mod tests {
         // should have asset market with contract address
         let market = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(Addr::unchecked("mtokencontract"), market.ma_token_address);
-        assert_eq!(Decimal256::one(), market.liquidity_index);
+        assert_eq!(Decimal::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
@@ -2652,7 +2656,7 @@ mod tests {
         // should have asset market with contract address
         let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
         assert_eq!(Addr::unchecked("mtokencontract"), market.ma_token_address);
-        assert_eq!(Decimal256::one(), market.liquidity_index);
+        assert_eq!(Decimal::one(), market.liquidity_index);
 
         // *
         // calling this again should not be allowed
@@ -2673,10 +2677,10 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
-            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
+            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
-            close_factor: Some(Decimal256::from_ratio(1, 2)),
+            close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
         let msg = InstantiateMsg { config };
         let info = mock_info("owner");
@@ -2686,19 +2690,19 @@ mod tests {
         // non owner is not authorized
         // *
         let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(5, 100),
-            max_borrow_rate: Decimal256::from_ratio(50, 100),
-            kp_1: Decimal256::from_ratio(3, 1),
-            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
-            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
-            kp_2: Decimal256::from_ratio(2, 1),
+            min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
+            max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
+            kp_1: Decimal::from_ratio(3u128, 1u128),
+            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+            kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
+            kp_2: Decimal::from_ratio(2u128, 1u128),
         };
         let asset_params = InitOrUpdateAssetParams {
-            initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
-            reserve_factor: Some(Decimal256::from_ratio(1, 100)),
-            maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
-            liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
+            initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
+            max_loan_to_value: Some(Decimal::from_ratio(50u128, 100u128)),
+            reserve_factor: Some(Decimal::from_ratio(1u128, 100u128)),
+            maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
+            liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -2743,7 +2747,7 @@ mod tests {
         // update asset with some params greater than 1
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
-            maintenance_margin: Some(Decimal256::from_ratio(110, 10)),
+            maintenance_margin: Some(Decimal::from_ratio(110u128, 10u128)),
             ..asset_params.clone()
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -2761,8 +2765,8 @@ mod tests {
         // update asset where LTV >= liquidity threshold
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
-            max_loan_to_value: Some(Decimal256::from_ratio(6, 10)),
-            maintenance_margin: Some(Decimal256::from_ratio(5, 10)),
+            max_loan_to_value: Some(Decimal::from_ratio(6u128, 10u128)),
+            maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
             ..asset_params
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -2787,8 +2791,8 @@ mod tests {
         // init asset where min borrow rate >= max borrow rate
         // *
         let invalid_dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(4, 10),
-            max_borrow_rate: Decimal256::from_ratio(4, 10),
+            min_borrow_rate: Decimal::from_ratio(4u128, 10u128),
+            max_borrow_rate: Decimal::from_ratio(4u128, 10u128),
             ..dynamic_ir
         };
         let invalid_asset_params = InitOrUpdateAssetParams {
@@ -2809,7 +2813,7 @@ mod tests {
         // init asset where optimal utilization rate > 1
         // *
         let invalid_dynamic_ir = DynamicInterestRate {
-            optimal_utilization_rate: Decimal256::from_ratio(11, 10),
+            optimal_utilization_rate: Decimal::from_ratio(11u128, 10u128),
             ..dynamic_ir
         };
         let invalid_asset_params = InitOrUpdateAssetParams {
@@ -2833,19 +2837,19 @@ mod tests {
         // update asset with new params
         // *
         let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(5, 100),
-            max_borrow_rate: Decimal256::from_ratio(50, 100),
-            kp_1: Decimal256::from_ratio(3, 1),
-            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
-            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
-            kp_2: Decimal256::from_ratio(2, 1),
+            min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
+            max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
+            kp_1: Decimal::from_ratio(3u128, 1u128),
+            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+            kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
+            kp_2: Decimal::from_ratio(2u128, 1u128),
         };
         let asset_params = InitOrUpdateAssetParams {
-            initial_borrow_rate: Some(Decimal256::from_ratio(20, 100)),
-            max_loan_to_value: Some(Decimal256::from_ratio(60, 100)),
-            reserve_factor: Some(Decimal256::from_ratio(10, 100)),
-            maintenance_margin: Some(Decimal256::from_ratio(90, 100)),
-            liquidation_bonus: Some(Decimal256::from_ratio(12, 100)),
+            initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
+            max_loan_to_value: Some(Decimal::from_ratio(60u128, 100u128)),
+            reserve_factor: Some(Decimal::from_ratio(10u128, 100u128)),
+            maintenance_margin: Some(Decimal::from_ratio(90u128, 100u128)),
+            liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
         let msg = ExecuteMsg::UpdateAsset {
@@ -2963,29 +2967,29 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
-            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
+            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
-            close_factor: Some(Decimal256::from_ratio(1, 2)),
+            close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
         let msg = InstantiateMsg { config };
         let info = mock_info("owner");
         instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal256::from_ratio(10, 100),
-            max_borrow_rate: Decimal256::from_ratio(60, 100),
-            kp_1: Decimal256::from_ratio(4, 1),
-            optimal_utilization_rate: Decimal256::from_ratio(90, 100),
-            kp_augmentation_threshold: Decimal256::from_ratio(2000, 1),
-            kp_2: Decimal256::from_ratio(3, 1),
+            min_borrow_rate: Decimal::from_ratio(10u128, 100u128),
+            max_borrow_rate: Decimal::from_ratio(60u128, 100u128),
+            kp_1: Decimal::from_ratio(4u128, 1u128),
+            optimal_utilization_rate: Decimal::from_ratio(90u128, 100u128),
+            kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
+            kp_2: Decimal::from_ratio(3u128, 1u128),
         };
         let asset_params_with_dynamic_ir = InitOrUpdateAssetParams {
-            initial_borrow_rate: Some(Decimal256::from_ratio(15, 100)),
-            max_loan_to_value: Some(Decimal256::from_ratio(50, 100)),
-            reserve_factor: Some(Decimal256::from_ratio(2, 100)),
-            maintenance_margin: Some(Decimal256::from_ratio(80, 100)),
-            liquidation_bonus: Some(Decimal256::from_ratio(10, 100)),
+            initial_borrow_rate: Some(Decimal::from_ratio(15u128, 100u128)),
+            max_loan_to_value: Some(Decimal::from_ratio(50u128, 100u128)),
+            reserve_factor: Some(Decimal::from_ratio(2u128, 100u128)),
+            maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
+            liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
 
@@ -3006,10 +3010,10 @@ mod tests {
         );
 
         let linear_ir = LinearInterestRate {
-            optimal_utilization_rate: Decimal256::from_ratio(80, 100),
-            base: Decimal256::from_ratio(0, 100),
-            slope_1: Decimal256::from_ratio(8, 100),
-            slope_2: Decimal256::from_ratio(48, 100),
+            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+            base: Decimal::from_ratio(0u128, 100u128),
+            slope_1: Decimal::from_ratio(8u128, 100u128),
+            slope_2: Decimal::from_ratio(48u128, 100u128),
         };
         let asset_params_with_linear_ir = InitOrUpdateAssetParams {
             interest_rate_strategy: Some(InterestRateStrategy::Linear(linear_ir.clone())),
@@ -3052,17 +3056,17 @@ mod tests {
     fn test_deposit_native_asset() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
-        let reserve_factor = Decimal256::from_ratio(1, 10);
+        let reserve_factor = Decimal::from_ratio(1u128, 10u128);
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            liquidity_index: Decimal256::from_ratio(11, 10),
-            max_loan_to_value: Decimal256::one(),
-            borrow_index: Decimal256::from_ratio(1, 1),
-            borrow_rate: Decimal256::from_ratio(10, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
+            liquidity_index: Decimal::from_ratio(11u128, 10u128),
+            max_loan_to_value: Decimal::one(),
+            borrow_index: Decimal::from_ratio(1u128, 1u128),
+            borrow_rate: Decimal::from_ratio(10u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor,
-            debt_total_scaled: Uint256::from(10000000u128),
+            debt_total_scaled: Uint128::from(10000000u128),
             interests_last_updated: 10000000,
             ..Default::default()
         };
@@ -3086,7 +3090,7 @@ mod tests {
         );
 
         let expected_mint_amount =
-            (Uint256::from(deposit_amount) / expected_params.liquidity_index).into();
+            Uint128::from(deposit_amount) * reverse_decimal(expected_params.liquidity_index);
 
         // mints coin_amount/liquidity_index
         assert_eq!(
@@ -3154,12 +3158,12 @@ mod tests {
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            liquidity_index: Decimal256::from_ratio(11, 10),
-            max_loan_to_value: Decimal256::one(),
-            borrow_index: Decimal256::from_ratio(1, 1),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(4, 100),
-            debt_total_scaled: Uint256::from(10_000_000u128),
+            liquidity_index: Decimal::from_ratio(11u128, 10u128),
+            max_loan_to_value: Decimal::one(),
+            borrow_index: Decimal::from_ratio(1u128, 1u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(4u128, 100u128),
+            debt_total_scaled: Uint128::from(10_000_000u128),
             interests_last_updated: 10_000_000,
             asset_type: AssetType::Cw20,
             ..Default::default()
@@ -3198,8 +3202,8 @@ mod tests {
             Default::default(),
         );
 
-        let expected_mint_amount: Uint256 =
-            Uint256::from(deposit_amount) / expected_params.liquidity_index;
+        let expected_mint_amount =
+            Uint128::from(deposit_amount) * reverse_decimal(expected_params.liquidity_index);
 
         let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
 
@@ -3209,7 +3213,7 @@ mod tests {
                 contract_addr: "matoken".to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Mint {
                     recipient: "depositor".to_string(),
-                    amount: expected_mint_amount.into(),
+                    amount: expected_mint_amount,
                 })
                 .unwrap(),
                 funds: vec![]
@@ -3284,20 +3288,20 @@ mod tests {
             &[(String::from("somecoin"), Uint128::new(100u128))],
         );
 
-        let initial_liquidity_index = Decimal256::from_ratio(15, 10);
+        let initial_liquidity_index = Decimal::from_ratio(15u128, 10u128);
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: initial_liquidity_index,
-            borrow_index: Decimal256::from_ratio(2, 1),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(1, 10),
-            debt_total_scaled: Uint256::from(10000000u128),
+            borrow_index: Decimal::from_ratio(2u128, 1u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(1u128, 10u128),
+            debt_total_scaled: Uint128::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let withdraw_amount = Uint256::from(20000u128);
+        let withdraw_amount = Uint128::from(20000u128);
         let seconds_elapsed = 2000u64;
 
         deps.querier.set_cw20_balances(
@@ -3344,7 +3348,8 @@ mod tests {
             },
         );
 
-        let withdraw_amount_scaled = withdraw_amount / expected_params.liquidity_index;
+        let withdraw_amount_scaled =
+            withdraw_amount * reverse_decimal(expected_params.liquidity_index);
 
         assert_eq!(
             res.messages,
@@ -3425,20 +3430,20 @@ mod tests {
             &[(Addr::unchecked("withdrawer"), Uint128::new(2000000u128))],
         );
 
-        let initial_liquidity_index = Decimal256::from_ratio(15, 10);
+        let initial_liquidity_index = Decimal::from_ratio(15u128, 10u128);
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: initial_liquidity_index,
-            borrow_index: Decimal256::from_ratio(2, 1),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(2, 100),
-            debt_total_scaled: Uint256::from(10000000u128),
+            borrow_index: Decimal::from_ratio(2u128, 1u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(2u128, 100u128),
+            debt_total_scaled: Uint128::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let withdraw_amount = Uint256::from(20000u128);
+        let withdraw_amount = Uint128::from(20000u128);
         let seconds_elapsed = 2000u64;
 
         let market_initial =
@@ -3484,7 +3489,8 @@ mod tests {
             },
         );
 
-        let withdraw_amount_scaled = withdraw_amount / expected_params.liquidity_index;
+        let withdraw_amount_scaled =
+            withdraw_amount * reverse_decimal(expected_params.liquidity_index);
 
         assert_eq!(
             res.messages,
@@ -3549,7 +3555,7 @@ mod tests {
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            liquidity_index: Decimal256::from_ratio(15, 10),
+            liquidity_index: Decimal::from_ratio(15u128, 10u128),
             ..Default::default()
         };
 
@@ -3564,7 +3570,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Some(Uint256::from(2000u128)),
+            amount: Some(Uint128::from(2000u128)),
         };
 
         let info = mock_info("withdrawer");
@@ -3589,30 +3595,30 @@ mod tests {
         let ma_token_1_addr = Addr::unchecked("matoken1");
         let market_1 = Market {
             ma_token_address: ma_token_1_addr.clone(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            max_loan_to_value: Decimal256::from_ratio(40, 100),
-            maintenance_margin: Decimal256::from_ratio(60, 100),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(60u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let ma_token_2_addr = Addr::unchecked("matoken2");
         let market_2 = Market {
             ma_token_address: ma_token_2_addr,
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            max_loan_to_value: Decimal256::from_ratio(50, 100),
-            maintenance_margin: Decimal256::from_ratio(80, 100),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(80u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let ma_token_3_addr = Addr::unchecked("matoken3");
         let market_3 = Market {
             ma_token_address: ma_token_3_addr.clone(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            max_loan_to_value: Decimal256::from_ratio(20, 100),
-            maintenance_margin: Decimal256::from_ratio(40, 100),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(40u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3644,13 +3650,13 @@ mod tests {
 
         // Set user to have positive debt amount in debt asset
         // Uncollateralized debt shouldn't count for health factor
-        let token_2_debt_scaled = Uint256::from(200000u128);
+        let token_2_debt_scaled = Uint128::from(200000u128);
         let debt = Debt {
             amount_scaled: token_2_debt_scaled,
             uncollateralized: false,
         };
         let uncollateralized_debt = Debt {
-            amount_scaled: Uint256::from(200000u128),
+            amount_scaled: Uint128::from(200000u128),
             uncollateralized: true,
         };
         DEBTS
@@ -3681,32 +3687,32 @@ mod tests {
 
         // Calculate how much to withdraw to have health factor equal to one
         let how_much_to_withdraw = {
-            let token_1_weighted_lt_in_uusd = Uint256::from(ma_token_1_balance_scaled)
+            let token_1_weighted_lt_in_uusd = ma_token_1_balance_scaled
                 * get_updated_liquidity_index(&market_1_initial, env.block.time.seconds())
                 * market_1_initial.maintenance_margin
-                * Decimal256::from(token_1_exchange_rate);
-            let token_3_weighted_lt_in_uusd = Uint256::from(ma_token_3_balance_scaled)
+                * token_1_exchange_rate;
+            let token_3_weighted_lt_in_uusd = ma_token_3_balance_scaled
                 * get_updated_liquidity_index(&market_3_initial, env.block.time.seconds())
                 * market_3_initial.maintenance_margin
-                * Decimal256::from(token_3_exchange_rate);
+                * token_3_exchange_rate;
             let weighted_maintenance_margin_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
             let total_collateralized_debt_in_uusd = token_2_debt_scaled
                 * get_updated_borrow_index(&market_2_initial, env.block.time.seconds())
-                * Decimal256::from(token_2_exchange_rate);
+                * token_2_exchange_rate;
 
             // How much to withdraw in uusd to have health factor equal to one
             let how_much_to_withdraw_in_uusd = (weighted_maintenance_margin_in_uusd
                 - total_collateralized_debt_in_uusd)
-                / market_3_initial.maintenance_margin;
-            how_much_to_withdraw_in_uusd / Decimal256::from(token_3_exchange_rate)
+                * reverse_decimal(market_3_initial.maintenance_margin);
+            how_much_to_withdraw_in_uusd * reverse_decimal(token_3_exchange_rate)
         };
 
         // Withdraw token3 with failure
         // The withdraw amount needs to be a little bit greater to have health factor less than one
         {
-            let withdraw_amount = how_much_to_withdraw + Uint256::from(10u128);
+            let withdraw_amount = how_much_to_withdraw + Uint128::from(10u128);
             let msg = ExecuteMsg::Withdraw {
                 asset: Asset::Native {
                     denom: "token3".to_string(),
@@ -3724,7 +3730,7 @@ mod tests {
         // Withdraw token3 with success
         // The withdraw amount needs to be a little bit smaller to have health factor greater than one
         {
-            let withdraw_amount = how_much_to_withdraw - Uint256::from(10u128);
+            let withdraw_amount = how_much_to_withdraw - Uint128::from(10u128);
             let msg = ExecuteMsg::Withdraw {
                 asset: Asset::Native {
                     denom: "token3".to_string(),
@@ -3734,7 +3740,10 @@ mod tests {
             let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
             let withdraw_amount_scaled = withdraw_amount
-                / get_updated_liquidity_index(&market_3_initial, env.block.time.seconds());
+                * reverse_decimal(get_updated_liquidity_index(
+                    &market_3_initial,
+                    env.block.time.seconds(),
+                ));
 
             assert_eq!(
                 res.messages,
@@ -3743,7 +3752,7 @@ mod tests {
                         contract_addr: "matoken3".to_string(),
                         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
                             user: withdrawer_addr.to_string(),
-                            amount: withdraw_amount_scaled.into(),
+                            amount: withdraw_amount_scaled,
                         })
                         .unwrap(),
                         funds: vec![]
@@ -3754,7 +3763,7 @@ mod tests {
                             deps.as_ref(),
                             Coin {
                                 denom: String::from("token3"),
-                                amount: withdraw_amount.into(),
+                                amount: withdraw_amount,
                             }
                         )
                         .unwrap()],
@@ -3776,20 +3785,20 @@ mod tests {
             &[(String::from("somecoin"), Uint128::new(100u128))],
         );
 
-        let initial_liquidity_index = Decimal256::from_ratio(15, 10);
+        let initial_liquidity_index = Decimal::from_ratio(15u128, 10u128);
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: initial_liquidity_index,
-            borrow_index: Decimal256::from_ratio(2, 1),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(1, 10),
-            debt_total_scaled: Uint256::from(10000000u128),
+            borrow_index: Decimal::from_ratio(2u128, 1u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(1u128, 10u128),
+            debt_total_scaled: Uint128::from(10000000u128),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let withdrawer_balance_scaled = Uint256::from(123456u128);
+        let withdrawer_balance_scaled = Uint128::from(123456u128);
         let seconds_elapsed = 2000u64;
 
         deps.querier.set_cw20_balances(
@@ -3942,32 +3951,32 @@ mod tests {
 
         let mock_market_1 = Market {
             ma_token_address: Addr::unchecked("matoken1"),
-            borrow_index: Decimal256::from_ratio(12, 10),
-            liquidity_index: Decimal256::from_ratio(8, 10),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(1, 100),
-            debt_total_scaled: Uint256::zero(),
+            borrow_index: Decimal::from_ratio(12u128, 10u128),
+            liquidity_index: Decimal::from_ratio(8u128, 10u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(1u128, 100u128),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
         let mock_market_2 = Market {
             ma_token_address: Addr::unchecked("matoken2"),
-            borrow_index: Decimal256::one(),
-            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal::one(),
+            liquidity_index: Decimal::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let mock_market_3 = Market {
             ma_token_address: Addr::unchecked("matoken3"),
-            borrow_index: Decimal256::one(),
-            liquidity_index: Decimal256::from_ratio(11, 10),
-            max_loan_to_value: Decimal256::from_ratio(7, 10),
-            borrow_rate: Decimal256::from_ratio(30, 100),
-            reserve_factor: Decimal256::from_ratio(3, 100),
-            liquidity_rate: Decimal256::from_ratio(20, 100),
-            debt_total_scaled: Uint256::zero(),
+            borrow_index: Decimal::one(),
+            liquidity_index: Decimal::from_ratio(11u128, 10u128),
+            max_loan_to_value: Decimal::from_ratio(7u128, 10u128),
+            borrow_rate: Decimal::from_ratio(30u128, 100u128),
+            reserve_factor: Decimal::from_ratio(3u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(20u128, 100u128),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -4010,7 +4019,7 @@ mod tests {
             asset: Asset::Cw20 {
                 contract_addr: cw20_contract_addr.to_string(),
             },
-            amount: Uint256::from(borrow_amount),
+            amount: Uint128::from(borrow_amount),
         };
 
         let env = mock_env_at_block_time(block_time);
@@ -4082,7 +4091,7 @@ mod tests {
             )
             .unwrap();
         let expected_debt_scaled_1_after_borrow =
-            Uint256::from(borrow_amount) / expected_params_cw20.borrow_index;
+            Uint128::from(borrow_amount) * reverse_decimal(expected_params_cw20.borrow_index);
 
         let market_1_after_borrow = MARKETS
             .load(&deps.storage, cw20_contract_addr.as_bytes())
@@ -4112,7 +4121,7 @@ mod tests {
             asset: Asset::Cw20 {
                 contract_addr: cw20_contract_addr.to_string(),
             },
-            amount: Uint256::from(borrow_amount),
+            amount: Uint128::from(borrow_amount),
         };
 
         let env = mock_env_at_block_time(block_time);
@@ -4146,7 +4155,7 @@ mod tests {
             .unwrap();
 
         let expected_debt_scaled_1_after_borrow_again = expected_debt_scaled_1_after_borrow
-            + Uint256::from(borrow_amount) / expected_params_cw20.borrow_index;
+            + Uint128::from(borrow_amount) * reverse_decimal(expected_params_cw20.borrow_index);
         assert_eq!(
             expected_debt_scaled_1_after_borrow_again,
             debt.amount_scaled
@@ -4176,7 +4185,7 @@ mod tests {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
-            amount: Uint256::from(borrow_amount),
+            amount: Uint128::from(borrow_amount),
         };
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
@@ -4248,7 +4257,7 @@ mod tests {
         let market_2_after_borrow_2 = MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
         let expected_debt_scaled_2_after_borrow_2 =
-            Uint256::from(borrow_amount) / expected_params_native.borrow_index;
+            Uint128::from(borrow_amount) * reverse_decimal(expected_params_native.borrow_index);
         assert_eq!(expected_debt_scaled_2_after_borrow_2, debt2.amount_scaled);
         assert_eq!(
             expected_debt_scaled_2_after_borrow_2,
@@ -4273,7 +4282,8 @@ mod tests {
             asset: Asset::Native {
                 denom: String::from("borrowedcoinnative"),
             },
-            amount: Uint256::from(83968_u128),
+
+            amount: Uint128::from(83968_u128),
         };
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
@@ -4367,7 +4377,7 @@ mod tests {
             MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
         let expected_debt_scaled_2_after_repay_some_2 = expected_debt_scaled_2_after_borrow_2
-            - Uint256::from(repay_amount) / expected_params_native.borrow_index;
+            - Uint128::from(repay_amount) * reverse_decimal(expected_params_native.borrow_index);
         assert_eq!(
             expected_debt_scaled_2_after_repay_some_2,
             debt2.amount_scaled
@@ -4459,9 +4469,9 @@ mod tests {
         let market_2_after_repay_all_2 =
             MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
-        assert_eq!(Uint256::zero(), debt2.amount_scaled);
+        assert_eq!(Uint128::zero(), debt2.amount_scaled);
         assert_eq!(
-            Uint256::zero(),
+            Uint128::zero(),
             market_2_after_repay_all_2.debt_total_scaled
         );
 
@@ -4509,7 +4519,7 @@ mod tests {
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let expected_repay_amount_scaled =
-            Uint256::from(repay_amount) / expected_params_cw20.borrow_index;
+            Uint128::from(repay_amount) * reverse_decimal(expected_params_cw20.borrow_index);
         let expected_refund_amount: u128 = ((expected_repay_amount_scaled
             - expected_debt_scaled_1_after_borrow_again)
             * expected_params_cw20.borrow_index)
@@ -4570,9 +4580,9 @@ mod tests {
         let market_1_after_repay_1 = MARKETS
             .load(&deps.storage, cw20_contract_addr.as_bytes())
             .unwrap();
-        assert_eq!(Uint256::from(0_u128), debt1.amount_scaled);
+        assert_eq!(Uint128::from(0_u128), debt1.amount_scaled);
         assert_eq!(
-            Uint256::from(0_u128),
+            Uint128::from(0_u128),
             market_1_after_repay_1.debt_total_scaled
         );
     }
@@ -4584,16 +4594,16 @@ mod tests {
         let block_time = 1;
 
         let borrower_addr = Addr::unchecked("borrower");
-        let ltv = Decimal256::from_ratio(7, 10);
+        let ltv = Decimal::from_ratio(7u128, 10u128);
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            liquidity_index: Decimal256::one(),
+            liquidity_index: Decimal::one(),
             max_loan_to_value: ltv,
-            borrow_index: Decimal256::one(),
-            borrow_rate: Decimal256::one(),
-            liquidity_rate: Decimal256::one(),
-            debt_total_scaled: Uint256::zero(),
+            borrow_index: Decimal::one(),
+            borrow_rate: Decimal::one(),
+            liquidity_rate: Decimal::one(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: block_time,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -4629,13 +4639,13 @@ mod tests {
             market.liquidity_rate,
             time_elapsed,
         );
-        let collateral = Decimal256::from_uint256(Uint256::from(deposit_amount)) * liquidity_index;
-        let max_to_borrow = Uint256::one() * (collateral * ltv);
+        let collateral = Uint128::from(deposit_amount) * liquidity_index;
+        let max_to_borrow = collateral * ltv;
         let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
             },
-            amount: max_to_borrow + Uint256::from(1u128),
+            amount: max_to_borrow + Uint128::from(1u128),
         };
         let env = mock_env_at_block_time(new_block_time);
         let info = mock_info("borrower");
@@ -4648,7 +4658,7 @@ mod tests {
             .into()
         );
 
-        let valid_amount = Uint256::from(deposit_amount) * ltv - Uint256::from(1000u128);
+        let valid_amount = Uint128::from(deposit_amount) * ltv - Uint128::from(1000u128);
         let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
                 denom: "uusd".to_string(),
@@ -4694,17 +4704,17 @@ mod tests {
         let info = mock_info("borrower");
         let borrower_addr = Addr::unchecked("borrower");
         let block_time = 1;
-        let ltv = Decimal256::one();
+        let ltv = Decimal::one();
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            liquidity_index: Decimal256::one(),
+            liquidity_index: Decimal::one(),
             max_loan_to_value: ltv,
-            borrow_index: Decimal256::one(),
-            borrow_rate: Decimal256::one(),
-            liquidity_rate: Decimal256::one(),
-            debt_total_scaled: Uint256::zero(),
-            reserve_factor: Decimal256::from_ratio(12, 100),
+            borrow_index: Decimal::one(),
+            borrow_rate: Decimal::one(),
+            liquidity_rate: Decimal::one(),
+            debt_total_scaled: Uint128::zero(),
+            reserve_factor: Decimal::from_ratio(12u128, 100u128),
             interests_last_updated: block_time,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -4830,28 +4840,28 @@ mod tests {
 
         let mock_market_1 = Market {
             ma_token_address: Addr::unchecked("matoken1"),
-            max_loan_to_value: Decimal256::from_ratio(8, 10),
-            debt_total_scaled: Uint256::zero(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
+            max_loan_to_value: Decimal::from_ratio(8u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
         let mock_market_2 = Market {
             ma_token_address: Addr::unchecked("matoken2"),
-            max_loan_to_value: Decimal256::from_ratio(6, 10),
-            debt_total_scaled: Uint256::zero(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
+            max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let mock_market_3 = Market {
             ma_token_address: Addr::unchecked("matoken3"),
-            max_loan_to_value: Decimal256::from_ratio(4, 10),
-            debt_total_scaled: Uint256::zero(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
+            max_loan_to_value: Decimal::from_ratio(4u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -4893,21 +4903,16 @@ mod tests {
         deps.querier
             .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3)]);
 
-        let max_borrow_allowed_in_uusd = (market_1_initial.max_loan_to_value
-            * Uint256::from(balance_1)
-            * Decimal256::from(exchange_rate_1))
-            + (market_2_initial.max_loan_to_value
-                * Uint256::from(balance_2)
-                * Decimal256::from(exchange_rate_2))
-            + (market_3_initial.max_loan_to_value
-                * Uint256::from(balance_3)
-                * Decimal256::from(exchange_rate_3));
+        let max_borrow_allowed_in_uusd =
+            (market_1_initial.max_loan_to_value * balance_1 * exchange_rate_1)
+                + (market_2_initial.max_loan_to_value * balance_2 * exchange_rate_2)
+                + (market_3_initial.max_loan_to_value * balance_3 * exchange_rate_3);
         let exceeding_borrow_amount = (max_borrow_allowed_in_uusd
-            / Decimal256::from(exchange_rate_2))
-            + Uint256::from(100_u64);
+            * reverse_decimal(exchange_rate_2))
+            + Uint128::from(100_u64);
         let permissible_borrow_amount = (max_borrow_allowed_in_uusd
-            / Decimal256::from(exchange_rate_2))
-            - Uint256::from(100_u64);
+            * reverse_decimal(exchange_rate_2))
+            - Uint128::from(100_u64);
 
         // borrow above the allowed amount given current collateral, should fail
         let borrow_msg = ExecuteMsg::Borrow {
@@ -4955,23 +4960,23 @@ mod tests {
         let _collateral_address = Addr::unchecked("collateral");
         let liquidator_address = Addr::unchecked("liquidator");
 
-        let collateral_max_ltv = Decimal256::from_ratio(5, 10);
-        let collateral_maintenance_margin = Decimal256::from_ratio(6, 10);
-        let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
+        let collateral_max_ltv = Decimal::from_ratio(5u128, 10u128);
+        let collateral_maintenance_margin = Decimal::from_ratio(6u128, 10u128);
+        let collateral_liquidation_bonus = Decimal::from_ratio(1u128, 10u128);
         let collateral_price = Decimal::from_ratio(2_u128, 1_u128);
         let debt_price = Decimal::from_ratio(11_u128, 10_u128);
         let user_collateral_balance = Uint128::new(2_000_000);
-        let user_debt = Uint256::from(3_000_000_u64); // ltv = 0.75
-        let close_factor = Decimal256::from_ratio(1, 2);
+        let user_debt = Uint128::from(3_000_000_u64); // ltv = 0.75
+        let close_factor = Decimal::from_ratio(1u128, 2u128);
 
-        let first_debt_to_repay = Uint256::from(400_000_u64);
+        let first_debt_to_repay = Uint128::from(400_000_u64);
         let first_block_time = 15_000_000;
 
-        let second_debt_to_repay = Uint256::from(10_000_000_u64);
+        let second_debt_to_repay = Uint128::from(10_000_000_u64);
         let second_block_time = 16_000_000;
 
         // Global debt for the debt market
-        let mut expected_global_debt_scaled = Uint256::from(1_800_000_000_u64);
+        let mut expected_global_debt_scaled = Uint128::from(1_800_000_000_u64);
 
         CONFIG
             .update(deps.as_mut().storage, |mut config| -> StdResult<_> {
@@ -5005,25 +5010,25 @@ mod tests {
             max_loan_to_value: collateral_max_ltv,
             maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
-            debt_total_scaled: Uint256::from(800_000_000_u64),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            borrow_rate: Decimal256::from_ratio(2, 10),
-            liquidity_rate: Decimal256::from_ratio(2, 10),
-            reserve_factor: Decimal256::from_ratio(2, 100),
+            debt_total_scaled: Uint128::from(800_000_000_u64),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            borrow_rate: Decimal::from_ratio(2u128, 10u128),
+            liquidity_rate: Decimal::from_ratio(2u128, 10u128),
+            reserve_factor: Decimal::from_ratio(2u128, 100u128),
             asset_type: AssetType::Native,
             interests_last_updated: 0,
             ..Default::default()
         };
 
         let debt_market = Market {
-            max_loan_to_value: Decimal256::from_ratio(6, 10),
+            max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
             debt_total_scaled: expected_global_debt_scaled,
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
-            borrow_rate: Decimal256::from_ratio(2, 10),
-            liquidity_rate: Decimal256::from_ratio(2, 10),
-            reserve_factor: Decimal256::from_ratio(3, 100),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            borrow_rate: Decimal::from_ratio(2u128, 10u128),
+            liquidity_rate: Decimal::from_ratio(2u128, 10u128),
+            reserve_factor: Decimal::from_ratio(3u128, 100u128),
             asset_type: AssetType::Cw20,
             interests_last_updated: 0,
             ..Default::default()
@@ -5035,7 +5040,8 @@ mod tests {
         let debt_market_initial =
             th_init_market(deps.as_mut(), debt_contract_addr.as_bytes(), &debt_market);
 
-        let mut expected_user_debt_scaled = user_debt / debt_market_initial.liquidity_index;
+        let mut expected_user_debt_scaled =
+            user_debt * reverse_decimal(debt_market_initial.liquidity_index);
 
         // Set user as having collateral and debt in respective markets
         {
@@ -5089,11 +5095,11 @@ mod tests {
         // trying to liquidate user with zero outstanding debt should fail (uncollateralized has not impact)
         {
             let debt = Debt {
-                amount_scaled: Uint256::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: Uint256::from(10000u128),
+                amount_scaled: Uint128::from(10000u128),
                 uncollateralized: true,
             };
             DEBTS
@@ -5138,7 +5144,7 @@ mod tests {
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: Uint256::from(10000u128),
+                amount_scaled: Uint128::from(10000u128),
                 uncollateralized: true,
             };
             DEBTS
@@ -5226,12 +5232,15 @@ mod tests {
                 .unwrap();
 
             let expected_liquidated_collateral_amount = first_debt_to_repay
-                * Decimal256::from(debt_price)
-                * (Decimal256::one() + collateral_liquidation_bonus)
-                / Decimal256::from(collateral_price);
+                * debt_price
+                * (Decimal::one() + collateral_liquidation_bonus)
+                * reverse_decimal(collateral_price);
 
             let expected_liquidated_collateral_amount_scaled = expected_liquidated_collateral_amount
-                / get_updated_liquidity_index(&collateral_market_after, env.block.time.seconds());
+                * reverse_decimal(get_updated_liquidity_index(
+                    &collateral_market_after,
+                    env.block.time.seconds(),
+                ));
 
             assert_eq!(
                 res.messages,
@@ -5293,7 +5302,8 @@ mod tests {
                 )
                 .unwrap();
 
-            let expected_less_debt_scaled = first_debt_to_repay / expected_debt_rates.borrow_index;
+            let expected_less_debt_scaled =
+                first_debt_to_repay * reverse_decimal(expected_debt_rates.borrow_index);
 
             expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
@@ -5309,7 +5319,7 @@ mod tests {
 
             // check correct accumulated protocol income to distribute
             assert_eq!(
-                Uint256::zero(),
+                Uint128::zero(),
                 collateral_market_after.protocol_income_to_distribute
             );
             assert_eq!(
@@ -5368,9 +5378,9 @@ mod tests {
             );
 
             let expected_liquidated_collateral_amount = expected_less_debt
-                * Decimal256::from(debt_price)
-                * (Decimal256::one() + collateral_liquidation_bonus)
-                / Decimal256::from(collateral_price);
+                * debt_price
+                * (Decimal::one() + collateral_liquidation_bonus)
+                * reverse_decimal(collateral_price);
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
                 &deps.as_ref(),
@@ -5388,8 +5398,8 @@ mod tests {
                 .load(&deps.storage, debt_contract_addr.as_bytes())
                 .unwrap();
 
-            let expected_liquidated_collateral_amount_scaled =
-                expected_liquidated_collateral_amount / expected_collateral_rates.liquidity_index;
+            let expected_liquidated_collateral_amount_scaled = expected_liquidated_collateral_amount
+                * reverse_decimal(expected_collateral_rates.liquidity_index);
 
             assert_eq!(
                 res.messages,
@@ -5398,7 +5408,7 @@ mod tests {
                         contract_addr: "ma_collateral".to_string(),
                         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
                             user: user_address.to_string(),
-                            amount: expected_liquidated_collateral_amount_scaled.into(),
+                            amount: expected_liquidated_collateral_amount_scaled,
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5409,7 +5419,7 @@ mod tests {
                             deps.as_ref(),
                             Coin {
                                 denom: String::from("collateral"),
-                                amount: expected_liquidated_collateral_amount.into(),
+                                amount: expected_liquidated_collateral_amount,
                             }
                         )
                         .unwrap()],
@@ -5418,7 +5428,7 @@ mod tests {
                         contract_addr: "debt".to_string(),
                         msg: to_binary(&Cw20ExecuteMsg::Transfer {
                             recipient: liquidator_address.to_string(),
-                            amount: expected_refund_amount.into(),
+                            amount: expected_refund_amount,
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5485,7 +5495,8 @@ mod tests {
             assert!(get_bit(user.borrowed_assets, debt_market_initial.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
-            let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
+            let expected_less_debt_scaled =
+                expected_less_debt * reverse_decimal(expected_debt_rates.borrow_index);
             expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             let debt = DEBTS
@@ -5518,9 +5529,9 @@ mod tests {
 
         // Perform full liquidation receiving ma_token in return (user should not be able to use asset as collateral)
         {
-            let user_collateral_balance_scaled = Uint256::from(100u128);
-            let mut expected_user_debt_scaled = Uint256::from(400u128);
-            let debt_to_repay = Uint256::from(300u128);
+            let user_collateral_balance_scaled = Uint128::from(100u128);
+            let mut expected_user_debt_scaled = Uint128::from(400u128);
+            let debt_to_repay = Uint128::from(300u128);
 
             // Set the querier to return positive collateral balance
             deps.querier.set_cw20_balances(
@@ -5572,9 +5583,10 @@ mod tests {
                 user_collateral_balance_scaled * expected_collateral_indices.liquidity;
 
             // Since debt is being over_repayed, we expect to liquidate total collateral
-            let expected_less_debt = Decimal256::from(collateral_price) * user_collateral_balance
-                / Decimal256::from(debt_price)
-                / (Decimal256::one() + collateral_liquidation_bonus);
+            let expected_less_debt = collateral_price
+                * user_collateral_balance
+                * reverse_decimal(debt_price)
+                * reverse_decimal(Decimal::one() + collateral_liquidation_bonus);
 
             let expected_refund_amount = debt_to_repay - expected_less_debt;
 
@@ -5608,8 +5620,8 @@ mod tests {
 
             // NOTE: expected_liquidated_collateral_amount_scaled should be equal user_collateral_balance_scaled
             // but there are rounding errors
-            let expected_liquidated_collateral_amount_scaled =
-                user_collateral_balance / expected_collateral_rates.liquidity_index;
+            let expected_liquidated_collateral_amount_scaled = user_collateral_balance
+                * reverse_decimal(expected_collateral_rates.liquidity_index);
 
             assert_eq!(
                 res.messages,
@@ -5618,7 +5630,7 @@ mod tests {
                         contract_addr: "ma_collateral".to_string(),
                         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
                             user: user_address.to_string(),
-                            amount: expected_liquidated_collateral_amount_scaled.into(),
+                            amount: expected_liquidated_collateral_amount_scaled,
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5629,7 +5641,7 @@ mod tests {
                             deps.as_ref(),
                             Coin {
                                 denom: String::from("collateral"),
-                                amount: user_collateral_balance.into(),
+                                amount: user_collateral_balance,
                             }
                         )
                         .unwrap()],
@@ -5638,7 +5650,7 @@ mod tests {
                         contract_addr: "debt".to_string(),
                         msg: to_binary(&Cw20ExecuteMsg::Transfer {
                             recipient: liquidator_address.to_string(),
-                            amount: expected_refund_amount.into(),
+                            amount: expected_refund_amount,
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5705,7 +5717,8 @@ mod tests {
             assert!(get_bit(user.borrowed_assets, debt_market_initial.index).unwrap());
 
             // check user's debt decreased by the appropriate amount
-            let expected_less_debt_scaled = expected_less_debt / expected_debt_rates.borrow_index;
+            let expected_less_debt_scaled =
+                expected_less_debt * reverse_decimal(expected_debt_rates.borrow_index);
             expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             let debt = DEBTS
@@ -5759,27 +5772,27 @@ mod tests {
         deps.querier
             .set_oracle_price(b"debt".to_vec(), Decimal::one());
 
-        let collateral_ltv = Decimal256::from_ratio(5, 10);
-        let collateral_maintenance_margin = Decimal256::from_ratio(7, 10);
-        let collateral_liquidation_bonus = Decimal256::from_ratio(1, 10);
+        let collateral_ltv = Decimal::from_ratio(5u128, 10u128);
+        let collateral_maintenance_margin = Decimal::from_ratio(7u128, 10u128);
+        let collateral_liquidation_bonus = Decimal::from_ratio(1u128, 10u128);
 
         let collateral_market = Market {
             ma_token_address: Addr::unchecked("collateral"),
             max_loan_to_value: collateral_ltv,
             maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
-            debt_total_scaled: Uint256::zero(),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
+            debt_total_scaled: Uint128::zero(),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
             asset_type: AssetType::Native,
             ..Default::default()
         };
         let debt_market = Market {
             ma_token_address: Addr::unchecked("debt"),
-            max_loan_to_value: Decimal256::from_ratio(6, 10),
-            debt_total_scaled: Uint256::from(20_000_000u64),
-            liquidity_index: Decimal256::one(),
-            borrow_index: Decimal256::one(),
+            max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
+            debt_total_scaled: Uint128::from(20_000_000u64),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
@@ -5822,13 +5835,13 @@ mod tests {
         );
 
         let healthy_user_debt_amount =
-            Uint256::from(healthy_user_collateral_balance) * collateral_maintenance_margin;
+            healthy_user_collateral_balance * collateral_maintenance_margin;
         let healthy_user_debt = Debt {
             amount_scaled: healthy_user_debt_amount,
             uncollateralized: false,
         };
         let uncollateralized_debt = Debt {
-            amount_scaled: Uint256::from(10000u128),
+            amount_scaled: Uint128::from(10000u128),
             uncollateralized: true,
         };
         DEBTS
@@ -5848,7 +5861,7 @@ mod tests {
 
         // perform liquidation (should fail because health factor is > 1)
         let liquidator_address = Addr::unchecked("liquidator");
-        let debt_to_cover = Uint256::from(1_000_000u64);
+        let debt_to_cover = Uint128::from(1_000_000u64);
 
         let liquidate_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             msg: to_binary(&ReceiveMsg::LiquidateCw20 {
@@ -5861,7 +5874,7 @@ mod tests {
             })
             .unwrap(),
             sender: liquidator_address.to_string(),
-            amount: debt_to_cover.into(),
+            amount: debt_to_cover,
         });
 
         let env = mock_env(MockEnvParams::default());
@@ -5885,13 +5898,13 @@ mod tests {
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("masomecoin"),
-            liquidity_index: Decimal256::one(),
-            maintenance_margin: Decimal256::from_ratio(5, 10),
+            liquidity_index: Decimal::one(),
+            maintenance_margin: Decimal::from_ratio(5u128, 10u128),
             ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
         let debt_mock_market = Market {
-            borrow_index: Decimal256::one(),
+            borrow_index: Decimal::one(),
             ..Default::default()
         };
         let debt_market = th_init_market(deps.as_mut(), b"debtcoin", &debt_mock_market);
@@ -5940,11 +5953,11 @@ mod tests {
         {
             // set debt for user in order for health factor to be < 1
             let debt = Debt {
-                amount_scaled: Uint256::from(500_000u128),
+                amount_scaled: Uint128::from(500_000u128),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: Uint256::from(10000u128),
+                amount_scaled: Uint128::from(10000u128),
                 uncollateralized: true,
             };
             DEBTS
@@ -5982,11 +5995,11 @@ mod tests {
         {
             // set debt for user in order for health factor to be > 1
             let debt = Debt {
-                amount_scaled: Uint256::from(1_000u128),
+                amount_scaled: Uint128::from(1_000u128),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: Uint256::from(10000u128),
+                amount_scaled: Uint128::from(10000u128),
                 uncollateralized: true,
             };
             DEBTS
@@ -6053,12 +6066,12 @@ mod tests {
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            borrow_index: Decimal256::from_ratio(12, 10),
-            liquidity_index: Decimal256::from_ratio(8, 10),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(1, 10),
-            debt_total_scaled: Uint256::zero(),
+            borrow_index: Decimal::from_ratio(12u128, 10u128),
+            liquidity_index: Decimal::from_ratio(8u128, 10u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(1u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -6117,7 +6130,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Uint256::from(initial_borrow_amount),
+            amount: initial_borrow_amount,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -6181,7 +6194,7 @@ mod tests {
             .unwrap();
 
         let expected_debt_scaled_after_borrow =
-            Uint256::from(initial_borrow_amount) / expected_params.borrow_index;
+            initial_borrow_amount * reverse_decimal(expected_params.borrow_index);
 
         assert_eq!(expected_debt_scaled_after_borrow, debt.amount_scaled);
 
@@ -6194,7 +6207,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Uint256::from(exceeding_limit),
+            amount: exceeding_limit,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -6213,7 +6226,7 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            amount: Uint256::from(remaining_limit),
+            amount: remaining_limit,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -6348,17 +6361,17 @@ mod tests {
         let asset = Asset::Native {
             denom: String::from("somecoin"),
         };
-        let protocol_income_to_distribute = Uint256::from(1_000_000_u64);
+        let protocol_income_to_distribute = Uint128::from(1_000_000_u64);
 
         // initialize market with non-zero amount of protocol_income_to_distribute
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
-            borrow_index: Decimal256::from_ratio(12, 10),
-            liquidity_index: Decimal256::from_ratio(8, 10),
-            borrow_rate: Decimal256::from_ratio(20, 100),
-            liquidity_rate: Decimal256::from_ratio(10, 100),
-            reserve_factor: Decimal256::from_ratio(1, 10),
-            debt_total_scaled: Uint256::zero(),
+            borrow_index: Decimal::from_ratio(12u128, 10u128),
+            liquidity_index: Decimal::from_ratio(8u128, 10u128),
+            borrow_rate: Decimal::from_ratio(20u128, 100u128),
+            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+            reserve_factor: Decimal::from_ratio(1u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             protocol_income_to_distribute,
@@ -6370,7 +6383,7 @@ mod tests {
         let mut block_time = mock_market.interests_last_updated + 10000u64;
 
         // call function providing amount exceeding protocol_income_to_distribute, should fail
-        let exceeding_amount = protocol_income_to_distribute + Uint256::from(1_000_u64);
+        let exceeding_amount = protocol_income_to_distribute + Uint128::from(1_000_u64);
         let distribute_income_msg = ExecuteMsg::DistributeProtocolIncome {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
@@ -6394,7 +6407,7 @@ mod tests {
         );
 
         // call function providing amount less than protocol_income_to_distribute
-        let permissible_amount = Decimal256::from_ratio(1, 2) * protocol_income_to_distribute;
+        let permissible_amount = Decimal::from_ratio(1u128, 2u128) * protocol_income_to_distribute;
         let distribute_income_msg = ExecuteMsg::DistributeProtocolIncome {
             asset: asset.clone(),
             amount: Some(permissible_amount),
@@ -6410,7 +6423,10 @@ mod tests {
             permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
 
         let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&market_initial, env.block.time.seconds());
+            * reverse_decimal(get_updated_liquidity_index(
+                &market_initial,
+                env.block.time.seconds(),
+            ));
 
         assert_eq!(
             res.messages,
@@ -6483,7 +6499,10 @@ mod tests {
             - (expected_insurance_amount + expected_treasury_amount);
 
         let scaled_mint_amount = expected_treasury_amount
-            / get_updated_liquidity_index(&market_after_distribution, env.block.time.seconds());
+            * reverse_decimal(get_updated_liquidity_index(
+                &market_after_distribution,
+                env.block.time.seconds(),
+            ));
 
         assert_eq!(
             res.messages,
@@ -6533,7 +6552,7 @@ mod tests {
         let market_after_second_distribution = MARKETS.load(&deps.storage, b"somecoin").unwrap();
         assert_eq!(
             market_after_second_distribution.protocol_income_to_distribute,
-            Uint256::zero()
+            Uint128::zero()
         );
     }
 
@@ -6602,10 +6621,10 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal256::from_ratio(5, 10)),
-            treasury_fee_share: Some(Decimal256::from_ratio(3, 10)),
+            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
+            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(1u64),
-            close_factor: Some(Decimal256::from_ratio(1, 2)),
+            close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
         let msg = InstantiateMsg { config };
         instantiate(deps.as_mut(), env, info, msg).unwrap();
@@ -6615,8 +6634,8 @@ mod tests {
     impl Default for Market {
         fn default() -> Self {
             let dynamic_ir = DynamicInterestRate {
-                min_borrow_rate: Decimal256::zero(),
-                max_borrow_rate: Decimal256::one(),
+                min_borrow_rate: Decimal::zero(),
+                max_borrow_rate: Decimal::one(),
                 kp_1: Default::default(),
                 optimal_utilization_rate: Default::default(),
                 kp_augmentation_threshold: Default::default(),
@@ -6634,9 +6653,9 @@ mod tests {
                 interests_last_updated: 0,
                 debt_total_scaled: Default::default(),
                 asset_type: AssetType::Native,
-                maintenance_margin: Decimal256::one(),
-                liquidation_bonus: Decimal256::zero(),
-                protocol_income_to_distribute: Uint256::zero(),
+                maintenance_margin: Decimal::one(),
+                liquidation_bonus: Decimal::zero(),
+                protocol_income_to_distribute: Uint128::zero(),
                 interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
             }
         }
@@ -6682,11 +6701,11 @@ mod tests {
 
     #[derive(Default, Debug)]
     struct TestInterestResults {
-        borrow_index: Decimal256,
-        liquidity_index: Decimal256,
-        borrow_rate: Decimal256,
-        liquidity_rate: Decimal256,
-        protocol_income_to_distribute: Uint256,
+        borrow_index: Decimal,
+        liquidity_index: Decimal,
+        borrow_rate: Decimal,
+        liquidity_rate: Decimal,
+        protocol_income_to_distribute: Uint128,
     }
 
     /// Deltas to be using in expected indices/rates results
@@ -6712,32 +6731,33 @@ mod tests {
             th_get_expected_protocol_income(market, &expected_indices);
 
         // When borrowing, new computed index is used for scaled amount
-        let more_debt_scaled = Uint256::from(deltas.more_debt) / expected_indices.borrow;
+        let more_debt_scaled =
+            Uint128::from(deltas.more_debt) * reverse_decimal(expected_indices.borrow);
         // When repaying, new computed index is used for scaled amount
-        let less_debt_scaled = Uint256::from(deltas.less_debt) / expected_indices.borrow;
+        let less_debt_scaled =
+            Uint128::from(deltas.less_debt) * reverse_decimal(expected_indices.borrow);
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         let new_debt_total_scaled =
             if (market.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
                 market.debt_total_scaled + more_debt_scaled - less_debt_scaled
             } else {
-                Uint256::zero()
+                Uint128::zero()
             };
-        let dec_debt_total =
-            Decimal256::from_uint256(new_debt_total_scaled) * expected_indices.borrow;
+        let dec_debt_total = new_debt_total_scaled * expected_indices.borrow;
         let total_protocol_income_to_distribute =
             market.protocol_income_to_distribute + expected_protocol_income_to_distribute;
 
         let config = CONFIG.load(deps.storage).unwrap();
 
         let dec_protocol_income_minus_treasury_amount =
-            (Decimal256::one() - config.treasury_fee_share) * total_protocol_income_to_distribute;
-        let contract_current_balance = Uint256::from(initial_liquidity);
-        let liquidity_taken = Uint256::from(deltas.less_liquidity);
-        let dec_liquidity_total = Decimal256::from_uint256(
-            contract_current_balance - liquidity_taken - dec_protocol_income_minus_treasury_amount,
-        );
-        let expected_utilization_rate = dec_debt_total / (dec_liquidity_total + dec_debt_total);
+            (Decimal::one() - config.treasury_fee_share) * total_protocol_income_to_distribute;
+        let contract_current_balance = Uint128::from(initial_liquidity);
+        let liquidity_taken = Uint128::from(deltas.less_liquidity);
+        let dec_liquidity_total =
+            contract_current_balance - liquidity_taken - dec_protocol_income_minus_treasury_amount;
+        let expected_utilization_rate =
+            Decimal::from_ratio(dec_debt_total, dec_liquidity_total + dec_debt_total);
 
         // interest rates
         let (expected_borrow_rate, expected_liquidity_rate) =
@@ -6761,22 +6781,22 @@ mod tests {
     fn th_get_expected_protocol_income(
         market: &Market,
         expected_indices: &TestExpectedIndices,
-    ) -> Uint256 {
+    ) -> Uint128 {
         let previous_borrow_index = market.borrow_index;
         let previous_debt_total = market.debt_total_scaled * previous_borrow_index;
         let current_debt_total = market.debt_total_scaled * expected_indices.borrow;
         let interest_accrued = if current_debt_total > previous_debt_total {
             current_debt_total - previous_debt_total
         } else {
-            Uint256::zero()
+            Uint128::zero()
         };
         interest_accrued * market.reserve_factor
     }
 
     /// Expected results for applying accumulated interest
     struct TestExpectedIndices {
-        liquidity: Decimal256,
-        borrow: Decimal256,
+        liquidity: Decimal,
+        borrow: Decimal,
     }
 
     fn th_get_expected_indices(market: &Market, block_time: u64) -> TestExpectedIndices {

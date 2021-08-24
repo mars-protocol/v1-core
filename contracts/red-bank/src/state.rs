@@ -1,8 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{Addr, StdError, StdResult, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::helpers::all_conditions_valid;
@@ -29,11 +28,11 @@ pub struct Config {
     /// maToken code id used to instantiate new tokens
     pub ma_token_code_id: u64,
     /// Maximum percentage of outstanding debt that can be covered by a liquidator
-    pub close_factor: Decimal256,
+    pub close_factor: Decimal,
     /// Percentage of fees that are sent to the insurance fund
-    pub insurance_fund_fee_share: Decimal256,
+    pub insurance_fund_fee_share: Decimal,
     /// Percentage of fees that are sent to the treasury
-    pub treasury_fee_share: Decimal256,
+    pub treasury_fee_share: Decimal,
 }
 
 impl Config {
@@ -53,7 +52,7 @@ impl Config {
 
         let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
         // Combined fee shares cannot exceed one
-        if combined_fee_share > Decimal256::one() {
+        if combined_fee_share > Decimal::one() {
             return Err(StdError::generic_err(
                 "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
             ));
@@ -62,8 +61,8 @@ impl Config {
         Ok(())
     }
 
-    fn less_or_equal_one(value: &Decimal256) -> bool {
-        value.le(&Decimal256::one())
+    fn less_or_equal_one(value: &Decimal) -> bool {
+        value.le(&Decimal::one())
     }
 }
 
@@ -83,35 +82,35 @@ pub struct Market {
     pub ma_token_address: Addr,
 
     /// Borrow index (Used to compute borrow interest)
-    pub borrow_index: Decimal256,
+    pub borrow_index: Decimal,
     /// Liquidity index (Used to compute deposit interest)
-    pub liquidity_index: Decimal256,
+    pub liquidity_index: Decimal,
     /// Rate charged to borrowers
-    pub borrow_rate: Decimal256,
+    pub borrow_rate: Decimal,
     /// Rate paid to depositors
-    pub liquidity_rate: Decimal256,
+    pub liquidity_rate: Decimal,
 
     /// Max percentage of collateral that can be borrowed
-    pub max_loan_to_value: Decimal256,
+    pub max_loan_to_value: Decimal,
 
     /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
-    pub reserve_factor: Decimal256,
+    pub reserve_factor: Decimal,
 
     /// Timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,
     /// Total debt scaled for the market's currency
-    pub debt_total_scaled: Uint256,
+    pub debt_total_scaled: Uint128,
 
     /// Indicated whether the asset is native or a cw20 token
     pub asset_type: AssetType,
 
     /// Percentage at which the loan is defined as under-collateralized
-    pub maintenance_margin: Decimal256,
+    pub maintenance_margin: Decimal,
     /// Bonus on the price of assets of the collateral when liquidators purchase it
-    pub liquidation_bonus: Decimal256,
+    pub liquidation_bonus: Decimal,
 
     /// Income to be distributed to other protocol contracts
-    pub protocol_income_to_distribute: Uint256,
+    pub protocol_income_to_distribute: Uint128,
 
     /// Interest rate strategy to calculate borrow_rate and liquidity_rate
     pub interest_rate_strategy: InterestRateStrategy,
@@ -154,17 +153,17 @@ impl Market {
             index,
             asset_type,
             ma_token_address: Addr::unchecked(""),
-            borrow_index: Decimal256::one(),
-            liquidity_index: Decimal256::one(),
+            borrow_index: Decimal::one(),
+            liquidity_index: Decimal::one(),
             borrow_rate: borrow_rate.unwrap(),
-            liquidity_rate: Decimal256::zero(),
+            liquidity_rate: Decimal::zero(),
             max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
             interests_last_updated: block_time.seconds(),
-            debt_total_scaled: Uint256::zero(),
+            debt_total_scaled: Uint128::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
-            protocol_income_to_distribute: Uint256::zero(),
+            protocol_income_to_distribute: Uint128::zero(),
             interest_rate_strategy: interest_rate_strategy.unwrap(),
         };
 
@@ -179,16 +178,16 @@ impl Market {
         // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
         let conditions_and_names = vec![
             (
-                self.max_loan_to_value.le(&Decimal256::one()),
+                self.max_loan_to_value.le(&Decimal::one()),
                 "max_loan_to_value",
             ),
-            (self.reserve_factor.le(&Decimal256::one()), "reserve_factor"),
+            (self.reserve_factor.le(&Decimal::one()), "reserve_factor"),
             (
-                self.maintenance_margin.le(&Decimal256::one()),
+                self.maintenance_margin.le(&Decimal::one()),
                 "maintenance_margin",
             ),
             (
-                self.liquidation_bonus.le(&Decimal256::one()),
+                self.liquidation_bonus.le(&Decimal::one()),
                 "liquidation_bonus",
             ),
         ];
@@ -258,7 +257,7 @@ impl Default for User {
 pub struct Debt {
     /// Scaled debt amount
     // TODO(does this amount always have six decimals? How do we manage this?)
-    pub amount_scaled: Uint256,
+    pub amount_scaled: Uint128,
 
     /// Marker for uncollateralized debt
     pub uncollateralized: bool,

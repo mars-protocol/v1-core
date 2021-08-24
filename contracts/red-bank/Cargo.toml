@@ -25,8 +25,6 @@ mars = { path = "../../packages/mars", version = "0.1.0" }
 cw20 = "0.8"
 cw20-base = { "version" = "0.8", features = ["library"] }
 
-cosmwasm-bignumber = "2.2.0"
-
 cosmwasm-std = { "version" = "0.16.0" }
 cw-storage-plus = { "version" = "0.8.0" }
 

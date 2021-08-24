@@ -1,5 +1,4 @@
-use cosmwasm_bignumber::{Decimal256, Uint256};
-use cosmwasm_std::{Addr, Decimal, Deps, DepsMut, StdError, StdResult};
+use cosmwasm_std::{Addr, Decimal, Deps, DepsMut, StdError, StdResult, Uint128};
 
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
@@ -13,11 +12,11 @@ use crate::state::{Debt, User, DEBTS};
 /// User global position
 pub struct UserPosition {
     /// NOTE: Not used yet
-    pub _total_collateral_in_uusd: Uint256,
-    pub total_debt_in_uusd: Uint256,
-    pub total_collateralized_debt_in_uusd: Uint256,
-    pub max_debt_in_uusd: Uint256,
-    pub weighted_maintenance_margin_in_uusd: Uint256,
+    pub _total_collateral_in_uusd: Uint128,
+    pub total_debt_in_uusd: Uint128,
+    pub total_collateralized_debt_in_uusd: Uint128,
+    pub max_debt_in_uusd: Uint128,
+    pub weighted_maintenance_margin_in_uusd: Uint128,
     pub health_status: UserHealthStatus,
     pub asset_positions: Vec<UserAssetPosition>,
 }
@@ -28,14 +27,14 @@ impl UserPosition {
         &self,
         asset_reference: &[u8],
         asset_label: &str,
-    ) -> Result<Decimal256, ContractError> {
+    ) -> Result<Decimal, ContractError> {
         let asset_position = self
             .asset_positions
             .iter()
             .find(|ap| ap.asset_reference.as_slice() == asset_reference);
 
         match asset_position {
-            Some(position) => Ok(Decimal256::from(position.asset_price)),
+            Some(position) => Ok(position.asset_price),
             None => Err(ContractError::price_not_found(asset_label)),
         }
     }
@@ -46,17 +45,17 @@ pub struct UserAssetPosition {
     pub asset_label: String,
     pub asset_type: AssetType,
     pub asset_reference: Vec<u8>,
-    pub collateral_amount: Uint256,
-    pub debt_amount: Uint256,
+    pub collateral_amount: Uint128,
+    pub debt_amount: Uint128,
     pub uncollateralized_debt: bool,
-    pub max_ltv: Decimal256,
-    pub maintenance_margin: Decimal256,
+    pub max_ltv: Decimal,
+    pub maintenance_margin: Decimal,
     pub asset_price: Decimal,
 }
 
 pub enum UserHealthStatus {
     NotBorrowing,
-    Borrowing(Decimal256),
+    Borrowing(Decimal),
 }
 
 /// Calculates the user data across the markets.
@@ -79,14 +78,14 @@ pub fn get_user_position(
         block_time,
     )?;
 
-    let mut total_collateral_in_uusd = Uint256::zero();
-    let mut total_debt_in_uusd = Uint256::zero();
-    let mut total_collateralized_debt_in_uusd = Uint256::zero();
-    let mut max_debt_in_uusd = Uint256::zero();
-    let mut weighted_maintenance_margin_in_uusd = Uint256::zero();
+    let mut total_collateral_in_uusd = Uint128::zero();
+    let mut total_debt_in_uusd = Uint128::zero();
+    let mut total_collateralized_debt_in_uusd = Uint128::zero();
+    let mut max_debt_in_uusd = Uint128::zero();
+    let mut weighted_maintenance_margin_in_uusd = Uint128::zero();
 
     for user_asset_position in &user_asset_positions {
-        let asset_price = Decimal256::from(user_asset_position.asset_price);
+        let asset_price = user_asset_position.asset_price;
         let collateral_in_uusd = user_asset_position.collateral_amount * asset_price;
         total_collateral_in_uusd += collateral_in_uusd;
 
@@ -107,8 +106,10 @@ pub fn get_user_position(
     let health_status = if total_collateralized_debt_in_uusd.is_zero() {
         UserHealthStatus::NotBorrowing
     } else {
-        let health_factor = Decimal256::from_uint256(weighted_maintenance_margin_in_uusd)
-            / Decimal256::from_uint256(total_collateralized_debt_in_uusd);
+        let health_factor = Decimal::from_ratio(
+            weighted_maintenance_margin_in_uusd,
+            total_collateralized_debt_in_uusd,
+        );
         UserHealthStatus::Borrowing(health_factor)
     };
 
@@ -156,7 +157,7 @@ fn get_user_asset_positions(
             )?;
 
             let liquidity_index = get_updated_liquidity_index(&market, block_time);
-            let collateral_amount = Uint256::from(asset_balance) * liquidity_index;
+            let collateral_amount = asset_balance * liquidity_index;
 
             (
                 collateral_amount,
@@ -164,7 +165,7 @@ fn get_user_asset_positions(
                 market.maintenance_margin,
             )
         } else {
-            (Uint256::zero(), Decimal256::zero(), Decimal256::zero())
+            (Uint128::zero(), Decimal::zero(), Decimal::zero())
         };
 
         let (debt_amount, uncollateralized_debt) = if user_is_borrowing {
@@ -179,7 +180,7 @@ fn get_user_asset_positions(
                 user_debt.uncollateralized,
             )
         } else {
-            (Uint256::zero(), false)
+            (Uint128::zero(), false)
         };
 
         let asset_label = match market.asset_type {
