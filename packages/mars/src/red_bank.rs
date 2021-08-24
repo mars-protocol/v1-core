@@ -168,6 +168,9 @@ pub mod msg {
             ma_token_address: String,
             amount: Uint128,
         },
+        UserPosition {
+            address: String,
+        },
     }
 
     // We define a custom struct for each query response
@@ -238,6 +241,22 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct AmountResponse {
         pub amount: Uint128,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct UserPositionResponse {
+        pub total_collateral_in_uusd: Uint128,
+        pub total_debt_in_uusd: Uint128,
+        pub total_collateralized_debt_in_uusd: Uint128,
+        pub max_debt_in_uusd: Uint128,
+        pub weighted_maintenance_margin_in_uusd: Uint128,
+        pub health_status: UserHealthStatusResponse,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub enum UserHealthStatusResponse {
+        NotBorrowing,
+        Borrowing(Decimal),
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

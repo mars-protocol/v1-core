@@ -15,6 +15,7 @@ use mars::red_bank::msg::{
     AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
     DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
     MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    UserHealthStatusResponse, UserPositionResponse,
 };
 
 use mars::asset::{Asset, AssetType};
@@ -391,7 +392,7 @@ pub fn execute_withdraw(
         )?;
 
         let user_position = get_user_position(
-            &deps,
+            deps.as_ref(),
             env.block.time.seconds(),
             &withdrawer_addr,
             oracle_address,
@@ -745,7 +746,7 @@ pub fn execute_borrow(
         )?;
 
         let user_position = get_user_position(
-            &deps,
+            deps.as_ref(),
             env.block.time.seconds(),
             &borrower_address,
             oracle_address.clone(),
@@ -1033,7 +1034,7 @@ pub fn execute_liquidate(
         MarsContract::Oracle,
     )?;
     let user_position = get_user_position(
-        &deps,
+        deps.as_ref(),
         block_time,
         &user_address,
         oracle_address,
@@ -1333,7 +1334,7 @@ pub fn execute_finalize_liquidity_token_transfer(
         MarsContract::Oracle,
     )?;
     let user_position = get_user_position(
-        &deps,
+        deps.as_ref(),
         env.block.time.seconds(),
         &from_address,
         oracle_address,
@@ -1607,7 +1608,45 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             ma_token_address,
             amount,
         )?),
+        QueryMsg::UserPosition { address } => {
+            let address = deps.api.addr_validate(&address)?;
+            to_binary(&query_user_position(deps, env, address)?)
+        }
     }
+}
+
+fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+    let user = USERS.load(deps.storage, &address)?;
+    let oracle_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::Oracle,
+    )?;
+    let user_position = get_user_position(
+        deps,
+        env.block.time.seconds(),
+        &address,
+        oracle_address,
+        &user,
+        global_state.market_count,
+    )?;
+    let health_status = match user_position.health_status {
+        UserHealthStatus::Borrowing(health_factor) => {
+            UserHealthStatusResponse::Borrowing(health_factor)
+        }
+        UserHealthStatus::NotBorrowing {} => UserHealthStatusResponse::NotBorrowing {},
+    };
+
+    Ok(UserPositionResponse {
+        total_collateral_in_uusd: user_position._total_collateral_in_uusd,
+        total_debt_in_uusd: user_position.total_debt_in_uusd,
+        total_collateralized_debt_in_uusd: user_position.total_collateralized_debt_in_uusd,
+        max_debt_in_uusd: user_position.max_debt_in_uusd,
+        weighted_maintenance_margin_in_uusd: user_position.weighted_maintenance_margin_in_uusd,
+        health_status,
+    })
 }
 
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {

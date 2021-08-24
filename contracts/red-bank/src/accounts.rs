@@ -62,7 +62,7 @@ pub enum UserHealthStatus {
 /// This includes the total debt/collateral balances in uusd,
 /// the max debt in uusd, the average Liquidation threshold, and the Health factor.
 pub fn get_user_position(
-    deps: &DepsMut,
+    deps: Deps,
     block_time: u64,
     user_address: &Addr,
     oracle_address: Addr,
@@ -70,7 +70,7 @@ pub fn get_user_position(
     market_count: u32,
 ) -> StdResult<UserPosition> {
     let user_asset_positions = get_user_asset_positions(
-        deps.as_ref(),
+        deps,
         market_count,
         user,
         user_address,
