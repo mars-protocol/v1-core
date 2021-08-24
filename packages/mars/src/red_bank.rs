@@ -1,4 +1,15 @@
+use cosmwasm_std::Decimal;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UserHealthStatus {
+    NotBorrowing,
+    Borrowing(Decimal),
+}
 pub mod msg {
+    use super::UserHealthStatus;
     use crate::asset::{Asset, AssetType};
     use crate::interest_rate_models::InterestRateStrategy;
     use cosmwasm_std::{Addr, Decimal, Uint128};
@@ -168,6 +179,9 @@ pub mod msg {
             ma_token_address: String,
             amount: Uint128,
         },
+        UserPosition {
+            address: String,
+        },
     }
 
     // We define a custom struct for each query response
@@ -238,6 +252,16 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct AmountResponse {
         pub amount: Uint128,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct UserPositionResponse {
+        pub total_collateral_in_uusd: Uint128,
+        pub total_debt_in_uusd: Uint128,
+        pub total_collateralized_debt_in_uusd: Uint128,
+        pub max_debt_in_uusd: Uint128,
+        pub weighted_maintenance_margin_in_uusd: Uint128,
+        pub health_status: UserHealthStatus,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
