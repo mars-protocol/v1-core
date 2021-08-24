@@ -5,11 +5,11 @@ LocalTerra oracle needs ~1500 ms timeouts to work. Set these with:
 sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' config/config.toml
 ```
 */
-import { isTxError, LCDClient, LocalTerra, MsgExecuteContract, Wallet } from "@terra-money/terra.js"
+import { LCDClient, LocalTerra, MsgExecuteContract, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
-  performTransaction,
+  performTransactionFails,
   queryContract,
   setTimeoutDuration,
   uploadContract
@@ -87,16 +87,16 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
 
   console.log("transferring the entire maToken balance should fail")
 
-  {
-    const executeMsg = new MsgExecuteContract(recipient.key.accAddress, maLuna, {
-      transfer: {
-        amount: String(LUNA_COLLATERAL),
-        recipient: recipient.key.accAddress
-      }
-    })
-    const result = await performTransaction(terra, recipient, executeMsg)
-    assert(isTxError(result))
-  }
+  assert(
+    await performTransactionFails(terra, recipient,
+      new MsgExecuteContract(recipient.key.accAddress, maLuna, {
+        transfer: {
+          amount: String(LUNA_COLLATERAL),
+          recipient: recipient.key.accAddress
+        }
+      })
+    )
+  )
 
   console.log("transferring a small amount of the maToken balance should work")
 
@@ -192,16 +192,16 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
 
-  {
-    const executeMsg = new MsgExecuteContract(borrower.key.accAddress, maLuna, {
-      transfer: {
-        amount: String(LUNA_COLLATERAL / 100),
-        recipient: recipient.key.accAddress
-      }
-    })
-    const result = await performTransaction(terra, borrower, executeMsg)
-    assert(isTxError(result))
-  }
+  assert(
+    await performTransactionFails(terra, borrower,
+      new MsgExecuteContract(borrower.key.accAddress, maLuna, {
+        transfer: {
+          amount: String(LUNA_COLLATERAL / 100),
+          recipient: recipient.key.accAddress
+        }
+      })
+    )
+  )
 
   console.log("enabling Luna as collateral should make transferring maLuna succeed")
 

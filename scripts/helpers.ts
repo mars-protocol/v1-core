@@ -11,6 +11,7 @@ import {
   MsgMigrateContract,
   MsgStoreCode,
   StdFee,
+  StdTx,
   Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
@@ -62,16 +63,20 @@ export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: M
   return await wallet.createTx(options)
 }
 
+export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
+  const result = await terra.tx.broadcast(signedTx)
+  await sleep(TIMEOUT)
+  return result
+}
+
 async function _performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const tx = await createTransaction(terra, wallet, msg)
   const signedTx = await wallet.key.signTx(tx)
-  return await terra.tx.broadcast(signedTx)
+  return await broadcastTransaction(terra, signedTx)
 }
 
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  const result = await _performTransaction(terra, wallet, msg)
-  await sleep(TIMEOUT)
-  return result
+  return await _performTransaction(terra, wallet, msg)
 }
 
 export async function mustPerformTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
@@ -79,8 +84,13 @@ export async function mustPerformTransaction(terra: LCDClient, wallet: Wallet, m
   if (isTxError(result)) {
     throw new TransactionError(result.code, result.codespace, result.raw_log)
   }
-  await sleep(TIMEOUT)
   return result
+}
+
+export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg) {
+  const result = await _performTransaction(terra, wallet, msg)
+  console.log(result)
+  return isTxError(result)
 }
 
 export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
@@ -100,6 +110,16 @@ export async function instantiateContract(terra: LCDClient, wallet: Wallet, code
 export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   return await mustPerformTransaction(terra, wallet, executeMsg);
+}
+
+export async function mayExecuteContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
+  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
+  return await performTransaction(terra, wallet, executeMsg);
+}
+
+export async function executeContractFails(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
+  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
+  return await performTransactionFails(terra, wallet, executeMsg);
 }
 
 export async function queryContract(terra: LCDClient, contractAddress: string, query: object): Promise<any> {
