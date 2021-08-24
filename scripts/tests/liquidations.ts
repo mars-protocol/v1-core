@@ -1,10 +1,8 @@
 import {
   BlockTxBroadcastResult,
   Int,
-  isTxError,
   LCDClient,
   LocalTerra,
-  MsgExecuteContract,
   Wallet
 } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
@@ -13,7 +11,6 @@ import {
   deployContract,
   executeContract,
   executeContractFails,
-  mayExecuteContract,
   queryContract,
   setTimeoutDuration,
   sleep,
@@ -27,6 +24,7 @@ const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
 
 const LUNA_MAX_LTV = 0.55
 const USD_MAX_LTV = 0.75
+const LIQUIDATION_BONUS = 0.1
 
 const LUNA_USD_PRICE = 25
 const USD_COLLATERAL = 100_000_000_000000
@@ -228,11 +226,11 @@ async function main() {
           max_loan_to_value: String(LUNA_MAX_LTV),
           reserve_factor: "0.2",
           maintenance_margin: String(LUNA_MAX_LTV + 0.001),
-          liquidation_bonus: "0.1",
+          liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
               optimal_utilization_rate: "0",
-              base: "10000",
+              base: "100000",
               slope_1: "0",
               slope_2: "0",
             }
@@ -254,11 +252,11 @@ async function main() {
           max_loan_to_value: "0.75",
           reserve_factor: "0.2",
           maintenance_margin: "0.85",
-          liquidation_bonus: "0.1",
+          liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
               optimal_utilization_rate: "0",
-              base: "10000",
+              base: "100000",
               slope_1: "0",
               slope_2: "0",
             }
@@ -339,50 +337,48 @@ async function main() {
 
   const ulunaBalanceBefore = await getBalance(terra, liquidator.key.accAddress, "uluna")
   const uusdBalanceBefore = await getBalance(terra, liquidator.key.accAddress, "uusd")
-  console.log(uusdBalanceBefore)
 
-  // TODO use UserPosition query to get the health factor
   let backoff = 1
   while (true) {
-    console.log(await queryContract(terra, redBank, { debt: { address: borrower.key.accAddress } }))
-    console.log(await queryContract(terra, redBank, { collateral: { address: borrower.key.accAddress } }))
+    const userPosition = await queryContract(terra, redBank, { user_position: { address: borrower.key.accAddress } })
+    const healthFactor = parseFloat(userPosition.health_status.borrowing)
 
-    const result = await mayExecuteContract(terra, liquidator, redBank,
-      {
-        liquidate_native: {
-          collateral_asset: { native: { denom: "uluna" } },
-          debt_asset: "uusd",
-          user_address: borrower.key.accAddress,
-          receive_ma_token: false,
-        }
-      }, `${Math.floor(USD_BORROW * 0.4)}uusd`
-    )
-
-    if (!isTxError(result)) {
+    if (healthFactor < 1.0) {
       break
     }
 
-    console.log(`backing off ${backoff} s`)
+    console.log("health factor:", healthFactor, `backing off: ${backoff} s`)
     await sleep(backoff * 1000)
     backoff *= 2
   }
 
+  const debtFraction = 0.4
+
+  await executeContract(terra, liquidator, redBank,
+    {
+      liquidate_native: {
+        collateral_asset: { native: { denom: "uluna" } },
+        debt_asset: "uusd",
+        user_address: borrower.key.accAddress,
+        receive_ma_token: false,
+      }
+    }, `${Math.floor(USD_BORROW * debtFraction)}uusd`
+  )
+
   const ulunaBalanceAfter = await getBalance(terra, liquidator.key.accAddress, "uluna")
+  const ulunaBalanceDifference = ulunaBalanceAfter.sub(ulunaBalanceBefore)
+  // uluna value of the fraction of debt paid back plus the liquidation bonus
+  const expectedUlunaBalanceDifference = new Int(
+    USD_BORROW * debtFraction * (1 + LIQUIDATION_BONUS) /
+    LUNA_USD_PRICE
+  )
+  assert(ulunaBalanceDifference.equals(expectedUlunaBalanceDifference))
+
   const uusdBalanceAfter = await getBalance(terra, liquidator.key.accAddress, "uusd")
-
   const uusdBalanceDifference = uusdBalanceBefore.sub(uusdBalanceAfter)
-
-
-
-
-  console.log(uusdBalanceAfter)
-  console.log("uluna delta", ulunaBalanceAfter.sub(ulunaBalanceBefore))
-  console.log("uusd delta", uusdBalanceDifference)
-  assert(ulunaBalanceAfter.gt(ulunaBalanceBefore))
-  assert(uusdBalanceAfter.equals(uusdBalanceBefore))
-  // console.log(await queryContract(terra, maUluna, { balance: { address: liquidator.key.accAddress } }))
-
-
+  // uusd value of the fraction of debt paid back plus the tx fee
+  const expectedUusdBalanceDifference = new Int(USD_BORROW * debtFraction + 45000000)
+  assert(uusdBalanceDifference.equals(expectedUusdBalanceDifference))
 
   console.log("OK")
 }
