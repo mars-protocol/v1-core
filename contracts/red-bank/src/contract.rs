@@ -1615,40 +1615,6 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
-    let config = CONFIG.load(deps.storage)?;
-    let global_state = GLOBAL_STATE.load(deps.storage)?;
-    let user = USERS.load(deps.storage, &address)?;
-    let oracle_address = address_provider::helpers::query_address(
-        &deps.querier,
-        config.address_provider_address,
-        MarsContract::Oracle,
-    )?;
-    let user_position = get_user_position(
-        deps,
-        env.block.time.seconds(),
-        &address,
-        oracle_address,
-        &user,
-        global_state.market_count,
-    )?;
-    let health_status = match user_position.health_status {
-        UserHealthStatus::Borrowing(health_factor) => {
-            UserHealthStatusResponse::Borrowing(health_factor)
-        }
-        UserHealthStatus::NotBorrowing {} => UserHealthStatusResponse::NotBorrowing {},
-    };
-
-    Ok(UserPositionResponse {
-        total_collateral_in_uusd: user_position._total_collateral_in_uusd,
-        total_debt_in_uusd: user_position.total_debt_in_uusd,
-        total_collateralized_debt_in_uusd: user_position.total_collateralized_debt_in_uusd,
-        max_debt_in_uusd: user_position.max_debt_in_uusd,
-        weighted_maintenance_margin_in_uusd: user_position.weighted_maintenance_margin_in_uusd,
-        health_status,
-    })
-}
-
 fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     let money_market = GLOBAL_STATE.load(deps.storage)?;
@@ -1835,6 +1801,40 @@ fn query_descaled_liquidity_amount(
     let descaled_amount = amount * get_updated_liquidity_index(&market, env.block.time.seconds());
     Ok(AmountResponse {
         amount: descaled_amount,
+    })
+}
+
+fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
+    let config = CONFIG.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+    let user = USERS.load(deps.storage, &address)?;
+    let oracle_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::Oracle,
+    )?;
+    let user_position = get_user_position(
+        deps,
+        env.block.time.seconds(),
+        &address,
+        oracle_address,
+        &user,
+        global_state.market_count,
+    )?;
+    let health_status = match user_position.health_status {
+        UserHealthStatus::Borrowing(health_factor) => {
+            UserHealthStatusResponse::Borrowing(health_factor)
+        }
+        UserHealthStatus::NotBorrowing {} => UserHealthStatusResponse::NotBorrowing {},
+    };
+
+    Ok(UserPositionResponse {
+        total_collateral_in_uusd: user_position._total_collateral_in_uusd,
+        total_debt_in_uusd: user_position.total_debt_in_uusd,
+        total_collateralized_debt_in_uusd: user_position.total_collateralized_debt_in_uusd,
+        max_debt_in_uusd: user_position.max_debt_in_uusd,
+        weighted_maintenance_margin_in_uusd: user_position.weighted_maintenance_margin_in_uusd,
+        health_status,
     })
 }
 
