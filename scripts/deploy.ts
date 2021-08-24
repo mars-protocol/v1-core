@@ -6,6 +6,7 @@ import {
   queryContract,
   recover,
   setTimeoutDuration,
+  setupOracle,
   setupRedBank,
   uploadContract,
 } from "./helpers.js"
@@ -36,7 +37,7 @@ async function main() {
   } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
-      chainID: 'bombay-0008'
+      chainID: 'bombay-10'
     })
     wallet = recover(terra, process.env.TEST_MAIN!)
     deployConfig = bombay
@@ -47,12 +48,27 @@ async function main() {
     deployConfig = local
   }
 
-  if (!deployConfig.cw20_code_id) {
-    console.log("Please set cw20_code_id for network in deploy_config.ts")
+  console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
+
+  if (!deployConfig.minterProxyContractAddress) {
+    console.log(`Please deploy CW1-Whitelist proxy contract set as the MARS tokens minter address,
+                use the same deploy address as "Wallet address from seed" above
+                and then set this address in the deploy config before running this script...`)
     return
   }
 
-  console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
+  if (!deployConfig.minterProxyContractAddress || !deployConfig.marsTokenContractAddress) {
+    console.log(`Please deploy the CW20-base MARS token,
+                and then set this address in the deploy config before running this script...`)
+    return
+  }
+
+  if (!deployConfig.oracleFactoryAddress) {
+    console.log(
+      "Please specify the oracle price source (TerraSwap/Astroport) in the deploy config before running this script..."
+    )
+    return
+  }
 
   /*************************************** Deploy Address Provider Contract *****************************************/
   console.log("Deploying Address Provider...")
@@ -75,9 +91,24 @@ async function main() {
   )
   console.log("Council Contract Address: " + councilContractAddress)
 
+  /*************************************** Set Council as MARS Tokens Minter *****************************************/
+  console.log("Setting council to MARS tokens minter...")
+
+  await executeContract(
+    terra,
+    wallet,
+    deployConfig.minterProxyContractAddress,
+    {
+      "update_admins": {
+        "admins": isTestnet ? [wallet.key.accAddress, councilContractAddress] : [councilContractAddress]
+      }
+    }
+  )
+  console.log("Council set to MARS token minter admin role: ", await queryContract(terra, deployConfig.minterProxyContractAddress, { "admin_list": {} }))
+
   /**************************************** Deploy Staking Contract *****************************************/
   console.log("Deploying Staking...")
-  // TODO fix `factory_contract_address` in LocalTerra
+  // TODO fix `terraswap_factory_address` in LocalTerra
   deployConfig.stakingInitMsg.config.owner = councilContractAddress
   deployConfig.stakingInitMsg.config.address_provider_address = addressProviderContractAddress
   const stakingContractAddress = await deployContract(
@@ -121,44 +152,6 @@ async function main() {
     },
   )
   console.log("Incentives Contract Address: " + incentivesContractAddress)
-
-  /************************************* Instantiate Mars Token Contract *************************************/
-  console.log("Deploying Mars token...")
-  const marsTokenContractAddress = await instantiateContract(
-    terra,
-    wallet,
-    deployConfig.cw20_code_id,
-    {
-      name: "Mars token",
-      symbol: "Mars",
-      decimals: 6,
-      initial_balances: isTestnet ? [
-        {
-          "address": wallet.key.accAddress,
-          "amount": "1000000000000"
-        },
-        {
-          "address": "terra1z926ax906k0ycsuckele6x5hh66e2m4m5udwep", // Fields developers address
-          "amount": "1000000000000"
-        }
-      ] : [],
-      mint: {
-        "minter": councilContractAddress
-      },
-    }
-  )
-  console.log("Mars Token Contract Address: " + marsTokenContractAddress)
-
-  const balanceResponse = await queryContract(
-    terra,
-    marsTokenContractAddress,
-    {
-      "balance": {
-        "address": wallet.key.accAddress
-      }
-    }
-  )
-  console.log(`Balance of adress ${wallet.key.accAddress}: ${balanceResponse.balance / 1e6} Mars`)
 
   /************************************* Instantiate xMars Token Contract *************************************/
   console.log("Deploying xMars token...")
@@ -204,6 +197,18 @@ async function main() {
   )
   console.log(`Red Bank Contract Address: ${redBankContractAddress}`)
 
+  /*************************************** Deploy Oracle Contract *****************************************/
+  console.log("Deploying Oracle...")
+  const oracleContractAddress = await deployContract(
+    terra,
+    wallet,
+    join(MARS_ARTIFACTS_PATH, 'oracle.wasm'),
+    {
+      "owner": wallet.key.accAddress,
+    },
+  )
+  console.log("Oracle Contract Address: " + oracleContractAddress)
+
   /**************************************** Update Config in Address Provider Contract *****************************************/
   console.log('Setting addresses in address provider')
   await executeContract(
@@ -217,16 +222,38 @@ async function main() {
           "council_address": councilContractAddress,
           "incentives_address": incentivesContractAddress,
           "insurance_fund_address": insuranceFundContractAddress,
-          "mars_token_address": marsTokenContractAddress,
+          "mars_token_address": deployConfig.marsTokenContractAddress,
+          "oracle_address": oracleContractAddress,
           "red_bank_address": redBankContractAddress,
           "staking_address": stakingContractAddress,
           "treasury_address": treasuryContractAddress,
-          "xmars_token_address": xMarsTokenContractAddress
+          "xmars_token_address": xMarsTokenContractAddress,
+          // TODO should this be the council address or the multisig address?
+          "protocol_admin_address": wallet.key.accAddress
         }
       }
     }
   )
   console.log("Address Provider config successfully setup: ", await queryContract(terra, addressProviderContractAddress, { "config": {} }))
+
+  /*************************************** Setup Oracle Assets *****************************************/
+  await setupOracle(
+    terra,
+    wallet,
+    oracleContractAddress,
+    deployConfig.initialAssets,
+    deployConfig.oracleFactoryAddress,
+    isTestnet
+  )
+  console.log("Assets oracle price feed setup successfully")
+
+  let updateConfigMsg = {
+    "update_config": {
+      "owner": councilContractAddress
+    }
+  }
+  await executeContract(terra, wallet, oracleContractAddress, updateConfigMsg);
+  console.log("Oracle owner successfully changed: ", await queryContract(terra, oracleContractAddress, { "config": {} }))
 
   /************************************* Setup Initial Red Bank Markets **************************************/
   await setupRedBank(

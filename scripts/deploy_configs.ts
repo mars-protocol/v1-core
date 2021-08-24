@@ -40,66 +40,113 @@ export const testnet: Config = {
     // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
     {
       denom: "uusd",
-      initial_borrow_rate: "0.2",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "1.0",
-      max_loan_to_value: "0.75",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.85",
-      liquidation_bonus: "0.1",
-      kp_1: "0.04",
-      optimal_utilization_rate: "0.9",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.07"
+      init_params: {
+        initial_borrow_rate: "0.2",
+        max_loan_to_value: "0.75",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.85",
+        liquidation_bonus: "0.1",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "1.0",
+            kp_1: "0.04",
+            optimal_utilization_rate: "0.9",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.07"
+          }
+        }
+      }
     },
     {
       denom: "uluna",
-      initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "2.0",
-      max_loan_to_value: "0.55",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.65",
-      liquidation_bonus: "0.1",
-      kp_1: "0.02",
-      optimal_utilization_rate: "0.7",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.05"
+      init_params: {
+        initial_borrow_rate: "0.1",
+        max_loan_to_value: "0.55",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.65",
+        liquidation_bonus: "0.1",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.7",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
     },
     {
       symbol: "MIR",
       contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u",
-      initial_borrow_rate: "0.07",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "2.0",
-      max_loan_to_value: "0.45",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.55",
-      liquidation_bonus: "0.15",
-      kp_1: "0.02",
-      optimal_utilization_rate: "0.5",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.05"
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.45",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.55",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
     },
     {
       symbol: "ANC",
       contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-      initial_borrow_rate: "0.07",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "2.0",
-      max_loan_to_value: "0.35",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.45",
-      liquidation_bonus: "0.15",
-      kp_1: "0.02",
-      optimal_utilization_rate: "0.5",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.05"
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.35",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.45",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
+    },
+    {
+      symbol: "MARS",
+      contract_addr: undefined,
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.45",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.55",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
     },
   ],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
-  cw20_code_id: 148, // This is terraswap token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
+  minterProxyContractAddress: undefined,
+  marsTokenContractAddress: undefined,
+  oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
 }
 
 export const bombay: Config = {
@@ -144,67 +191,113 @@ export const bombay: Config = {
     // find contract addresses of CW20's here: https://github.com/terra-project/assets/blob/master/cw20/tokens.json
     {
       denom: "uusd",
-      initial_borrow_rate: "0.2",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "1.0",
-      max_loan_to_value: "0.75",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.85",
-      liquidation_bonus: "0.1",
-      kp_1: "0.04",
-      optimal_utilization_rate: "0.9",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.07"
+      init_params: {
+        initial_borrow_rate: "0.2",
+        max_loan_to_value: "0.75",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.85",
+        liquidation_bonus: "0.1",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "1.0",
+            kp_1: "0.04",
+            optimal_utilization_rate: "0.9",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.07"
+          }
+        }
+      }
     },
     {
       denom: "uluna",
-      initial_borrow_rate: "0.1",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "2.0",
-      max_loan_to_value: "0.55",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.65",
-      liquidation_bonus: "0.1",
-      kp_1: "0.02",
-      optimal_utilization_rate: "0.7",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.05"
+      init_params: {
+        initial_borrow_rate: "0.1",
+        max_loan_to_value: "0.55",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.65",
+        liquidation_bonus: "0.1",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.7",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
     },
     {
       symbol: "MIR",
       contract_addr: "terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u",
-      initial_borrow_rate: "0.07",
-      min_borrow_rate: "0.0",
-      max_borrow_rate: "2.0",
-      max_loan_to_value: "0.45",
-      reserve_factor: "0.2",
-      maintenance_margin: "0.55",
-      liquidation_bonus: "0.15",
-      kp_1: "0.02",
-      optimal_utilization_rate: "0.5",
-      kp_augmentation_threshold: "0.15",
-      kp_2: "0.05"
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.45",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.55",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
     },
-    // TODO ANC broken on bombay atm so can't use it
     // {
     //   symbol: "ANC",
     //   contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-    //   initial_borrow_rate: "0.07",
-    //   min_borrow_rate: "0.0",
-    //   max_borrow_rate: "2.0",
-    //   max_loan_to_value: "0.35",
-    //   reserve_factor: "0.2",
-    //   maintenance_margin: "0.45",
-    //   liquidation_bonus: "0.15",
-    //   kp_1: "0.02",
-    //   optimal_utilization_rate: "0.5",
-    //   kp_augmentation_threshold: "0.15",
-    //   kp_2: "0.05"
+    //   init_params: {
+    //     initial_borrow_rate: "0.07",
+    //     max_loan_to_value: "0.35",
+    //     reserve_factor: "0.2",
+    //     maintenance_margin: "0.45",
+    //     liquidation_bonus: "0.15",
+    //     interest_rate_strategy: {
+    //       "dynamic": {
+    //         min_borrow_rate: "0.0",
+    //         max_borrow_rate: "2.0",
+    //         kp_1: "0.02",
+    //         optimal_utilization_rate: "0.5",
+    //         kp_augmentation_threshold: "0.15",
+    //         kp_2: "0.05"
+    //       }
+    //     }
+    //   }
     // },
+    {
+      symbol: "MARS",
+      contract_addr: "terra1s5x50t9vgjnt6vctezwlzyyr7z2my8utuctx49",
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.45",
+        reserve_factor: "0.2",
+        maintenance_margin: "0.55",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        }
+      }
+    },
   ],
-  mirFarmingStratContractAddress: "terra18vx7zwn9mmygqtg35aptdx6s59p4zlrl9kx4z3",
-  ancFarmingStratContractAddress: "terra1zdwqr84m7sgx7vg82n48p6dgwn7p57hzwu0ht4",
-  cw20_code_id: 148, // This is terraswap token contract - the MIR token is instantiated from it (https://finder.terra.money/bombay-0008/address/terra10llyp6v3j3her8u3ce66ragytu45kcmd9asj3u)
+  mirFarmingStratContractAddress: "terra13k39jclh7shutznrh8qce50u6mzpm7s7klycrz",
+  ancFarmingStratContractAddress: "terra1aaazdd0qkh2p4gscs53a0vupq793yfsum9qgpw",
+  minterProxyContractAddress: "terra14x8y92htsz0qf7h0zlqgj93xvjewjvxcvj5kl9",
+  marsTokenContractAddress: "terra1s5x50t9vgjnt6vctezwlzyyr7z2my8utuctx49",
+  oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
 }
 
 export const local: Config = {
@@ -248,5 +341,7 @@ export const local: Config = {
   initialAssets: [],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
-  cw20_code_id: undefined,
+  minterProxyContractAddress: undefined,
+  marsTokenContractAddress: undefined,
+  oracleFactoryAddress: undefined,
 }

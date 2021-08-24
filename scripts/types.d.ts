@@ -38,21 +38,40 @@ interface RedBankInitMsg {
   }
 }
 
-interface Asset {
-  denom?: string
-  symbol?: string
-  contract_addr?: string
+interface DynamicInterestRate {
+  "dynamic": {
+    min_borrow_rate: string
+    max_borrow_rate: string
+    kp_1: string
+    optimal_utilization_rate: string
+    kp_augmentation_threshold: string
+    kp_2: string
+  }
+}
+
+interface LinearInterestRate {
+  "linear": {
+    optimal_utilization_rate: string
+    base: string
+    slope_1: string
+    slope_2: string
+  }
+}
+
+interface InitOrUpdateAssetParams {
   initial_borrow_rate: string
-  min_borrow_rate: string
-  max_borrow_rate: string
   max_loan_to_value: string
   reserve_factor: string
   maintenance_margin: string
   liquidation_bonus: string
-  kp_1: string
-  optimal_utilization_rate: string
-  kp_augmentation_threshold: string
-  kp_2: string
+  interest_rate_strategy: DynamicInterestRate | LinearInterestRate
+}
+
+interface Asset {
+  denom?: string
+  symbol?: string
+  contract_addr?: string
+  init_params: InitOrUpdateAssetParams
 }
 
 interface Config {
@@ -63,5 +82,7 @@ interface Config {
   initialAssets: Asset[]
   mirFarmingStratContractAddress: string | undefined
   ancFarmingStratContractAddress: string | undefined
-  cw20_code_id: number | undefined
+  minterProxyContractAddress: string | undefined
+  marsTokenContractAddress: string | undefined
+  oracleFactoryAddress: string | undefined
 }
