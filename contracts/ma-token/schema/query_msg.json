@@ -183,6 +183,27 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Returns the underlying asset amount for given address. Return type: BalanceResponse.",
+      "type": "object",
+      "required": [
+        "underlying_asset_balance"
+      ],
+      "properties": {
+        "underlying_asset_balance": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ]
 }
