@@ -254,6 +254,7 @@ pub mod msg {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    #[serde(rename_all = "snake_case")]
     pub enum UserHealthStatusResponse {
         NotBorrowing,
         Borrowing(Decimal),
