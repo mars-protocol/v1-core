@@ -88,11 +88,8 @@ export async function mustPerformTransaction(terra: LCDClient, wallet: Wallet, m
   return result
 }
 
-export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg, log?: boolean) {
+export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const result = await _performTransaction(terra, wallet, msg)
-  if (log) {
-    console.log(result)
-  }
   return isTxError(result)
 }
 
@@ -113,11 +110,6 @@ export async function instantiateContract(terra: LCDClient, wallet: Wallet, code
 export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   return await mustPerformTransaction(terra, wallet, executeMsg);
-}
-
-export async function mayExecuteContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
-  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
-  return await performTransaction(terra, wallet, executeMsg);
 }
 
 export async function executeContractFails(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
