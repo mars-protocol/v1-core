@@ -1880,6 +1880,28 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
     market.protocol_income_to_distribute += new_protocol_income_to_distribute;
 }
 
+const SCALING_FACTOR: u128 = 1_000_000;
+
+/// Scales the amount by factor for greater precision.
+/// Example:
+/// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
+/// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
+/// we scale the amount by SCALING_FACTOR.
+fn get_scaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
+    // Scale by SCALING_FACTOR to have better precision
+    let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR);
+    // Different form for: scaled_amount / index
+    scaled_amount * reverse_decimal(index)
+}
+
+/// Descales the amount introduced by `get_scaled_amount` (see function description).
+fn get_descaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
+    // Multiply scaled amount by decimal (index)
+    let result = amount * index;
+    // Descale by SCALING_FACTOR which is introduced by `get_scaled_amount`
+    result.checked_div(Uint128::from(SCALING_FACTOR)).unwrap()
+}
+
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
