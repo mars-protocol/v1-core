@@ -1,7 +1,6 @@
 import {
   BlockTxBroadcastResult,
   Coin,
-  Int,
   LCDClient,
   LocalTerra,
   Wallet
@@ -27,6 +26,7 @@ const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
 const CLOSE_FACTOR = 0.5
 const LUNA_MAX_LTV = 0.55
 const LIQUIDATION_BONUS = 0.1
+// set a high interest rate, so tests can be run faster
 const INTEREST_RATE = 100000
 const LUNA_USD_PRICE = 25
 
@@ -37,7 +37,9 @@ const USD_BORROW = LUNA_COLLATERAL * LUNA_USD_PRICE * LUNA_MAX_LTV
 // HELPERS
 
 async function maAssetAddress(terra: LCDClient, redBank: string, denom: string) {
-  const market = await queryContract(terra, redBank, { market: { asset: { native: { denom: denom } } } })
+  const market = await queryContract(terra, redBank,
+    { market: { asset: { native: { denom: denom } } } }
+  )
   return market.ma_token_address
 }
 
@@ -59,7 +61,10 @@ async function txTimestamp(terra: LCDClient, result: BlockTxBroadcastResult) {
 }
 
 async function deposit(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  const result = await executeContract(terra, wallet, redBank, { deposit_native: { denom: denom } }, `${amount}${denom}`)
+  const result = await executeContract(terra, wallet, redBank,
+    { deposit_native: { denom: denom } },
+    `${amount}${denom}`
+  )
   return await txTimestamp(terra, result)
 }
 
@@ -74,14 +79,13 @@ async function borrow(terra: LCDClient, wallet: Wallet, redBank: string, denom: 
   )
 }
 
-
-function calculateTaxOnBorrowedAmount(amount: number, taxRate: number, taxCap: number) {
+function computeTax(amount: number, taxRate: number, taxCap: number) {
   const tax = amount - amount / (1 + taxRate)
-  return tax > taxCap ? taxCap : tax
+  return tax > taxCap ? taxCap : Math.round(tax)
 }
 
-function amountReceivedFromBorrowedAmount(amount: number, taxRate: number, taxCap: number) {
-  return amount - calculateTaxOnBorrowedAmount(amount, taxRate, taxCap)
+function deductTax(amount: number, taxRate: number, taxCap: number) {
+  return amount - computeTax(amount, taxRate, taxCap)
 }
 
 async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
@@ -115,43 +119,32 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, debtFraction: 
 
   const { terra, redBank, provider, liquidator, taxRate, taxCap, maUluna } = env
 
-  console.log("provider provides USD")
+  console.log("provider provides uusd")
 
   await deposit(terra, provider, redBank, "uusd", USD_COLLATERAL)
 
-  console.log("borrower provides Luna")
+  console.log("borrower provides uluna")
 
   await deposit(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
 
   console.log("borrower borrows a small amount of uusd")
 
-  let totalUusdReceived = 0
+  let totalUusdAmountReceived = 0
 
-  // let uusdBalanceBefore = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
+  let uusdAmountBorrowed = Math.floor(USD_BORROW * 0.01)
+  let txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  let txEvents = txResult.logs[0].eventsByType
 
-  const uusdBorrow1 = Math.floor(USD_BORROW * 0.01)
-  const uusdReceived1 = amountReceivedFromBorrowedAmount(uusdBorrow1, taxRate, taxCap)
-  totalUusdReceived += uusdReceived1
-  //const borrowTxResult1 =
-  await borrow(terra, borrower, redBank, "uusd", uusdBorrow1)
-  // const uusdLoggedBorrowAmount = parseInt(borrowTxResult1.logs[0].eventsByType.wasm.amount[0])
-  // strictEqual(uusdLoggedBorrowAmount, uusdBorrow1)
+  // amount received after deducting Terra tax from the borrowed amount
+  let uusdAmountReceived = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
+  let expectedUusdAmountReceived = deductTax(uusdAmountBorrowed, taxRate, taxCap)
+  strictEqual(uusdAmountReceived, expectedUusdAmountReceived)
 
-  // let uusdBalanceAfter = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
-  // let uusdBalanceDifference = uusdBalanceAfter - uusdBalanceBefore
-  // console.log(
-  //   uusdBorrow1,
-  //   LOCAL_TERRA_FEE_UUSD,
-  //   calculateTaxOnBorrowedAmount(uusdBorrow1, taxRate, taxCap)
-  // )
-  // strictEqual(
-  //   uusdBalanceDifference,
-  //   uusdBorrow1 - LOCAL_TERRA_FEE_UUSD - calculateTaxOnBorrowedAmount(uusdBorrow1, taxRate, taxCap)
-  // )
+  totalUusdAmountReceived += uusdAmountReceived
 
   console.log("liquidator tries to liquidate the borrower")
 
-  const uusdRepayAmount1 = Math.floor((uusdBorrow1 * CLOSE_FACTOR) / 2)
+  let uusdAmountLiquidated = uusdAmountBorrowed
   // should fail because the borrower's health factor is > 1
   assert(await executeContractFails(terra, liquidator, redBank,
     {
@@ -162,24 +155,24 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, debtFraction: 
         receive_ma_token: receiveMaToken,
       }
     },
-    `${uusdRepayAmount1}uusd`
+    `${uusdAmountLiquidated}uusd`
   ))
 
-  console.log("borrower borrows up to the borrow limit of their uluna collateral")
+  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
 
-  const uusdBorrowed2 = Math.floor(USD_BORROW * 0.98)
-  const uusdReceived2 = amountReceivedFromBorrowedAmount(uusdBorrowed2, taxRate, taxCap)
-  totalUusdReceived += uusdReceived2
-  //const borrowTxResult2 =
-  await borrow(terra, borrower, redBank, "uusd", uusdBorrowed2)
-  // const uusdLoggedBorrowAmount2 = parseInt(borrowTxResult2.logs[0].eventsByType.wasm.amount[0])
-  // strictEqual(uusdLoggedBorrowAmount2, uusdBorrowed2)
+  uusdAmountBorrowed = Math.floor(USD_BORROW * 0.98)
+  txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  txEvents = txResult.logs[0].eventsByType
 
-  // strictEqual(parseInt(borrowTxResult2.logs[0].eventsByType.wasm.amount_after_tax[0]), uusdReceived2)
+  uusdAmountReceived = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
+  expectedUusdAmountReceived = deductTax(uusdAmountBorrowed, taxRate, taxCap)
+  strictEqual(uusdAmountReceived, expectedUusdAmountReceived)
+
+  totalUusdAmountReceived += uusdAmountReceived
 
   console.log("liquidator waits until the borrower's health factor is < 1, then liquidates")
 
-  // wait until the borrower is able to be liquidated
+  // wait until the borrower can be liquidated
   let backoff = 1
   while (true) {
     const userPosition = await queryContract(terra, redBank,
@@ -195,14 +188,14 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, debtFraction: 
     backoff *= 2
   }
 
-  // cache the liquidator's balances before liquidating
+  // cache the liquidator's balances before they liquidate the borrower
   const uusdBalanceBefore = await queryNativeBalance(terra, liquidator.key.accAddress, "uusd")
   const ulunaBalanceBefore = await queryNativeBalance(terra, liquidator.key.accAddress, "uluna")
   const maUlunaBalanceBefore = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
 
   // liquidate the borrower
-  const uusdRepayAmount2 = Math.floor(totalUusdReceived * debtFraction)
-  const liquidateResult = await executeContract(terra, liquidator, redBank,
+  uusdAmountLiquidated = Math.floor(totalUusdAmountReceived * debtFraction)
+  txResult = await executeContract(terra, liquidator, redBank,
     {
       liquidate_native: {
         collateral_asset: { native: { denom: "uluna" } },
@@ -211,21 +204,21 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, debtFraction: 
         receive_ma_token: receiveMaToken,
       }
     },
-    `${uusdRepayAmount2}uusd`
+    `${uusdAmountLiquidated}uusd`
   )
-  const liquidateEvents = liquidateResult.logs[0].eventsByType.wasm
+  txEvents = txResult.logs[0].eventsByType
 
-  // cache the liquidator's balances after liquidating
+  // cache the liquidator's balances after they have liquidated the borrower
   const uusdBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uusd")
   const ulunaBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uluna")
   const maUlunaBalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
 
-  // maximum fraction of the debt that can be liquidated
+  // maximum fraction of debt that can be liquidated
   const maxDebtFraction = debtFraction > CLOSE_FACTOR ? CLOSE_FACTOR : debtFraction
 
   // debt amount repaid
-  const debtAmountRepaid = parseInt(liquidateEvents.debt_amount_repaid[0])
-  const expectedDebtAmountRepaid = Math.floor(totalUusdReceived * maxDebtFraction)
+  const debtAmountRepaid = parseInt(txEvents.wasm.debt_amount_repaid[0])
+  const expectedDebtAmountRepaid = Math.floor(totalUusdAmountReceived * maxDebtFraction)
 
   if (debtFraction > CLOSE_FACTOR) {
     assert(
@@ -240,27 +233,28 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, debtFraction: 
   const uusdBalanceDifference = uusdBalanceBefore - uusdBalanceAfter
   // TODO why do these cases behave differently?
   if (debtFraction > CLOSE_FACTOR) {
-    const uusdLiquidationTax = (await terra.utils.calculateTax(new Coin("uusd", uusdRepayAmount2))).amount.toNumber()
+    const uusdLiquidationTax = await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))
     strictEqual(
       debtAmountRepaid,
-      uusdBalanceDifference - uusdLiquidationTax - LOCAL_TERRA_FEE_UUSD
+      uusdBalanceDifference - uusdLiquidationTax.amount.toNumber() - LOCAL_TERRA_FEE_UUSD
     )
   } else {
     strictEqual(debtAmountRepaid, uusdBalanceDifference - LOCAL_TERRA_FEE_UUSD)
   }
 
   // refund amount
-  const refundAmount = parseInt(liquidateEvents.refund_amount[0])
+  const refundAmount = parseInt(txEvents.wasm.refund_amount[0])
   if (debtFraction > CLOSE_FACTOR) {
-    const expectedRefundAmount = uusdRepayAmount2 - debtAmountRepaid
+    const expectedRefundAmount = uusdAmountLiquidated - debtAmountRepaid
     strictEqual(refundAmount, expectedRefundAmount)
   } else {
     strictEqual(refundAmount, 0)
   }
 
   // collateral amount liquidated
-  const collateralAmountLiquidated = parseInt(liquidateEvents.collateral_amount_liquidated[0])
-  const expectedCollateralAmountLiquidated = new Int(debtAmountRepaid * (1 + LIQUIDATION_BONUS) / LUNA_USD_PRICE).toNumber()
+  const collateralAmountLiquidated = parseInt(txEvents.wasm.collateral_amount_liquidated[0])
+  const expectedCollateralAmountLiquidated =
+    Math.round(debtAmountRepaid * (1 + LIQUIDATION_BONUS) / LUNA_USD_PRICE)
   strictEqual(collateralAmountLiquidated, expectedCollateralAmountLiquidated)
 
   // collateral amount received
@@ -296,16 +290,17 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
 
   const uusdBalanceBefore = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
 
-  const uusdBorrowAmount = USD_COLLATERAL
-  const borrowTxResult = await borrow(terra, borrower, redBank, "uusd", uusdBorrowAmount)
-  const uusdLoggedBorrowAmount = parseInt(borrowTxResult.logs[0].eventsByType.wasm.amount[0])
-  strictEqual(uusdLoggedBorrowAmount, uusdBorrowAmount)
+  const uusdAmountBorrowed = USD_COLLATERAL
+  const txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  const txEvents = txResult.logs[0].eventsByType
+  const loggedUusdAmountBorrowed = parseInt(txEvents.wasm.amount[0])
+  strictEqual(loggedUusdAmountBorrowed, uusdAmountBorrowed)
 
   const uusdBalanceAfter = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
   const uusdBalanceDifference = uusdBalanceAfter - uusdBalanceBefore
   strictEqual(
     uusdBalanceDifference,
-    uusdBorrowAmount - LOCAL_TERRA_FEE_UUSD - calculateTaxOnBorrowedAmount(uusdBorrowAmount, taxRate, taxCap)
+    uusdAmountBorrowed - LOCAL_TERRA_FEE_UUSD - computeTax(uusdAmountBorrowed, taxRate, taxCap)
   )
 
   console.log("liquidator tries to liquidate the borrower")
@@ -326,7 +321,7 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
         receive_ma_token: false,
       }
     },
-    `${uusdBorrowAmount}uusd`
+    `${uusdAmountBorrowed}uusd`
   ))
 
   const userPositionT2 = await queryContract(terra, redBank,
@@ -511,12 +506,12 @@ async function main() {
   await testCollateralizedLoan(env, terra.wallets.test4, debtFraction, false)
   await testCollateralizedLoan(env, terra.wallets.test5, debtFraction, true)
 
-  // debtFraction = CLOSE_FACTOR + 0.1
+  debtFraction = CLOSE_FACTOR + 0.1
   await testCollateralizedLoan(env, terra.wallets.test6, debtFraction, false)
   await testCollateralizedLoan(env, terra.wallets.test7, debtFraction, true)
 
   // uncollateralized
-  // await testUncollateralizedLoan(env, terra.wallets.test8)
+  await testUncollateralizedLoan(env, terra.wallets.test8)
 
   console.log("OK")
 }
