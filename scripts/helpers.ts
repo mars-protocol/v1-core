@@ -36,9 +36,10 @@ export async function sleep(timeout: number) {
 
 // LocalTerra doesn't estimate fees properly, so we set the fee in this environment sufficiently high to
 // ensure all transactions succeed.
+export const LOCAL_TERRA_FEE_UUSD = 45_000000
 const LOCAL_TERRA_FEE = new StdFee(
-  30000000,
-  [new Coin('uusd', 45000000)]
+  30_000_000,
+  [new Coin('uusd', LOCAL_TERRA_FEE_UUSD)]
 )
 
 export class TransactionError extends CustomError {
@@ -87,9 +88,11 @@ export async function mustPerformTransaction(terra: LCDClient, wallet: Wallet, m
   return result
 }
 
-export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg) {
+export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg, log?: boolean) {
   const result = await _performTransaction(terra, wallet, msg)
-  console.log(result)
+  if (log) {
+    console.log(result)
+  }
   return isTxError(result)
 }
 
