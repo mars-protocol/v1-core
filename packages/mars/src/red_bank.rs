@@ -97,10 +97,17 @@ pub mod msg {
         /// Called by liquidity token. Validate liquidity token transfer is valid
         /// and update collateral status
         FinalizeLiquidityTokenTransfer {
-            sender_address: String,
-            recipient_address: String,
+            /// Token sender. Address is trusted because it should have been verified in
+            /// the token contract
+            sender_address: Addr,
+            /// Token recipient. Address is trusted because it should have been verified in
+            /// the token contract
+            recipient_address: Addr,
+            /// Sender's balance before the token transfer
             sender_previous_balance: Uint128,
+            /// Recipient's balance before the token transfer
             recipient_previous_balance: Uint128,
+            /// Transfer amount
             amount: Uint128,
         },
 
@@ -122,9 +129,11 @@ pub mod msg {
             amount: Option<Uint128>,
         },
 
-        /// Withdraw asset
+        /// Withdraw an amount of the asset burning an equivalent amount of maTokens
         Withdraw {
             asset: Asset,
+            /// Amount to be withdrawn. If None is specified, the full maToken balance will be
+            /// burned in exchange for the equivalent asset amount.
             amount: Option<Uint128>,
         },
     }
@@ -152,35 +161,29 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
+        /// Get config parameters
         Config {},
-        Market {
-            asset: Asset,
-        },
+        /// Get asset market parameters
+        Market { asset: Asset },
+        /// Get a list of all markets. Returns MarketsListResponse
         MarketsList {},
-        Debt {
-            address: String,
-        },
-        UncollateralizedLoanLimit {
-            user_address: String,
-            asset: Asset,
-        },
-        Collateral {
-            address: String,
-        },
-        ScaledLiquidityAmount {
-            asset: Asset,
-            amount: Uint128,
-        },
-        ScaledDebtAmount {
-            asset: Asset,
-            amount: Uint128,
-        },
+        /// Get uncollateralized limit for given asset and user.
+        /// Returns UncollateralizedLoanLimitResponse
+        UncollateralizedLoanLimit { user_address: String, asset: Asset },
+        /// Get all debt positions for a user. Returns DebtResponse
+        Debt { address: String },
+        /// Get all collateral positions for a user. Returns CollateralResponse
+        Collateral { address: String },
+        /// Get user position. Returns UserPositionResponse
+        UserPosition { address: String },
+        /// Get equivalent underlying asset amount for a maToken balance. Returns AmountResponse
+        ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
+        /// Get equivalent underlying asset amount for a debt balance. Returns AmountResponse
+        ScaledDebtAmount { asset: Asset, amount: Uint128 },
+        /// Get equivalent maToken amount for a given underlying asset balance. Returns AmountResponse
         DescaledLiquidityAmount {
             ma_token_address: String,
             amount: Uint128,
-        },
-        UserPosition {
-            address: String,
         },
     }
 
@@ -218,7 +221,9 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct MarketInfo {
+        /// Either denom for a native token or asset address for a cw20
         pub denom: String,
+        /// Address for the corresponding maToken
         pub ma_token_address: Addr,
     }
 
@@ -229,7 +234,9 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct DebtInfo {
+        /// Either denom for a native token or asset address for a cw20
         pub denom: String,
+        /// Scaled amount
         pub amount: Uint128,
     }
 
@@ -240,12 +247,16 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct CollateralInfo {
+        /// Either denom for a native token or asset address for a cw20
         pub denom: String,
+        /// Scaled amount
         pub enabled: bool,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct UncollateralizedLoanLimitResponse {
+        /// Limit an address has for an uncollateralized loan for a specific asset.
+        /// 0 limit means no collateral.
         pub limit: Uint128,
     }
 
@@ -258,6 +269,7 @@ pub mod msg {
     pub struct UserPositionResponse {
         pub total_collateral_in_uusd: Uint128,
         pub total_debt_in_uusd: Uint128,
+        /// Total debt minus the uncollateralized debt
         pub total_collateralized_debt_in_uusd: Uint128,
         pub max_debt_in_uusd: Uint128,
         pub weighted_maintenance_margin_in_uusd: Uint128,

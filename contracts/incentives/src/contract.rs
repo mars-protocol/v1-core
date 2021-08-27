@@ -129,7 +129,7 @@ pub fn execute_balance_change(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
-    user_address: String,
+    user_address: Addr,
     user_balance_before: Uint128,
     total_supply_before: Uint128,
 ) -> Result<Response, ContractError> {
@@ -152,8 +152,6 @@ pub fn execute_balance_change(
     ASSET_INCENTIVES.save(deps.storage, &ma_token_address, &asset_incentive)?;
 
     // Check if user has accumulated uncomputed rewards (which means index is not up to date)
-    let user_address = deps.api.addr_validate(&user_address)?;
-
     let user_asset_index_key = USER_ASSET_INDICES.key((&user_address, &ma_token_address));
 
     let user_asset_index = user_asset_index_key
@@ -648,7 +646,7 @@ mod tests {
         // non existing incentive returns a no op
         let info = mock_info("ma_asset", &[]);
         let msg = ExecuteMsg::BalanceChange {
-            user_address: String::from("user"),
+            user_address: Addr::unchecked("user"),
             user_balance_before: Uint128::new(100000),
             total_supply_before: Uint128::new(100000),
         };
@@ -682,7 +680,7 @@ mod tests {
             ..Default::default()
         });
         let msg = ExecuteMsg::BalanceChange {
-            user_address: String::from("user"),
+            user_address: Addr::unchecked("user"),
             user_balance_before: Uint128::new(100_000),
             total_supply_before: Uint128::new(100_000),
         };
@@ -757,7 +755,7 @@ mod tests {
             ..Default::default()
         });
         let msg = ExecuteMsg::BalanceChange {
-            user_address: user_address.to_string(),
+            user_address: user_address.clone(),
             user_balance_before: Uint128::zero(),
             total_supply_before: total_supply,
         };
@@ -834,7 +832,7 @@ mod tests {
                 ..Default::default()
             });
             let msg = ExecuteMsg::BalanceChange {
-                user_address: user_address.to_string(),
+                user_address: user_address.clone(),
                 user_balance_before: Uint128::zero(),
                 total_supply_before: Uint128::zero(),
             };
@@ -903,7 +901,7 @@ mod tests {
                 ..Default::default()
             });
             let msg = ExecuteMsg::BalanceChange {
-                user_address: user_address.to_string(),
+                user_address: user_address.clone(),
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };
@@ -968,7 +966,7 @@ mod tests {
                 ..Default::default()
             });
             let msg = ExecuteMsg::BalanceChange {
-                user_address: user_address.to_string(),
+                user_address: user_address.clone(),
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };
@@ -1034,7 +1032,7 @@ mod tests {
                 ..Default::default()
             });
             let msg = ExecuteMsg::BalanceChange {
-                user_address: user_address.to_string(),
+                user_address: user_address.clone(),
                 user_balance_before: user_balance,
                 total_supply_before: total_supply,
             };

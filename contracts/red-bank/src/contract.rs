@@ -181,20 +181,16 @@ pub fn execute(
             sender_previous_balance,
             recipient_previous_balance,
             amount,
-        } => {
-            let sender_addr = deps.api.addr_validate(&sender_address)?;
-            let recipient_addr = deps.api.addr_validate(&recipient_address)?;
-            execute_finalize_liquidity_token_transfer(
-                deps,
-                env,
-                info,
-                sender_addr,
-                recipient_addr,
-                sender_previous_balance,
-                recipient_previous_balance,
-                amount,
-            )
-        }
+        } => execute_finalize_liquidity_token_transfer(
+            deps,
+            env,
+            info,
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        ),
 
         ExecuteMsg::UpdateUncollateralizedLoanLimit {
             user_address,
@@ -6032,8 +6028,8 @@ mod tests {
         // Finalize transfer with sender not borrowing passes
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(1_000_000),
                 recipient_previous_balance: Uint128::new(0),
                 amount: Uint128::new(500_000),
@@ -6078,8 +6074,8 @@ mod tests {
 
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(1_000_000),
                 recipient_previous_balance: Uint128::new(0),
                 amount: Uint128::new(500_000),
@@ -6120,8 +6116,8 @@ mod tests {
 
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(500_000),
                 recipient_previous_balance: Uint128::new(500_000),
                 amount: Uint128::new(500_000),
@@ -6139,8 +6135,8 @@ mod tests {
         // Calling this with other token fails
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address,
+                recipient_address: recipient_address,
                 sender_previous_balance: Uint128::new(500_000),
                 recipient_previous_balance: Uint128::new(500_000),
                 amount: Uint128::new(500_000),
