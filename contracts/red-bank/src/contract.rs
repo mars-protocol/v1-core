@@ -900,7 +900,6 @@ pub fn execute_repay(
     let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
-        // TODO: Should we log this?
         refund_amount = (repay_amount_scaled - debt.amount_scaled)
             * get_updated_borrow_index(&market, env.block.time.seconds());
         let refund_msg = match asset_type {
@@ -1132,8 +1131,11 @@ pub fn execute_liquidate(
                 cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
             }
         };
+        // TODO: Why are we scaling this by the index??
+        /*
         let contract_collateral_balance = contract_collateral_balance
             * get_updated_liquidity_index(&collateral_market, block_time);
+        */
         if contract_collateral_balance < collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1961,9 +1963,6 @@ pub fn market_update_interest_rates(
         }
     };
 
-    // TODO: Verify on integration tests that this balance includes the
-    // amount sent by the user on deposits and repays(both for cw20 and native).
-    // If it doesn't, we should include them on the available_liquidity
     let contract_current_balance = contract_balance_amount;
 
     // Get protocol income to be deducted from liquidity (doesn't belong to the money market
@@ -4101,8 +4100,6 @@ mod tests {
             &[(borrower_addr.clone(), Uint128::new(10000))],
         );
 
-        // TODO: probably some variables (ie: borrow_amount, expected_params) that are repeated
-        // in all calls could be enclosed in local scopes somehow)
         // *
         // Borrow cw20 token
         // *
@@ -4504,9 +4501,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        // TODO: There's a rounding error when multiplying a dividing by a Decimal256
-        // probably because intermediate result is cast to Uint256. doing everything in Decimal256
-        // eliminates this but need to then find a way to cast it back to an integer
+
         let repay_amount: u128 = (expected_debt_scaled_2_after_repay_some_2
             * expected_params_native.borrow_index)
             .into();
