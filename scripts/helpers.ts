@@ -1,16 +1,13 @@
 import {
   Coin,
-  CreateTxOptions,
   isTxError,
   LCDClient,
-  LocalTerra,
   MnemonicKey,
   Msg,
   MsgExecuteContract,
   MsgInstantiateContract,
   MsgMigrateContract,
   MsgStoreCode,
-  StdFee,
   StdTx,
   Wallet
 } from '@terra-money/terra.js';
@@ -34,14 +31,6 @@ export async function sleep(timeout: number) {
   await new Promise(resolve => setTimeout(resolve, timeout))
 }
 
-// LocalTerra doesn't estimate fees properly, so we set the fee in this environment sufficiently high to
-// ensure all transactions succeed.
-export const LOCAL_TERRA_FEE_UUSD = 45_000000
-const LOCAL_TERRA_FEE = new StdFee(
-  30_000_000,
-  [new Coin('uusd', LOCAL_TERRA_FEE_UUSD)]
-)
-
 export class TransactionError extends CustomError {
   public constructor(
     public code: number,
@@ -52,16 +41,8 @@ export class TransactionError extends CustomError {
   }
 }
 
-export async function createTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  let options: CreateTxOptions = {
-    msgs: [msg],
-    gasPrices: [new Coin("uusd", 0.15)]
-  }
-  if (terra instanceof LocalTerra) {
-    options.fee = LOCAL_TERRA_FEE
-  }
-
-  return await wallet.createTx(options)
+export async function createTransaction(wallet: Wallet, msg: Msg) {
+  return await wallet.createTx({ msgs: [msg] })
 }
 
 export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
@@ -70,51 +51,33 @@ export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
   return result
 }
 
-async function _performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  const tx = await createTransaction(terra, wallet, msg)
-  const signedTx = await wallet.key.signTx(tx)
-  return await broadcastTransaction(terra, signedTx)
-}
-
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  return await _performTransaction(terra, wallet, msg)
-}
-
-export async function mustPerformTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  const result = await _performTransaction(terra, wallet, msg)
+  const tx = await createTransaction(wallet, msg)
+  const signedTx = await wallet.key.signTx(tx)
+  const result = await broadcastTransaction(terra, signedTx)
   if (isTxError(result)) {
     throw new TransactionError(result.code, result.codespace, result.raw_log)
   }
   return result
 }
 
-export async function performTransactionFails(terra: LCDClient, wallet: Wallet, msg: Msg) {
-  const result = await _performTransaction(terra, wallet, msg)
-  return isTxError(result)
-}
-
 export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
   const contract = readFileSync(filepath, 'base64');
   const uploadMsg = new MsgStoreCode(wallet.key.accAddress, contract);
-  let result = await mustPerformTransaction(terra, wallet, uploadMsg);
+  let result = await performTransaction(terra, wallet, uploadMsg);
   return Number(result.logs[0].eventsByType.store_code.code_id[0]) // code_id
 }
 
 export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object) {
   const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, wallet.key.accAddress, codeId, msg, undefined);
-  let result = await mustPerformTransaction(terra, wallet, instantiateMsg)
+  let result = await performTransaction(terra, wallet, instantiateMsg)
   const attributes = result.logs[0].events[0].attributes
   return attributes[attributes.length - 1].value // contract address
 }
 
 export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
-  return await mustPerformTransaction(terra, wallet, executeMsg);
-}
-
-export async function executeContractFails(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
-  const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
-  return await performTransactionFails(terra, wallet, executeMsg);
+  return await performTransaction(terra, wallet, executeMsg);
 }
 
 export async function queryContract(terra: LCDClient, contractAddress: string, query: object): Promise<any> {
@@ -128,7 +91,7 @@ export async function deployContract(terra: LCDClient, wallet: Wallet, filepath:
 
 export async function migrate(terra: LCDClient, wallet: Wallet, contractAddress: string, newCodeId: number) {
   const migrateMsg = new MsgMigrateContract(wallet.key.accAddress, contractAddress, newCodeId, {});
-  return await mustPerformTransaction(terra, wallet, migrateMsg);
+  return await performTransaction(terra, wallet, migrateMsg);
 }
 
 export function recover(terra: LCDClient, mnemonic: string) {
@@ -292,7 +255,7 @@ export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAdd
       const coins = new Coin(asset, amount);
       const depositMsg = { "deposit_native": { "denom": asset } };
       const executeDepositMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, depositMsg, [coins]);
-      await mustPerformTransaction(terra, account, executeDepositMsg);
+      await performTransaction(terra, account, executeDepositMsg);
       console.log(`Deposited ${amount} ${asset}`);
     }
   }
@@ -313,7 +276,7 @@ export async function setupRedBank(terra: LCDClient, wallet: Wallet, contractAdd
         }
       };
       const executeBorrowMsg = new MsgExecuteContract(account.key.accAddress, contractAddress, borrowMsg);
-      await mustPerformTransaction(terra, account, executeBorrowMsg);
+      await performTransaction(terra, account, executeBorrowMsg);
       console.log(`Borrowed ${amount} ${asset}`);
     }
   }

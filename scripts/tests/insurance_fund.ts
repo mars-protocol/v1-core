@@ -15,7 +15,7 @@ import {
   deployContract,
   executeContract,
   instantiateContract,
-  mustPerformTransaction,
+  performTransaction,
   queryContract,
   setTimeoutDuration,
   uploadContract
@@ -114,7 +114,7 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   await provideLiquidity(env, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
 
   // transfer some native token to the insurance fund
-  await mustPerformTransaction(env.terra, env.wallet,
+  await performTransaction(env.terra, env.wallet,
     new MsgSend(
       env.wallet.key.accAddress,
       env.insuranceFundAddress,
