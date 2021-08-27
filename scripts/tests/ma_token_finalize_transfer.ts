@@ -1,20 +1,13 @@
-/*
-LocalTerra oracle needs ~1500 ms timeouts to work. Set these with:
-
-```
-sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' config/config.toml
-```
-*/
 import { LCDClient, LocalTerra, MsgExecuteContract, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
-  performTransactionFails,
+  performTransaction,
   queryContract,
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert } from "assert"
+import { strict as assert, strictEqual } from "assert"
 
 // consts
 
@@ -87,8 +80,8 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
 
   console.log("transferring the entire maToken balance should fail")
 
-  assert(
-    await performTransactionFails(terra, recipient,
+  try {
+    await performTransaction(terra, recipient,
       new MsgExecuteContract(recipient.key.accAddress, maLuna, {
         transfer: {
           amount: String(LUNA_COLLATERAL),
@@ -96,7 +89,10 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
         }
       })
     )
-  )
+  } catch (error) {
+    strictEqual(error.config.url, "/txs/estimate_fee")
+    assert(error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`))
+  }
 
   console.log("transferring a small amount of the maToken balance should work")
 
@@ -192,16 +188,23 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
 
-  assert(
-    await performTransactionFails(terra, borrower,
-      new MsgExecuteContract(borrower.key.accAddress, maLuna, {
-        transfer: {
-          amount: String(LUNA_COLLATERAL / 100),
-          recipient: recipient.key.accAddress
+  try {
+    await performTransaction(terra, borrower,
+      new MsgExecuteContract(borrower.key.accAddress, maLuna,
+        {
+          transfer: {
+            amount: String(LUNA_COLLATERAL / 100),
+            recipient: recipient.key.accAddress
+          }
         }
-      })
+      )
     )
-  )
+  } catch (error) {
+    strictEqual(error.config.url, "/txs/estimate_fee")
+    assert(error.response.data.error.includes(
+      "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
+    ))
+  }
 
   console.log("enabling Luna as collateral should make transferring maLuna succeed")
 
@@ -233,12 +236,6 @@ async function main() {
 
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
-
-  // Check Terra uusd oracle is available, if not, try again in a few seconds
-  const activeDenoms = await terra.oracle.activeDenoms()
-  if (!activeDenoms.includes("uusd")) {
-    throw new Error("Terra uusd oracle unavailable")
-  }
 
   console.log("upload contracts")
 
@@ -325,16 +322,8 @@ async function main() {
   await executeContract(terra, deployer, oracle,
     {
       set_asset: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        },
-        price_source: {
-          native: {
-            denom: "uluna"
-          }
-        }
+        asset: { native: { denom: "uluna" } },
+        price_source: { fixed: { price: "25" } }
       }
     }
   )
@@ -372,16 +361,8 @@ async function main() {
   await executeContract(terra, deployer, oracle,
     {
       set_asset: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
-        price_source: {
-          native: {
-            denom: "uusd"
-          }
-        }
+        asset: { native: { denom: "uusd" } },
+        price_source: { fixed: { price: "1" } }
       }
     }
   )
