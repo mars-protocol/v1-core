@@ -1131,11 +1131,7 @@ pub fn execute_liquidate(
                 cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
             }
         };
-        // TODO: Why are we scaling this by the index??
-        /*
-        let contract_collateral_balance = contract_collateral_balance
-            * get_updated_liquidity_index(&collateral_market, block_time);
-        */
+
         if contract_collateral_balance < collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1347,7 +1343,6 @@ pub fn execute_finalize_liquidity_token_transfer(
     }
 
     // Update users's positions
-    // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
         if from_previous_balance.checked_sub(amount)?.is_zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
