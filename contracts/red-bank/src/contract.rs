@@ -30,8 +30,8 @@ use crate::accounts::get_user_position;
 use crate::data_types::{get_descaled_amount, get_scaled_amount, ScaledAmount};
 use crate::error::ContractError;
 use crate::state::{
-    Config, Debt, GlobalState, Market, MarketReferences, User, CONFIG, DEBTS, GLOBAL_STATE,
-    MARKETS, MARKET_MA_TOKENS, MARKET_REFERENCES, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+    Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
+    MARKET_REFERENCES_BY_INDEX, MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
 use mars::interest_rate_models::InterestRateModel;
 use mars::math::{decimal_multiplication, reverse_decimal};
@@ -182,20 +182,16 @@ pub fn execute(
             sender_previous_balance,
             recipient_previous_balance,
             amount,
-        } => {
-            let sender_addr = deps.api.addr_validate(&sender_address)?;
-            let recipient_addr = deps.api.addr_validate(&recipient_address)?;
-            execute_finalize_liquidity_token_transfer(
-                deps,
-                env,
-                info,
-                sender_addr,
-                recipient_addr,
-                sender_previous_balance,
-                recipient_previous_balance,
-                amount,
-            )
-        }
+        } => execute_finalize_liquidity_token_transfer(
+            deps,
+            env,
+            info,
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        ),
 
         ExecuteMsg::UpdateUncollateralizedLoanLimit {
             user_address,
@@ -496,12 +492,10 @@ pub fn execute_init_asset(
             MARKETS.save(deps.storage, asset_reference.as_slice(), &new_market)?;
 
             // Save index to reference mapping
-            MARKET_REFERENCES.save(
+            MARKET_REFERENCES_BY_INDEX.save(
                 deps.storage,
                 U32Key::new(market_idx),
-                &MarketReferences {
-                    reference: asset_reference.to_vec(),
-                },
+                &asset_reference.to_vec(),
             )?;
 
             // Increment market count
@@ -585,7 +579,7 @@ pub fn execute_init_asset_token_callback(
         MARKETS.save(deps.storage, reference.as_slice(), &market)?;
 
         // save ma token contract to reference mapping
-        MARKET_MA_TOKENS.save(deps.storage, &ma_contract_addr, &reference)?;
+        MARKET_REFERENCES_BY_MA_TOKEN.save(deps.storage, &ma_contract_addr, &reference)?;
 
         Ok(Response::default())
     } else {
@@ -910,7 +904,6 @@ pub fn execute_repay(
     let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
-        // TODO: Should we log this?
         refund_amount = get_descaled_amount(
             repay_amount_scaled - debt.amount_scaled,
             get_updated_borrow_index(&market, env.block.time.seconds()),
@@ -1152,11 +1145,7 @@ pub fn execute_liquidate(
                 cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
             }
         };
-        // FIXME: @piobab contract balance is not scaled so it shouldn't be descaled?
-        /*let contract_collateral_balance = get_descaled_amount(
-            contract_collateral_balance,
-            get_updated_liquidity_index(&collateral_market, block_time),
-        );*/
+
         if contract_collateral_balance < collateral_amount_to_liquidate {
             return Err(StdError::generic_err(
                 "contract does not have enough collateral liquidity to send back underlying asset",
@@ -1345,7 +1334,7 @@ pub fn execute_finalize_liquidity_token_transfer(
     amount: Uint128,
 ) -> Result<Response, ContractError> {
     // Get liquidity token market
-    let market_reference = MARKET_MA_TOKENS.load(deps.storage, &info.sender)?;
+    let market_reference = MARKET_REFERENCES_BY_MA_TOKEN.load(deps.storage, &info.sender)?;
     let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
 
     // Check user health factor is above 1
@@ -1372,7 +1361,6 @@ pub fn execute_finalize_liquidity_token_transfer(
     }
 
     // Update users's positions
-    // TODO: Should this and all collateral positions changes be logged? how?
     if from_address != to_address {
         if from_previous_balance.checked_sub(amount)?.is_zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
@@ -1820,7 +1808,7 @@ fn query_descaled_liquidity_amount(
     amount: ScaledAmount,
 ) -> StdResult<AmountResponse> {
     let ma_token_address = deps.api.addr_validate(&ma_token_address)?;
-    let market_reference = MARKET_MA_TOKENS.load(deps.storage, &ma_token_address)?;
+    let market_reference = MARKET_REFERENCES_BY_MA_TOKEN.load(deps.storage, &ma_token_address)?;
     let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
     let descaled_amount = get_descaled_amount(
         amount,
@@ -1991,9 +1979,6 @@ pub fn market_update_interest_rates(
         }
     };
 
-    // TODO: Verify on integration tests that this balance includes the
-    // amount sent by the user on deposits and repays(both for cw20 and native).
-    // If it doesn't, we should include them on the available_liquidity
     let contract_current_balance = contract_balance_amount;
 
     // Get protocol income to be deducted from liquidity (doesn't belong to the money market
@@ -2181,16 +2166,17 @@ fn build_send_cw20_token_msg(
 }
 
 pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
-    let asset_reference_vec = match MARKET_REFERENCES.load(deps.storage, U32Key::new(index)) {
-        Ok(asset_reference_vec) => asset_reference_vec,
-        Err(_) => {
-            return Err(StdError::generic_err(format!(
-                "no market reference exists with index: {}",
-                index
-            )))
-        }
-    }
-    .reference;
+    let asset_reference_vec =
+        match MARKET_REFERENCES_BY_INDEX.load(deps.storage, U32Key::new(index)) {
+            Ok(asset_reference_vec) => asset_reference_vec,
+            Err(_) => {
+                return Err(StdError::generic_err(format!(
+                    "no market reference exists with index: {}",
+                    index
+                )))
+            }
+        };
+
     match MARKETS.load(deps.storage, asset_reference_vec.as_slice()) {
         Ok(asset_market) => Ok((asset_reference_vec, asset_market)),
         Err(_) => Err(StdError::generic_err(format!(
@@ -2630,10 +2616,10 @@ mod tests {
         assert_eq!(AssetType::Native, market.asset_type);
 
         // should store reference in market index
-        let market_reference = MARKET_REFERENCES
+        let market_reference = MARKET_REFERENCES_BY_INDEX
             .load(&deps.storage, U32Key::new(0))
             .unwrap();
-        assert_eq!(b"someasset", market_reference.reference.as_slice());
+        assert_eq!(b"someasset", market_reference.as_slice());
 
         // Should have market count of 1
         let money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
@@ -2657,7 +2643,7 @@ mod tests {
                     init_hook: Some(ma_token::msg::InitHook {
                         contract_addr: MOCK_CONTRACT_ADDR.to_string(),
                         msg: to_binary(&ExecuteMsg::InitAssetTokenCallback {
-                            reference: market_reference.reference,
+                            reference: market_reference,
                         })
                         .unwrap()
                     }),
@@ -2750,10 +2736,10 @@ mod tests {
         assert_eq!(AssetType::Cw20, market.asset_type);
 
         // should store reference in market index
-        let market_reference = MARKET_REFERENCES
+        let market_reference = MARKET_REFERENCES_BY_INDEX
             .load(&deps.storage, U32Key::new(1))
             .unwrap();
-        assert_eq!(cw20_addr.as_bytes(), market_reference.reference.as_slice());
+        assert_eq!(cw20_addr.as_bytes(), market_reference.as_slice());
 
         // should have an asset_type of cw20
         assert_eq!(AssetType::Cw20, market.asset_type);
@@ -3005,10 +2991,10 @@ mod tests {
             new_market.liquidation_bonus
         );
 
-        let new_market_reference = MARKET_REFERENCES
+        let new_market_reference = MARKET_REFERENCES_BY_INDEX
             .load(&deps.storage, U32Key::new(0))
             .unwrap();
-        assert_eq!(b"someasset", new_market_reference.reference.as_slice());
+        assert_eq!(b"someasset", new_market_reference.as_slice());
 
         let new_money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
         assert_eq!(new_money_market.market_count, 1);
@@ -3439,7 +3425,7 @@ mod tests {
         );
 
         let market_initial = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
-        MARKET_MA_TOKENS
+        MARKET_REFERENCES_BY_MA_TOKEN
             .save(
                 deps.as_mut().storage,
                 &Addr::unchecked("matoken"),
@@ -3543,7 +3529,7 @@ mod tests {
         // Withdraw cw20 token
         let mut deps = th_setup(&[]);
         let cw20_contract_addr = Addr::unchecked("somecontract");
-        let initial_available_liquidity = 12000000u128 * SCALING_FACTOR;
+        let initial_available_liquidity = 12000000u128;
 
         let ma_token_addr = Addr::unchecked("matoken");
 
@@ -3556,10 +3542,7 @@ mod tests {
         );
         deps.querier.set_cw20_balances(
             ma_token_addr.clone(),
-            &[(
-                Addr::unchecked("withdrawer"),
-                Uint128::new(2000000u128 * SCALING_FACTOR),
-            )],
+            &[(Addr::unchecked("withdrawer"), Uint128::new(2000000u128))],
         );
 
         let initial_liquidity_index = Decimal::from_ratio(15u128, 10u128);
@@ -3580,7 +3563,7 @@ mod tests {
 
         let market_initial =
             th_init_market(deps.as_mut(), cw20_contract_addr.as_bytes(), &mock_market);
-        MARKET_MA_TOKENS
+        MARKET_REFERENCES_BY_MA_TOKEN
             .save(
                 deps.as_mut().storage,
                 &ma_token_addr,
@@ -3712,7 +3695,7 @@ mod tests {
 
     #[test]
     fn test_withdraw_if_health_factor_not_met() {
-        let initial_available_liquidity = 10000000u128 * SCALING_FACTOR;
+        let initial_available_liquidity = 10000000u128;
         let mut deps = th_setup(&[coin(initial_available_liquidity, "token3")]);
 
         // Set tax data
@@ -3769,12 +3752,12 @@ mod tests {
             .unwrap();
 
         // Set the querier to return collateral balances (ma_token_1 and ma_token_3)
-        let ma_token_1_balance_scaled = Uint128::new(100000 * SCALING_FACTOR);
+        let ma_token_1_balance_scaled = Uint128::new(100000);
         deps.querier.set_cw20_balances(
             ma_token_1_addr,
             &[(withdrawer_addr.clone(), ma_token_1_balance_scaled)],
         );
-        let ma_token_3_balance_scaled = Uint128::new(600000 * SCALING_FACTOR);
+        let ma_token_3_balance_scaled = Uint128::new(600000);
         deps.querier.set_cw20_balances(
             ma_token_3_addr,
             &[(withdrawer_addr.clone(), ma_token_3_balance_scaled)],
@@ -3782,13 +3765,13 @@ mod tests {
 
         // Set user to have positive debt amount in debt asset
         // Uncollateralized debt shouldn't count for health factor
-        let token_2_debt_scaled = Uint128::from(200000u128 * SCALING_FACTOR);
+        let token_2_debt_scaled = Uint128::from(200000u128);
         let debt = Debt {
             amount_scaled: token_2_debt_scaled,
             uncollateralized: false,
         };
         let uncollateralized_debt = Debt {
-            amount_scaled: Uint128::from(200000u128 * SCALING_FACTOR),
+            amount_scaled: Uint128::from(200000u128),
             uncollateralized: true,
         };
         DEBTS
@@ -3944,7 +3927,7 @@ mod tests {
         );
 
         let market_initial = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
-        MARKET_MA_TOKENS
+        MARKET_REFERENCES_BY_MA_TOKEN
             .save(
                 deps.as_mut().storage,
                 &Addr::unchecked("matoken"),
@@ -4143,8 +4126,6 @@ mod tests {
             &[(borrower_addr.clone(), Uint128::new(10000))],
         );
 
-        // TODO: probably some variables (ie: borrow_amount, expected_params) that are repeated
-        // in all calls could be enclosed in local scopes somehow)
         // *
         // Borrow cw20 token
         // *
@@ -4556,9 +4537,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        // TODO: There's a rounding error when multiplying a dividing by a Decimal256
-        // probably because intermediate result is cast to Uint256. doing everything in Decimal256
-        // eliminates this but need to then find a way to cast it back to an integer
+
         let repay_amount: u128 = get_descaled_amount(
             expected_debt_scaled_2_after_repay_some_2,
             expected_params_native.borrow_index,
@@ -6084,8 +6063,8 @@ mod tests {
         // Finalize transfer with sender not borrowing passes
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(1_000_000),
                 recipient_previous_balance: Uint128::new(0),
                 amount: Uint128::new(500_000),
@@ -6130,8 +6109,8 @@ mod tests {
 
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(1_000_000),
                 recipient_previous_balance: Uint128::new(0),
                 amount: Uint128::new(500_000),
@@ -6172,8 +6151,8 @@ mod tests {
 
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address.clone(),
+                recipient_address: recipient_address.clone(),
                 sender_previous_balance: Uint128::new(500_000),
                 recipient_previous_balance: Uint128::new(500_000),
                 amount: Uint128::new(500_000),
@@ -6191,8 +6170,8 @@ mod tests {
         // Calling this with other token fails
         {
             let msg = ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(),
-                recipient_address: recipient_address.to_string(),
+                sender_address: sender_address,
+                recipient_address: recipient_address,
                 sender_previous_balance: Uint128::new(500_000),
                 recipient_previous_balance: Uint128::new(500_000),
                 amount: Uint128::new(500_000),
@@ -6833,17 +6812,11 @@ mod tests {
 
         MARKETS.save(deps.storage, key, &new_market).unwrap();
 
-        MARKET_REFERENCES
-            .save(
-                deps.storage,
-                U32Key::new(index),
-                &MarketReferences {
-                    reference: key.to_vec(),
-                },
-            )
+        MARKET_REFERENCES_BY_INDEX
+            .save(deps.storage, U32Key::new(index), &key.to_vec())
             .unwrap();
 
-        MARKET_MA_TOKENS
+        MARKET_REFERENCES_BY_MA_TOKEN
             .save(deps.storage, &new_market.ma_token_address, &key.to_vec())
             .unwrap();
 

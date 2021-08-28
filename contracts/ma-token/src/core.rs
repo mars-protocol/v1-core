@@ -96,8 +96,8 @@ pub fn finalize_transfer_msg(
         contract_addr: red_bank_address.into(),
         msg: to_binary(
             &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address: sender_address.to_string(), // TODO: Maybe we trust these to be Addr
-                recipient_address: recipient_address.to_string(),
+                sender_address,
+                recipient_address,
                 sender_previous_balance,
                 recipient_previous_balance,
                 amount,
@@ -116,7 +116,7 @@ pub fn balance_change_msg(
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: incentives_address.into(),
         msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
-            user_address: user_address.to_string(), // TODO: Maybe we trust this to be Addr
+            user_address,
             user_balance_before,
             total_supply_before,
         })?,

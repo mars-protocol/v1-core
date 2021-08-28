@@ -13,8 +13,8 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
 pub const USERS: Map<&Addr, User> = Map::new("users");
 pub const MARKETS: Map<&[u8], Market> = Map::new("markets");
-pub const MARKET_REFERENCES: Map<U32Key, MarketReferences> = Map::new("market_references");
-pub const MARKET_MA_TOKENS: Map<&Addr, Vec<u8>> = Map::new("market_ma_tokens");
+pub const MARKET_REFERENCES_BY_INDEX: Map<U32Key, Vec<u8>> = Map::new("market_refs_by_index");
+pub const MARKET_REFERENCES_BY_MA_TOKEN: Map<&Addr, Vec<u8>> = Map::new("market_refs_by_ma_token");
 pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
 pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
     Map::new("uncollateralized_loan_limits");
@@ -262,12 +262,4 @@ pub struct Debt {
 
     /// Marker for uncollateralized debt
     pub uncollateralized: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-// TODO: If we do not use the struct for anything else this struct should be deleted and
-// the bucket should just store Vec<u8>
-pub struct MarketReferences {
-    /// Reference of market
-    pub reference: Vec<u8>,
 }

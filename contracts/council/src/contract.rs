@@ -2059,7 +2059,6 @@ mod tests {
     fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(contract_balances);
 
-        // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
             address_provider_address: Some(String::from("address_provider")),
 

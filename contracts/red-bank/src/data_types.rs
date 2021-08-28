@@ -42,6 +42,12 @@ impl ScaledAmount {
     }
 }
 
+impl From<u128> for ScaledAmount {
+    fn from(val: u128) -> Self {
+        ScaledAmount(val)
+    }
+}
+
 impl From<Uint128> for ScaledAmount {
     fn from(val: Uint128) -> Self {
         ScaledAmount(val.u128())

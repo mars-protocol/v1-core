@@ -9,9 +9,6 @@ use terraswap::pair::ExecuteMsg as TerraswapPairExecuteMsg;
 use terraswap::querier::query_pair_info;
 
 /// Swap assets via terraswap
-// TODO: AssetInfo will contain unverified Addrs (as they come from user input). This is probably
-// not an issue as we are not transfering to that address and the transaction will fail if the
-// address is non existing. Check if this has a problem besdes the pair query failing. If there is we should verify the addresses. If there isn't just leave as is.
 pub fn execute_swap(
     deps: DepsMut,
     env: Env,
