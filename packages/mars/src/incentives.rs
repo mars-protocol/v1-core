@@ -28,7 +28,9 @@ pub mod msg {
         /// Sent from an external contract, triggered on user balance changes
         /// Will return an empty response if no incentive is applied for the asset
         BalanceChange {
-            user_address: String,
+            /// user address. Address is trusted as it must be validated by the maToken
+            /// contract before calling this method
+            user_address: Addr,
             /// user balance up to the instant before the change
             user_balance_before: Uint128,
             /// total supply up to the instant before the change

@@ -10,7 +10,6 @@ pub enum Asset {
     Native { denom: String },
 }
 
-// TODO: Should we implement a checked/unchecked version of this?
 impl Asset {
     /// Get symbol (denom/addres), reference (bytes used as key for storage) and asset type
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
