@@ -33,6 +33,11 @@ pub fn get_descaled_amount(amount: ScaledAmount, index: Decimal) -> Uint128 {
 }
 
 impl ScaledAmount {
+    /// Creates a value based on the provided value and SCALING_FACTOR
+    pub fn new(val: u128) -> Self {
+        ScaledAmount(val * SCALING_FACTOR)
+    }
+
     pub const fn zero() -> Self {
         ScaledAmount(0)
     }
@@ -40,11 +45,9 @@ impl ScaledAmount {
     pub fn is_zero(&self) -> bool {
         self.0 == 0
     }
-}
 
-impl From<u128> for ScaledAmount {
-    fn from(val: u128) -> Self {
-        ScaledAmount(val)
+    pub fn u128(&self) -> u128 {
+        self.0
     }
 }
 
@@ -54,6 +57,7 @@ impl From<Uint128> for ScaledAmount {
     }
 }
 
+#[allow(clippy::from_over_into)]
 impl Into<Uint128> for ScaledAmount {
     fn into(self) -> Uint128 {
         Uint128::new(self.0)
