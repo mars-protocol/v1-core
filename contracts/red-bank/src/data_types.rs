@@ -11,7 +11,8 @@ const SCALING_FACTOR: u128 = 1_000_000;
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord, JsonSchema)]
 pub struct ScaledAmount(#[schemars(with = "String")] u128);
 
-/// Scales the amount by factor for greater precision.
+/// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
+/// the value is multiplied by SCALED_FACTOR for greater precision.
 /// Example:
 /// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
 /// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
@@ -24,7 +25,8 @@ pub fn get_scaled_amount(amount: Uint128, index: Decimal) -> ScaledAmount {
     ScaledAmount(result.u128())
 }
 
-/// Descales the amount introduced by `get_scaled_amount` (see function description).
+/// Descales the amount introduced by `get_scaled_amount`. As interest rate is accumulated
+/// the index used to descale the amount should be bigger than the one used to scale it.
 pub fn get_descaled_amount(amount: ScaledAmount, index: Decimal) -> Uint128 {
     // Multiply scaled amount by decimal (index)
     let result = Uint128::from(amount.0) * index;
