@@ -1,7 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::data_types::ScaledAmount;
 use cosmwasm_std::{Addr, Decimal, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
@@ -100,7 +99,7 @@ pub struct Market {
     /// Timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,
     /// Total debt scaled for the market's currency
-    pub debt_total_scaled: ScaledAmount,
+    pub debt_total_scaled: Uint128,
 
     /// Indicated whether the asset is native or a cw20 token
     pub asset_type: AssetType,
@@ -161,7 +160,7 @@ impl Market {
             max_loan_to_value: max_loan_to_value.unwrap(),
             reserve_factor: reserve_factor.unwrap(),
             interests_last_updated: block_time.seconds(),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint128::zero(),
@@ -258,7 +257,7 @@ impl Default for User {
 pub struct Debt {
     /// Scaled debt amount
     // TODO(does this amount always have six decimals? How do we manage this?)
-    pub amount_scaled: ScaledAmount,
+    pub amount_scaled: Uint128,
 
     /// Marker for uncollateralized debt
     pub uncollateralized: bool,

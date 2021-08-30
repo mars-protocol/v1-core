@@ -5,9 +5,9 @@ use mars::helpers::cw20_get_balance;
 use mars::red_bank::UserHealthStatus;
 
 use crate::contract::{
-    get_bit, get_updated_borrow_index, get_updated_liquidity_index, market_get_from_index,
+    get_bit, get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
+    market_get_from_index,
 };
-use crate::data_types::{get_descaled_amount, ScaledAmount};
 use crate::error::ContractError;
 use crate::state::{Debt, User, DEBTS};
 
@@ -146,12 +146,11 @@ fn get_user_asset_positions(
 
         let (collateral_amount, max_ltv, maintenance_margin) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
-            let asset_balance_scaled: ScaledAmount = cw20_get_balance(
+            let asset_balance_scaled = cw20_get_balance(
                 &deps.querier,
                 market.ma_token_address.clone(),
                 user_address.clone(),
-            )?
-            .into();
+            )?;
 
             let liquidity_index = get_updated_liquidity_index(&market, block_time);
             let collateral_amount = get_descaled_amount(asset_balance_scaled, liquidity_index);

@@ -27,7 +27,6 @@ use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, ze
 use mars::tax::deduct_tax;
 
 use crate::accounts::get_user_position;
-use crate::data_types::{get_descaled_amount, get_scaled_amount, ScaledAmount};
 use crate::error::ContractError;
 use crate::state::{
     Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
@@ -340,8 +339,8 @@ pub fn execute_withdraw(
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     let asset_ma_addr = market.ma_token_address.clone();
-    let withdrawer_balance_scaled: ScaledAmount =
-        cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?.into();
+    let withdrawer_balance_scaled =
+        cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
 
     if withdrawer_balance_scaled.is_zero() {
         return Err(StdError::generic_err(
@@ -439,7 +438,7 @@ pub fn execute_withdraw(
         contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
             user: withdrawer_addr.to_string(),
-            amount: withdraw_amount_scaled.into(),
+            amount: withdraw_amount_scaled,
         })?,
         funds: vec![],
     });
@@ -673,7 +672,7 @@ pub fn execute_deposit(
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: depositor_address.into(),
-                amount: mint_amount.into(),
+                amount: mint_amount,
             })?,
             funds: vec![],
         }));
@@ -784,7 +783,7 @@ pub fn execute_borrow(
                 (asset_reference.as_slice(), &borrower_address),
             )?
             .unwrap_or(Debt {
-                amount_scaled: ScaledAmount::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: uncollateralized_debt,
             });
 
@@ -816,7 +815,7 @@ pub fn execute_borrow(
             (asset_reference.as_slice(), &borrower_address),
         )?
         .unwrap_or(Debt {
-            amount_scaled: ScaledAmount::zero(),
+            amount_scaled: Uint128::zero(),
             uncollateralized: uncollateralized_debt,
         });
     let borrow_amount_scaled = get_scaled_amount(
@@ -1004,12 +1003,11 @@ pub fn execute_liquidate(
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
     // check if user has available collateral in specified collateral asset to be liquidated
-    let user_collateral_balance_scaled: ScaledAmount = cw20_get_balance(
+    let user_collateral_balance_scaled = cw20_get_balance(
         &deps.querier,
         collateral_market.ma_token_address.clone(),
         user_address.clone(),
-    )?
-    .into();
+    )?;
     let user_collateral_balance = get_descaled_amount(
         user_collateral_balance_scaled,
         get_updated_liquidity_index(&collateral_market, block_time),
@@ -1124,7 +1122,7 @@ pub fn execute_liquidate(
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
                 sender: user_address.to_string(),
                 recipient: liquidator_address.to_string(),
-                amount: collateral_amount_to_liquidate_scaled.into(),
+                amount: collateral_amount_to_liquidate_scaled,
             })?,
             funds: vec![],
         }));
@@ -1173,7 +1171,7 @@ pub fn execute_liquidate(
             msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
                 user: user_address.to_string(),
 
-                amount: collateral_amount_to_liquidate_scaled.into(),
+                amount: collateral_amount_to_liquidate_scaled,
             })?,
             funds: vec![],
         });
@@ -1409,7 +1407,7 @@ pub fn execute_update_uncollateralized_loan_limit(
         (asset_reference.as_slice(), &user_address),
         |debt_opt: Option<Debt>| -> StdResult<_> {
             let mut debt = debt_opt.unwrap_or(Debt {
-                amount_scaled: ScaledAmount::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: false,
             });
             // if limit == 0 then uncollateralized = false, otherwise uncollateralized = true
@@ -1551,7 +1549,7 @@ pub fn execute_distribute_protocol_income(
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: treasury_address.into(),
-                amount: scaled_mint_amount.into(),
+                amount: scaled_mint_amount,
             })?,
             funds: vec![],
         });
@@ -1674,7 +1672,7 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         liquidity_rate: market.liquidity_rate,
         max_loan_to_value: market.max_loan_to_value,
         interests_last_updated: market.interests_last_updated,
-        debt_total_scaled: market.debt_total_scaled.into(),
+        debt_total_scaled: market.debt_total_scaled,
         asset_type: market.asset_type,
         maintenance_margin: market.maintenance_margin,
         liquidation_bonus: market.liquidation_bonus,
@@ -1714,7 +1712,7 @@ fn query_debt(deps: Deps, address: Addr) -> StdResult<DebtResponse> {
                 let debt = DEBTS.load(deps.storage, (k.as_slice(), &address))?;
                 Ok(DebtInfo {
                     denom,
-                    amount: debt.amount_scaled.into(),
+                    amount: debt.amount_scaled,
                 })
             } else {
                 Ok(DebtInfo {
@@ -1780,7 +1778,7 @@ fn query_scaled_liquidity_amount(
         get_updated_liquidity_index(&market, env.block.time.seconds()),
     );
     Ok(AmountResponse {
-        amount: scaled_amount.into(),
+        amount: scaled_amount,
     })
 }
 
@@ -1797,7 +1795,7 @@ fn query_scaled_debt_amount(
         get_updated_borrow_index(&market, env.block.time.seconds()),
     );
     Ok(AmountResponse {
-        amount: scaled_amount.into(),
+        amount: scaled_amount,
     })
 }
 
@@ -1811,7 +1809,7 @@ fn query_descaled_liquidity_amount(
     let market_reference = MARKET_REFERENCES_BY_MA_TOKEN.load(deps.storage, &ma_token_address)?;
     let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
     let descaled_amount = get_descaled_amount(
-        ScaledAmount::from(amount),
+        amount,
         get_updated_liquidity_index(&market, env.block.time.seconds()),
     );
     Ok(AmountResponse {
@@ -1890,6 +1888,31 @@ pub fn market_apply_accumulated_interests(env: &Env, market: &mut Market) {
 
     let new_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
     market.protocol_income_to_distribute += new_protocol_income_to_distribute;
+}
+
+/// Scaling factor used to keep more precision during division / multiplication by index.
+const SCALING_FACTOR: u128 = 1_000_000;
+
+/// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
+/// the value is multiplied by SCALED_FACTOR for greater precision.
+/// Example:
+/// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
+/// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
+/// we scale the amount by SCALING_FACTOR.
+fn get_scaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
+    // Scale by SCALING_FACTOR to have better precision
+    let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR);
+    // Different form for: scaled_amount / index
+    scaled_amount * reverse_decimal(index)
+}
+
+/// Descales the amount introduced by `get_scaled_amount`. As interest rate is accumulated
+/// the index used to descale the amount should be bigger than the one used to scale it.
+pub fn get_descaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
+    // Multiply scaled amount by decimal (index)
+    let result = amount * index;
+    // Descale by SCALING_FACTOR which is introduced by `get_scaled_amount`
+    result.checked_div(Uint128::from(SCALING_FACTOR)).unwrap()
 }
 
 /// Return applied interest rate for borrow index according to passed blocks
@@ -3177,7 +3200,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(10u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor,
-            debt_total_scaled: ScaledAmount::new(10_000_000),
+            debt_total_scaled: Uint128::new(10_000_000 * SCALING_FACTOR),
             interests_last_updated: 10000000,
             ..Default::default()
         };
@@ -3276,7 +3299,7 @@ mod tests {
             borrow_index: Decimal::from_ratio(1u128, 1u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(4u128, 100u128),
-            debt_total_scaled: ScaledAmount::new(10_000_000),
+            debt_total_scaled: Uint128::new(10_000_000 * SCALING_FACTOR),
             interests_last_updated: 10_000_000,
             asset_type: AssetType::Cw20,
             ..Default::default()
@@ -3412,7 +3435,7 @@ mod tests {
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(1u128, 10u128),
 
-            debt_total_scaled: ScaledAmount::new(10_000_000),
+            debt_total_scaled: Uint128::new(10_000_000 * SCALING_FACTOR),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -3424,7 +3447,7 @@ mod tests {
             Addr::unchecked("matoken"),
             &[(
                 Addr::unchecked("withdrawer"),
-                ScaledAmount::new(2_000_000).into(),
+                Uint128::new(2_000_000 * SCALING_FACTOR),
             )],
         );
 
@@ -3548,7 +3571,7 @@ mod tests {
             ma_token_addr.clone(),
             &[(
                 Addr::unchecked("withdrawer"),
-                ScaledAmount::new(2_000_000).into(),
+                Uint128::new(2_000_000 * SCALING_FACTOR),
             )],
         );
 
@@ -3560,7 +3583,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(20u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(2u128, 100u128),
-            debt_total_scaled: ScaledAmount::new(10_000_000),
+            debt_total_scaled: Uint128::new(10_000_000 * SCALING_FACTOR),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
             ..Default::default()
@@ -3759,12 +3782,12 @@ mod tests {
             .unwrap();
 
         // Set the querier to return collateral balances (ma_token_1 and ma_token_3)
-        let ma_token_1_balance_scaled = ScaledAmount::new(100_000);
+        let ma_token_1_balance_scaled = Uint128::new(100_000 * SCALING_FACTOR);
         deps.querier.set_cw20_balances(
             ma_token_1_addr,
             &[(withdrawer_addr.clone(), ma_token_1_balance_scaled.into())],
         );
-        let ma_token_3_balance_scaled = ScaledAmount::new(600_000);
+        let ma_token_3_balance_scaled = Uint128::new(600_000 * SCALING_FACTOR);
         deps.querier.set_cw20_balances(
             ma_token_3_addr,
             &[(withdrawer_addr.clone(), ma_token_3_balance_scaled.into())],
@@ -3772,13 +3795,13 @@ mod tests {
 
         // Set user to have positive debt amount in debt asset
         // Uncollateralized debt shouldn't count for health factor
-        let token_2_debt_scaled = ScaledAmount::new(200_000);
+        let token_2_debt_scaled = Uint128::new(200_000 * SCALING_FACTOR);
         let debt = Debt {
             amount_scaled: token_2_debt_scaled,
             uncollateralized: false,
         };
         let uncollateralized_debt = Debt {
-            amount_scaled: ScaledAmount::new(200_000),
+            amount_scaled: Uint128::new(200_000 * SCALING_FACTOR),
             uncollateralized: true,
         };
         DEBTS
@@ -3917,12 +3940,12 @@ mod tests {
             borrow_rate: Decimal::from_ratio(20u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(1u128, 10u128),
-            debt_total_scaled: ScaledAmount::new(10_000_000),
+            debt_total_scaled: Uint128::new(10_000_000 * SCALING_FACTOR),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let withdrawer_balance_scaled = ScaledAmount::new(123_456);
+        let withdrawer_balance_scaled = Uint128::new(123_456 * SCALING_FACTOR);
         let seconds_elapsed = 2000u64;
 
         deps.querier.set_cw20_balances(
@@ -4082,7 +4105,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(20u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(1u128, 100u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Cw20,
             ..Default::default()
@@ -4102,7 +4125,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(30u128, 100u128),
             reserve_factor: Decimal::from_ratio(3u128, 100u128),
             liquidity_rate: Decimal::from_ratio(20u128, 100u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -4130,7 +4153,7 @@ mod tests {
         let deposit_coin_address = Addr::unchecked("matoken3");
         deps.querier.set_cw20_balances(
             deposit_coin_address,
-            &[(borrower_addr.clone(), ScaledAmount::new(10000).into())],
+            &[(borrower_addr.clone(), Uint128::new(10000 * SCALING_FACTOR))],
         );
 
         // *
@@ -4603,9 +4626,9 @@ mod tests {
         let market_2_after_repay_all_2 =
             MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
-        assert_eq!(ScaledAmount::zero(), debt2.amount_scaled);
+        assert_eq!(Uint128::zero(), debt2.amount_scaled);
         assert_eq!(
-            ScaledAmount::zero(),
+            Uint128::zero(),
             market_2_after_repay_all_2.debt_total_scaled
         );
 
@@ -4717,11 +4740,8 @@ mod tests {
         let market_1_after_repay_1 = MARKETS
             .load(&deps.storage, cw20_contract_addr.as_bytes())
             .unwrap();
-        assert_eq!(ScaledAmount::zero(), debt1.amount_scaled);
-        assert_eq!(
-            ScaledAmount::zero(),
-            market_1_after_repay_1.debt_total_scaled
-        );
+        assert_eq!(Uint128::zero(), debt1.amount_scaled);
+        assert_eq!(Uint128::zero(), market_1_after_repay_1.debt_total_scaled);
     }
 
     #[test]
@@ -4740,7 +4760,7 @@ mod tests {
             borrow_index: Decimal::from_ratio(20u128, 10u128),
             borrow_rate: Decimal::one(),
             liquidity_rate: Decimal::one(),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: block_time,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -4754,7 +4774,7 @@ mod tests {
         );
 
         // Set user as having the market_collateral deposited
-        let deposit_amount_scaled = ScaledAmount::new(110_000);
+        let deposit_amount_scaled = Uint128::new(110_000 * SCALING_FACTOR);
         let mut user = User::default();
         set_bit(&mut user.collateral_assets, market.index).unwrap();
         USERS
@@ -4853,7 +4873,7 @@ mod tests {
             borrow_index: Decimal::one(),
             borrow_rate: Decimal::one(),
             liquidity_rate: Decimal::one(),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             reserve_factor: Decimal::from_ratio(12u128, 100u128),
             interests_last_updated: block_time,
             asset_type: AssetType::Native,
@@ -4881,7 +4901,7 @@ mod tests {
             deposit_coin_address,
             &[(
                 borrower_addr.clone(),
-                ScaledAmount::new(deposit_amount).into(),
+                Uint128::new(deposit_amount * SCALING_FACTOR),
             )],
         );
 
@@ -4985,7 +5005,7 @@ mod tests {
         let mock_market_1 = Market {
             ma_token_address: Addr::unchecked("matoken1"),
             max_loan_to_value: Decimal::from_ratio(8u128, 10u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Cw20,
@@ -4994,7 +5014,7 @@ mod tests {
         let mock_market_2 = Market {
             ma_token_address: Addr::unchecked("matoken2"),
             max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Native,
@@ -5003,7 +5023,7 @@ mod tests {
         let mock_market_3 = Market {
             ma_token_address: Addr::unchecked("matoken3"),
             max_loan_to_value: Decimal::from_ratio(4u128, 10u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Native,
@@ -5035,9 +5055,9 @@ mod tests {
         let ma_token_address_2 = Addr::unchecked("matoken2");
         let ma_token_address_3 = Addr::unchecked("matoken3");
 
-        let balance_1 = ScaledAmount::new(4_000_000);
-        let balance_2 = ScaledAmount::new(7_000_000);
-        let balance_3 = ScaledAmount::new(3_000_000);
+        let balance_1 = Uint128::new(4_000_000 * SCALING_FACTOR);
+        let balance_2 = Uint128::new(7_000_000 * SCALING_FACTOR);
+        let balance_3 = Uint128::new(3_000_000 * SCALING_FACTOR);
 
         // Set the querier to return a certain collateral balance
         deps.querier.set_cw20_balances(
@@ -5129,7 +5149,7 @@ mod tests {
         let second_block_time = 16_000_000;
 
         // Global debt for the debt market
-        let mut expected_global_debt_scaled = ScaledAmount::new(1_800_000_000);
+        let mut expected_global_debt_scaled = Uint128::new(1_800_000_000 * SCALING_FACTOR);
 
         CONFIG
             .update(deps.as_mut().storage, |mut config| -> StdResult<_> {
@@ -5163,7 +5183,7 @@ mod tests {
             max_loan_to_value: collateral_max_ltv,
             maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
-            debt_total_scaled: ScaledAmount::new(800_000_000),
+            debt_total_scaled: Uint128::new(800_000_000 * SCALING_FACTOR),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             borrow_rate: Decimal::from_ratio(2u128, 10u128),
@@ -5244,18 +5264,18 @@ mod tests {
             Addr::unchecked("ma_collateral"),
             &[(
                 user_address.clone(),
-                ScaledAmount::new(user_collateral_balance).into(),
+                Uint128::new(user_collateral_balance * SCALING_FACTOR),
             )],
         );
 
         // trying to liquidate user with zero outstanding debt should fail (uncollateralized has not impact)
         {
             let debt = Debt {
-                amount_scaled: ScaledAmount::zero(),
+                amount_scaled: Uint128::zero(),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: ScaledAmount::new(10_000),
+                amount_scaled: Uint128::new(10_000 * SCALING_FACTOR),
                 uncollateralized: true,
             };
             DEBTS
@@ -5300,7 +5320,7 @@ mod tests {
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: ScaledAmount::new(10_000),
+                amount_scaled: Uint128::new(10_000 * SCALING_FACTOR),
                 uncollateralized: true,
             };
             DEBTS
@@ -5686,8 +5706,8 @@ mod tests {
 
         // Perform full liquidation receiving ma_token in return (user should not be able to use asset as collateral)
         {
-            let user_collateral_balance_scaled = ScaledAmount::new(100);
-            let mut expected_user_debt_scaled = ScaledAmount::new(400);
+            let user_collateral_balance_scaled = Uint128::new(100 * SCALING_FACTOR);
+            let mut expected_user_debt_scaled = Uint128::new(400 * SCALING_FACTOR);
             let debt_to_repay = Uint128::from(300u128);
 
             // Set the querier to return positive collateral balance
@@ -5942,7 +5962,7 @@ mod tests {
             max_loan_to_value: collateral_ltv,
             maintenance_margin: collateral_maintenance_margin,
             liquidation_bonus: collateral_liquidation_bonus,
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             asset_type: AssetType::Native,
@@ -5951,7 +5971,7 @@ mod tests {
         let debt_market = Market {
             ma_token_address: Addr::unchecked("debt"),
             max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
-            debt_total_scaled: ScaledAmount::new(20_000_000),
+            debt_total_scaled: Uint128::new(20_000_000 * SCALING_FACTOR),
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             asset_type: AssetType::Cw20,
@@ -5984,7 +6004,7 @@ mod tests {
 
         // set initial collateral and debt balances for user
         let collateral_address = Addr::unchecked("collateral");
-        let healthy_user_collateral_balance_scaled = ScaledAmount::new(10_000_000);
+        let healthy_user_collateral_balance_scaled = Uint128::new(10_000_000 * SCALING_FACTOR);
 
         // Set the querier to return a certain collateral balance
         deps.querier.set_cw20_balances(
@@ -6003,7 +6023,7 @@ mod tests {
             uncollateralized: false,
         };
         let uncollateralized_debt = Debt {
-            amount_scaled: ScaledAmount::new(10_000),
+            amount_scaled: Uint128::new(10_000 * SCALING_FACTOR),
             uncollateralized: true,
         };
         DEBTS
@@ -6081,7 +6101,10 @@ mod tests {
 
         deps.querier.set_cw20_balances(
             Addr::unchecked("masomecoin"),
-            &[(sender_address.clone(), ScaledAmount::new(500_000).into())],
+            &[(
+                sender_address.clone(),
+                Uint128::new(500_000 * SCALING_FACTOR),
+            )],
         );
 
         {
@@ -6115,11 +6138,11 @@ mod tests {
         {
             // set debt for user in order for health factor to be < 1
             let debt = Debt {
-                amount_scaled: ScaledAmount::new(500_000),
+                amount_scaled: Uint128::new(500_000 * SCALING_FACTOR),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: ScaledAmount::new(10_000),
+                amount_scaled: Uint128::new(10_000 * SCALING_FACTOR),
                 uncollateralized: true,
             };
             DEBTS
@@ -6157,11 +6180,11 @@ mod tests {
         {
             // set debt for user in order for health factor to be > 1
             let debt = Debt {
-                amount_scaled: ScaledAmount::new(1_000),
+                amount_scaled: Uint128::new(1_000 * SCALING_FACTOR),
                 uncollateralized: false,
             };
             let uncollateralized_debt = Debt {
-                amount_scaled: ScaledAmount::new(10_000u128),
+                amount_scaled: Uint128::new(10_000u128 * SCALING_FACTOR),
                 uncollateralized: true,
             };
             DEBTS
@@ -6233,7 +6256,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(20u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(1u128, 10u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             ..Default::default()
@@ -6533,7 +6556,7 @@ mod tests {
             borrow_rate: Decimal::from_ratio(20u128, 100u128),
             liquidity_rate: Decimal::from_ratio(10u128, 100u128),
             reserve_factor: Decimal::from_ratio(1u128, 10u128),
-            debt_total_scaled: ScaledAmount::zero(),
+            debt_total_scaled: Uint128::zero(),
             interests_last_updated: 10000000,
             asset_type: AssetType::Native,
             protocol_income_to_distribute,
@@ -6896,7 +6919,7 @@ mod tests {
             if (market.debt_total_scaled + more_debt_scaled) > less_debt_scaled {
                 market.debt_total_scaled + more_debt_scaled - less_debt_scaled
             } else {
-                ScaledAmount::zero()
+                Uint128::zero()
             };
         let dec_debt_total = get_descaled_amount(new_debt_total_scaled, expected_indices.borrow);
         let total_protocol_income_to_distribute =
