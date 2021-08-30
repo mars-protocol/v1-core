@@ -3,7 +3,7 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
-      "description": "Update LP config",
+      "description": "Update contract config",
       "type": "object",
       "required": [
         "update_config"
@@ -120,7 +120,7 @@
           ],
           "properties": {
             "reference": {
-              "description": "Either the denom for a terra native asset or address for a cw20 token",
+              "description": "Either the denom for a terra native asset or address for a cw20 token in bytes",
               "type": "array",
               "items": {
                 "type": "integer",
@@ -134,7 +134,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Deposit Terra native coins",
+      "description": "Deposit Terra native coins. Deposited coins must be sent in the transaction this call is made",
       "type": "object",
       "required": [
         "deposit_native"
@@ -156,7 +156,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Borrow Terra native coins",
+      "description": "Borrow Terra native coins. If borrow allowed, amount is added to caller's debt and sent to the address. If asset is a Terra native token, the amount sent is selected so that the sum of the transfered amount plus the stability tax payed is equal to the borrowed amount.",
       "type": "object",
       "required": [
         "borrow"
@@ -170,10 +170,15 @@
           ],
           "properties": {
             "amount": {
-              "$ref": "#/definitions/Uint128"
+              "description": "Amount to borrow",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
             },
             "asset": {
-              "description": "Denom used in Terra (e.g: uluna, uusd)",
+              "description": "Asset to borrow",
               "allOf": [
                 {
                   "$ref": "#/definitions/Asset"
@@ -186,7 +191,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Repay Terra native coins loan",
+      "description": "Repay Terra native coins loan. Coins used to repay must be sent in the transaction this call is made.",
       "type": "object",
       "required": [
         "repay_native"
@@ -208,7 +213,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Liquidate under-collateralized native loans",
+      "description": "Liquidate under-collateralized native loans. Coins used to repay must be sent in the transaction this call is made.",
       "type": "object",
       "required": [
         "liquidate_native"
@@ -218,25 +223,25 @@
           "type": "object",
           "required": [
             "collateral_asset",
-            "debt_asset",
+            "debt_asset_denom",
             "receive_ma_token",
             "user_address"
           ],
           "properties": {
             "collateral_asset": {
-              "description": "Details for collateral asset",
+              "description": "Collateral asset liquidator gets from the borrower",
               "allOf": [
                 {
                   "$ref": "#/definitions/Asset"
                 }
               ]
             },
-            "debt_asset": {
+            "debt_asset_denom": {
               "description": "Denom used in Terra (e.g: uluna, uusd) of the debt asset",
               "type": "string"
             },
             "receive_ma_token": {
-              "description": "Sends maAsset to liquidator if true and underlying collateral asset if false",
+              "description": "Whether the liquidator gets liquidated collateral in maToken (true) or the underlying collateral asset (false)",
               "type": "boolean"
             },
             "user_address": {
@@ -249,7 +254,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Called by liquidity token. Validate liquidity token transfer is valid and update collateral status",
+      "description": "Called by liquidity token (maToken). Validate liquidity token transfer is valid and update collateral status",
       "type": "object",
       "required": [
         "finalize_liquidity_token_transfer"
@@ -266,19 +271,44 @@
           ],
           "properties": {
             "amount": {
-              "$ref": "#/definitions/Uint128"
+              "description": "Transfer amount",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
             },
             "recipient_address": {
-              "type": "string"
+              "description": "Token recipient. Address is trusted because it should have been verified in the token contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                }
+              ]
             },
             "recipient_previous_balance": {
-              "$ref": "#/definitions/Uint128"
+              "description": "Recipient's balance before the token transfer",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
             },
             "sender_address": {
-              "type": "string"
+              "description": "Token sender. Address is trusted because it should have been verified in the token contract",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                }
+              ]
             },
             "sender_previous_balance": {
-              "$ref": "#/definitions/Uint128"
+              "description": "Sender's balance before the token transfer",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
             }
           }
         }
@@ -286,7 +316,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Update uncollateralized loan limit",
+      "description": "Update uncollateralized loan limit for a given user and asset. Overrides previous value if any. A limt of zero means no uncollateralized limit and the debt in that asset needs to be collateralized.",
       "type": "object",
       "required": [
         "update_uncollateralized_loan_limit"
@@ -301,12 +331,23 @@
           ],
           "properties": {
             "asset": {
-              "$ref": "#/definitions/Asset"
+              "description": "Asset the user receives the credit in",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             },
             "new_limit": {
-              "$ref": "#/definitions/Uint128"
+              "description": "Limit for the uncolateralize loan.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
             },
             "user_address": {
+              "description": "Address that receives the credit",
               "type": "string"
             }
           }
@@ -315,7 +356,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Update (enable / disable) asset as collateral",
+      "description": "Update (enable / disable) asset as collateral for the caller",
       "type": "object",
       "required": [
         "update_user_collateral_asset_status"
@@ -329,9 +370,15 @@
           ],
           "properties": {
             "asset": {
-              "$ref": "#/definitions/Asset"
+              "description": "Asset to update status for",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             },
             "enable": {
+              "description": "Option to enable (true) / disable (false) asset as collateral",
               "type": "boolean"
             }
           }
@@ -340,7 +387,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts",
+      "description": "Distribute the accrued protocol income to the treasury, insurance fund, and staking contracts according to the split set in config. Will transfer underlying asset to insurance fund and staking while minting maTokens to the treasury. Callable by any address, will fail if red bank has no liquidity.",
       "type": "object",
       "required": [
         "distribute_protocol_income"
@@ -377,7 +424,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Withdraw asset",
+      "description": "Withdraw an amount of the asset burning an equivalent amount of maTokens. If asset is a Terra native token, the amount sent to the user is selected so that the sum of the transfered amount plus the stability tax payed is equal to the withdrawn amount.",
       "type": "object",
       "required": [
         "withdraw"
@@ -390,6 +437,7 @@
           ],
           "properties": {
             "amount": {
+              "description": "Amount to be withdrawn. If None is specified, the full maToken balance will be burned in exchange for the equivalent asset amount.",
               "anyOf": [
                 {
                   "$ref": "#/definitions/Uint128"
@@ -400,7 +448,12 @@
               ]
             },
             "asset": {
-              "$ref": "#/definitions/Asset"
+              "description": "Asset to withdraw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             }
           }
         }
@@ -409,6 +462,10 @@
     }
   ],
   "definitions": {
+    "Addr": {
+      "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+      "type": "string"
+    },
     "Asset": {
       "description": "Represents either a native asset or a cw20. Meant to be used as part of a msg in a contract call and not to be used internally",
       "anyOf": [

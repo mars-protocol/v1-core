@@ -1,38 +1,16 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
-  "description": "Treasury global configuration",
+  "description": "Insurance fund global configuration",
   "type": "object",
   "required": [
-    "address_provider_address",
-    "cooldown_duration",
     "owner",
     "terraswap_factory_address",
-    "terraswap_max_spread",
-    "unstake_window"
+    "terraswap_max_spread"
   ],
   "properties": {
-    "address_provider_address": {
-      "description": "Address provider address",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Addr"
-        }
-      ]
-    },
-    "cooldown_duration": {
-      "description": "Cooldown duration in seconds",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
-    },
     "owner": {
-      "description": "Contract owner",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Addr"
-        }
-      ]
+      "$ref": "#/definitions/Addr"
     },
     "terraswap_factory_address": {
       "description": "Terraswap factory contract address",
@@ -49,12 +27,6 @@
           "$ref": "#/definitions/Decimal"
         }
       ]
-    },
-    "unstake_window": {
-      "description": "Time in seconds after the cooldown ends during which the unstaking of the associated amount is allowed",
-      "type": "integer",
-      "format": "uint64",
-      "minimum": 0.0
     }
   },
   "definitions": {

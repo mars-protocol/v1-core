@@ -17,14 +17,20 @@
     "DebtInfo": {
       "type": "object",
       "required": [
-        "amount",
+        "amount_scaled",
         "denom"
       ],
       "properties": {
-        "amount": {
-          "$ref": "#/definitions/Uint128"
+        "amount_scaled": {
+          "description": "Scaled amount",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
         },
         "denom": {
+          "description": "Either denom for a native token or asset address for a cw20",
           "type": "string"
         }
       }

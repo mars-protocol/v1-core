@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Get contract config",
       "type": "object",
       "required": [
         "config"
@@ -15,6 +16,7 @@
       "additionalProperties": false
     },
     {
+      "description": "Get latest cooldown for given user. Even though a cooldown may be returned, it may have expired.",
       "type": "object",
       "required": [
         "cooldown"
@@ -23,10 +25,10 @@
         "cooldown": {
           "type": "object",
           "required": [
-            "sender_address"
+            "user_address"
           ],
           "properties": {
-            "sender_address": {
+            "user_address": {
               "type": "string"
             }
           }

@@ -22,16 +22,31 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
     pub struct ConfigParams {
+        /// Contract owner (has special persmissions to update parameters)
         pub owner: Option<String>,
+        /// Council contract handles the submission and execution of proposals
         pub council_address: Option<String>,
+        /// Incentives contract handles incentives to depositiors on the red bank
         pub incentives_address: Option<String>,
+        /// Insurance funnd contract accumulates UST to protect the protocol from shortfall
+        /// events
         pub insurance_fund_address: Option<String>,
+        /// Mars token cw20 contract
         pub mars_token_address: Option<String>,
+        /// Oracle contract provides prices in uusd for assets used in the protocol
         pub oracle_address: Option<String>,
+        /// Red Bank contract handles user's depositing/borrowing and holds the protocol's
+        /// liquidity
         pub red_bank_address: Option<String>,
+        /// Staking address handles Mars staking and xMars minting
         pub staking_address: Option<String>,
+        /// Treasury contract accumulates protocol fees that can be spent by the council tthrough
+        /// the voting of proposals
         pub treasury_address: Option<String>,
+        /// xMars token cw20 contract
         pub xmars_token_address: Option<String>,
+        /// Protocol admin is the Cosmos level contract admin that has permissions to migrate
+        /// contracts
         pub protocol_admin_address: Option<String>,
     }
 
