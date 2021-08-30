@@ -4,11 +4,11 @@ use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
 use mars::red_bank::UserHealthStatus;
 
-use crate::contract::{
-    get_bit, get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
-    market_get_from_index,
-};
+use crate::contract::{get_bit, market_get_from_index};
 use crate::error::ContractError;
+use crate::interest_rate::{
+    get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
+};
 use crate::state::{Debt, User, DEBTS};
 
 /// User global position
