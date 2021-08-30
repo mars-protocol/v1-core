@@ -278,7 +278,7 @@ pub mod msg {
     pub struct CollateralInfo {
         /// Either denom for a native token or asset address for a cw20
         pub denom: String,
-        /// Wether the user is using asset as collateral or not 
+        /// Wether the user is using asset as collateral or not
         pub enabled: bool,
     }
 
