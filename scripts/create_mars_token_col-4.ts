@@ -10,59 +10,56 @@ Dependencies to run on LocalTerra:
   - LocalTerra 1c3f42a60116b4c17cb5d002aa194eae9b8811b5
 */
 
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { LCDClient, LocalTerra } from "@terra-money/terra.js"
 import 'dotenv/config.js'
-import { executeContract, instantiateContract, queryContract, recover, setTimeoutDuration, uploadContract } from "./helpers.js"
+import { instantiateContract, recover, setTimeoutDuration, uploadContract } from "./helpers.js"
+
+// CONSTS
 
 // Required environment variables:
-
+const TOKEN_MINTER_MNEMONIC = process.env.TOKEN_MINTER_MNEMONIC!
 
 // Testnet:
 const CHAIN_ID = process.env.CHAIN_ID
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
-const WALLET = process.env.WALLET
 const CW20_CODE_ID = process.env.CW20_CODE_ID
 
 // LocalTerra:
 const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH
 
-// Main
+// MAIN
 
 async function main() {
-  const isTestnet = CHAIN_ID !== undefined
+  const isLocalTerra = CHAIN_ID === undefined
 
   let terra: LCDClient | LocalTerra
-  let wallet: Wallet
-  let cw20CodeId: number
 
-  if (isTestnet) {
+  if (isLocalTerra) {
+    setTimeoutDuration(0)
+
+    terra = new LocalTerra()
+  } else {
     terra = new LCDClient({
       URL: LCD_CLIENT_URL!,
       chainID: CHAIN_ID!
     })
-
-    wallet = recover(terra, WALLET!)
-
-    cw20CodeId = parseInt(CW20_CODE_ID!)
-
-  } else {
-    setTimeoutDuration(0)
-
-    terra = new LocalTerra()
-
-    wallet = (terra as LocalTerra).wallets.test1
-
-    // Upload contract code
-    cw20CodeId = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
-    console.log(cw20CodeId)
   }
 
-  // Token info
+  const wallet = recover(terra, TOKEN_MINTER_MNEMONIC)
+
+  let cw20CodeId: number
+
+  if (isLocalTerra) {
+    cw20CodeId = await uploadContract(terra, wallet, CW20_BINARY_PATH!)
+  } else {
+    cw20CodeId = parseInt(CW20_CODE_ID!)
+  }
+
   const TOKEN_NAME = "Mars"
   const TOKEN_SYMBOL = "MARS"
   const TOKEN_DECIMALS = 6
   const TOKEN_MINTER = wallet.key.accAddress
-  const TOKEN_CAP = 1_000_000_000_000000
+  const TOKEN_CAP = 1_000_000_000_000000 // TODO check this
 
   const TOKEN_INFO = {
     name: TOKEN_NAME,
@@ -75,23 +72,12 @@ async function main() {
     }
   }
 
-  // Instantiate Mars token contract
-  const marsAddress = await instantiateContract(terra, wallet, cw20CodeId, TOKEN_INFO)
-  console.log("mars:", marsAddress)
-  console.log(await queryContract(terra, marsAddress, { token_info: {} }))
-  console.log(await queryContract(terra, marsAddress, { minter: {} }))
+  const tokenAddress = await instantiateContract(terra, wallet, cw20CodeId, TOKEN_INFO)
+  console.log("token address", tokenAddress)
 
-  // Try minting
-  await executeContract(terra, wallet, marsAddress,
-    {
-      mint: {
-        recipient: wallet.key.accAddress,
-        amount: String(1_000_000000)
-      }
-    }
-  )
-
-  console.log(await queryContract(terra, marsAddress, { balance: { address: wallet.key.accAddress } }))
+  if (!isLocalTerra) {
+    console.log(`https://finder.terra.money/${CHAIN_ID}/address/${tokenAddress}`)
+  }
 
   console.log("OK")
 }
