@@ -1,5 +1,6 @@
 import {
   Coin,
+  Coins,
   isTxError,
   LCDClient,
   MnemonicKey,
@@ -8,6 +9,7 @@ import {
   MsgInstantiateContract,
   MsgMigrateContract,
   MsgStoreCode,
+  StdFee,
   StdTx,
   Wallet
 } from '@terra-money/terra.js';
@@ -42,7 +44,10 @@ export class TransactionError extends CustomError {
 }
 
 export async function createTransaction(wallet: Wallet, msg: Msg) {
-  return await wallet.createTx({ msgs: [msg] })
+  return await wallet.createTx({
+    msgs: [msg],
+    // fee: new StdFee(3_000_000, Coins.fromString("1000000uluna")),
+  })
 }
 
 export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
@@ -69,10 +74,9 @@ export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath:
 }
 
 export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object) {
-  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, wallet.key.accAddress, codeId, msg, undefined);
-  let result = await performTransaction(terra, wallet, instantiateMsg)
-  const attributes = result.logs[0].events[0].attributes
-  return attributes[attributes.length - 1].value // contract address
+  const instantiateMsg = new MsgInstantiateContract(wallet.key.accAddress, codeId, msg, undefined, true);
+  const result = await performTransaction(terra, wallet, instantiateMsg)
+  return result.logs[0].events[0].attributes[2].value // contract address
 }
 
 export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string) {
