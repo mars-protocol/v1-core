@@ -81,13 +81,13 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
   console.log("transferring the entire maToken balance should fail")
 
   try {
-    await performTransaction(terra, recipient,
-      new MsgExecuteContract(recipient.key.accAddress, maLuna, {
+    await executeContract(terra, recipient, maLuna,
+      {
         transfer: {
           amount: String(LUNA_COLLATERAL),
           recipient: recipient.key.accAddress
         }
-      })
+      }
     )
   } catch (error) {
     strictEqual(error.config.url, "/txs/estimate_fee")
@@ -189,15 +189,13 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
   assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
 
   try {
-    await performTransaction(terra, borrower,
-      new MsgExecuteContract(borrower.key.accAddress, maLuna,
-        {
-          transfer: {
-            amount: String(LUNA_COLLATERAL / 100),
-            recipient: recipient.key.accAddress
-          }
+    await executeContract(terra, borrower, maLuna,
+      {
+        transfer: {
+          amount: String(LUNA_COLLATERAL / 100),
+          recipient: recipient.key.accAddress
         }
-      )
+      }
     )
   } catch (error) {
     strictEqual(error.config.url, "/txs/estimate_fee")
