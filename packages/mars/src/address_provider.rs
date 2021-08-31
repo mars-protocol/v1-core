@@ -28,7 +28,7 @@ pub mod msg {
         pub council_address: Option<String>,
         /// Incentives contract handles incentives to depositiors on the red bank
         pub incentives_address: Option<String>,
-        /// Insurance funnd contract accumulates UST to protect the protocol from shortfall
+        /// Insurance fund contract accumulates UST to protect the protocol from shortfall
         /// events
         pub insurance_fund_address: Option<String>,
         /// Mars token cw20 contract
