@@ -122,7 +122,7 @@ pub mod msg {
         },
 
         /// Update uncollateralized loan limit for a given user and asset.
-        /// Overrides previous value if any. A limt of zero means no
+        /// Overrides previous value if any. A limit of zero means no
         /// uncollateralized limit and the debt in that asset needs to be
         /// collateralized.
         UpdateUncollateralizedLoanLimit {
