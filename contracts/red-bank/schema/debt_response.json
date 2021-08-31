@@ -22,9 +22,15 @@
       ],
       "properties": {
         "amount": {
-          "$ref": "#/definitions/Uint128"
+          "description": "Scaled amount",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Uint128"
+            }
+          ]
         },
         "denom": {
+          "description": "Either denom for a native token or asset address for a cw20",
           "type": "string"
         }
       }
