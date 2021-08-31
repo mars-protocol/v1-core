@@ -22,7 +22,7 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, JsonSchema)]
     pub struct ConfigParams {
-        /// Contract owner (has special persmissions to update parameters)
+        /// Contract owner (has special permissions to update parameters)
         pub owner: Option<String>,
         /// Council contract handles the submission and execution of proposals
         pub council_address: Option<String>,
