@@ -146,18 +146,16 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction
   let uusdAmountLiquidated = uusdAmountBorrowed
   // should fail because the borrower's health factor is > 1
   try {
-    await performTransaction(terra, liquidator,
-      new MsgExecuteContract(liquidator.key.accAddress, redBank,
-        {
-          liquidate_native: {
-            collateral_asset: { native: { denom: "uluna" } },
-            debt_asset: "uusd",
-            user_address: borrower.key.accAddress,
-            receive_ma_token: receiveMaToken,
-          }
-        },
-        `${uusdAmountLiquidated}uusd`
-      ),
+    await executeContract(terra, liquidator, redBank,
+      {
+        liquidate_native: {
+          collateral_asset: { native: { denom: "uluna" } },
+          debt_asset: "uusd",
+          user_address: borrower.key.accAddress,
+          receive_ma_token: receiveMaToken,
+        }
+      },
+      `${uusdAmountLiquidated}uusd`
     )
   } catch (error) {
     strictEqual(error.config.url, "/txs/estimate_fee")
@@ -352,18 +350,16 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
 
   // should fail because there are no collateralized loans
   try {
-    await performTransaction(terra, liquidator,
-      new MsgExecuteContract(liquidator.key.accAddress, redBank,
-        {
-          liquidate_native: {
-            collateral_asset: { native: { denom: "uluna" } },
-            debt_asset: "uusd",
-            user_address: borrower.key.accAddress,
-            receive_ma_token: false,
-          }
-        },
-        `${uusdAmountBorrowed}uusd`
-      )
+    await executeContract(terra, liquidator, redBank,
+      {
+        liquidate_native: {
+          collateral_asset: { native: { denom: "uluna" } },
+          debt_asset: "uusd",
+          user_address: borrower.key.accAddress,
+          receive_ma_token: false,
+        }
+      },
+      `${uusdAmountBorrowed}uusd`
     )
   } catch (error) {
     strictEqual(error.config.url, "/txs/estimate_fee")
