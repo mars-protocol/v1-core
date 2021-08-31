@@ -17,11 +17,11 @@
     "DebtInfo": {
       "type": "object",
       "required": [
-        "amount",
+        "amount_scaled",
         "denom"
       ],
       "properties": {
-        "amount": {
+        "amount_scaled": {
           "description": "Scaled amount",
           "allOf": [
             {

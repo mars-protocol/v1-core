@@ -8,6 +8,7 @@ pub enum UserHealthStatus {
     NotBorrowing,
     Borrowing(Decimal),
 }
+
 pub mod msg {
     use super::UserHealthStatus;
     use crate::asset::{Asset, AssetType};
@@ -35,7 +36,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ExecuteMsg {
-        /// Update LP config
+        /// Update contract config
         UpdateConfig { config: CreateOrUpdateConfig },
 
         /// Implementation of cw20 receive msg
@@ -60,41 +61,50 @@ pub mod msg {
         /// Callback sent from maToken contract after instantiated
         InitAssetTokenCallback {
             /// Either the denom for a terra native asset or address for a cw20 token
+            /// in bytes
             reference: Vec<u8>,
         },
 
-        /// Deposit Terra native coins
+        /// Deposit Terra native coins. Deposited coins must be sent in the transaction
+        /// this call is made
         DepositNative {
             /// Denom used in Terra (e.g: uluna, uusd)
             denom: String,
         },
 
-        /// Borrow Terra native coins
+        /// Borrow Terra native coins. If borrow allowed, amount is added to caller's debt
+        /// and sent to the address. If asset is a Terra native token, the amount sent
+        /// is selected so that the sum of the transfered amount plus the stability tax
+        /// payed is equal to the borrowed amount.
         Borrow {
-            /// Denom used in Terra (e.g: uluna, uusd)
+            /// Asset to borrow
             asset: Asset,
+            /// Amount to borrow
             amount: Uint128,
         },
 
-        /// Repay Terra native coins loan
+        /// Repay Terra native coins loan. Coins used to repay must be sent in the
+        /// transaction this call is made.
         RepayNative {
             /// Denom used in Terra (e.g: uluna, uusd)
             denom: String,
         },
 
-        /// Liquidate under-collateralized native loans
+        /// Liquidate under-collateralized native loans. Coins used to repay must be sent in the
+        /// transaction this call is made.
         LiquidateNative {
-            /// Details for collateral asset
+            /// Collateral asset liquidator gets from the borrower
             collateral_asset: Asset,
             /// Denom used in Terra (e.g: uluna, uusd) of the debt asset
-            debt_asset: String,
+            debt_asset_denom: String,
             /// The address of the borrower getting liquidated
             user_address: String,
-            /// Sends maAsset to liquidator if true and underlying collateral asset if false
+            /// Whether the liquidator gets liquidated collateral in maToken (true) or
+            /// the underlying collateral asset (false)
             receive_ma_token: bool,
         },
 
-        /// Called by liquidity token. Validate liquidity token transfer is valid
+        /// Called by liquidity token (maToken). Validate liquidity token transfer is valid
         /// and update collateral status
         FinalizeLiquidityTokenTransfer {
             /// Token sender. Address is trusted because it should have been verified in
@@ -111,17 +121,32 @@ pub mod msg {
             amount: Uint128,
         },
 
-        /// Update uncollateralized loan limit
+        /// Update uncollateralized loan limit for a given user and asset.
+        /// Overrides previous value if any. A limit of zero means no
+        /// uncollateralized limit and the debt in that asset needs to be
+        /// collateralized.
         UpdateUncollateralizedLoanLimit {
+            /// Address that receives the credit
             user_address: String,
+            /// Asset the user receives the credit in
             asset: Asset,
+            /// Limit for the uncolateralize loan.
             new_limit: Uint128,
         },
 
-        /// Update (enable / disable) asset as collateral
-        UpdateUserCollateralAssetStatus { asset: Asset, enable: bool },
+        /// Update (enable / disable) asset as collateral for the caller
+        UpdateUserCollateralAssetStatus {
+            /// Asset to update status for
+            asset: Asset,
+            /// Option to enable (true) / disable (false) asset as collateral
+            enable: bool,
+        },
 
-        /// Distribute protocol income to the treasury, insurance fund, and staking contracts protocol contracts
+        /// Distribute the accrued protocol income to the treasury, insurance fund, and staking contracts
+        /// according to the split set in config.
+        /// Will transfer underlying asset to insurance fund and staking while minting maTokens to
+        /// the treasury.
+        /// Callable by any address, will fail if red bank has no liquidity.
         DistributeProtocolIncome {
             /// Asset market fees to distribute
             asset: Asset,
@@ -129,8 +154,12 @@ pub mod msg {
             amount: Option<Uint128>,
         },
 
-        /// Withdraw an amount of the asset burning an equivalent amount of maTokens
+        /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
+        /// If asset is a Terra native token, the amount sent to the user
+        /// is selected so that the sum of the transfered amount plus the stability tax
+        /// payed is equal to the withdrawn amount.
         Withdraw {
+            /// Asset to withdraw
             asset: Asset,
             /// Amount to be withdrawn. If None is specified, the full maToken balance will be
             /// burned in exchange for the equivalent asset amount.
@@ -141,19 +170,18 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ReceiveMsg {
-        /// Deposit the sent cw20 tokens
+        /// Deposit sent cw20 tokens
         DepositCw20 {},
-        /// Repay the sent cw20 tokens
+        /// Repay sent cw20 tokens
         RepayCw20 {},
-        /// Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan
+        /// Liquidate under-collateralized cw20 loan using the sent cw20 tokens.
         LiquidateCw20 {
-            /// Details for collateral asset
+            /// Collateral asset liquidator gets from the borrower
             collateral_asset: Asset,
-            /// Token address of the debt asset
-            debt_asset_address: String,
             /// The address of the borrower getting liquidated
             user_address: String,
-            /// Sends maAsset to liquidator if true and underlying collateral asset if false
+            /// Whether the liquidator gets liquidated collateral in maToken (true) or
+            /// the underlying collateral asset (false)
             receive_ma_token: bool,
         },
     }
@@ -171,11 +199,12 @@ pub mod msg {
         /// Returns UncollateralizedLoanLimitResponse
         UncollateralizedLoanLimit { user_address: String, asset: Asset },
         /// Get all debt positions for a user. Returns DebtResponse
-        Debt { address: String },
-        /// Get all collateral positions for a user. Returns CollateralResponse
-        Collateral { address: String },
+        UserDebt { user_address: String },
+        /// Get info about whether or not user is using each asset as collateral.
+        /// Returns CollateralResponse
+        UserCollateral { user_address: String },
         /// Get user position. Returns UserPositionResponse
-        UserPosition { address: String },
+        UserPosition { user_address: String },
         /// Get equivalent underlying asset amount for a maToken balance. Returns AmountResponse
         ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
         /// Get equivalent underlying asset amount for a debt balance. Returns AmountResponse
@@ -237,7 +266,7 @@ pub mod msg {
         /// Either denom for a native token or asset address for a cw20
         pub denom: String,
         /// Scaled amount
-        pub amount: Uint128,
+        pub amount_scaled: Uint128,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -249,7 +278,7 @@ pub mod msg {
     pub struct CollateralInfo {
         /// Either denom for a native token or asset address for a cw20
         pub denom: String,
-        /// Scaled amount
+        /// Wether the user is using asset as collateral or not
         pub enabled: bool,
     }
 

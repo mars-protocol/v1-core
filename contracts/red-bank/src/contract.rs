@@ -155,20 +155,23 @@ pub fn execute(
 
         ExecuteMsg::LiquidateNative {
             collateral_asset,
-            debt_asset,
+            debt_asset_denom,
             user_address,
             receive_ma_token,
         } => {
             let sender = info.sender.clone();
             let user_addr = deps.api.addr_validate(&user_address)?;
-            let sent_debt_asset_amount = get_denom_amount_from_coins(&info.funds, &debt_asset);
+            let sent_debt_asset_amount =
+                get_denom_amount_from_coins(&info.funds, &debt_asset_denom);
             execute_liquidate(
                 deps,
                 env,
                 info,
                 sender,
                 collateral_asset,
-                Asset::Native { denom: debt_asset },
+                Asset::Native {
+                    denom: debt_asset_denom,
+                },
                 user_addr,
                 sent_debt_asset_amount,
                 receive_ma_token,
@@ -294,18 +297,10 @@ pub fn execute_receive_cw20(
         }
         ReceiveMsg::LiquidateCw20 {
             collateral_asset,
-            debt_asset_address,
             user_address,
             receive_ma_token,
         } => {
-            let debt_asset_addr = deps.api.addr_validate(&debt_asset_address)?;
-            if info.sender != debt_asset_addr {
-                return Err(StdError::generic_err(format!(
-                    "Incorrect asset, must send {} in order to liquidate",
-                    debt_asset_address
-                ))
-                .into());
-            }
+            let debt_asset_addr = info.sender.clone();
             let liquidator_addr = deps.api.addr_validate(&cw20_msg.sender)?;
             let user_addr = deps.api.addr_validate(&user_address)?;
             execute_liquidate(
@@ -315,7 +310,7 @@ pub fn execute_receive_cw20(
                 liquidator_addr,
                 collateral_asset,
                 Asset::Cw20 {
-                    contract_addr: debt_asset_address,
+                    contract_addr: debt_asset_addr.to_string(),
                 },
                 user_addr,
                 cw20_msg.amount,
@@ -968,8 +963,8 @@ pub fn execute_liquidate(
     receive_ma_token: bool,
 ) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
-
     let (debt_asset_label, debt_asset_reference, _) = debt_asset.get_attributes();
+
     // 1. Validate liquidation
     // If user (contract) has a positive uncollateralized limit then the user
     // cannot be liquidated
@@ -1583,12 +1578,12 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
         QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
-        QueryMsg::Debt { address } => {
-            let address = deps.api.addr_validate(&address)?;
+        QueryMsg::UserDebt { user_address } => {
+            let address = deps.api.addr_validate(&user_address)?;
             to_binary(&query_debt(deps, address)?)
         }
-        QueryMsg::Collateral { address } => {
-            let address = deps.api.addr_validate(&address)?;
+        QueryMsg::UserCollateral { user_address } => {
+            let address = deps.api.addr_validate(&user_address)?;
             to_binary(&query_collateral(deps, address)?)
         }
         QueryMsg::UncollateralizedLoanLimit {
@@ -1617,8 +1612,8 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             ma_token_address,
             amount,
         )?),
-        QueryMsg::UserPosition { address } => {
-            let address = deps.api.addr_validate(&address)?;
+        QueryMsg::UserPosition { user_address } => {
+            let address = deps.api.addr_validate(&user_address)?;
             to_binary(&query_user_position(deps, env, address)?)
         }
     }
@@ -1712,12 +1707,12 @@ fn query_debt(deps: Deps, address: Addr) -> StdResult<DebtResponse> {
                 let debt = DEBTS.load(deps.storage, (k.as_slice(), &address))?;
                 Ok(DebtInfo {
                     denom,
-                    amount: debt.amount_scaled,
+                    amount_scaled: debt.amount_scaled,
                 })
             } else {
                 Ok(DebtInfo {
                     denom,
-                    amount: Uint128::zero(),
+                    amount_scaled: Uint128::zero(),
                 })
             }
         })
@@ -5238,7 +5233,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: true,
                 })
@@ -5298,7 +5292,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: true,
                 })
@@ -5346,7 +5339,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: true,
                 })
@@ -5371,7 +5363,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: true,
                 })
@@ -5512,7 +5503,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: false,
                 })
@@ -5734,7 +5724,6 @@ mod tests {
                     collateral_asset: Asset::Native {
                         denom: "collateral".to_string(),
                     },
-                    debt_asset_address: debt_contract_addr.to_string(),
                     user_address: user_address.to_string(),
                     receive_ma_token: false,
                 })
@@ -6050,7 +6039,6 @@ mod tests {
                 collateral_asset: Asset::Native {
                     denom: "collateral".to_string(),
                 },
-                debt_asset_address: debt_contract_addr.to_string(),
                 user_address: healthy_user_address.to_string(),
                 receive_ma_token: true,
             })
