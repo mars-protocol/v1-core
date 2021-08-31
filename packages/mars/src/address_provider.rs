@@ -40,7 +40,7 @@ pub mod msg {
         pub red_bank_address: Option<String>,
         /// Staking address handles Mars staking and xMars minting
         pub staking_address: Option<String>,
-        /// Treasury contract accumulates protocol fees that can be spent by the council tthrough
+        /// Treasury contract accumulates protocol fees that can be spent by the council through
         /// the voting of proposals
         pub treasury_address: Option<String>,
         /// xMars token cw20 contract
