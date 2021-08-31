@@ -175,9 +175,6 @@ export async function setupOracle(
           }
           await executeContract(terra, wallet, oracleFactoryAddress, createPairMsg);
           console.log("Pair created");
-          // TODO, not sure this actually worked? I just called the factory contract directly, whereas I think I should have perhaps initalised a pair contract
-          // TODO with a call back to the factory token contract as per here: https://finder.terra.money/bombay-10/tx/6B1E44803ED9EB41AAF5BF18D6FD9AF72B7549F090593ED015C139362AEC2F9F
-          // TODO vs my version here: https://finder.terra.money/bombay-10/tx/4B579047BFFDABA25166AB1ADBC5B55F2C649DDF21D10FF95C5E837B15CF8A63
 
           pairQueryResponse = await queryContract(terra, oracleFactoryAddress, pairQueryMsg)
         } else {

@@ -26,10 +26,16 @@
       ],
       "properties": {
         "denom": {
+          "description": "Either denom for a native token or asset address for a cw20",
           "type": "string"
         },
         "ma_token_address": {
-          "$ref": "#/definitions/Addr"
+          "description": "Address for the corresponding maToken",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Addr"
+            }
+          ]
         }
       }
     }

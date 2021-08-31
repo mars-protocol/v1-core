@@ -69,7 +69,6 @@ pub fn mock_env_at_block_height(block_height: u64) -> Env {
 }
 
 /// quick mock info with just the sender
-// TODO: Maybe this one does not make sense given there's a very smilar helper in cosmwasm_std
 pub fn mock_info(sender: &str) -> MessageInfo {
     MessageInfo {
         sender: Addr::unchecked(sender),

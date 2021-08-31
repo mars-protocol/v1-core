@@ -17,7 +17,7 @@ pub fn reverse_decimal(decimal: Decimal) -> Decimal {
 #[cfg(test)]
 mod tests {
     use crate::math::{decimal_division, decimal_multiplication, reverse_decimal};
-    use cosmwasm_std::{Decimal, Fraction};
+    use cosmwasm_std::Decimal;
     use std::str::FromStr;
 
     #[test]

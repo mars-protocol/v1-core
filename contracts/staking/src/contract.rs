@@ -468,7 +468,7 @@ pub fn execute_swap_uusd_to_mars(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
-        QueryMsg::Cooldown { sender_address } => to_binary(&query_cooldown(deps, sender_address)?),
+        QueryMsg::Cooldown { user_address } => to_binary(&query_cooldown(deps, user_address)?),
     }
 }
 
@@ -483,8 +483,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     })
 }
 
-fn query_cooldown(deps: Deps, sender_address: String) -> StdResult<CooldownResponse> {
-    let cooldown = COOLDOWNS.may_load(deps.storage, &deps.api.addr_validate(&sender_address)?)?;
+fn query_cooldown(deps: Deps, user_address: String) -> StdResult<CooldownResponse> {
+    let cooldown = COOLDOWNS.may_load(deps.storage, &deps.api.addr_validate(&user_address)?)?;
 
     match cooldown {
         Some(result) => Ok(CooldownResponse {
@@ -1113,7 +1113,6 @@ mod tests {
     fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(contract_balances);
 
-        // TODO: Do we actually need the init to happen on tests?
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
