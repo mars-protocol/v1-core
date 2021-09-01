@@ -80,6 +80,22 @@ pub struct Market {
     pub index: u32,
     /// maToken contract address
     pub ma_token_address: Addr,
+    /// Indicated whether the asset is native or a cw20 token
+    pub asset_type: AssetType,
+
+    /// Max uusd that can be borrowed per uusd collateral when using the asset as collateral
+    pub max_loan_to_value: Decimal,
+    /// LTV (if using only the asset as collateral) that if surpassed, makes the user's position
+    /// liquidatable
+    pub maintenance_margin: Decimal,
+    /// Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral
+    /// from user in an amount equal to debt repayed + bonus)
+    pub liquidation_bonus: Decimal,
+    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    pub reserve_factor: Decimal,
+
+    /// Interest rate strategy to calculate borrow_rate and liquidity_rate
+    pub interest_rate_strategy: InterestRateStrategy,
 
     /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal,
@@ -89,31 +105,13 @@ pub struct Market {
     pub borrow_rate: Decimal,
     /// Rate paid to depositors
     pub liquidity_rate: Decimal,
-
-    /// Max percentage of collateral that can be borrowed
-    pub max_loan_to_value: Decimal,
-
-    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
-    pub reserve_factor: Decimal,
-
     /// Timestamp (seconds) where indexes and rates where last updated
     pub interests_last_updated: u64,
+
     /// Total debt scaled for the market's currency
     pub debt_total_scaled: Uint128,
-
-    /// Indicated whether the asset is native or a cw20 token
-    pub asset_type: AssetType,
-
-    /// Percentage at which the loan is defined as under-collateralized
-    pub maintenance_margin: Decimal,
-    /// Bonus on the price of assets of the collateral when liquidators purchase it
-    pub liquidation_bonus: Decimal,
-
     /// Income to be distributed to other protocol contracts
     pub protocol_income_to_distribute: Uint128,
-
-    /// Interest rate strategy to calculate borrow_rate and liquidity_rate
-    pub interest_rate_strategy: InterestRateStrategy,
 }
 
 impl Market {
@@ -237,9 +235,11 @@ impl Market {
 /// Data for individual users
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct User {
-    /// bitmap representing borrowed asset. 1 on the corresponding bit means asset is
+    /// bits representing borrowed assets. 1 on the corresponding bit means asset is
     /// being borrowed
     pub borrowed_assets: Uint128,
+    /// bits representing collateral assets. 1 on the corresponding bit means asset is
+    /// being used as collateral
     pub collateral_assets: Uint128,
 }
 
@@ -256,7 +256,6 @@ impl Default for User {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Debt {
     /// Scaled debt amount
-    // TODO(does this amount always have six decimals? How do we manage this?)
     pub amount_scaled: Uint128,
 
     /// Marker for uncollateralized debt
