@@ -309,14 +309,16 @@ pub mod msg {
     pub struct InitOrUpdateAssetParams {
         /// Initial borrow rate
         pub initial_borrow_rate: Option<Decimal>,
-        /// Max percentage of collateral that can be borrowed
-        pub max_loan_to_value: Option<Decimal>,
+
         /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
         pub reserve_factor: Option<Decimal>,
+        /// Max percentage of collateral that can be borrowed
+        pub max_loan_to_value: Option<Decimal>,
         /// Percentage at which the loan is defined as under-collateralized
         pub maintenance_margin: Option<Decimal>,
         /// Bonus on the price of assets of the collateral when liquidators purchase it
         pub liquidation_bonus: Option<Decimal>,
+
         /// Interest rate strategy to calculate borrow_rate and liquidity_rate
         pub interest_rate_strategy: Option<InterestRateStrategy>,
     }

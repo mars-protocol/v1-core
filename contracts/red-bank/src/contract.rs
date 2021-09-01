@@ -2090,7 +2090,7 @@ mod tests {
         let response = instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg);
         assert_generic_error_message(
             response,
-            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one",
         );
 
         // *
@@ -2192,7 +2192,7 @@ mod tests {
         assert_eq!(
             error_res,
             StdError::generic_err(
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one"
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one"
             )
             .into()
         );
