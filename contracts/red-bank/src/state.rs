@@ -54,7 +54,7 @@ impl Config {
         // Combined fee shares cannot exceed one
         if combined_fee_share > Decimal::one() {
             return Err(StdError::generic_err(
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceed one",
+                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one",
             ));
         }
 
