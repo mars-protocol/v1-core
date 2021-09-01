@@ -15,7 +15,7 @@ async function main() {
   } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
-      chainID: 'bombay-0008'
+      chainID: 'bombay-10'
     })
   } else {
     terra = new LocalTerra();

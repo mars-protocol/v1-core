@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Get config",
       "type": "object",
       "required": [
         "config"
@@ -15,24 +16,67 @@
       "additionalProperties": false
     },
     {
+      "description": "Get a single address",
       "type": "object",
       "required": [
-        "cooldown"
+        "address"
       ],
       "properties": {
-        "cooldown": {
+        "address": {
           "type": "object",
           "required": [
-            "sender_address"
+            "contract"
           ],
           "properties": {
-            "sender_address": {
-              "type": "string"
+            "contract": {
+              "$ref": "#/definitions/MarsContract"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get a list of addresses",
+      "type": "object",
+      "required": [
+        "addresses"
+      ],
+      "properties": {
+        "addresses": {
+          "type": "object",
+          "required": [
+            "contracts"
+          ],
+          "properties": {
+            "contracts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/MarsContract"
+              }
             }
           }
         }
       },
       "additionalProperties": false
     }
-  ]
+  ],
+  "definitions": {
+    "MarsContract": {
+      "description": "Contracts from mars protocol",
+      "type": "string",
+      "enum": [
+        "Council",
+        "Incentives",
+        "InsuranceFund",
+        "MarsToken",
+        "Oracle",
+        "RedBank",
+        "Staking",
+        "Treasury",
+        "XMarsToken",
+        "ProtocolAdmin"
+      ]
+    }
+  }
 }

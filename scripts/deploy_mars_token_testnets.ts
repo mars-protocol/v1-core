@@ -60,8 +60,8 @@ async function main() {
     wallet,
     join(MARS_ARTIFACTS_PATH, 'cw20_base.wasm'),
     {
-      name: "Mars token",
-      symbol: "Mars",
+      name: "Mars",
+      symbol: "MARS",
       decimals: 6,
       initial_balances: isTestnet ? [
         {

@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Get config parameters",
       "type": "object",
       "required": [
         "config"
@@ -15,6 +16,7 @@
       "additionalProperties": false
     },
     {
+      "description": "Get asset market parameters",
       "type": "object",
       "required": [
         "market"
@@ -35,6 +37,7 @@
       "additionalProperties": false
     },
     {
+      "description": "Get a list of all markets. Returns MarketsListResponse",
       "type": "object",
       "required": [
         "markets_list"
@@ -47,26 +50,7 @@
       "additionalProperties": false
     },
     {
-      "type": "object",
-      "required": [
-        "debt"
-      ],
-      "properties": {
-        "debt": {
-          "type": "object",
-          "required": [
-            "address"
-          ],
-          "properties": {
-            "address": {
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
+      "description": "Get uncollateralized limit for given asset and user. Returns UncollateralizedLoanLimitResponse",
       "type": "object",
       "required": [
         "uncollateralized_loan_limit"
@@ -91,18 +75,19 @@
       "additionalProperties": false
     },
     {
+      "description": "Get all debt positions for a user. Returns DebtResponse",
       "type": "object",
       "required": [
-        "collateral"
+        "user_debt"
       ],
       "properties": {
-        "collateral": {
+        "user_debt": {
           "type": "object",
           "required": [
-            "address"
+            "user_address"
           ],
           "properties": {
-            "address": {
+            "user_address": {
               "type": "string"
             }
           }
@@ -111,6 +96,49 @@
       "additionalProperties": false
     },
     {
+      "description": "Get info about whether or not user is using each asset as collateral. Returns CollateralResponse",
+      "type": "object",
+      "required": [
+        "user_collateral"
+      ],
+      "properties": {
+        "user_collateral": {
+          "type": "object",
+          "required": [
+            "user_address"
+          ],
+          "properties": {
+            "user_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get user position. Returns UserPositionResponse",
+      "type": "object",
+      "required": [
+        "user_position"
+      ],
+      "properties": {
+        "user_position": {
+          "type": "object",
+          "required": [
+            "user_address"
+          ],
+          "properties": {
+            "user_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get equivalent underlying asset amount for a maToken balance. Returns AmountResponse",
       "type": "object",
       "required": [
         "scaled_liquidity_amount"
@@ -135,6 +163,7 @@
       "additionalProperties": false
     },
     {
+      "description": "Get equivalent underlying asset amount for a debt balance. Returns AmountResponse",
       "type": "object",
       "required": [
         "scaled_debt_amount"
@@ -159,6 +188,7 @@
       "additionalProperties": false
     },
     {
+      "description": "Get equivalent maToken amount for a given underlying asset balance. Returns AmountResponse",
       "type": "object",
       "required": [
         "descaled_liquidity_amount"

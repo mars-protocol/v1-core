@@ -3,7 +3,7 @@
   "title": "ReceiveMsg",
   "anyOf": [
     {
-      "description": "Deposit the sent cw20 tokens",
+      "description": "Deposit sent cw20 tokens",
       "type": "object",
       "required": [
         "deposit_cw20"
@@ -16,7 +16,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Repay the sent cw20 tokens",
+      "description": "Repay sent cw20 tokens",
       "type": "object",
       "required": [
         "repay_cw20"
@@ -29,7 +29,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Use the sent cw20 tokens to pay off a specified user's under-collateralized cw20 loan",
+      "description": "Liquidate under-collateralized cw20 loan using the sent cw20 tokens.",
       "type": "object",
       "required": [
         "liquidate_cw20"
@@ -39,25 +39,20 @@
           "type": "object",
           "required": [
             "collateral_asset",
-            "debt_asset_address",
             "receive_ma_token",
             "user_address"
           ],
           "properties": {
             "collateral_asset": {
-              "description": "Details for collateral asset",
+              "description": "Collateral asset liquidator gets from the borrower",
               "allOf": [
                 {
                   "$ref": "#/definitions/Asset"
                 }
               ]
             },
-            "debt_asset_address": {
-              "description": "Token address of the debt asset",
-              "type": "string"
-            },
             "receive_ma_token": {
-              "description": "Sends maAsset to liquidator if true and underlying collateral asset if false",
+              "description": "Whether the liquidator gets liquidated collateral in maToken (true) or the underlying collateral asset (false)",
               "type": "boolean"
             },
             "user_address": {
