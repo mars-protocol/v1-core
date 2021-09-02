@@ -80,19 +80,20 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
 
   console.log("transferring the entire maToken balance should fail")
 
-  try {
-    await executeContract(terra, recipient, maLuna,
+  assert.rejects(
+    executeContract(terra, recipient, maLuna,
       {
         transfer: {
           amount: String(LUNA_COLLATERAL),
           recipient: recipient.key.accAddress
         }
       }
-    )
-  } catch (error) {
-    strictEqual(error.config.url, "/txs/estimate_fee")
-    assert(error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`))
-  }
+    ),
+    (error: any) => {
+      assert(error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`))
+      return true
+    }
+  )
 
   console.log("transferring a small amount of the maToken balance should work")
 
@@ -188,21 +189,21 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
 
-  try {
-    await executeContract(terra, borrower, maLuna,
+  assert.rejects(
+    executeContract(terra, borrower, maLuna,
       {
         transfer: {
           amount: String(LUNA_COLLATERAL / 100),
           recipient: recipient.key.accAddress
         }
       }
-    )
-  } catch (error) {
-    strictEqual(error.config.url, "/txs/estimate_fee")
-    assert(error.response.data.error.includes(
-      "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
-    ))
-  }
+    ),
+    (error: any) => {
+      assert(error.response.data.error.includes(
+        "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
+      ))
+    }
+  )
 
   console.log("enabling Luna as collateral should make transferring maLuna succeed")
 
