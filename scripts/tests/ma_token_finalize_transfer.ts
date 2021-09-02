@@ -80,7 +80,7 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
 
   console.log("transferring the entire maToken balance should fail")
 
-  assert.rejects(
+  await assert.rejects(
     executeContract(terra, recipient, maLuna,
       {
         transfer: {
@@ -189,7 +189,7 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
 
-  assert.rejects(
+  await assert.rejects(
     executeContract(terra, borrower, maLuna,
       {
         transfer: {
@@ -202,6 +202,7 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
       assert(error.response.data.error.includes(
         "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
       ))
+      return true
     }
   )
 

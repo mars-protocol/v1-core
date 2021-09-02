@@ -188,7 +188,7 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
 
   let uusdAmountLiquidated = uusdAmountBorrowed
   // should fail because the borrower's health factor is > 1
-  assert.rejects(
+  await assert.rejects(
     executeContract(terra, liquidator, redBank,
       {
         liquidate_native: {
@@ -204,6 +204,7 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
       assert(error.response.data.error.includes(
         "User's health factor is not less than 1 and thus cannot be liquidated"
       ))
+      return true
     }
   )
 
@@ -385,7 +386,7 @@ async function testCollateralizedCw20Loan(env: Env, borrower: Wallet, borrowFrac
 
   let cw20Token1AmountLiquidated = cw20Token1AmountBorrowed
   // should fail because the borrower's health factor is > 1
-  assert.rejects(
+  await assert.rejects(
     executeContract(terra, liquidator, cw20Token1,
       {
         send: {
@@ -583,7 +584,7 @@ async function testUncollateralizedNativeLoan(env: Env, borrower: Wallet) {
 
 
   // should fail because there are no collateralized loans
-  assert.rejects(
+  await assert.rejects(
     executeContract(terra, liquidator, redBank,
       {
         liquidate_native: {
@@ -808,19 +809,19 @@ async function main() {
 
   // collateralized
   let borrowFraction = CLOSE_FACTOR - 0.1
-  // await testCollateralizedNativeLoan(env, terra.wallets.test2, borrowFraction, false)
-  // await testCollateralizedNativeLoan(env, terra.wallets.test3, borrowFraction, true)
+  await testCollateralizedNativeLoan(env, terra.wallets.test2, borrowFraction, false)
+  await testCollateralizedNativeLoan(env, terra.wallets.test3, borrowFraction, true)
   await testCollateralizedCw20Loan(env, terra.wallets.test4, borrowFraction, false)
-  // await testCollateralizedCw20Loan(env, terra.wallets.test5, borrowFraction, true)
+  await testCollateralizedCw20Loan(env, terra.wallets.test5, borrowFraction, true)
 
   borrowFraction = CLOSE_FACTOR + 0.1
-  // await testCollateralizedNativeLoan(env, terra.wallets.test6, borrowFraction, false)
-  // await testCollateralizedNativeLoan(env, terra.wallets.test7, borrowFraction, true)
-  // await testCollateralizedCw20Loan(env, terra.wallets.test8, borrowFraction, false)
-  // await testCollateralizedCw20Loan(env, terra.wallets.test9, borrowFraction, true)
+  await testCollateralizedNativeLoan(env, terra.wallets.test6, borrowFraction, false)
+  await testCollateralizedNativeLoan(env, terra.wallets.test7, borrowFraction, true)
+  await testCollateralizedCw20Loan(env, terra.wallets.test8, borrowFraction, false)
+  await testCollateralizedCw20Loan(env, terra.wallets.test9, borrowFraction, true)
 
   // uncollateralized
-  // await testUncollateralizedNativeLoan(env, terra.wallets.test10)
+  await testUncollateralizedNativeLoan(env, terra.wallets.test10)
 
   console.log("OK")
 }
