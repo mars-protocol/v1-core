@@ -1,18 +1,10 @@
-import {
-  BlockTxBroadcastResult,
-  Coin,
-  Int,
-  LCDClient,
-  LocalTerra,
-  MsgExecuteContract,
-  Wallet
-} from "@terra-money/terra.js"
+import { Coin, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
+import 'dotenv/config.js'
 import {
   deployContract,
   executeContract,
   instantiateContract,
-  performTransaction,
   queryContract,
   setTimeoutDuration,
   sleep,
@@ -22,45 +14,53 @@ import {
 
 // CONSTS
 
+// required environment variables
+const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH!
+
+// red-bank
 const CLOSE_FACTOR = 0.5
-const LUNA_MAX_LTV = 0.55
+const MAX_LTV = 0.55
 const LIQUIDATION_BONUS = 0.1
+const MA_TOKEN_SCALING_FACTOR = 1_000_000
 // set a high interest rate, so tests can be run faster
 const INTEREST_RATE = 100000
+
+// native tokens
 const LUNA_USD_PRICE = 25
+const USD_COLLATERAL_AMOUNT = 100_000_000_000000
+const LUNA_COLLATERAL_AMOUNT = 1_000_000000
+const USD_BORROW_AMOUNT = LUNA_COLLATERAL_AMOUNT * LUNA_USD_PRICE * MAX_LTV
 
-const USD_COLLATERAL = 100_000_000_000000
-const LUNA_COLLATERAL = 1_000_000000
-const USD_BORROW = LUNA_COLLATERAL * LUNA_USD_PRICE * LUNA_MAX_LTV
-const CW20_BORROW = LUNA_COLLATERAL * LUNA_MAX_LTV
-
-const TOKEN_DECIMALS = 6
-const MA_TOKEN_SCALING_FACTOR = 1_000_000
-
-// HELPERS
-
-async function queryMaAssetAddress(terra: LCDClient, redBank: string, asset: Asset) {
-  const market = await queryContract(terra, redBank,
-    { market: { asset: asset } }
-  )
-  return market.ma_token_address
-}
+// cw20 tokens
+const CW20_TOKEN_USD_PRICE = 10
+const CW20_TOKEN_1_COLLATERAL_AMOUNT = 100_000_000_000000
+const CW20_TOKEN_2_COLLATERAL_AMOUNT = 1_000_000000
+const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
 
 // TYPES
 
-interface Native {
-  native: {
-    denom: string
-  }
-}
+interface Native { native: { denom: string } }
 
-interface CW20 {
-  cw20: {
-    contract_addr: string
-  }
-}
+interface CW20 { cw20: { contract_addr: string } }
 
 type Asset = Native | CW20
+
+interface Env {
+  terra: LocalTerra,
+  redBank: string,
+  deployer: Wallet,
+  maUluna: string,
+  cw20Token1: string,
+  cw20Token2: string,
+  maCw20Token2: string,
+}
+
+// HELPERS
+
+async function queryMaAssetAddress(terra: LCDClient, redBank: string, asset: Asset): Promise<string> {
+  const market = await queryContract(terra, redBank, { market: { asset: asset } })
+  return market.ma_token_address
+}
 
 async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracle: string, asset: Asset, price: number) {
   await executeContract(terra, wallet, oracle,
@@ -73,29 +73,26 @@ async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracl
   )
 }
 
-async function getTxTimestamp(terra: LCDClient, result: BlockTxBroadcastResult) {
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(result.txhash)
-  return Date.parse(txInfo.timestamp) / 1000 // seconds
-}
-
-async function deposit(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  const result = await executeContract(terra, wallet, redBank,
+async function depositNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
+  return await executeContract(terra, wallet, redBank,
     { deposit_native: { denom: denom } },
     `${amount}${denom}`
   )
-  return await getTxTimestamp(terra, result)
 }
 
-async function depositCw20(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  const result = await executeContract(terra, wallet, redBank,
-    { deposit_native: { denom: denom } },
-    `${amount}${denom}`
+async function depositCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
+  return await executeContract(terra, wallet, contract,
+    {
+      send: {
+        contract: redBank,
+        amount: String(amount),
+        msg: toEncodedBinary({ deposit_cw20: {} })
+      }
+    }
   )
-  return await getTxTimestamp(terra, result)
 }
 
-async function borrow(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
+async function borrowNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
   return await executeContract(terra, wallet, redBank,
     {
       borrow: {
@@ -106,11 +103,11 @@ async function borrow(terra: LCDClient, wallet: Wallet, redBank: string, denom: 
   )
 }
 
-async function borrowCw20(terra: LCDClient, wallet: Wallet, redBank: string, contractAddress: string, amount: number) {
+async function borrowCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
   return await executeContract(terra, wallet, redBank,
     {
       borrow: {
-        asset: { cw20: { contract_addr: contractAddress } },
+        asset: { cw20: { contract_addr: contract } },
         amount: String(amount)
       }
     }
@@ -128,13 +125,16 @@ async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, reci
   )
 }
 
-function computeTax(amount: number, taxRate: number, taxCap: number) {
+async function computeTax(terra: LCDClient, coin: Coin) {
+  const taxRate = (await terra.treasury.taxRate()).toNumber()
+  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount.toNumber()
+  const amount = coin.amount.toNumber()
   const tax = amount - amount / (1 + taxRate)
-  return tax > taxCap ? taxCap : Math.round(tax) // TODO check this and use big num types
+  return tax > taxCap ? taxCap : Math.round(tax)
 }
 
-function deductTax(amount: number, taxRate: number, taxCap: number) {
-  return amount - computeTax(amount, taxRate, taxCap)
+async function deductTax(terra: LCDClient, coin: Coin) {
+  return coin.amount.toNumber() - await computeTax(terra, coin)
 }
 
 async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
@@ -150,51 +150,37 @@ async function queryCw20Balance(terra: LCDClient, userAddress: string, contractA
   const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
   return parseInt(result.balance)
 }
-interface Env {
-  terra: LocalTerra,
-  redBank: string,
-  deployer: Wallet,
-  taxRate: number,
-  taxCap: number,
-  maUluna: string,
-  cw20Token1: string,
-  cw20Token2: string,
-  maCw20Token1: string,
-  maCw20Token2: string,
-}
 
 // TESTS
 
-async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
-  console.log("testCollateralizedLoan: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
+async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
+  console.log("testCollateralizedNativeLoan: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
 
-  const { terra, redBank, deployer, taxRate, taxCap, maUluna } = env
+  const { terra, redBank, deployer, maUluna } = env
 
   console.log("provider provides uusd")
 
   const provider = deployer
-  await deposit(terra, provider, redBank, "uusd", USD_COLLATERAL)
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
 
   console.log("borrower provides uluna")
 
-  await deposit(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
 
   console.log("borrower borrows a small amount of uusd")
 
   let totalUusdAmountBorrowed = 0
-  let totalUusdAmountReceivedFromBorrow = 0
 
-  let uusdAmountBorrowed = Math.floor(USD_BORROW * 0.01)
-  let txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  let uusdAmountBorrowed = Math.floor(USD_BORROW_AMOUNT * 0.01)
+  let txResult = await borrowNative(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
   let txEvents = txResult.logs[0].eventsByType
 
   // amount received after deducting Terra tax from the borrowed amount
   let uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
-  let expectedUusdAmountReceived = deductTax(uusdAmountBorrowed, taxRate, taxCap)
+  let expectedUusdAmountReceived = await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))
   strictEqual(uusdAmountReceivedFromBorrow, expectedUusdAmountReceived)
 
   totalUusdAmountBorrowed += uusdAmountBorrowed
-  totalUusdAmountReceivedFromBorrow += uusdAmountReceivedFromBorrow
 
   console.log("liquidator tries to liquidate the borrower")
 
@@ -223,16 +209,15 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction
 
   console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
 
-  uusdAmountBorrowed = Math.floor(USD_BORROW * 0.98)
-  txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  uusdAmountBorrowed = Math.floor(USD_BORROW_AMOUNT * 0.98)
+  txResult = await borrowNative(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
   txEvents = txResult.logs[0].eventsByType
 
   uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
-  expectedUusdAmountReceived = deductTax(uusdAmountBorrowed, taxRate, taxCap)
+  expectedUusdAmountReceived = await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))
   strictEqual(uusdAmountReceivedFromBorrow, expectedUusdAmountReceived)
 
   totalUusdAmountBorrowed += uusdAmountBorrowed
-  totalUusdAmountReceivedFromBorrow += uusdAmountReceivedFromBorrow
 
   console.log("liquidator waits until the borrower's health factor is < 1, then liquidates")
 
@@ -284,7 +269,7 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction
   await sleep(100)
   const txInfo = await terra.tx.txInfo(txResult.txhash)
 
-  // cache the liquidator's balances after they have liquidated the borrower
+  // get the liquidator's balances after they have liquidated the borrower
   const uusdBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uusd")
   const ulunaBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uluna")
   const maUlunaBalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
@@ -314,21 +299,22 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction
 
   // liquidator uusd balance
   const uusdBalanceDifference = uusdBalanceBefore - uusdBalanceAfter
+  const uusdAmountLiquidatedTax = await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))
   if (borrowFraction > CLOSE_FACTOR) {
-    const uusdLiquidationTax = await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))
-    // TODO why is uusdBalanceDifference 1 or 2 uusd different from expected?
+    const debtAmountRepaidTax = await computeTax(terra, new Coin("uusd", debtAmountRepaid))
+    // TODO why is uusdBalanceDifference sometimes 1 or 2 uusd different from expected?
     try {
       strictEqual(
         uusdBalanceDifference,
-        debtAmountRepaid + computeTax(debtAmountRepaid, taxRate, taxCap) + uusdLiquidationTax.amount.toNumber()
+        debtAmountRepaid + uusdAmountLiquidatedTax.amount.toNumber() + debtAmountRepaidTax
       )
-    } catch (e) {
-      console.log(e)
+    } catch (error) {
+      console.log(error.response.error)
     }
   } else {
     strictEqual(
       uusdBalanceDifference,
-      debtAmountRepaid + computeTax(debtAmountRepaid, taxRate, taxCap)
+      debtAmountRepaid + uusdAmountLiquidatedTax.amount.toNumber()
     )
   }
 
@@ -360,8 +346,8 @@ async function testCollateralizedLoan(env: Env, borrower: Wallet, borrowFraction
   }
 }
 
-async function testCollateralizedLoanCw20(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
-  console.log("testCollateralizedLoanCw20: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
+async function testCollateralizedCw20Loan(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
+  console.log("testCollateralizedCw20Loan: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
 
   const { terra, redBank, deployer, cw20Token1, cw20Token2, maCw20Token2 } = env
 
@@ -369,39 +355,23 @@ async function testCollateralizedLoanCw20(env: Env, borrower: Wallet, borrowFrac
   const liquidator = deployer
 
   // mint some tokens
-  await mintCw20(terra, deployer, cw20Token1, provider.key.accAddress, USD_COLLATERAL)
-  await mintCw20(terra, deployer, cw20Token2, borrower.key.accAddress, LUNA_COLLATERAL)
-  await mintCw20(terra, deployer, cw20Token1, liquidator.key.accAddress, USD_COLLATERAL)
+  await mintCw20(terra, deployer, cw20Token1, provider.key.accAddress, CW20_TOKEN_1_COLLATERAL_AMOUNT)
+  await mintCw20(terra, deployer, cw20Token2, borrower.key.accAddress, CW20_TOKEN_2_COLLATERAL_AMOUNT)
+  await mintCw20(terra, deployer, cw20Token1, liquidator.key.accAddress, CW20_TOKEN_1_COLLATERAL_AMOUNT)
 
   console.log("provider provides cw20 token 1")
 
-  await executeContract(terra, provider, cw20Token1,
-    {
-      send: {
-        contract: redBank,
-        amount: String(USD_COLLATERAL),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
+  await depositCw20(terra, provider, redBank, cw20Token1, CW20_TOKEN_1_COLLATERAL_AMOUNT)
 
   console.log("borrower provides cw20 token 2")
 
-  await executeContract(terra, borrower, cw20Token2,
-    {
-      send: {
-        contract: redBank,
-        amount: String(LUNA_COLLATERAL),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
+  await depositCw20(terra, borrower, redBank, cw20Token2, CW20_TOKEN_2_COLLATERAL_AMOUNT)
 
   console.log("borrower borrows a small amount of cw20 token 1")
 
   let totalCw20Token1AmountBorrowed = 0
 
-  let cw20Token1AmountBorrowed = Math.floor(CW20_BORROW * 0.01)
+  let cw20Token1AmountBorrowed = Math.floor(CW20_TOKEN_1_BORROW_AMOUNT * 0.01)
   let txResult = await borrowCw20(terra, borrower, redBank, cw20Token1, cw20Token1AmountBorrowed)
   let txEvents = txResult.logs[0].eventsByType
 
@@ -440,7 +410,7 @@ async function testCollateralizedLoanCw20(env: Env, borrower: Wallet, borrowFrac
 
   console.log("borrower borrows cw20 token 1 up to the borrow limit of their cw20 token 2 collateral")
 
-  cw20Token1AmountBorrowed = Math.floor(CW20_BORROW * 0.98)
+  cw20Token1AmountBorrowed = Math.floor(CW20_TOKEN_1_BORROW_AMOUNT * 0.98)
   txResult = await borrowCw20(terra, borrower, redBank, cw20Token1, cw20Token1AmountBorrowed)
   txEvents = txResult.logs[0].eventsByType
 
@@ -501,8 +471,6 @@ async function testCollateralizedLoanCw20(env: Env, borrower: Wallet, borrowFrac
     }
   )
   txEvents = txResult.logs[0].eventsByType
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(txResult.txhash)
 
   // get the liquidator's balances after they have liquidated the borrower
   const cw20Token1BalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, cw20Token1)
@@ -562,16 +530,16 @@ async function testCollateralizedLoanCw20(env: Env, borrower: Wallet, borrowFrac
   }
 }
 
-async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
-  console.log("testUncollateralizedLoan")
+async function testUncollateralizedNativeLoan(env: Env, borrower: Wallet) {
+  console.log("testUncollateralizedNativeLoan")
 
-  const { terra, redBank, deployer, taxRate, taxCap } = env
+  const { terra, redBank, deployer } = env
 
   console.log("provider provides uusd")
 
   const provider = deployer
 
-  await deposit(terra, provider, redBank, "uusd", USD_COLLATERAL)
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
 
   console.log("set uncollateralized loan limit for borrower")
 
@@ -580,7 +548,7 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
       update_uncollateralized_loan_limit: {
         user_address: borrower.key.accAddress,
         asset: { native: { denom: "uusd" } },
-        new_limit: String(USD_COLLATERAL),
+        new_limit: String(USD_COLLATERAL_AMOUNT),
       }
     }
   )
@@ -589,8 +557,8 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
 
   const uusdBalanceBefore = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
 
-  const uusdAmountBorrowed = USD_COLLATERAL
-  let txResult = await borrow(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
+  const uusdAmountBorrowed = USD_COLLATERAL_AMOUNT
+  let txResult = await borrowNative(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
   const txEvents = txResult.logs[0].eventsByType
   const loggedUusdAmountBorrowed = parseInt(txEvents.wasm.amount[0])
   strictEqual(loggedUusdAmountBorrowed, uusdAmountBorrowed)
@@ -599,7 +567,7 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
   const uusdBalanceDifference = uusdBalanceAfter - uusdBalanceBefore
   strictEqual(
     uusdBalanceDifference,
-    uusdAmountBorrowed - computeTax(uusdAmountBorrowed, taxRate, taxCap)
+    uusdAmountBorrowed - await computeTax(terra, new Coin("uusd", uusdAmountBorrowed))
   )
 
   console.log("liquidator tries to liquidate the borrower")
@@ -632,7 +600,6 @@ async function testUncollateralizedLoan(env: Env, borrower: Wallet) {
       "user has a positive uncollateralized loan limit and thus cannot be liquidated"
     ))
   }
-
 
   const userPositionT2 = await queryContract(terra, redBank,
     { user_position: { user_address: borrower.key.accAddress } }
@@ -697,14 +664,13 @@ async function main() {
   )
 
   // cw20 tokens
-  // TODO use .env file
-  const cw20CodeId = await uploadContract(terra, deployer, "../../cw-plus/artifacts/cw20_base.wasm")
+  const cw20CodeId = await uploadContract(terra, deployer, CW20_BINARY_PATH)
 
   const cw20Token1 = await instantiateContract(terra, deployer, cw20CodeId,
     {
       name: "cw20 Token 1",
       symbol: "ONE",
-      decimals: TOKEN_DECIMALS,
+      decimals: 6,
       initial_balances: [],
       mint: { minter: deployer.key.accAddress }
     }
@@ -714,7 +680,7 @@ async function main() {
     {
       name: "cw20 Token 2",
       symbol: "TWO",
-      decimals: TOKEN_DECIMALS,
+      decimals: 6,
       initial_balances: [],
       mint: { minter: deployer.key.accAddress }
     }
@@ -729,9 +695,9 @@ async function main() {
         asset: { native: { denom: "uluna" } },
         asset_params: {
           initial_borrow_rate: "0.1",
-          max_loan_to_value: String(LUNA_MAX_LTV),
+          max_loan_to_value: String(MAX_LTV),
           reserve_factor: "0.2",
-          maintenance_margin: String(LUNA_MAX_LTV + 0.001),
+          maintenance_margin: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
@@ -745,8 +711,11 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, LUNA_USD_PRICE)
-  const maUluna: string = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uluna" } },
+    LUNA_USD_PRICE
+  )
+  const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -771,7 +740,10 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
+  )
 
   // cw20token1
   await executeContract(terra, deployer, redBank,
@@ -780,9 +752,9 @@ async function main() {
         asset: { cw20: { contract_addr: cw20Token1 } },
         asset_params: {
           initial_borrow_rate: "0.1",
-          max_loan_to_value: String(LUNA_MAX_LTV),
+          max_loan_to_value: String(MAX_LTV),
           reserve_factor: "0.2",
-          maintenance_margin: String(LUNA_MAX_LTV + 0.001),
+          maintenance_margin: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
@@ -796,8 +768,10 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { cw20: { contract_addr: cw20Token1 } }, LUNA_USD_PRICE)
-  const maCw20Token1: string = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token1 } })
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: cw20Token1 } },
+    CW20_TOKEN_USD_PRICE
+  )
 
   // cw20token2
   await executeContract(terra, deployer, redBank,
@@ -806,9 +780,9 @@ async function main() {
         asset: { cw20: { contract_addr: cw20Token2 } },
         asset_params: {
           initial_borrow_rate: "0.1",
-          max_loan_to_value: String(LUNA_MAX_LTV),
+          max_loan_to_value: String(MAX_LTV),
           reserve_factor: "0.2",
-          maintenance_margin: String(LUNA_MAX_LTV + 0.001),
+          maintenance_margin: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
@@ -822,40 +796,29 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { cw20: { contract_addr: cw20Token2 } }, LUNA_USD_PRICE)
-  const maCw20Token2: string = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token2 } })
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: cw20Token2 } },
+    CW20_TOKEN_USD_PRICE
+  )
+  const maCw20Token2 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token2 } })
 
-  const taxRate = (await terra.treasury.taxRate()).toNumber()
-  const taxCap = (await terra.treasury.taxCap("uusd")).amount.toNumber()
-
-  const env: Env = {
-    terra,
-    redBank,
-    deployer,
-    taxRate,
-    taxCap,
-    maUluna,
-    cw20Token1,
-    cw20Token2,
-    maCw20Token1,
-    maCw20Token2,
-  }
+  const env: Env = { terra, redBank, deployer, maUluna, cw20Token1, cw20Token2, maCw20Token2 }
 
   // collateralized
   let borrowFraction = CLOSE_FACTOR - 0.1
-  // await testCollateralizedLoan(env, terra.wallets.test2, borrowFraction, false)
-  // await testCollateralizedLoan(env, terra.wallets.test3, borrowFraction, true)
-  await testCollateralizedLoanCw20(env, terra.wallets.test4, borrowFraction, false)
-  await testCollateralizedLoanCw20(env, terra.wallets.test5, borrowFraction, true)
+  await testCollateralizedNativeLoan(env, terra.wallets.test2, borrowFraction, false)
+  await testCollateralizedNativeLoan(env, terra.wallets.test3, borrowFraction, true)
+  await testCollateralizedCw20Loan(env, terra.wallets.test4, borrowFraction, false)
+  await testCollateralizedCw20Loan(env, terra.wallets.test5, borrowFraction, true)
 
   borrowFraction = CLOSE_FACTOR + 0.1
-  // await testCollateralizedLoan(env, terra.wallets.test6, borrowFraction, false)
-  // await testCollateralizedLoan(env, terra.wallets.test7, borrowFraction, true)
-  await testCollateralizedLoanCw20(env, terra.wallets.test8, borrowFraction, false)
-  await testCollateralizedLoanCw20(env, terra.wallets.test9, borrowFraction, true)
+  await testCollateralizedNativeLoan(env, terra.wallets.test6, borrowFraction, false)
+  await testCollateralizedNativeLoan(env, terra.wallets.test7, borrowFraction, true)
+  await testCollateralizedCw20Loan(env, terra.wallets.test8, borrowFraction, false)
+  await testCollateralizedCw20Loan(env, terra.wallets.test9, borrowFraction, true)
 
   // uncollateralized
-  await testUncollateralizedLoan(env, terra.wallets.test10)
+  await testUncollateralizedNativeLoan(env, terra.wallets.test10)
 
   console.log("OK")
 }
