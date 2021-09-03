@@ -1,4 +1,4 @@
-import { Coin, Int, LCDClient, LocalTerra, TxError, Wallet } from "@terra-money/terra.js"
+import { Coin, Int, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import 'dotenv/config.js'
 import {
