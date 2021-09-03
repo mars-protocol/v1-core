@@ -125,14 +125,6 @@ async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, reci
   )
 }
 
-// async function computeTax(terra: LCDClient, coin: Coin) {
-//   const taxRate = (await terra.treasury.taxRate()).toNumber()
-//   const taxCap = (await terra.treasury.taxCap(coin.denom)).amount.toNumber()
-//   const amount = coin.amount.toNumber()
-//   const tax = amount - amount / (1 + taxRate)
-//   return tax > taxCap ? taxCap : Math.round(tax)
-// }
-
 async function computeTax(terra: LCDClient, coin: Coin) {
   const DECIMAL_FRACTION = new Int("1000000000000000000") // 10^18
   const taxRate = await terra.treasury.taxRate()
@@ -143,11 +135,11 @@ async function computeTax(terra: LCDClient, coin: Coin) {
       .mul(DECIMAL_FRACTION)
       .div(DECIMAL_FRACTION.mul(taxRate).add(DECIMAL_FRACTION))
   )
-  return tax.gt(taxCap) ? taxCap.toNumber() : tax.toNumber()
+  return tax.gt(taxCap) ? taxCap : tax
 }
 
 async function deductTax(terra: LCDClient, coin: Coin) {
-  return Math.floor(coin.amount.toNumber() - await computeTax(terra, coin))
+  return coin.amount.sub(await computeTax(terra, coin)).floor()
 }
 
 async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
@@ -190,7 +182,7 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
 
   // amount received after deducting Terra tax from the borrowed amount
   let uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
-  let expectedUusdAmountReceived = await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))
+  let expectedUusdAmountReceived = (await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))).toNumber()
   strictEqual(uusdAmountReceivedFromBorrow, expectedUusdAmountReceived)
 
   totalUusdAmountBorrowed += uusdAmountBorrowed
@@ -228,7 +220,7 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
   txEvents = txResult.logs[0].eventsByType
 
   uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
-  expectedUusdAmountReceived = await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))
+  expectedUusdAmountReceived = (await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))).toNumber()
   strictEqual(uusdAmountReceivedFromBorrow, expectedUusdAmountReceived)
 
   totalUusdAmountBorrowed += uusdAmountBorrowed
@@ -329,7 +321,7 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
   const uusdBalanceDifference = uusdBalanceBefore - uusdBalanceAfter
   const uusdAmountLiquidatedTax = (await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))).amount.toNumber()
   if (liquidatorOverpays) {
-    const refundAmountTax = await computeTax(terra, new Coin("uusd", refundAmount))
+    const refundAmountTax = (await computeTax(terra, new Coin("uusd", refundAmount))).toNumber()
     const expectedUusdBalanceDifference =
       debtAmountRepaid + uusdAmountLiquidatedTax + refundAmountTax
     // TODO why is uusdBalanceDifference sometimes 1 or 2 uusd different from expected?
@@ -579,7 +571,7 @@ async function testUncollateralizedNativeLoan(env: Env, borrower: Wallet) {
   const uusdBalanceDifference = uusdBalanceAfter - uusdBalanceBefore
   strictEqual(
     uusdBalanceDifference,
-    uusdAmountBorrowed - await computeTax(terra, new Coin("uusd", uusdAmountBorrowed))
+    uusdAmountBorrowed - (await computeTax(terra, new Coin("uusd", uusdAmountBorrowed))).toNumber()
   )
 
   console.log("liquidator tries to liquidate the borrower")
