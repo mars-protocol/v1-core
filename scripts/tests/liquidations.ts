@@ -1,4 +1,4 @@
-import { Coin, LCDClient, LocalTerra, TxError, Wallet } from "@terra-money/terra.js"
+import { Coin, Int, LCDClient, LocalTerra, TxError, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import 'dotenv/config.js'
 import {
@@ -125,16 +125,29 @@ async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, reci
   )
 }
 
+// async function computeTax(terra: LCDClient, coin: Coin) {
+//   const taxRate = (await terra.treasury.taxRate()).toNumber()
+//   const taxCap = (await terra.treasury.taxCap(coin.denom)).amount.toNumber()
+//   const amount = coin.amount.toNumber()
+//   const tax = amount - amount / (1 + taxRate)
+//   return tax > taxCap ? taxCap : Math.round(tax)
+// }
+
 async function computeTax(terra: LCDClient, coin: Coin) {
-  const taxRate = (await terra.treasury.taxRate()).toNumber()
-  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount.toNumber()
-  const amount = coin.amount.toNumber()
-  const tax = amount - amount / (1 + taxRate)
-  return tax > taxCap ? taxCap : Math.round(tax)
+  const DECIMAL_FRACTION = new Int("1000000000000000000") // 10^18
+  const taxRate = await terra.treasury.taxRate()
+  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount
+  const amount = coin.amount
+  const tax = amount.sub(
+    amount
+      .mul(DECIMAL_FRACTION)
+      .div(DECIMAL_FRACTION.mul(taxRate).add(DECIMAL_FRACTION))
+  )
+  return tax.gt(taxCap) ? taxCap.toNumber() : tax.toNumber()
 }
 
 async function deductTax(terra: LCDClient, coin: Coin) {
-  return coin.amount.toNumber() - await computeTax(terra, coin)
+  return Math.floor(coin.amount.toNumber() - await computeTax(terra, coin))
 }
 
 async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
@@ -276,13 +289,16 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
   const maUlunaBalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
 
   // the maximum fraction of debt that can be liquidated is `CLOSE_FACTOR`
-  const expectedLiquidatedDebtFraction = borrowFraction > CLOSE_FACTOR ? CLOSE_FACTOR : borrowFraction
+  const liquidatorOverpays = borrowFraction > CLOSE_FACTOR
+  const expectedLiquidatedDebtFraction = liquidatorOverpays ? CLOSE_FACTOR : borrowFraction
 
   // debt amount repaid
+  // the actual amount of debt repaid by the liquidator:
+  // if `liquidatorOverpays == true` then `debtAmountRepaid < uusdAmountLiquidated`
   const debtAmountRepaid = parseInt(txEvents.wasm.debt_amount_repaid[0])
   const expectedDebtAmountRepaid = Math.floor(totalUusdAmountBorrowed * expectedLiquidatedDebtFraction)
 
-  if (borrowFraction > CLOSE_FACTOR) {
+  if (liquidatorOverpays) {
     // pay back the maximum repayable debt
     // use intervals because the exact amount of debt owed at any time t changes as interest accrues
     assert(
@@ -298,36 +314,30 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
     strictEqual(debtAmountRepaid, expectedDebtAmountRepaid)
   }
 
-  // liquidator uusd balance
-  const uusdBalanceDifference = uusdBalanceBefore - uusdBalanceAfter
-  const uusdAmountLiquidatedTax = await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))
-  if (borrowFraction > CLOSE_FACTOR) {
-    const debtAmountRepaidTax = await computeTax(terra, new Coin("uusd", debtAmountRepaid))
-    // TODO why is uusdBalanceDifference sometimes 1 or 2 uusd different from expected?
-    try {
-      strictEqual(
-        uusdBalanceDifference,
-        debtAmountRepaid + uusdAmountLiquidatedTax.amount.toNumber() + debtAmountRepaidTax
-      )
-    } catch (error) {
-      console.log(error.response.error)
-    }
-  } else {
-    strictEqual(
-      uusdBalanceDifference,
-      debtAmountRepaid + uusdAmountLiquidatedTax.amount.toNumber()
-    )
-  }
-
   // refund amount
   const refundAmount = parseInt(txEvents.wasm.refund_amount[0])
-  if (borrowFraction > CLOSE_FACTOR) {
+  if (liquidatorOverpays) {
     // liquidator paid more than the maximum repayable debt, so is refunded the difference
     const expectedRefundAmount = uusdAmountLiquidated - debtAmountRepaid
     strictEqual(refundAmount, expectedRefundAmount)
   } else {
     // liquidator paid less than the maximum repayable debt, so no refund is owed
     strictEqual(refundAmount, 0)
+  }
+
+  // liquidator uusd balance
+  const uusdBalanceDifference = uusdBalanceBefore - uusdBalanceAfter
+  const uusdAmountLiquidatedTax = (await terra.utils.calculateTax(new Coin("uusd", uusdAmountLiquidated))).amount.toNumber()
+  if (liquidatorOverpays) {
+    const refundAmountTax = await computeTax(terra, new Coin("uusd", refundAmount))
+    const expectedUusdBalanceDifference =
+      debtAmountRepaid + uusdAmountLiquidatedTax + refundAmountTax
+    // TODO why is uusdBalanceDifference sometimes 1 or 2 uusd different from expected?
+    strictEqual(uusdBalanceDifference, expectedUusdBalanceDifference)
+    // assert(Math.abs(uusdBalanceDifference - expectedUusdBalanceDifference) < 2)
+  } else {
+    const expectedUusdBalanceDifference = debtAmountRepaid + uusdAmountLiquidatedTax
+    strictEqual(uusdBalanceDifference, expectedUusdBalanceDifference)
   }
 
   // collateral amount liquidated
