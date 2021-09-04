@@ -967,20 +967,17 @@ pub fn execute_liquidate(
     // 1. Validate liquidation
     // If user (contract) has a positive uncollateralized limit then the user
     // cannot be liquidated
-    let uncollateralized_loan_limit = match UNCOLLATERALIZED_LOAN_LIMITS.may_load(
+    if let Some(limit) = UNCOLLATERALIZED_LOAN_LIMITS.may_load(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
-    ) {
-        Ok(Some(limit)) => limit,
-        Ok(None) => Uint128::zero(),
-        Err(error) => return Err(error.into()),
+    )? {
+        if !limit.is_zero() {
+            return Err(StdError::generic_err(
+                "user has a positive uncollateralized loan limit and thus cannot be liquidated",
+            )
+            .into());
+        }
     };
-    if uncollateralized_loan_limit > Uint128::zero() {
-        return Err(StdError::generic_err(
-            "user has a positive uncollateralized loan limit and thus cannot be liquidated",
-        )
-        .into());
-    }
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_asset_amount.is_zero() {
@@ -1634,27 +1631,14 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 }
 
 fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
-    let market = match asset {
-        Asset::Native { denom } => match MARKETS.load(deps.storage, denom.as_bytes()) {
-            Ok(market) => market,
-            Err(_) => {
-                return Err(StdError::generic_err(format!(
-                    "failed to load market for: {}",
-                    denom
-                )))
-            }
-        },
-        Asset::Cw20 { contract_addr } => {
-            let contract_addr = deps.api.addr_validate(&contract_addr)?;
-            match MARKETS.load(deps.storage, contract_addr.as_bytes()) {
-                Ok(market) => market,
-                Err(_) => {
-                    return Err(StdError::generic_err(format!(
-                        "failed to load market for: {}",
-                        contract_addr
-                    )))
-                }
-            }
+    let (label, reference, _) = asset.get_attributes();
+    let market = match MARKETS.load(deps.storage, reference.as_slice()) {
+        Ok(market) => market,
+        Err(_) => {
+            return Err(StdError::generic_err(format!(
+                "failed to load market for: {}",
+                label
+            )))
         }
     };
 
@@ -3036,15 +3020,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "somecoin")
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
+            vec![th_build_interests_updated_event(
+                "somecoin",
+                &expected_params
+            )]
         );
 
         let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
@@ -3153,15 +3132,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", cw20_addr)
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string()),]
+            vec![th_build_interests_updated_event(
+                cw20_addr.as_str(),
+                &expected_params
+            )]
         );
         assert_eq!(
             market.protocol_income_to_distribute,
@@ -3314,15 +3288,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "somecoin")
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
+            vec![th_build_interests_updated_event(
+                "somecoin",
+                &expected_params
+            )]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3456,15 +3425,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "somecontract")
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
+            vec![th_build_interests_updated_event(
+                "somecontract",
+                &expected_params
+            )]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3828,15 +3792,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "somecoin")
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
+            vec![th_build_interests_updated_event(
+                "somecoin",
+                &expected_params
+            )]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3994,21 +3953,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "borrowedcoincw20")
-                .add_attribute(
-                    "borrow_index",
-                    expected_params_cw20.borrow_index.to_string()
-                )
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params_cw20.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params_cw20.borrow_rate.to_string())
-                .add_attribute(
-                    "liquidity_rate",
-                    expected_params_cw20.liquidity_rate.to_string()
-                )]
+            vec![th_build_interests_updated_event(
+                "borrowedcoincw20",
+                &expected_params_cw20
+            )]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4167,24 +4115,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "borrowedcoinnative")
-                .add_attribute(
-                    "borrow_index",
-                    expected_params_native.borrow_index.to_string()
-                )
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params_native.liquidity_index.to_string()
-                )
-                .add_attribute(
-                    "borrow_rate",
-                    expected_params_native.borrow_rate.to_string()
-                )
-                .add_attribute(
-                    "liquidity_rate",
-                    expected_params_native.liquidity_rate.to_string()
-                )]
+            vec![th_build_interests_updated_event(
+                "borrowedcoinnative",
+                &expected_params_native
+            )]
         );
 
         let debt2 = DEBTS
@@ -4284,24 +4218,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "borrowedcoinnative")
-                .add_attribute(
-                    "borrow_index",
-                    expected_params_native.borrow_index.to_string()
-                )
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params_native.liquidity_index.to_string()
-                )
-                .add_attribute(
-                    "borrow_rate",
-                    expected_params_native.borrow_rate.to_string()
-                )
-                .add_attribute(
-                    "liquidity_rate",
-                    expected_params_native.liquidity_rate.to_string()
-                ),]
+            vec![th_build_interests_updated_event(
+                "borrowedcoinnative",
+                &expected_params_native
+            )]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4380,24 +4300,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "borrowedcoinnative")
-                .add_attribute(
-                    "borrow_index",
-                    expected_params_native.borrow_index.to_string()
-                )
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params_native.liquidity_index.to_string()
-                )
-                .add_attribute(
-                    "borrow_rate",
-                    expected_params_native.borrow_rate.to_string()
-                )
-                .add_attribute(
-                    "liquidity_rate",
-                    expected_params_native.liquidity_rate.to_string()
-                ),]
+            vec![th_build_interests_updated_event(
+                "borrowedcoinnative",
+                &expected_params_native
+            )]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4495,21 +4401,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "borrowedcoincw20")
-                .add_attribute(
-                    "borrow_index",
-                    expected_params_cw20.borrow_index.to_string()
-                )
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params_cw20.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params_cw20.borrow_rate.to_string())
-                .add_attribute(
-                    "liquidity_rate",
-                    expected_params_cw20.liquidity_rate.to_string()
-                ),]
+            vec![th_build_interests_updated_event(
+                "borrowedcoincw20",
+                &expected_params_cw20
+            )]
         );
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(!get_bit(user.borrowed_assets, 0).unwrap());
@@ -4914,7 +4809,6 @@ mod tests {
 
         let debt_contract_addr = Addr::unchecked("debt");
         let user_address = Addr::unchecked("user");
-        let _collateral_address = Addr::unchecked("collateral");
         let liquidator_address = Addr::unchecked("liquidator");
 
         let collateral_max_ltv = Decimal::from_ratio(5u128, 10u128);
@@ -4978,7 +4872,7 @@ mod tests {
             ..Default::default()
         };
 
-        let debt_market = Market {
+        let cw20_debt_market = Market {
             max_loan_to_value: Decimal::from_ratio(6u128, 10u128),
             debt_total_scaled: expected_global_debt_scaled,
             liquidity_index: Decimal::one(),
@@ -4994,8 +4888,11 @@ mod tests {
         let collateral_market_initial =
             th_init_market(deps.as_mut(), b"collateral", &collateral_market);
 
-        let debt_market_initial =
-            th_init_market(deps.as_mut(), debt_contract_addr.as_bytes(), &debt_market);
+        let debt_market_initial = th_init_market(
+            deps.as_mut(),
+            debt_contract_addr.as_bytes(),
+            &cw20_debt_market,
+        );
 
         let mut expected_user_debt_scaled =
             get_scaled_amount(user_debt, debt_market_initial.liquidity_index);
@@ -5121,7 +5018,7 @@ mod tests {
                 .unwrap();
         }
 
-        //  trying to liquidate without sending funds should fail
+        // trying to liquidate without sending funds should fail
         {
             let liquidate_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
                 msg: to_binary(&ReceiveMsg::LiquidateCw20 {
@@ -5229,18 +5126,10 @@ mod tests {
             );
             assert_eq!(
                 res.events,
-                vec![Event::new("interests_updated")
-                    .add_attribute("market", "debt")
-                    .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
-                    .add_attribute(
-                        "liquidity_index",
-                        expected_debt_rates.liquidity_index.to_string()
-                    )
-                    .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
-                    .add_attribute(
-                        "liquidity_rate",
-                        expected_debt_rates.liquidity_rate.to_string()
-                    ),]
+                vec![th_build_interests_updated_event(
+                    "debt",
+                    &expected_debt_rates
+                )]
             );
 
             // check user still has deposited collateral asset and
@@ -5323,7 +5212,7 @@ mod tests {
                 &deps.as_ref(),
                 &debt_market_before,
                 block_time,
-                available_liquidity_debt, //this is the same as before as it comes from mocks
+                available_liquidity_debt, // this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
                     less_debt: expected_less_debt.into(),
                     less_liquidity: expected_refund_amount.into(),
@@ -5340,7 +5229,7 @@ mod tests {
                 &deps.as_ref(),
                 &collateral_market_before,
                 block_time,
-                available_liquidity_collateral, //this is the same as before as it comes from mocks
+                available_liquidity_collateral, // this is the same as before as it comes from mocks
                 TestUtilizationDeltas {
                     less_liquidity: expected_liquidated_collateral_amount.into(),
                     ..Default::default()
@@ -5411,36 +5300,8 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
-                    Event::new("interests_updated")
-                        .add_attribute("market", "debt")
-                        .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
-                        .add_attribute(
-                            "liquidity_index",
-                            expected_debt_rates.liquidity_index.to_string()
-                        )
-                        .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
-                        .add_attribute(
-                            "liquidity_rate",
-                            expected_debt_rates.liquidity_rate.to_string()
-                        ),
-                    Event::new("interests_updated")
-                        .add_attribute("market", "collateral")
-                        .add_attribute(
-                            "borrow_index",
-                            expected_collateral_rates.borrow_index.to_string()
-                        )
-                        .add_attribute(
-                            "liquidity_index",
-                            expected_collateral_rates.liquidity_index.to_string()
-                        )
-                        .add_attribute(
-                            "borrow_rate",
-                            expected_collateral_rates.borrow_rate.to_string()
-                        )
-                        .add_attribute(
-                            "liquidity_rate",
-                            expected_collateral_rates.liquidity_rate.to_string()
-                        ),
+                    th_build_interests_updated_event("debt", &expected_debt_rates),
+                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
             );
 
@@ -5636,36 +5497,8 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
-                    Event::new("interests_updated")
-                        .add_attribute("market", "debt")
-                        .add_attribute("borrow_index", expected_debt_rates.borrow_index.to_string())
-                        .add_attribute(
-                            "liquidity_index",
-                            expected_debt_rates.liquidity_index.to_string()
-                        )
-                        .add_attribute("borrow_rate", expected_debt_rates.borrow_rate.to_string())
-                        .add_attribute(
-                            "liquidity_rate",
-                            expected_debt_rates.liquidity_rate.to_string()
-                        ),
-                    Event::new("interests_updated")
-                        .add_attribute("market", "collateral")
-                        .add_attribute(
-                            "borrow_index",
-                            expected_collateral_rates.borrow_index.to_string()
-                        )
-                        .add_attribute(
-                            "liquidity_index",
-                            expected_collateral_rates.liquidity_index.to_string()
-                        )
-                        .add_attribute(
-                            "borrow_rate",
-                            expected_collateral_rates.borrow_rate.to_string()
-                        )
-                        .add_attribute(
-                            "liquidity_rate",
-                            expected_collateral_rates.liquidity_rate.to_string()
-                        ),
+                    th_build_interests_updated_event("debt", &expected_debt_rates),
+                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
             );
 
@@ -6136,15 +5969,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![Event::new("interests_updated")
-                .add_attribute("market", "somecoin")
-                .add_attribute("borrow_index", expected_params.borrow_index.to_string())
-                .add_attribute(
-                    "liquidity_index",
-                    expected_params.liquidity_index.to_string()
-                )
-                .add_attribute("borrow_rate", expected_params.borrow_rate.to_string())
-                .add_attribute("liquidity_rate", expected_params.liquidity_rate.to_string())]
+            vec![th_build_interests_updated_event(
+                "somecoin",
+                &expected_params
+            )]
         );
 
         // Check debt
@@ -6660,6 +6488,15 @@ mod tests {
         borrow_rate: Decimal,
         liquidity_rate: Decimal,
         protocol_income_to_distribute: Uint128,
+    }
+
+    fn th_build_interests_updated_event(label: &str, ir: &TestInterestResults) -> Event {
+        Event::new("interests_updated")
+            .add_attribute("market", label)
+            .add_attribute("borrow_index", ir.borrow_index.to_string())
+            .add_attribute("liquidity_index", ir.liquidity_index.to_string())
+            .add_attribute("borrow_rate", ir.borrow_rate.to_string())
+            .add_attribute("liquidity_rate", ir.liquidity_rate.to_string())
     }
 
     /// Deltas to be using in expected indices/rates results
