@@ -1,9 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Binary, Decimal, StdResult, Uint128};
+use cosmwasm_std::{Addr, Binary, Decimal, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
+use mars::error::MarsError;
 use mars::helpers::all_conditions_valid;
 
 pub const CONFIG: Item<Config> = Item::new("config");
@@ -33,7 +34,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn validate(&self) -> StdResult<()> {
+    pub fn validate(&self) -> Result<(), MarsError> {
         let conditions_and_names = vec![
             (
                 Self::less_or_equal_one(&self.proposal_required_quorum),
