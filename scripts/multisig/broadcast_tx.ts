@@ -1,7 +1,8 @@
-import { isTxError, LCDClient, StdTx } from "@terra-money/terra.js"
+import { LCDClient, StdTx } from "@terra-money/terra.js"
 import { execSync } from "child_process"
 import { readFileSync } from "fs"
 import 'dotenv/config.js'
+import { broadcastTransaction } from "../helpers"
 
 // Required environment variables:
 
@@ -40,12 +41,7 @@ async function main() {
   const tx = StdTx.fromData(JSON.parse(readFileSync(signedTx).toString()))
 
   // Broadcast the tx
-  const result = await terra.tx.broadcast(tx);
-  if (isTxError(result)) {
-    throw new Error(
-      `transaction failed. code: ${result.code}, codespace: ${result.codespace}, raw_log: ${result.raw_log}`
-    );
-  }
+  const result = await broadcastTransaction(terra, tx)
   console.log(`https://finder.terra.money/${CHAIN_ID}/tx/${result.txhash}`)
 }
 
