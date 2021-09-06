@@ -1910,14 +1910,14 @@ fn build_collateral_position_changed_event(label: &str, enabled: bool, user_addr
     Event::new("collateral_position_changed")
         .add_attribute("market", label)
         .add_attribute("using_as_collateral", enabled.to_string())
-        .add_attribute("user_address", user_addr)
+        .add_attribute("user", user_addr)
 }
 
 fn build_debt_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
     Event::new("debt_position_changed")
         .add_attribute("market", label)
         .add_attribute("borrowing", enabled.to_string())
-        .add_attribute("user_address", user_addr)
+        .add_attribute("user", user_addr)
 }
 
 // HELPERS
@@ -3106,10 +3106,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event("somecoin", true, "depositor".to_string()),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
@@ -3218,10 +3218,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                cw20_addr.as_str(),
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event(
+                    cw20_addr.as_str(),
+                    true,
+                    "depositor".to_string()
+                ),
+                th_build_interests_updated_event(cw20_addr.as_str(), &expected_params)
+            ]
         );
         assert_eq!(
             market.protocol_income_to_distribute,
@@ -3878,10 +3882,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event(
+                    "somecoin",
+                    false,
+                    "withdrawer".to_string()
+                ),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -4039,10 +4047,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoincw20",
-                &expected_params_cw20
-            )]
+            vec![
+                build_debt_position_changed_event("borrowedcoincw20", true, "borrower".to_string()),
+                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20)
+            ]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4201,10 +4209,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoinnative",
-                &expected_params_native
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoinnative",
+                    true,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native)
+            ]
         );
 
         let debt2 = DEBTS
@@ -4386,10 +4398,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoinnative",
-                &expected_params_native
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoinnative",
+                    false,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native)
+            ]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4487,10 +4503,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoincw20",
-                &expected_params_cw20
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoincw20",
+                    false,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20)
+            ]
         );
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(!get_bit(user.borrowed_assets, 0).unwrap());
@@ -5243,10 +5263,17 @@ mod tests {
             );
             assert_eq!(
                 res.events,
-                vec![th_build_interests_updated_event(
-                    cw20_debt_contract_addr.as_str(),
-                    &expected_debt_rates
-                )]
+                vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        true,
+                        liquidator_address.to_string()
+                    ),
+                    th_build_interests_updated_event(
+                        cw20_debt_contract_addr.as_str(),
+                        &expected_debt_rates
+                    )
+                ]
             );
 
             // check user still has deposited collateral asset and
@@ -5621,6 +5648,11 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        false,
+                        user_address.to_string()
+                    ),
                     th_build_interests_updated_event(
                         cw20_debt_contract_addr.as_str(),
                         &expected_debt_rates
@@ -5827,6 +5859,11 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        false,
+                        user_address.to_string()
+                    ),
                     th_build_interests_updated_event("native_debt", &expected_debt_rates),
                     th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
@@ -6063,13 +6100,22 @@ mod tests {
                 amount: Uint128::new(500_000),
             };
 
-            execute(deps.as_mut(), env.clone(), info_matoken.clone(), msg).unwrap();
+            let res = execute(deps.as_mut(), env.clone(), info_matoken.clone(), msg).unwrap();
 
             let sender_user = USERS.load(&deps.storage, &sender_address).unwrap();
             let recipient_user = USERS.load(&deps.storage, &recipient_address).unwrap();
             assert!(get_bit(sender_user.collateral_assets, market.index).unwrap());
             // Should create user and set deposited to true as previous balance is 0
             assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
+
+            assert_eq!(
+                res.events,
+                vec![build_collateral_position_changed_event(
+                    "somecoin",
+                    true,
+                    recipient_address.to_string()
+                )]
+            );
         }
 
         // Finalize transfer with health factor < 1 for sender doesn't go through
@@ -6151,13 +6197,22 @@ mod tests {
                 amount: Uint128::new(500_000),
             };
 
-            execute(deps.as_mut(), env.clone(), info_matoken, msg).unwrap();
+            let res = execute(deps.as_mut(), env.clone(), info_matoken, msg).unwrap();
 
             let sender_user = USERS.load(&deps.storage, &sender_address).unwrap();
             let recipient_user = USERS.load(&deps.storage, &recipient_address).unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
             assert!(!get_bit(sender_user.collateral_assets, market.index).unwrap());
             assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
+
+            assert_eq!(
+                res.events,
+                vec![build_collateral_position_changed_event(
+                    "somecoin",
+                    false,
+                    sender_address.to_string()
+                )]
+            );
         }
 
         // Calling this with other token fails
@@ -6297,10 +6352,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_debt_position_changed_event("somecoin", true, "borrower".to_string()),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         // Check debt
