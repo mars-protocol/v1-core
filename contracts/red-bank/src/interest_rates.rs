@@ -88,6 +88,47 @@ pub fn get_descaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
     result.checked_div(Uint128::from(SCALING_FACTOR)).unwrap()
 }
 
+
+/// Return applied interest rate for borrow index according to passed blocks
+/// NOTE: Calling this function when interests for the market are up to date with the current block
+/// and index is not, will use the wrong interest rate to update the index.
+pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal {
+    if market.interests_last_updated < block_time {
+        let time_elapsed = block_time - market.interests_last_updated;
+
+        if market.borrow_rate > Decimal::zero() {
+            let applied_interest_rate = calculate_applied_linear_interest_rate(
+                market.borrow_index,
+                market.borrow_rate,
+                time_elapsed,
+            );
+            return applied_interest_rate;
+        }
+    }
+
+    market.borrow_index
+}
+
+/// Return applied interest rate for liquidity index according to passed blocks
+/// NOTE: Calling this function when interests for the market are up to date with the current block
+/// and index is not, will use the wrong interest rate to update the index.
+pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal {
+    if market.interests_last_updated < block_time {
+        let time_elapsed = block_time - market.interests_last_updated;
+
+        if market.liquidity_rate > Decimal::zero() {
+            let applied_interest_rate = calculate_applied_linear_interest_rate(
+                market.liquidity_index,
+                market.liquidity_rate,
+                time_elapsed,
+            );
+            return applied_interest_rate;
+        }
+    }
+
+    market.liquidity_index
+}
+
 /// Update interest rates for current liquidity and debt levels
 /// Note it does not save the market to the store (that is left to the caller)
 pub fn update_interest_rates(
@@ -167,49 +208,9 @@ pub fn update_interest_rates(
     Ok(())
 }
 
-/// Return applied interest rate for borrow index according to passed blocks
-/// NOTE: Calling this function when interests for the market are up to date with the current block
-/// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal {
-    if market.interests_last_updated < block_time {
-        let time_elapsed = block_time - market.interests_last_updated;
-
-        if market.borrow_rate > Decimal::zero() {
-            let applied_interest_rate = calculate_applied_linear_interest_rate(
-                market.borrow_index,
-                market.borrow_rate,
-                time_elapsed,
-            );
-            return applied_interest_rate;
-        }
-    }
-
-    market.borrow_index
-}
-
-/// Return applied interest rate for liquidity index according to passed blocks
-/// NOTE: Calling this function when interests for the market are up to date with the current block
-/// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal {
-    if market.interests_last_updated < block_time {
-        let time_elapsed = block_time - market.interests_last_updated;
-
-        if market.liquidity_rate > Decimal::zero() {
-            let applied_interest_rate = calculate_applied_linear_interest_rate(
-                market.liquidity_index,
-                market.liquidity_rate,
-                time_elapsed,
-            );
-            return applied_interest_rate;
-        }
-    }
-
-    market.liquidity_index
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::interest_rate::calculate_applied_linear_interest_rate;
+    use crate::interest_rates::calculate_applied_linear_interest_rate;
     use cosmwasm_std::Decimal;
 
     #[test]
