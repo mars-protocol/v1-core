@@ -412,10 +412,16 @@ pub fn execute_withdraw(
         }
     }
 
+    let mut events = vec![];
     // if amount to withdraw equals the user's balance then unset collateral bit
     if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
         unset_bit(&mut withdrawer.collateral_assets, market.index)?;
         USERS.save(deps.storage, &withdrawer_addr, &withdrawer)?;
+        events.push(build_collateral_position_changed_event(
+            asset_label.as_str(),
+            false,
+            withdrawer_addr.to_string(),
+        ));
     }
 
     apply_accumulated_interests(&env, &mut market);
@@ -445,6 +451,8 @@ pub fn execute_withdraw(
         withdraw_amount,
     )?;
 
+    events.push(build_interests_updated_event(asset_label.as_str(), &market));
+
     let res = Response::new()
         .add_attribute("action", "withdraw")
         .add_attribute("market", asset_label.as_str())
@@ -453,7 +461,7 @@ pub fn execute_withdraw(
         .add_attribute("withdraw_amount", withdraw_amount)
         .add_message(burn_ma_tokens_msg)
         .add_message(send_underlying_asset_msg)
-        .add_event(build_interests_updated_event(asset_label.as_str(), &market));
+        .add_events(events);
     Ok(res)
 }
 
@@ -638,10 +646,16 @@ pub fn execute_deposit(
         .may_load(deps.storage, &depositor_address)?
         .unwrap_or_default();
 
+    let mut events = vec![];
     let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.collateral_assets, market.index)?;
         USERS.save(deps.storage, &depositor_address, &user)?;
+        events.push(build_collateral_position_changed_event(
+            asset_label,
+            true,
+            depositor_address.to_string(),
+        ));
     }
 
     apply_accumulated_interests(&env, &mut market);
@@ -656,12 +670,14 @@ pub fn execute_deposit(
         get_updated_liquidity_index(&market, env.block.time.seconds()),
     );
 
+    events.push(build_interests_updated_event(asset_label, &market));
+
     let res = Response::new()
         .add_attribute("action", "deposit")
         .add_attribute("market", asset_label)
         .add_attribute("user", depositor_address.as_str())
         .add_attribute("amount", deposit_amount)
-        .add_event(build_interests_updated_event(asset_label, &market))
+        .add_events(events)
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
@@ -796,10 +812,16 @@ pub fn execute_borrow(
 
     apply_accumulated_interests(&env, &mut borrow_market);
 
+    let mut events = vec![];
     // Set borrowing asset for user
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_market.index)?;
         USERS.save(deps.storage, &borrower_address, &user)?;
+        events.push(build_debt_position_changed_event(
+            asset_label.as_str(),
+            true,
+            borrower_address.to_string(),
+        ));
     }
 
     // Set new debt
@@ -843,15 +865,17 @@ pub fn execute_borrow(
         borrow_amount,
     )?;
 
+    events.push(build_interests_updated_event(
+        asset_label.as_str(),
+        &borrow_market,
+    ));
+
     let res = Response::new()
         .add_attribute("action", "borrow")
         .add_attribute("market", asset_label.as_str())
         .add_attribute("user", borrower_address.as_str())
         .add_attribute("amount", borrow_amount)
-        .add_event(build_interests_updated_event(
-            asset_label.as_str(),
-            &borrow_market,
-        ))
+        .add_events(events)
         .add_message(send_msg);
     Ok(res)
 }
@@ -932,12 +956,20 @@ pub fn execute_repay(
     update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
+    let mut events = vec![];
     if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
         let mut user = USERS.load(deps.storage, &repayer_address)?;
         unset_bit(&mut user.borrowed_assets, market.index)?;
         USERS.save(deps.storage, &repayer_address, &user)?;
+        events.push(build_debt_position_changed_event(
+            asset_label,
+            false,
+            repayer_address.to_string(),
+        ));
     }
+
+    events.push(build_interests_updated_event(asset_label, &market));
 
     let res = Response::new()
         .add_attribute("action", "repay")
@@ -945,7 +977,7 @@ pub fn execute_repay(
         .add_attribute("user", repayer_address)
         .add_attribute("amount", repay_amount - refund_amount)
         .add_messages(messages)
-        .add_event(build_interests_updated_event(asset_label, &market));
+        .add_events(events);
     Ok(res)
 }
 
@@ -1085,6 +1117,7 @@ pub fn execute_liquidate(
         );
 
     let mut messages = vec![];
+    let mut events = vec![];
 
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
@@ -1101,6 +1134,11 @@ pub fn execute_liquidate(
         if !liquidator_is_using_as_collateral {
             set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
             USERS.save(deps.storage, &liquidator_address, &liquidator)?;
+            events.push(build_collateral_position_changed_event(
+                collateral_asset_label.as_str(),
+                true,
+                liquidator_address.to_string(),
+            ));
         }
 
         let collateral_amount_to_liquidate_scaled = get_scaled_amount(
@@ -1183,6 +1221,11 @@ pub fn execute_liquidate(
         let mut user = USERS.load(deps.storage, &user_address)?;
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, &user_address, &user)?;
+        events.push(build_collateral_position_changed_event(
+            collateral_asset_label.as_str(),
+            false,
+            user_address.to_string(),
+        ));
     }
 
     // 5. Update debt market and positions
@@ -1235,7 +1278,18 @@ pub fn execute_liquidate(
         messages.push(refund_msg);
     }
 
-    let mut res = Response::new()
+    events.push(build_interests_updated_event(
+        debt_asset_label.as_str(),
+        &debt_market,
+    ));
+    if !receive_ma_token {
+        events.push(build_interests_updated_event(
+            collateral_asset_label.as_str(),
+            &collateral_market,
+        ));
+    }
+
+    let res = Response::new()
         .add_attribute("action", "liquidate")
         .add_attribute("collateral_market", collateral_asset_label.as_str())
         .add_attribute("debt_market", debt_asset_label.as_str())
@@ -1247,19 +1301,8 @@ pub fn execute_liquidate(
         )
         .add_attribute("debt_amount_repaid", debt_amount_to_repay.to_string())
         .add_attribute("refund_amount", refund_amount.to_string())
-        .add_event(build_interests_updated_event(
-            debt_asset_label.as_str(),
-            &debt_market,
-        ))
+        .add_events(events)
         .add_messages(messages);
-
-    if !receive_ma_token {
-        res = res.add_event(build_interests_updated_event(
-            collateral_asset_label.as_str(),
-            &collateral_market,
-        ))
-    }
-
     Ok(res)
 }
 
@@ -1349,11 +1392,19 @@ pub fn execute_finalize_liquidity_token_transfer(
         }
     }
 
+    let asset_label = String::from_utf8(market_reference).expect("Found invalid UTF-8");
+    let mut events = vec![];
+
     // Update users's positions
     if from_address != to_address {
         if from_previous_balance.checked_sub(amount)?.is_zero() {
             unset_bit(&mut from_user.collateral_assets, market.index)?;
             USERS.save(deps.storage, &from_address, &from_user)?;
+            events.push(build_collateral_position_changed_event(
+                asset_label.as_str(),
+                false,
+                from_address.to_string(),
+            ))
         }
 
         if to_previous_balance.is_zero() && !amount.is_zero() {
@@ -1362,10 +1413,18 @@ pub fn execute_finalize_liquidity_token_transfer(
                 .unwrap_or_default();
             set_bit(&mut to_user.collateral_assets, market.index)?;
             USERS.save(deps.storage, &to_address, &to_user)?;
+            events.push(build_collateral_position_changed_event(
+                asset_label.as_str(),
+                true,
+                to_address.to_string(),
+            ))
         }
     }
 
-    Ok(Response::default())
+    let res = Response::new()
+        .add_attribute("action", "finalize_liquidity_token_transfer")
+        .add_events(events);
+    Ok(res)
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
@@ -1428,6 +1487,8 @@ pub fn execute_update_user_collateral_asset_status(
         .may_load(deps.storage, &user_address)?
         .unwrap_or_default();
 
+    let mut events = vec![];
+
     let (collateral_asset_label, collateral_asset_reference, _) = asset.get_attributes();
     let collateral_market = MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
     let has_collateral_asset = get_bit(user.collateral_assets, collateral_market.index)?;
@@ -1439,6 +1500,11 @@ pub fn execute_update_user_collateral_asset_status(
             // enable collateral asset
             set_bit(&mut user.collateral_assets, collateral_market.index)?;
             USERS.save(deps.storage, &user_address, &user)?;
+            events.push(build_collateral_position_changed_event(
+                collateral_asset_label.as_str(),
+                true,
+                user_address.to_string(),
+            ));
         } else {
             return Err(StdError::generic_err(format!(
                 "User address {} has no balance in specified collateral asset {}",
@@ -1451,6 +1517,11 @@ pub fn execute_update_user_collateral_asset_status(
         // disable collateral asset
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, &user_address, &user)?;
+        events.push(build_collateral_position_changed_event(
+            collateral_asset_label.as_str(),
+            false,
+            user_address.to_string(),
+        ));
     }
 
     let res = Response::new()
@@ -1458,7 +1529,8 @@ pub fn execute_update_user_collateral_asset_status(
         .add_attribute("user", user_address.as_str())
         .add_attribute("asset", collateral_asset_label)
         .add_attribute("has_collateral", has_collateral_asset.to_string())
-        .add_attribute("enable", enable.to_string());
+        .add_attribute("enable", enable.to_string())
+        .add_events(events);
     Ok(res)
 }
 
@@ -1832,6 +1904,20 @@ fn build_interests_updated_event(label: &str, market: &Market) -> Event {
         .add_attribute("liquidity_index", market.liquidity_index.to_string())
         .add_attribute("borrow_rate", market.borrow_rate.to_string())
         .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
+}
+
+fn build_collateral_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
+    Event::new("collateral_position_changed")
+        .add_attribute("market", label)
+        .add_attribute("using_as_collateral", enabled.to_string())
+        .add_attribute("user", user_addr)
+}
+
+fn build_debt_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
+    Event::new("debt_position_changed")
+        .add_attribute("market", label)
+        .add_attribute("borrowing", enabled.to_string())
+        .add_attribute("user", user_addr)
 }
 
 // HELPERS
@@ -3020,10 +3106,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event("somecoin", true, "depositor".to_string()),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
@@ -3132,10 +3218,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                cw20_addr.as_str(),
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event(
+                    cw20_addr.as_str(),
+                    true,
+                    "depositor".to_string()
+                ),
+                th_build_interests_updated_event(cw20_addr.as_str(), &expected_params)
+            ]
         );
         assert_eq!(
             market.protocol_income_to_distribute,
@@ -3792,10 +3882,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_collateral_position_changed_event(
+                    "somecoin",
+                    false,
+                    "withdrawer".to_string()
+                ),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         assert_eq!(market.borrow_rate, expected_params.borrow_rate);
@@ -3953,10 +4047,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoincw20",
-                &expected_params_cw20
-            )]
+            vec![
+                build_debt_position_changed_event("borrowedcoincw20", true, "borrower".to_string()),
+                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20)
+            ]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4115,10 +4209,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoinnative",
-                &expected_params_native
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoinnative",
+                    true,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native)
+            ]
         );
 
         let debt2 = DEBTS
@@ -4300,10 +4398,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoinnative",
-                &expected_params_native
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoinnative",
+                    false,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native)
+            ]
         );
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4401,10 +4503,14 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "borrowedcoincw20",
-                &expected_params_cw20
-            )]
+            vec![
+                build_debt_position_changed_event(
+                    "borrowedcoincw20",
+                    false,
+                    "borrower".to_string()
+                ),
+                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20)
+            ]
         );
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
         assert!(!get_bit(user.borrowed_assets, 0).unwrap());
@@ -5157,10 +5263,17 @@ mod tests {
             );
             assert_eq!(
                 res.events,
-                vec![th_build_interests_updated_event(
-                    cw20_debt_contract_addr.as_str(),
-                    &expected_debt_rates
-                )]
+                vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        true,
+                        liquidator_address.to_string()
+                    ),
+                    th_build_interests_updated_event(
+                        cw20_debt_contract_addr.as_str(),
+                        &expected_debt_rates
+                    )
+                ]
             );
 
             // check user still has deposited collateral asset and
@@ -5535,6 +5648,11 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        false,
+                        user_address.to_string()
+                    ),
                     th_build_interests_updated_event(
                         cw20_debt_contract_addr.as_str(),
                         &expected_debt_rates
@@ -5741,6 +5859,11 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    build_collateral_position_changed_event(
+                        "collateral",
+                        false,
+                        user_address.to_string()
+                    ),
                     th_build_interests_updated_event("native_debt", &expected_debt_rates),
                     th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
@@ -5977,13 +6100,22 @@ mod tests {
                 amount: Uint128::new(500_000),
             };
 
-            execute(deps.as_mut(), env.clone(), info_matoken.clone(), msg).unwrap();
+            let res = execute(deps.as_mut(), env.clone(), info_matoken.clone(), msg).unwrap();
 
             let sender_user = USERS.load(&deps.storage, &sender_address).unwrap();
             let recipient_user = USERS.load(&deps.storage, &recipient_address).unwrap();
             assert!(get_bit(sender_user.collateral_assets, market.index).unwrap());
             // Should create user and set deposited to true as previous balance is 0
             assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
+
+            assert_eq!(
+                res.events,
+                vec![build_collateral_position_changed_event(
+                    "somecoin",
+                    true,
+                    recipient_address.to_string()
+                )]
+            );
         }
 
         // Finalize transfer with health factor < 1 for sender doesn't go through
@@ -6065,13 +6197,22 @@ mod tests {
                 amount: Uint128::new(500_000),
             };
 
-            execute(deps.as_mut(), env.clone(), info_matoken, msg).unwrap();
+            let res = execute(deps.as_mut(), env.clone(), info_matoken, msg).unwrap();
 
             let sender_user = USERS.load(&deps.storage, &sender_address).unwrap();
             let recipient_user = USERS.load(&deps.storage, &recipient_address).unwrap();
             // Should set deposited to false as: previous_balance - amount = 0
             assert!(!get_bit(sender_user.collateral_assets, market.index).unwrap());
             assert!(get_bit(recipient_user.collateral_assets, market.index).unwrap());
+
+            assert_eq!(
+                res.events,
+                vec![build_collateral_position_changed_event(
+                    "somecoin",
+                    false,
+                    sender_address.to_string()
+                )]
+            );
         }
 
         // Calling this with other token fails
@@ -6211,10 +6352,10 @@ mod tests {
         );
         assert_eq!(
             res.events,
-            vec![th_build_interests_updated_event(
-                "somecoin",
-                &expected_params
-            )]
+            vec![
+                build_debt_position_changed_event("somecoin", true, "borrower".to_string()),
+                th_build_interests_updated_event("somecoin", &expected_params)
+            ]
         );
 
         // Check debt
