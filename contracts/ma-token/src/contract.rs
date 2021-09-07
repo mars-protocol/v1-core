@@ -801,6 +801,19 @@ mod tests {
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
+        // cannot send to self
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: addr1.clone(),
+            amount: transfer,
+        };
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert!(matches!(
+            err,
+            ContractError::Std(StdError::GenericErr { .. })
+        ));
+
         // valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
         let env = mock_env();
