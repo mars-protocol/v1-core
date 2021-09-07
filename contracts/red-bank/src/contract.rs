@@ -1317,8 +1317,7 @@ fn process_underlying_asset_transfer_to_liquidator(
     if contract_collateral_balance < collateral_amount_to_liquidate {
         return Err(StdError::generic_err(
             "contract does not have enough collateral liquidity to send back underlying asset",
-        )
-        .into());
+        ));
     }
 
     // Apply update collateral interest as liquidity is reduced
@@ -5958,6 +5957,134 @@ mod tests {
                 collateral_market_after.protocol_income_to_distribute
                     - collateral_market_before.protocol_income_to_distribute
             );
+        }
+    }
+
+    #[test]
+    fn test_underlying_asset_balance_check_when_transfer_to_liquidator() {
+        let native_collateral_liquidity = 4510000u128;
+        let mut deps = th_setup(&[coin(native_collateral_liquidity, "native_collateral")]);
+
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("native_collateral"), Uint128::new(100u128))],
+        );
+
+        let cw20_collateral_liquidity = 6510000u128;
+        let cw20_collateral_contract_addr = Addr::unchecked("cw20_collateral");
+        deps.querier.set_cw20_balances(
+            cw20_collateral_contract_addr.clone(),
+            &[(
+                Addr::unchecked(MOCK_CONTRACT_ADDR),
+                Uint128::new(cw20_collateral_liquidity),
+            )],
+        );
+
+        let user_addr = Addr::unchecked("user");
+        let liquidator_addr = Addr::unchecked("liquidator");
+        let env = mock_env(MockEnvParams::default());
+
+        // Indices changed in order to detect that there is no any scaling on asset balance
+        let mut market = Market {
+            liquidity_index: Decimal::from_ratio(2u128, 1u128),
+            borrow_index: Decimal::from_ratio(4u128, 1u128),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let native_collateral_asset = Asset::Native {
+            denom: "native_collateral".to_string(),
+        };
+
+        {
+            // Trying to transfer more underlying native asset than available should fail
+            let collateral_amount_to_liquidate = Uint128::new(native_collateral_liquidity + 1u128);
+            let error_res = process_underlying_asset_transfer_to_liquidator(
+                deps.as_mut(),
+                &env,
+                &user_addr,
+                &liquidator_addr,
+                native_collateral_asset.clone(),
+                b"native_collateral",
+                &mut market,
+                collateral_amount_to_liquidate,
+                &mut vec![],
+            )
+            .unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err(
+                    "contract does not have enough collateral liquidity to send back underlying asset"
+                )
+            );
+        }
+
+        {
+            // Trying to transfer less underlying native asset than available should pass
+            let collateral_amount_to_liquidate = Uint128::new(native_collateral_liquidity - 1u128);
+            let _res = process_underlying_asset_transfer_to_liquidator(
+                deps.as_mut(),
+                &env,
+                &user_addr,
+                &liquidator_addr,
+                native_collateral_asset,
+                b"native_collateral",
+                &mut market,
+                collateral_amount_to_liquidate,
+                &mut vec![],
+            )
+            .unwrap();
+        }
+
+        // Indices changed in order to detect that there is no any scaling on asset balance
+        let mut market = Market {
+            liquidity_index: Decimal::from_ratio(8u128, 1u128),
+            borrow_index: Decimal::from_ratio(6u128, 1u128),
+            asset_type: AssetType::Cw20,
+            ..Default::default()
+        };
+        let cw20_collateral_asset = Asset::Cw20 {
+            contract_addr: "cw20_collateral".to_string(),
+        };
+
+        {
+            // Trying to transfer more underlying cw20 asset than available should fail
+            let collateral_amount_to_liquidate = Uint128::new(cw20_collateral_liquidity + 1u128);
+            let error_res = process_underlying_asset_transfer_to_liquidator(
+                deps.as_mut(),
+                &env,
+                &user_addr,
+                &liquidator_addr,
+                cw20_collateral_asset.clone(),
+                b"cw20_collateral",
+                &mut market,
+                collateral_amount_to_liquidate,
+                &mut vec![],
+            )
+            .unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err(
+                    "contract does not have enough collateral liquidity to send back underlying asset"
+                )
+            );
+        }
+
+        {
+            // Trying to transfer less underlying cw20 asset than available should pass
+            let collateral_amount_to_liquidate = Uint128::new(cw20_collateral_liquidity - 1u128);
+            let _res = process_underlying_asset_transfer_to_liquidator(
+                deps.as_mut(),
+                &env,
+                &user_addr,
+                &liquidator_addr,
+                cw20_collateral_asset,
+                b"cw20_collateral",
+                &mut market,
+                collateral_amount_to_liquidate,
+                &mut vec![],
+            )
+            .unwrap();
         }
     }
 
