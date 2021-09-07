@@ -28,7 +28,7 @@ use mars::tax::deduct_tax;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
-use crate::interest_rate::{
+use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
 };
@@ -592,7 +592,7 @@ pub fn execute_init_asset_token_callback(
 /// Update asset with new params.
 pub fn execute_update_asset(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     asset: Asset,
     asset_params: InitOrUpdateAssetParams,
@@ -607,14 +607,19 @@ pub fn execute_update_asset(
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
-            let updated_market = market.update_with(asset_params)?;
+            let (updated_market, interest_rates_updated) =
+                market.update(&deps, &env, asset_reference.as_slice(), asset_params)?;
 
-            // Save updated market
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
-            let res = Response::new()
+            let mut res = Response::new()
                 .add_attribute("action", "update_asset")
-                .add_attribute("asset", asset_label);
+                .add_attribute("asset", &asset_label);
+
+            if interest_rates_updated {
+                res = res.add_event(build_interests_updated_event(&asset_label, &updated_market));
+            }
+
             Ok(res)
         }
         None => Err(StdError::generic_err("Asset not initialized").into()),
@@ -2077,7 +2082,7 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interest_rate::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
+    use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
     use mars::interest_rate_models::{
@@ -2446,7 +2451,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
 
         // *
         // init asset where optimal utilization rate > 1
@@ -2674,9 +2679,6 @@ mod tests {
         let info = mock_info("owner");
         instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        // *
-        // non owner is not authorized
-        // *
         let dynamic_ir = DynamicInterestRate {
             min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
             max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
@@ -2693,264 +2695,289 @@ mod tests {
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
         };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: asset_params.clone(),
-        };
-        let info = mock_info("somebody");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, MarsError::Unauthorized {}.into());
 
         // *
-        // owner is authorized but can't update asset if not initialize firstly
+        // non owner is not authorized
         // *
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: asset_params.clone(),
-        };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("Asset not initialized").into()
-        );
+        {
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: asset_params.clone(),
+            };
+            let info = mock_info("somebody");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(error_res, MarsError::Unauthorized {}.into());
+        }
+
+        // *
+        // owner is authorized but can't update asset if not initialized first
+        // *
+        {
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: asset_params.clone(),
+            };
+            let info = mock_info("owner");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err("Asset not initialized").into()
+            );
+        }
 
         // *
         // initialize asset
         // *
-        let msg = ExecuteMsg::InitAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: asset_params.clone(),
-        };
-        let info = mock_info("owner");
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        {
+            let msg = ExecuteMsg::InitAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: asset_params.clone(),
+            };
+            let info = mock_info("owner");
+            let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        }
 
         // *
         // update asset with some params greater than 1
         // *
-        let invalid_asset_params = InitOrUpdateAssetParams {
-            maintenance_margin: Some(Decimal::from_ratio(110u128, 10u128)),
-            ..asset_params.clone()
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: invalid_asset_params,
-        };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [maintenance_margin]").into());
+        {
+            let invalid_asset_params = InitOrUpdateAssetParams {
+                maintenance_margin: Some(Decimal::from_ratio(110u128, 10u128)),
+                ..asset_params.clone()
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: invalid_asset_params,
+            };
+            let info = mock_info("owner");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(error_res, StdError::generic_err("[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
+                    Invalid params: [maintenance_margin]").into());
+        }
 
         // *
         // update asset where LTV >= liquidity threshold
         // *
-        let invalid_asset_params = InitOrUpdateAssetParams {
-            max_loan_to_value: Some(Decimal::from_ratio(6u128, 10u128)),
-            maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
-            ..asset_params
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: invalid_asset_params,
-        };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err(
-                "maintenance_margin should be greater than max_loan_to_value. \
-                    maintenance_margin: 0.5, \
-                    max_loan_to_value: 0.6"
-            )
-            .into()
-        );
+        {
+            let invalid_asset_params = InitOrUpdateAssetParams {
+                max_loan_to_value: Some(Decimal::from_ratio(6u128, 10u128)),
+                maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
+                ..asset_params
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: invalid_asset_params,
+            };
+            let info = mock_info("owner");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err(
+                    "maintenance_margin should be greater than max_loan_to_value. \
+                        maintenance_margin: 0.5, \
+                        max_loan_to_value: 0.6"
+                )
+                .into()
+            );
+        }
 
         // *
         // init asset where min borrow rate >= max borrow rate
         // *
-        let invalid_dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal::from_ratio(4u128, 10u128),
-            max_borrow_rate: Decimal::from_ratio(4u128, 10u128),
-            ..dynamic_ir
-        };
-        let invalid_asset_params = InitOrUpdateAssetParams {
-            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
-            ..asset_params
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: invalid_asset_params,
-        };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.4").into());
+        {
+            let invalid_dynamic_ir = DynamicInterestRate {
+                min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+                max_borrow_rate: Decimal::from_ratio(4u128, 10u128),
+                ..dynamic_ir
+            };
+            let invalid_asset_params = InitOrUpdateAssetParams {
+                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(
+                    invalid_dynamic_ir.clone(),
+                )),
+                ..asset_params
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: invalid_asset_params,
+            };
+            let info = mock_info("owner");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+        }
 
         // *
         // init asset where optimal utilization rate > 1
         // *
-        let invalid_dynamic_ir = DynamicInterestRate {
-            optimal_utilization_rate: Decimal::from_ratio(11u128, 10u128),
-            ..dynamic_ir
-        };
-        let invalid_asset_params = InitOrUpdateAssetParams {
-            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
-            ..asset_params
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: invalid_asset_params,
-        };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("Optimal utilization rate can't be greater than one").into()
-        );
+        {
+            let invalid_dynamic_ir = DynamicInterestRate {
+                optimal_utilization_rate: Decimal::from_ratio(11u128, 10u128),
+                ..dynamic_ir
+            };
+            let invalid_asset_params = InitOrUpdateAssetParams {
+                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(
+                    invalid_dynamic_ir.clone(),
+                )),
+                ..asset_params
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: invalid_asset_params,
+            };
+            let info = mock_info("owner");
+            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err("Optimal utilization rate can't be greater than one").into()
+            );
+        }
 
         // *
         // update asset with new params
         // *
-        let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
-            max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
-            kp_1: Decimal::from_ratio(3u128, 1u128),
-            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
-            kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
-            kp_2: Decimal::from_ratio(2u128, 1u128),
-        };
-        let asset_params = InitOrUpdateAssetParams {
-            initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
-            max_loan_to_value: Some(Decimal::from_ratio(60u128, 100u128)),
-            reserve_factor: Some(Decimal::from_ratio(10u128, 100u128)),
-            maintenance_margin: Some(Decimal::from_ratio(90u128, 100u128)),
-            liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
-            interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: asset_params.clone(),
-        };
-        let info = mock_info("owner");
-        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        {
+            let dynamic_ir = DynamicInterestRate {
+                min_borrow_rate: Decimal::from_ratio(5u128, 100u128),
+                max_borrow_rate: Decimal::from_ratio(50u128, 100u128),
+                kp_1: Decimal::from_ratio(3u128, 1u128),
+                optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+                kp_augmentation_threshold: Decimal::from_ratio(2000u128, 1u128),
+                kp_2: Decimal::from_ratio(2u128, 1u128),
+            };
+            let asset_params = InitOrUpdateAssetParams {
+                initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
+                max_loan_to_value: Some(Decimal::from_ratio(60u128, 100u128)),
+                reserve_factor: Some(Decimal::from_ratio(10u128, 100u128)),
+                maintenance_margin: Some(Decimal::from_ratio(90u128, 100u128)),
+                liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
+                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: asset_params.clone(),
+            };
+            let info = mock_info("owner");
+            let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
-        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
-        assert_eq!(0, new_market.index);
-        assert_eq!(
-            asset_params.max_loan_to_value.unwrap(),
-            new_market.max_loan_to_value
-        );
-        assert_eq!(
-            asset_params.reserve_factor.unwrap(),
-            new_market.reserve_factor
-        );
-        assert_eq!(
-            asset_params.maintenance_margin.unwrap(),
-            new_market.maintenance_margin
-        );
-        assert_eq!(
-            asset_params.liquidation_bonus.unwrap(),
-            new_market.liquidation_bonus
-        );
+            let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+            assert_eq!(0, new_market.index);
+            assert_eq!(
+                asset_params.max_loan_to_value.unwrap(),
+                new_market.max_loan_to_value
+            );
+            assert_eq!(
+                asset_params.reserve_factor.unwrap(),
+                new_market.reserve_factor
+            );
+            assert_eq!(
+                asset_params.maintenance_margin.unwrap(),
+                new_market.maintenance_margin
+            );
+            assert_eq!(
+                asset_params.liquidation_bonus.unwrap(),
+                new_market.liquidation_bonus
+            );
 
-        let new_market_reference = MARKET_REFERENCES_BY_INDEX
-            .load(&deps.storage, U32Key::new(0))
-            .unwrap();
-        assert_eq!(b"someasset", new_market_reference.as_slice());
+            let new_market_reference = MARKET_REFERENCES_BY_INDEX
+                .load(&deps.storage, U32Key::new(0))
+                .unwrap();
+            assert_eq!(b"someasset", new_market_reference.as_slice());
 
-        let new_money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
-        assert_eq!(new_money_market.market_count, 1);
+            let new_money_market = GLOBAL_STATE.load(&deps.storage).unwrap();
+            assert_eq!(new_money_market.market_count, 1);
 
-        assert_eq!(res.messages, vec![],);
+            assert_eq!(res.messages, vec![],);
 
-        assert_eq!(
-            res.attributes,
-            vec![attr("action", "update_asset"), attr("asset", "someasset"),],
-        );
+            assert_eq!(
+                res.attributes,
+                vec![attr("action", "update_asset"), attr("asset", "someasset"),],
+            );
+        }
 
         // *
         // update asset with empty params
         // *
-        let empty_asset_params = InitOrUpdateAssetParams {
-            initial_borrow_rate: None,
-            max_loan_to_value: None,
-            reserve_factor: None,
-            maintenance_margin: None,
-            liquidation_bonus: None,
-            interest_rate_strategy: None,
-        };
-        let msg = ExecuteMsg::UpdateAsset {
-            asset: Asset::Native {
-                denom: "someasset".to_string(),
-            },
-            asset_params: empty_asset_params,
-        };
-        let info = mock_info("owner");
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
-        assert_eq!(0, new_market.index);
-        // should keep old params
-        assert_eq!(
-            asset_params.initial_borrow_rate.unwrap(),
-            new_market.borrow_rate
-        );
-        assert_eq!(
-            asset_params.max_loan_to_value.unwrap(),
-            new_market.max_loan_to_value
-        );
-        assert_eq!(
-            asset_params.reserve_factor.unwrap(),
-            new_market.reserve_factor
-        );
-        assert_eq!(
-            asset_params.maintenance_margin.unwrap(),
-            new_market.maintenance_margin
-        );
-        assert_eq!(
-            asset_params.liquidation_bonus.unwrap(),
-            new_market.liquidation_bonus
-        );
-        if let InterestRateStrategy::Dynamic(market_dynamic_ir) = new_market.interest_rate_strategy
         {
+            let market_before = MARKETS.load(&deps.storage, b"someasset").unwrap();
+
+            let empty_asset_params = InitOrUpdateAssetParams {
+                initial_borrow_rate: None,
+                max_loan_to_value: None,
+                reserve_factor: None,
+                maintenance_margin: None,
+                liquidation_bonus: None,
+                interest_rate_strategy: None,
+            };
+            let msg = ExecuteMsg::UpdateAsset {
+                asset: Asset::Native {
+                    denom: "someasset".to_string(),
+                },
+                asset_params: empty_asset_params,
+            };
+            let info = mock_info("owner");
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+            // no interest updated event
+            assert_eq!(res.events.len(), 0);
+
+            let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+            // should keep old params
+            assert_eq!(0, new_market.index);
+            assert_eq!(market_before.borrow_rate, new_market.borrow_rate);
             assert_eq!(
-                dynamic_ir.min_borrow_rate,
-                market_dynamic_ir.min_borrow_rate
+                market_before.max_loan_to_value,
+                new_market.max_loan_to_value
+            );
+            assert_eq!(market_before.reserve_factor, new_market.reserve_factor);
+            assert_eq!(
+                market_before.maintenance_margin,
+                new_market.maintenance_margin
             );
             assert_eq!(
-                dynamic_ir.max_borrow_rate,
-                market_dynamic_ir.max_borrow_rate
+                market_before.liquidation_bonus,
+                new_market.liquidation_bonus
             );
-            assert_eq!(dynamic_ir.kp_1, market_dynamic_ir.kp_1);
-            assert_eq!(
-                dynamic_ir.kp_augmentation_threshold,
-                market_dynamic_ir.kp_augmentation_threshold
-            );
-            assert_eq!(dynamic_ir.kp_2, market_dynamic_ir.kp_2);
-        } else {
-            panic!("INCORRECT STRATEGY")
+            if let InterestRateStrategy::Dynamic(market_dynamic_ir) =
+                new_market.interest_rate_strategy
+            {
+                assert_eq!(
+                    dynamic_ir.min_borrow_rate,
+                    market_dynamic_ir.min_borrow_rate
+                );
+                assert_eq!(
+                    dynamic_ir.max_borrow_rate,
+                    market_dynamic_ir.max_borrow_rate
+                );
+                assert_eq!(dynamic_ir.kp_1, market_dynamic_ir.kp_1);
+                assert_eq!(
+                    dynamic_ir.kp_augmentation_threshold,
+                    market_dynamic_ir.kp_augmentation_threshold
+                );
+                assert_eq!(dynamic_ir.kp_2, market_dynamic_ir.kp_2);
+            } else {
+                panic!("INCORRECT STRATEGY")
+            }
         }
     }
 
     #[test]
     fn test_update_asset_with_new_interest_rate_strategy() {
         let mut deps = mock_dependencies(&[]);
-        let env = mock_env(MockEnvParams::default());
 
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
@@ -2962,6 +2989,7 @@ mod tests {
         };
         let msg = InstantiateMsg { config };
         let info = mock_info("owner");
+        let env = mock_env(MockEnvParams::default());
         instantiate(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let dynamic_ir = DynamicInterestRate {
@@ -2988,12 +3016,13 @@ mod tests {
             asset_params: asset_params_with_dynamic_ir.clone(),
         };
         let info = mock_info("owner");
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let env = mock_env_at_block_time(1_000_000);
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // Verify if IR strategy is saved correctly
-        let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
+        let market_before = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(
-            new_market.interest_rate_strategy,
+            market_before.interest_rate_strategy,
             InterestRateStrategy::Dynamic(dynamic_ir)
         );
 
@@ -3014,13 +3043,127 @@ mod tests {
             asset_params: asset_params_with_linear_ir.clone(),
         };
         let info = mock_info("owner");
-        let _res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+        let env = mock_env_at_block_time(2_000_000);
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // Verify if IR strategy is updated
         let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
         assert_eq!(
             new_market.interest_rate_strategy,
-            InterestRateStrategy::Linear(linear_ir)
+            InterestRateStrategy::Linear(linear_ir.clone())
+        );
+
+        // Indices should have been updated using previous interest rate
+        let expected_indices = th_get_expected_indices(&market_before, 2_000_000);
+        assert_eq!(new_market.liquidity_index, expected_indices.liquidity);
+        assert_eq!(new_market.borrow_index, expected_indices.borrow);
+        assert_eq!(new_market.interests_last_updated, 2_000_000);
+
+        // Interest rate should have been recomputed using new strategy and values
+        let (expected_borrow_rate, expected_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            Decimal::zero(),
+            new_market.borrow_rate,
+            new_market.reserve_factor,
+        );
+        assert_eq!(new_market.borrow_rate, expected_borrow_rate);
+        assert_eq!(new_market.liquidity_rate, expected_liquidity_rate);
+
+        // proper event is logged
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "someasset")
+                .add_attribute("borrow_index", new_market.borrow_index.to_string())
+                .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
+                .add_attribute("borrow_rate", expected_borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
+        );
+    }
+
+    #[test]
+    fn test_update_asset_new_reserve_factor_accrues_interest_rate() {
+        let asset_liquidity = 10_000_000_000000_u128;
+        let mut deps = th_setup(&[coin(asset_liquidity, "somecoin")]);
+
+        let ma_token_address = Addr::unchecked("ma_token");
+        let linear_ir = LinearInterestRate {
+            optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
+            base: Decimal::zero(),
+            slope_1: Decimal::from_ratio(1_u128, 2_u128),
+            slope_2: Decimal::from_ratio(2_u128, 1_u128),
+        };
+
+        let asset_initial_debt = Uint128::new(2_000_000_000000);
+        let market_before = th_init_market(
+            deps.as_mut(),
+            b"somecoin",
+            &Market {
+                reserve_factor: Decimal::from_ratio(1_u128, 10_u128),
+                protocol_income_to_distribute: Uint128::zero(),
+                borrow_index: Decimal::one(),
+                liquidity_index: Decimal::one(),
+                interests_last_updated: 1_000_000,
+                borrow_rate: Decimal::from_ratio(12u128, 100u128),
+                liquidity_rate: Decimal::from_ratio(12u128, 100u128),
+                debt_total_scaled: get_scaled_amount(asset_initial_debt, Decimal::one()),
+                ma_token_address: ma_token_address,
+                interest_rate_strategy: InterestRateStrategy::Linear(linear_ir.clone()),
+                ..Market::default()
+            },
+        );
+
+        let asset_params = InitOrUpdateAssetParams {
+            initial_borrow_rate: None,
+            max_loan_to_value: None,
+            reserve_factor: Some(Decimal::from_ratio(2_u128, 10_u128)),
+            maintenance_margin: None,
+            liquidation_bonus: None,
+            interest_rate_strategy: None,
+        };
+        let msg = ExecuteMsg::UpdateAsset {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            asset_params: asset_params,
+        };
+        let info = mock_info("owner");
+        let env = mock_env_at_block_time(1_500_000);
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        let new_market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
+        let config = CONFIG.load(&deps.storage).unwrap();
+
+        // Indices should have been updated using previous interest rate
+        let expected_indices = th_get_expected_indices(&market_before, 1_500_000);
+        assert_eq!(new_market.liquidity_index, expected_indices.liquidity);
+        assert_eq!(new_market.borrow_index, expected_indices.borrow);
+        assert_eq!(new_market.interests_last_updated, 1_500_000);
+
+        // Interest rate should have been recomputed using new strategy and values
+        let expected_debt =
+            get_descaled_amount(new_market.debt_total_scaled, new_market.borrow_index);
+        let expected_liquidity = Uint128::new(asset_liquidity)
+            - (Decimal::one() - config.treasury_fee_share)
+                * new_market.protocol_income_to_distribute;
+        let expected_utilization_rate =
+            Decimal::from_ratio(expected_debt, expected_liquidity + expected_debt);
+        let (expected_borrow_rate, expected_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            expected_utilization_rate,
+            new_market.borrow_rate,
+            new_market.reserve_factor,
+        );
+        assert_eq!(new_market.borrow_rate, expected_borrow_rate);
+        assert_eq!(new_market.liquidity_rate, expected_liquidity_rate);
+
+        // proper event is logged
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", new_market.borrow_index.to_string())
+                .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
+                .add_attribute("borrow_rate", expected_borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
         );
     }
 
@@ -4747,7 +4890,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collateral_check() {
+    fn test_borrow_collateral_check() {
         // NOTE: available liquidity stays fixed as the test environment does not get changes in
         // contract balances on subsequent calls. They would change from call to call in practice
         let available_liquidity_1 = 1000000000u128;
@@ -4901,7 +5044,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_handle_liquidate() {
+    pub fn test_execute_liquidate() {
         // Setup
         let available_liquidity_collateral = 1_000_000_000u128;
         let available_liquidity_cw20_debt = 2_000_000_000u128;

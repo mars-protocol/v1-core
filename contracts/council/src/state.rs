@@ -24,7 +24,7 @@ pub struct Config {
     /// Blocks after the effective_delay during which a successful proposal can be activated before it expires
     pub proposal_expiration_period: u64,
     /// Number of Mars needed to make a proposal. Will be returned if successful. Will be
-    /// distributed between stakers if proposal is not executed.
+    /// distributed between stakers if rejected.
     pub proposal_required_deposit: Uint128,
     /// % of total voting power required to participate in the proposal in order to consider it successfull
     pub proposal_required_quorum: Decimal,

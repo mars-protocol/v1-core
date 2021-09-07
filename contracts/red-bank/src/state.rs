@@ -1,12 +1,14 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, StdError, StdResult, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, DepsMut, Env, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::helpers::all_conditions_valid;
 use mars::interest_rate_models::{InterestRateModel, InterestRateStrategy};
 use mars::red_bank::msg::InitOrUpdateAssetParams;
+
+use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
@@ -205,7 +207,13 @@ impl Market {
     }
 
     /// Update market based on new params
-    pub fn update_with(self, params: InitOrUpdateAssetParams) -> StdResult<Self> {
+    pub fn update(
+        mut self,
+        deps: &DepsMut,
+        env: &Env,
+        reference: &[u8],
+        params: InitOrUpdateAssetParams,
+    ) -> StdResult<(Self, bool)> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -217,7 +225,19 @@ impl Market {
             interest_rate_strategy,
         } = params;
 
-        let updated_market = Market {
+        // If reserve factor or interest rates are updated we update indexes with
+        // current values before applying the change to prevent applying this
+        // new params to a period where they were not valid yet. Interests rates are
+        // recalculated after changes are applied.
+        let should_update_interest_rates = (reserve_factor.is_some()
+            && reserve_factor.unwrap() != self.reserve_factor)
+            || interest_rate_strategy.is_some();
+
+        if should_update_interest_rates {
+            apply_accumulated_interests(env, &mut self);
+        }
+
+        let mut updated_market = Market {
             max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
             reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
             maintenance_margin: maintenance_margin.unwrap_or(self.maintenance_margin),
@@ -228,7 +248,11 @@ impl Market {
 
         updated_market.validate()?;
 
-        Ok(updated_market)
+        if should_update_interest_rates {
+            update_interest_rates(deps, env, reference, &mut updated_market, Uint128::zero())?;
+        }
+
+        Ok((updated_market, should_update_interest_rates))
     }
 }
 

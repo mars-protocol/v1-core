@@ -128,9 +128,9 @@ impl InterestRateModel for DynamicInterestRate {
     }
 
     fn validate(&self) -> StdResult<()> {
-        if self.min_borrow_rate >= self.max_borrow_rate {
+        if self.min_borrow_rate > self.max_borrow_rate {
             return Err(StdError::generic_err(format!(
-                "max_borrow_rate should be greater than min_borrow_rate. \
+                "max_borrow_rate should be greater than or equal to min_borrow_rate. \
                     max_borrow_rate: {}, \
                     min_borrow_rate: {}",
                 self.max_borrow_rate, self.min_borrow_rate

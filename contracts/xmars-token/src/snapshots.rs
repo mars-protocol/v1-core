@@ -6,7 +6,6 @@ pub const TOTAL_SUPPLY_SNAPSHOTS: Map<U64Key, Uint128> = Map::new("total_supply_
 pub const BALANCE_SNAPSHOTS: Map<(&Addr, U64Key), Uint128> = Map::new("balance_snapshots");
 
 // CORE
-//
 
 fn get_snapshot_value_at(
     storage: &dyn Storage,
