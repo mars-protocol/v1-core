@@ -1250,7 +1250,7 @@ fn process_ma_token_transfer_to_liquidator(
     events: &mut Vec<Event>,
 ) -> StdResult<()> {
     let mut liquidator = USERS
-        .may_load(deps.storage, &liquidator_addr)?
+        .may_load(deps.storage, liquidator_addr)?
         .unwrap_or_default();
 
     // Set liquidator's deposited bit to true if not already true
@@ -1259,7 +1259,7 @@ fn process_ma_token_transfer_to_liquidator(
         get_bit(liquidator.collateral_assets, collateral_market.index)?;
     if !liquidator_is_using_as_collateral {
         set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
-        USERS.save(deps.storage, &liquidator_addr, &liquidator)?;
+        USERS.save(deps.storage, liquidator_addr, &liquidator)?;
         events.push(build_collateral_position_changed_event(
             collateral_asset_label,
             true,
@@ -1269,7 +1269,7 @@ fn process_ma_token_transfer_to_liquidator(
 
     let collateral_amount_to_liquidate_scaled = get_scaled_amount(
         collateral_amount_to_liquidate,
-        get_updated_liquidity_index(&collateral_market, block_time),
+        get_updated_liquidity_index(collateral_market, block_time),
     );
 
     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1321,10 +1321,10 @@ fn process_underlying_asset_transfer_to_liquidator(
     }
 
     // Apply update collateral interest as liquidity is reduced
-    apply_accumulated_interests(&env, &mut collateral_market);
+    apply_accumulated_interests(env, &mut collateral_market);
     update_interest_rates(
         &deps,
-        &env,
+        env,
         collateral_asset_reference,
         &mut collateral_market,
         collateral_amount_to_liquidate,
@@ -1332,7 +1332,7 @@ fn process_underlying_asset_transfer_to_liquidator(
 
     let collateral_amount_to_liquidate_scaled = get_scaled_amount(
         collateral_amount_to_liquidate,
-        get_updated_liquidity_index(&collateral_market, block_time),
+        get_updated_liquidity_index(collateral_market, block_time),
     );
 
     let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
@@ -5985,7 +5985,7 @@ mod tests {
         let liquidator_addr = Addr::unchecked("liquidator");
         let env = mock_env(MockEnvParams::default());
 
-        // Indices changed in order to detect that there is no any scaling on asset balance
+        // Indices changed in order to detect that there is no scaling on asset balance
         let mut market = Market {
             liquidity_index: Decimal::from_ratio(2u128, 1u128),
             borrow_index: Decimal::from_ratio(4u128, 1u128),
@@ -6036,7 +6036,7 @@ mod tests {
             .unwrap();
         }
 
-        // Indices changed in order to detect that there is no any scaling on asset balance
+        // Indices changed in order to detect that there is no scaling on asset balance
         let mut market = Market {
             liquidity_index: Decimal::from_ratio(8u128, 1u128),
             borrow_index: Decimal::from_ratio(6u128, 1u128),
