@@ -88,7 +88,6 @@ pub fn get_descaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
     result.checked_div(Uint128::from(SCALING_FACTOR)).unwrap()
 }
 
-
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.

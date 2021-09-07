@@ -607,9 +607,8 @@ pub fn execute_update_asset(
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
-            let (updated_market, interest_rates_updated) = 
+            let (updated_market, interest_rates_updated) =
                 market.update(&deps, &env, asset_reference.as_slice(), asset_params)?;
-
 
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
@@ -2802,7 +2801,9 @@ mod tests {
                 ..dynamic_ir
             };
             let invalid_asset_params = InitOrUpdateAssetParams {
-                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
+                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(
+                    invalid_dynamic_ir.clone(),
+                )),
                 ..asset_params
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -2825,7 +2826,9 @@ mod tests {
                 ..dynamic_ir
             };
             let invalid_asset_params = InitOrUpdateAssetParams {
-                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(invalid_dynamic_ir.clone())),
+                interest_rate_strategy: Some(InterestRateStrategy::Dynamic(
+                    invalid_dynamic_ir.clone(),
+                )),
                 ..asset_params
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -2911,7 +2914,7 @@ mod tests {
         // *
         {
             let market_before = MARKETS.load(&deps.storage, b"someasset").unwrap();
-        
+
             let empty_asset_params = InitOrUpdateAssetParams {
                 initial_borrow_rate: None,
                 max_loan_to_value: None,
@@ -2927,23 +2930,20 @@ mod tests {
                 asset_params: empty_asset_params,
             };
             let info = mock_info("owner");
-            let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+            // no interest updated event
+            assert_eq!(res.events.len(), 0);
 
             let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
             // should keep old params
             assert_eq!(0, new_market.index);
-            assert_eq!(
-                market_before.borrow_rate,
-                new_market.borrow_rate
-            );
+            assert_eq!(market_before.borrow_rate, new_market.borrow_rate);
             assert_eq!(
                 market_before.max_loan_to_value,
                 new_market.max_loan_to_value
             );
-            assert_eq!(
-                market_before.reserve_factor,
-                new_market.reserve_factor
-            );
+            assert_eq!(market_before.reserve_factor, new_market.reserve_factor);
             assert_eq!(
                 market_before.maintenance_margin,
                 new_market.maintenance_margin
@@ -2952,7 +2952,8 @@ mod tests {
                 market_before.liquidation_bonus,
                 new_market.liquidation_bonus
             );
-            if let InterestRateStrategy::Dynamic(market_dynamic_ir) = new_market.interest_rate_strategy
+            if let InterestRateStrategy::Dynamic(market_dynamic_ir) =
+                new_market.interest_rate_strategy
             {
                 assert_eq!(
                     dynamic_ir.min_borrow_rate,
@@ -3043,7 +3044,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let env = mock_env_at_block_time(2_000_000);
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         // Verify if IR strategy is updated
         let new_market = MARKETS.load(&deps.storage, b"someasset").unwrap();
@@ -3053,55 +3054,68 @@ mod tests {
         );
 
         // Indices should have been updated using previous interest rate
-        let expected_indices = th_get_expected_indices(
-            &market_before,
-            2_000_000,
-        );
+        let expected_indices = th_get_expected_indices(&market_before, 2_000_000);
         assert_eq!(new_market.liquidity_index, expected_indices.liquidity);
         assert_eq!(new_market.borrow_index, expected_indices.borrow);
         assert_eq!(new_market.interests_last_updated, 2_000_000);
 
         // Interest rate should have been recomputed using new strategy and values
-        let (expected_borrow_rate, expected_liquidity_rate) =
-            linear_ir.get_updated_interest_rates(
-                Decimal::zero(),
-                new_market.borrow_rate,
-                new_market.reserve_factor,
-            );
+        let (expected_borrow_rate, expected_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            Decimal::zero(),
+            new_market.borrow_rate,
+            new_market.reserve_factor,
+        );
         assert_eq!(new_market.borrow_rate, expected_borrow_rate);
         assert_eq!(new_market.liquidity_rate, expected_liquidity_rate);
 
         // proper event is logged
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "someasset")
+                .add_attribute("borrow_index", new_market.borrow_index.to_string())
+                .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
+                .add_attribute("borrow_rate", expected_borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
+        );
     }
 
     #[test]
     fn test_update_asset_new_reserve_factor_accrues_interest_rate() {
-        let mut deps = th_setup(&[]);
+        let asset_liquidity = 10_000_000_000000_u128;
+        let mut deps = th_setup(&[coin(asset_liquidity, "somecoin")]);
+
+        let ma_token_address = Addr::unchecked("ma_token");
         let linear_ir = LinearInterestRate {
             optimal_utilization_rate: Decimal::from_ratio(80u128, 100u128),
-            base: Decimal::from_ratio(0u128, 100u128),
-            slope_1: Decimal::zero(),
-            slope_2: Decimal::zero(),
+            base: Decimal::zero(),
+            slope_1: Decimal::from_ratio(1_u128, 2_u128),
+            slope_2: Decimal::from_ratio(2_u128, 1_u128),
         };
-        let market = th_init_market(
+
+        let asset_initial_debt = Uint128::new(2_000_000_000000);
+        let market_before = th_init_market(
             deps.as_mut(),
             b"somecoin",
-            &Market { 
+            &Market {
                 reserve_factor: Decimal::from_ratio(1_u128, 10_u128),
                 protocol_income_to_distribute: Uint128::zero(),
                 borrow_index: Decimal::one(),
                 liquidity_index: Decimal::one(),
                 interests_last_updated: 1_000_000,
-                borrow_rate: Decimal::from_ratio(10u128, 100u128),
-                liquidity_rate: Decimal::from_ratio(10u128, 100u128),
+                borrow_rate: Decimal::from_ratio(12u128, 100u128),
+                liquidity_rate: Decimal::from_ratio(12u128, 100u128),
+                debt_total_scaled: get_scaled_amount(asset_initial_debt, Decimal::one()),
+                ma_token_address: ma_token_address,
+                interest_rate_strategy: InterestRateStrategy::Linear(linear_ir.clone()),
                 ..Market::default()
-            }
+            },
         );
 
-        let empty_asset_params = InitOrUpdateAssetParams {
+        let asset_params = InitOrUpdateAssetParams {
             initial_borrow_rate: None,
             max_loan_to_value: None,
-            reserve_factor: None,
+            reserve_factor: Some(Decimal::from_ratio(2_u128, 10_u128)),
             maintenance_margin: None,
             liquidation_bonus: None,
             interest_rate_strategy: None,
@@ -3110,13 +3124,47 @@ mod tests {
             asset: Asset::Native {
                 denom: "somecoin".to_string(),
             },
-            asset_params: empty_asset_params,
+            asset_params: asset_params,
         };
         let info = mock_info("owner");
-        let env = mock_env(MockEnvParams::default());
-        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+        let env = mock_env_at_block_time(1_500_000);
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let new_market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
+        let config = CONFIG.load(&deps.storage).unwrap();
+
+        // Indices should have been updated using previous interest rate
+        let expected_indices = th_get_expected_indices(&market_before, 1_500_000);
+        assert_eq!(new_market.liquidity_index, expected_indices.liquidity);
+        assert_eq!(new_market.borrow_index, expected_indices.borrow);
+        assert_eq!(new_market.interests_last_updated, 1_500_000);
+
+        // Interest rate should have been recomputed using new strategy and values
+        let expected_debt =
+            get_descaled_amount(new_market.debt_total_scaled, new_market.borrow_index);
+        let expected_liquidity = Uint128::new(asset_liquidity)
+            - (Decimal::one() - config.treasury_fee_share)
+                * new_market.protocol_income_to_distribute;
+        let expected_utilization_rate =
+            Decimal::from_ratio(expected_debt, expected_liquidity + expected_debt);
+        let (expected_borrow_rate, expected_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            expected_utilization_rate,
+            new_market.borrow_rate,
+            new_market.reserve_factor,
+        );
+        assert_eq!(new_market.borrow_rate, expected_borrow_rate);
+        assert_eq!(new_market.liquidity_rate, expected_liquidity_rate);
+
+        // proper event is logged
+        assert_eq!(
+            res.events,
+            vec![Event::new("interests_updated")
+                .add_attribute("market", "somecoin")
+                .add_attribute("borrow_index", new_market.borrow_index.to_string())
+                .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
+                .add_attribute("borrow_rate", expected_borrow_rate.to_string())
+                .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
+        );
     }
 
     #[test]
@@ -4842,7 +4890,7 @@ mod tests {
     }
 
     #[test]
-    fn test_collateral_check() {
+    fn test_borrow_collateral_check() {
         // NOTE: available liquidity stays fixed as the test environment does not get changes in
         // contract balances on subsequent calls. They would change from call to call in practice
         let available_liquidity_1 = 1000000000u128;
@@ -4996,7 +5044,7 @@ mod tests {
     }
 
     #[test]
-    pub fn test_handle_liquidate() {
+    pub fn test_execute_liquidate() {
         // Setup
         let available_liquidity_collateral = 1_000_000_000u128;
         let available_liquidity_cw20_debt = 2_000_000_000u128;

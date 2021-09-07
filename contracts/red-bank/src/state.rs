@@ -8,9 +8,7 @@ use mars::helpers::all_conditions_valid;
 use mars::interest_rate_models::{InterestRateModel, InterestRateStrategy};
 use mars::red_bank::msg::InitOrUpdateAssetParams;
 
-use crate::interest_rates::{
-    apply_accumulated_interests, update_interest_rates
-};
+use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
@@ -214,7 +212,7 @@ impl Market {
         deps: &DepsMut,
         env: &Env,
         reference: &[u8],
-        params: InitOrUpdateAssetParams
+        params: InitOrUpdateAssetParams,
     ) -> StdResult<(Self, bool)> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
@@ -229,18 +227,15 @@ impl Market {
 
         // If reserve factor or interest rates are updated we update indexes with
         // current values before applying the change to prevent applying this
-        // new params to a period where they were not valid yet. Interests rates are 
+        // new params to a period where they were not valid yet. Interests rates are
         // recalculated after changes are applied.
-        let should_update_interest_rates = 
-            (
-                reserve_factor.is_some() &&
-                reserve_factor.unwrap() != self.reserve_factor
-            ) || interest_rate_strategy.is_some();
+        let should_update_interest_rates = (reserve_factor.is_some()
+            && reserve_factor.unwrap() != self.reserve_factor)
+            || interest_rate_strategy.is_some();
 
         if should_update_interest_rates {
             apply_accumulated_interests(env, &mut self);
         }
-
 
         let mut updated_market = Market {
             max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
@@ -254,13 +249,7 @@ impl Market {
         updated_market.validate()?;
 
         if should_update_interest_rates {
-            update_interest_rates(
-                &deps,
-                &env,
-                reference,
-                &mut updated_market,
-                Uint128::zero(),
-            )?;
+            update_interest_rates(deps, env, reference, &mut updated_market, Uint128::zero())?;
         }
 
         Ok((updated_market, should_update_interest_rates))
