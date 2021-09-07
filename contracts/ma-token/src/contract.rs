@@ -809,10 +809,12 @@ mod tests {
             amount: transfer,
         };
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert!(matches!(
+        assert_eq!(
             err,
-            ContractError::Std(StdError::GenericErr { .. })
-        ));
+            ContractError::Std(StdError::generic_err(
+                "Sender and recipient cannot be the same"
+            ))
+        );
 
         // valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
