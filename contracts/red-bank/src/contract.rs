@@ -983,7 +983,7 @@ pub fn execute_repay(
 
 /// Execute loan liquidations on under-collateralized loans
 pub fn execute_liquidate(
-    deps: DepsMut,
+    mut deps: DepsMut,
     env: Env,
     _info: MessageInfo,
     liquidator_address: Addr,
@@ -1122,98 +1122,29 @@ pub fn execute_liquidate(
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
-        // Transfer ma tokens from user to liquidator
-        let mut liquidator = USERS
-            .may_load(deps.storage, &liquidator_address)?
-            .unwrap_or_default();
-
-        // set liquidator's deposited bit to true if not already true
-        // NOTE: previous checks should ensure this amount is not zero
-        let liquidator_is_using_as_collateral =
-            get_bit(liquidator.collateral_assets, collateral_market.index)?;
-        if !liquidator_is_using_as_collateral {
-            set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
-            USERS.save(deps.storage, &liquidator_address, &liquidator)?;
-            events.push(build_collateral_position_changed_event(
-                collateral_asset_label.as_str(),
-                true,
-                liquidator_address.to_string(),
-            ));
-        }
-
-        let collateral_amount_to_liquidate_scaled = get_scaled_amount(
+        process_ma_token_transfer_to_liquidator(
+            deps.branch(),
+            block_time,
+            &user_address,
+            &liquidator_address,
+            collateral_asset_label.as_str(),
+            &collateral_market,
             collateral_amount_to_liquidate,
-            get_updated_liquidity_index(&collateral_market, block_time),
-        );
-
-        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: collateral_market.ma_token_address.to_string(),
-            msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
-                sender: user_address.to_string(),
-                recipient: liquidator_address.to_string(),
-                amount: collateral_amount_to_liquidate_scaled,
-            })?,
-            funds: vec![],
-        }));
+            &mut messages,
+            &mut events,
+        )?;
     } else {
-        // Burn ma_tokens from user and send underlying asset to liquidator
-
-        // Ensure contract has enough collateral to send back underlying asset
-        let contract_collateral_balance = match collateral_asset.clone() {
-            Asset::Native { denom } => {
-                deps.querier
-                    .query_balance(env.contract.address.clone(), denom.as_str())?
-                    .amount
-            }
-            Asset::Cw20 {
-                contract_addr: token_addr,
-            } => {
-                let token_addr = deps.api.addr_validate(&token_addr)?;
-                cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
-            }
-        };
-
-        if contract_collateral_balance < collateral_amount_to_liquidate {
-            return Err(StdError::generic_err(
-                "contract does not have enough collateral liquidity to send back underlying asset",
-            )
-            .into());
-        }
-
-        // apply update collateral interest as liquidity is reduced
-        apply_accumulated_interests(&env, &mut collateral_market);
-        update_interest_rates(
-            &deps,
+        process_underlying_asset_transfer_to_liquidator(
+            deps.branch(),
             &env,
+            &user_address,
+            &liquidator_address,
+            collateral_asset,
             collateral_asset_reference.as_slice(),
             &mut collateral_market,
             collateral_amount_to_liquidate,
+            &mut messages,
         )?;
-
-        let collateral_amount_to_liquidate_scaled = get_scaled_amount(
-            collateral_amount_to_liquidate,
-            get_updated_liquidity_index(&collateral_market, block_time),
-        );
-
-        let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: collateral_market.ma_token_address.to_string(),
-            msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
-                user: user_address.to_string(),
-
-                amount: collateral_amount_to_liquidate_scaled,
-            })?,
-            funds: vec![],
-        });
-
-        let send_underlying_asset_msg = build_send_asset_msg(
-            deps.as_ref(),
-            env.contract.address.clone(),
-            liquidator_address.clone(),
-            collateral_asset,
-            collateral_amount_to_liquidate,
-        )?;
-        messages.push(burn_ma_tokens_msg);
-        messages.push(send_underlying_asset_msg);
     }
 
     // if max collateral to liquidate equals the user's balance then unset collateral bit
@@ -1304,6 +1235,128 @@ pub fn execute_liquidate(
         .add_events(events)
         .add_messages(messages);
     Ok(res)
+}
+
+/// Transfer ma tokens from user to liquidator
+fn process_ma_token_transfer_to_liquidator(
+    deps: DepsMut,
+    block_time: u64,
+    user_addr: &Addr,
+    liquidator_addr: &Addr,
+    collateral_asset_label: &str,
+    collateral_market: &Market,
+    collateral_amount_to_liquidate: Uint128,
+    messages: &mut Vec<CosmosMsg>,
+    events: &mut Vec<Event>,
+) -> StdResult<()> {
+    let mut liquidator = USERS
+        .may_load(deps.storage, &liquidator_addr)?
+        .unwrap_or_default();
+
+    // Set liquidator's deposited bit to true if not already true
+    // NOTE: previous checks should ensure this amount is not zero
+    let liquidator_is_using_as_collateral =
+        get_bit(liquidator.collateral_assets, collateral_market.index)?;
+    if !liquidator_is_using_as_collateral {
+        set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
+        USERS.save(deps.storage, &liquidator_addr, &liquidator)?;
+        events.push(build_collateral_position_changed_event(
+            collateral_asset_label,
+            true,
+            liquidator_addr.to_string(),
+        ));
+    }
+
+    let collateral_amount_to_liquidate_scaled = get_scaled_amount(
+        collateral_amount_to_liquidate,
+        get_updated_liquidity_index(&collateral_market, block_time),
+    );
+
+    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: collateral_market.ma_token_address.to_string(),
+        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
+            sender: user_addr.to_string(),
+            recipient: liquidator_addr.to_string(),
+            amount: collateral_amount_to_liquidate_scaled,
+        })?,
+        funds: vec![],
+    }));
+
+    Ok(())
+}
+
+/// Burn ma_tokens from user and send underlying asset to liquidator
+fn process_underlying_asset_transfer_to_liquidator(
+    deps: DepsMut,
+    env: &Env,
+    user_addr: &Addr,
+    liquidator_addr: &Addr,
+    collateral_asset: Asset,
+    collateral_asset_reference: &[u8],
+    mut collateral_market: &mut Market,
+    collateral_amount_to_liquidate: Uint128,
+    messages: &mut Vec<CosmosMsg>,
+) -> StdResult<()> {
+    let block_time = env.block.time.seconds();
+
+    // Ensure contract has enough collateral to send back underlying asset
+    let contract_collateral_balance = match collateral_asset.clone() {
+        Asset::Native { denom } => {
+            deps.querier
+                .query_balance(env.contract.address.clone(), denom.as_str())?
+                .amount
+        }
+        Asset::Cw20 {
+            contract_addr: token_addr,
+        } => {
+            let token_addr = deps.api.addr_validate(&token_addr)?;
+            cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
+        }
+    };
+
+    if contract_collateral_balance < collateral_amount_to_liquidate {
+        return Err(StdError::generic_err(
+            "contract does not have enough collateral liquidity to send back underlying asset",
+        )
+        .into());
+    }
+
+    // Apply update collateral interest as liquidity is reduced
+    apply_accumulated_interests(&env, &mut collateral_market);
+    update_interest_rates(
+        &deps,
+        &env,
+        collateral_asset_reference,
+        &mut collateral_market,
+        collateral_amount_to_liquidate,
+    )?;
+
+    let collateral_amount_to_liquidate_scaled = get_scaled_amount(
+        collateral_amount_to_liquidate,
+        get_updated_liquidity_index(&collateral_market, block_time),
+    );
+
+    let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: collateral_market.ma_token_address.to_string(),
+        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
+            user: user_addr.to_string(),
+
+            amount: collateral_amount_to_liquidate_scaled,
+        })?,
+        funds: vec![],
+    });
+
+    let send_underlying_asset_msg = build_send_asset_msg(
+        deps.as_ref(),
+        env.contract.address.clone(),
+        liquidator_addr.clone(),
+        collateral_asset,
+        collateral_amount_to_liquidate,
+    )?;
+    messages.push(burn_ma_tokens_msg);
+    messages.push(send_underlying_asset_msg);
+
+    Ok(())
 }
 
 /// Computes debt to repay (in debt asset),
