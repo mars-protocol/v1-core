@@ -53,8 +53,8 @@ async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: st
 }
 
 async function assertXmarsTotalSupplyAt(terra: LCDClient, xMars: string, block: number, expectedTotalSupply: number) {
-  const xMarsTotalSupply = await queryContract(terra, xMars, { total_supply_at: { block } })
-  strictEqual(parseInt(xMarsTotalSupply.total_supply), expectedTotalSupply)
+  const expectedXmarsTotalSupply = await queryContract(terra, xMars, { total_supply_at: { block } })
+  strictEqual(parseInt(expectedXmarsTotalSupply.total_supply), expectedTotalSupply)
 }
 
 async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
@@ -237,7 +237,7 @@ async function main() {
 
   // TESTS
 
-  let xMarsTotalSupply = 0
+  let expectedXmarsTotalSupply = 0
 
   {
     console.log("alice stakes Mars and receives the same amount of xMars")
@@ -264,13 +264,13 @@ async function main() {
 
     // before staking
     await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, block - 1, 0)
-    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     // after staking
-    xMarsTotalSupply += MARS_STAKE_AMOUNT
+    expectedXmarsTotalSupply += MARS_STAKE_AMOUNT
     await assertXmarsBalance(terra, xMars, alice.key.accAddress, MARS_STAKE_AMOUNT)
     await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, block + 1, MARS_STAKE_AMOUNT)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
   }
 
   {
@@ -298,13 +298,13 @@ async function main() {
 
     // before staking
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, 0)
-    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     // after staking
-    xMarsTotalSupply += MARS_STAKE_AMOUNT
+    expectedXmarsTotalSupply += MARS_STAKE_AMOUNT
     await assertXmarsBalance(terra, xMars, bob.key.accAddress, MARS_STAKE_AMOUNT)
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, MARS_STAKE_AMOUNT)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
   }
 
   {
@@ -323,14 +323,14 @@ async function main() {
     // before staking
     await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, block - 1, MARS_STAKE_AMOUNT)
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, MARS_STAKE_AMOUNT)
-    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     // after staking
     await assertXmarsBalance(terra, xMars, alice.key.accAddress, 3 * MARS_STAKE_AMOUNT / 2)
     await assertXmarsBalance(terra, xMars, bob.key.accAddress, MARS_STAKE_AMOUNT / 2)
     await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, block + 1, 3 * MARS_STAKE_AMOUNT / 2)
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, MARS_STAKE_AMOUNT / 2)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
   }
 
   {
@@ -407,14 +407,14 @@ async function main() {
 
     // before staking
     await assertXmarsBalanceAt(terra, xMars, carol.key.accAddress, block - 1, 0)
-    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     // after staking
     const carolXmarsBalance = await queryCw20Balance(terra, carol.key.accAddress, xMars)
     assert(carolXmarsBalance < MARS_STAKE_AMOUNT)
-    xMarsTotalSupply += carolXmarsBalance
+    expectedXmarsTotalSupply += carolXmarsBalance
     await assertXmarsBalanceAt(terra, xMars, carol.key.accAddress, block + 1, carolXmarsBalance)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
   }
 
   {
@@ -520,10 +520,10 @@ async function main() {
     const block = await getBlockHeight(terra, txResult)
 
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, MARS_STAKE_AMOUNT)
-    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, xMarsTotalSupply)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, MARS_STAKE_AMOUNT / 2)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, xMarsTotalSupply - MARS_STAKE_AMOUNT / 2)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply - MARS_STAKE_AMOUNT / 2)
   }
 
   {
