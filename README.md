@@ -33,17 +33,7 @@ npm install
 TypeScript scripts must be executed with `ts-node` using:
 
 ```
-node --loader ts-node/esm script.ts
-```
-
-An alias can be added to the shell profile:
-
-```
-# bash
-echo 'alias ts-node="node --loader ts-node/esm"' >> ~/.bashrc
-
-# zsh
-echo 'alias ts-node="node --loader ts-node/esm"' >> ~/.zshrc
+node --loader ts-node/esm <script>.ts
 ```
 
 Some scripts require LocalTerra to be running:
@@ -77,7 +67,7 @@ echo "NETWORK=bombay" >> .env
 
 # ensure the deploy_config.ts has a cw20_code_id specified for above network
 
-ts-node deploy.ts
+node --loader ts-node/esm deploy.ts
 ```
 
 ### Testing
@@ -95,7 +85,7 @@ cargo test
 
 ```
 cd scripts
-ts-node tests/insurance_fund.ts
+node --loader ts-node/esm tests/<test>.ts
 ```
 
 Env variables:
@@ -107,5 +97,5 @@ Env variables:
 1. Create a .env file in the top level of the scripts directory if doesn't already exist
 2. Add the env variable NETWORK=[network_to_generate_from_e.g._NETWORK=bombay]
 3. Add the env variable REDBANK_ADDRESS=[your_deployed_red_bank_contract_address]
-4. Run `ts-node whitelist.ts`
+4. Run `node --loader ts-node/esm whitelist.ts`
 5. Check the whitelists folder for [NETWORK].json output
