@@ -2451,7 +2451,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater or equal than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
 
         // *
         // init asset where optimal utilization rate > 1
@@ -2814,7 +2814,7 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater or equal than min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+            assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
         }
 
         // *
