@@ -1,10 +1,3 @@
-/*
-LocalTerra oracle needs ~1500 ms timeouts to work. Set these with:
-
-```
-sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' config/config.toml
-```
-*/
 import { Coin, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
@@ -15,23 +8,25 @@ import {
 } from "../helpers.js"
 import { strictEqual } from "assert"
 
+// CONSTS
+
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
 const USD_BORROW = 100_000_000_000000
 
+// HELPERS
+
 async function getDebt(terra: LCDClient, borrower: Wallet, redBank: string) {
   const debts = await queryContract(terra, redBank,
-    {
-      debt: {
-        address: borrower.key.accAddress
-      }
-    }
+    { user_debt: { user_address: borrower.key.accAddress } }
   )
 
-  const debt = debts.debts.filter((coin: Coin) => coin.denom == "uusd")[0].amount
+  const debt = debts.debts.filter((coin: any) => coin.denom == "uusd")[0].amount_scaled
 
   return parseInt(debt)
 }
+
+// MAIN
 
 async function main() {
   setTimeoutDuration(0)
@@ -40,12 +35,6 @@ async function main() {
   const deployer = terra.wallets.test1
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
-
-  // Check Terra uusd oracle is available, if not, try again in a few seconds
-  const activeDenoms = await terra.oracle.activeDenoms()
-  if (!activeDenoms.includes("uusd")) {
-    throw new Error("Terra uusd oracle unavailable")
-  }
 
   console.log("upload contracts")
 
@@ -132,33 +121,11 @@ async function main() {
   await executeContract(terra, deployer, oracle,
     {
       set_asset: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        },
-        price_source: {
-          native: {
-            denom: "uluna"
-          }
-        }
+        asset: { native: { denom: "uluna" } },
+        price_source: { fixed: { price: "25" } }
       }
     }
   )
-
-  // Check oracle prices
-  console.log("oracle contract Luna price", await queryContract(terra, oracle,
-    {
-      asset_price: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        }
-      }
-    }
-  ))
-  console.log("terra oracle Luna price", await terra.oracle.exchangeRate("uusd"))
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -193,19 +160,13 @@ async function main() {
   await executeContract(terra, deployer, oracle,
     {
       set_asset: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
-        price_source: {
-          native: {
-            denom: "uusd"
-          }
-        }
+        asset: { native: { denom: "uusd" } },
+        price_source: { fixed: { price: "1" } }
       }
     }
   )
+
+  // TESTS
 
   console.log("provide usd")
 

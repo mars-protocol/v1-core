@@ -1,30 +1,28 @@
-import { LCDClient, LocalTerra, MsgExecuteContract, Wallet } from "@terra-money/terra.js"
+import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
-  performTransaction,
   queryContract,
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert, strictEqual } from "assert"
+import { strict as assert } from "assert"
 
 // consts
 
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
 const USD_BORROW = 100_000_000_000000
+const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
 // helpers
 
 async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, enabled: boolean) {
   const collateral = await queryContract(terra, redBank,
-    {
-      collateral: {
-        address: wallet.key.accAddress
-      }
-    }
+    { user_collateral: { user_address: wallet.key.accAddress } }
   )
+
+  console.log(collateral)
 
   for (const c of collateral.collateral) {
     if (c.denom == denom && c.enabled == enabled) {
@@ -129,12 +127,12 @@ async function testCollateralStatusChanges(terra: LocalTerra, redBank: string, m
   assert(await checkCollateral(terra, provider, redBank, "uluna", true))
   assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
 
-  console.log("transferring maTokens to recipient should enable that asset as collateral")
+  console.log("transferring all maTokens to recipient should enable that asset as collateral")
 
   await executeContract(terra, provider, maLuna,
     {
       transfer: {
-        amount: String(LUNA_COLLATERAL),
+        amount: String(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR),
         recipient: recipient.key.accAddress
       }
     }
@@ -381,21 +379,6 @@ async function main() {
   )
 
   const maLuna = maLunaMarket.ma_token_address
-
-  // Check oracle prices
-  console.log("oracle contract Luna price", await queryContract(terra, oracle,
-    {
-      asset_price: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        }
-      }
-    }
-  ))
-
-  console.log("terra oracle Luna price", await terra.oracle.exchangeRate("uusd"))
 
   // tests
 
