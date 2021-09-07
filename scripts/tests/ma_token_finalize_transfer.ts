@@ -22,8 +22,6 @@ async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string
     { user_collateral: { user_address: wallet.key.accAddress } }
   )
 
-  console.log(collateral)
-
   for (const c of collateral.collateral) {
     if (c.denom == denom && c.enabled == enabled) {
       return true
