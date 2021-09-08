@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Binary, Decimal, StdResult, Uint128};
+use cosmwasm_std::{Addr, CosmosMsg, Decimal, StdResult, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
 use mars::helpers::all_conditions_valid;
@@ -90,7 +90,7 @@ pub enum ProposalStatus {
 pub struct ProposalExecuteCall {
     pub execution_order: u64,
     pub target_contract_address: Addr,
-    pub msg: Binary,
+    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

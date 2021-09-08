@@ -1,5 +1,5 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
-use cosmwasm_std::{Binary, Decimal, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -63,7 +63,7 @@ pub enum ReceiveMsg {
 pub struct MsgExecuteCall {
     pub execution_order: u64,
     pub target_contract_address: String,
-    pub msg: Binary,
+    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -123,7 +123,7 @@ pub struct ProposalInfo {
 pub struct ProposalExecuteCallResponse {
     pub execution_order: u64,
     pub target_contract_address: String,
-    pub msg: Binary,
+    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

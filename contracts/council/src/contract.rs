@@ -452,13 +452,7 @@ pub fn execute_execute_proposal(
 
             proposal_execute_calls
                 .into_iter()
-                .map(|execute_call| {
-                    CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: execute_call.target_contract_address.into(),
-                        msg: execute_call.msg,
-                        funds: vec![],
-                    })
-                })
+                .map(|execute_call| execute_call.msg)
                 .collect()
         })
         .unwrap_or_else(Vec::new);
@@ -1160,10 +1154,14 @@ mod tests {
                 execute_calls: Some(vec![MsgExecuteCall {
                     execution_order: 0,
                     target_contract_address: String::from(MOCK_CONTRACT_ADDR),
-                    msg: to_binary(&ExecuteMsg::UpdateConfig {
-                        config: CreateOrUpdateConfig::default(),
-                    })
-                    .unwrap(),
+                    msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: String::from(MOCK_CONTRACT_ADDR),
+                        msg: to_binary(&ExecuteMsg::UpdateConfig {
+                            config: CreateOrUpdateConfig::default(),
+                        })
+                        .unwrap(),
+                        funds: vec![],
+                    }),
                 }]),
             })
             .unwrap(),
@@ -1200,10 +1198,14 @@ mod tests {
             Some(vec![ProposalExecuteCall {
                 execution_order: 0,
                 target_contract_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
-                msg: to_binary(&ExecuteMsg::UpdateConfig {
-                    config: CreateOrUpdateConfig::default()
-                })
-                .unwrap(),
+                msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from(MOCK_CONTRACT_ADDR),
+                    msg: to_binary(&ExecuteMsg::UpdateConfig {
+                        config: CreateOrUpdateConfig::default(),
+                    })
+                    .unwrap(),
+                    funds: vec![],
+                }),
             }])
         );
     }
@@ -1509,7 +1511,11 @@ mod tests {
         let execute_calls = Option::from(vec![ProposalExecuteCall {
             execution_order: 0,
             target_contract_address: Addr::unchecked("test_address"),
-            msg: Binary::from(br#"{"some":123}"#),
+            msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: String::from("test_address"),
+                msg: Binary::from(br#"{"some":123}"#),
+                funds: vec![],
+            }),
         }]);
         th_build_mock_proposal(
             deps.as_mut(),
@@ -1865,23 +1871,35 @@ mod tests {
                 execute_calls: Some(vec![
                     ProposalExecuteCall {
                         execution_order: 2,
-                        msg: binary_msg.clone(),
+                        msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: other_address.to_string(),
+                            msg: binary_msg.clone(),
+                            funds: vec![],
+                        }),
                         target_contract_address: other_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 3,
-                        msg: to_binary(&ExecuteMsg::UpdateConfig {
-                            config: CreateOrUpdateConfig::default(),
-                        })
-                        .unwrap(),
+                        msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: contract_address.to_string(),
+                            msg: to_binary(&ExecuteMsg::UpdateConfig {
+                                config: CreateOrUpdateConfig::default(),
+                            })
+                            .unwrap(),
+                            funds: vec![],
+                        }),
                         target_contract_address: contract_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 1,
-                        msg: to_binary(&ExecuteMsg::UpdateConfig {
-                            config: CreateOrUpdateConfig::default(),
-                        })
-                        .unwrap(),
+                        msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: contract_address.to_string(),
+                            msg: to_binary(&ExecuteMsg::UpdateConfig {
+                                config: CreateOrUpdateConfig::default(),
+                            })
+                            .unwrap(),
+                            funds: vec![],
+                        }),
                         target_contract_address: contract_address.clone(),
                     },
                 ]),
