@@ -1534,10 +1534,13 @@ mod tests {
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_2_id);
-        match &res.proposal_list[1].execute_calls.clone().unwrap()[0].msg {
+        match res.proposal_list[1].execute_calls.clone().unwrap()[0]
+            .msg
+            .clone()
+        {
             CosmosMsg::Wasm(msg) => match msg {
                 WasmMsg::Execute { contract_addr, .. } => {
-                    assert_eq!(contract_addr, &String::from("test_address"));
+                    assert_eq!(contract_addr, String::from("test_address"));
                 }
                 _ => panic!("incorrect WasmMsg variant"),
             },
