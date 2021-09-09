@@ -83,13 +83,10 @@ pub enum ProposalStatus {
     Executed,
 }
 
-/// Execute call that will be done by the DAO if the proposal succeeds. As this is persisted,
-/// the contract checked address is stored (vs the unchecked string when the proposal submit message is
-/// sent)
+/// Execute call that will be executed by the DAO if the proposal succeeds
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalExecuteCall {
     pub execution_order: u64,
-    pub target_contract_address: Addr,
     pub msg: CosmosMsg,
 }
 

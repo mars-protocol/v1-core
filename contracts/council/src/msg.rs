@@ -55,14 +55,10 @@ pub enum ReceiveMsg {
     },
 }
 
-/// Execute call that will be done by the DAO if the proposal succeeds.
-/// Contains a the msg and contract_addr attributes of a WasmMsg::Execute call
-/// As this is part of the proposal creation call, the contract unchecked string is sent
-/// (vs the validated address when persisted)
+/// Execute call that will be executed by the DAO if the proposal succeeds
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MsgExecuteCall {
     pub execution_order: u64,
-    pub target_contract_address: String,
     pub msg: CosmosMsg,
 }
 
@@ -122,7 +118,6 @@ pub struct ProposalInfo {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ProposalExecuteCallResponse {
     pub execution_order: u64,
-    pub target_contract_address: String,
     pub msg: CosmosMsg,
 }
 

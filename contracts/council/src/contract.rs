@@ -210,9 +210,9 @@ pub fn execute_submit_proposal(
     let option_proposal_execute_calls = if let Some(calls) = option_msg_execute_calls {
         let mut proposal_execute_calls: Vec<ProposalExecuteCall> = vec![];
         for call in calls {
+            // TODO validate contract address?
             proposal_execute_calls.push(ProposalExecuteCall {
                 execution_order: call.execution_order,
-                target_contract_address: deps.api.addr_validate(&call.target_contract_address)?,
                 msg: call.msg,
             });
         }
@@ -696,7 +696,6 @@ fn map_execute_calls_response(
             .map(|execute_call| {
                 Some(ProposalExecuteCallResponse {
                     execution_order: execute_call.execution_order,
-                    target_contract_address: execute_call.target_contract_address.to_string(),
                     msg: execute_call.msg.clone(),
                 })
             })
@@ -1153,7 +1152,6 @@ mod tests {
                 link: Some("https://www.avalidlink.com".to_string()),
                 execute_calls: Some(vec![MsgExecuteCall {
                     execution_order: 0,
-                    target_contract_address: String::from(MOCK_CONTRACT_ADDR),
                     msg: CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from(MOCK_CONTRACT_ADDR),
                         msg: to_binary(&ExecuteMsg::UpdateConfig {
@@ -1197,7 +1195,6 @@ mod tests {
             proposal.execute_calls,
             Some(vec![ProposalExecuteCall {
                 execution_order: 0,
-                target_contract_address: Addr::unchecked(MOCK_CONTRACT_ADDR),
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from(MOCK_CONTRACT_ADDR),
                     msg: to_binary(&ExecuteMsg::UpdateConfig {
@@ -1510,7 +1507,6 @@ mod tests {
         let active_proposal_2_id = 2_u64;
         let execute_calls = Option::from(vec![ProposalExecuteCall {
             execution_order: 0,
-            target_contract_address: Addr::unchecked("test_address"),
             msg: CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("test_address"),
                 msg: Binary::from(br#"{"some":123}"#),
@@ -1539,10 +1535,15 @@ mod tests {
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_2_id);
-        assert_eq!(
-            res.proposal_list[1].execute_calls.clone().unwrap()[0].target_contract_address,
-            String::from("test_address")
-        );
+        match &res.proposal_list[1].execute_calls.clone().unwrap()[0].msg {
+            CosmosMsg::Wasm(msg) => match msg {
+                WasmMsg::Execute { contract_addr, .. } => {
+                    assert_eq!(contract_addr, &String::from("test_address"));
+                }
+                _ => panic!("incorrect WasmMsg variant"),
+            },
+            _ => panic!("incorrect CosmosMsg variant"),
+        }
 
         // Assert start != 0
         let res = query_proposals(deps.as_ref(), Some(2), None).unwrap();
@@ -1876,7 +1877,6 @@ mod tests {
                             msg: binary_msg.clone(),
                             funds: vec![],
                         }),
-                        target_contract_address: other_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 3,
@@ -1888,7 +1888,6 @@ mod tests {
                             .unwrap(),
                             funds: vec![],
                         }),
-                        target_contract_address: contract_address.clone(),
                     },
                     ProposalExecuteCall {
                         execution_order: 1,
@@ -1900,7 +1899,6 @@ mod tests {
                             .unwrap(),
                             funds: vec![],
                         }),
-                        target_contract_address: contract_address.clone(),
                     },
                 ]),
                 ..Default::default()
