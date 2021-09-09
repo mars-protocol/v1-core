@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use cosmwasm_std::{Addr, Decimal, StdResult, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
-use mars::{council::msg::ProposalExecuteCall, helpers::all_conditions_valid};
+use mars::{council::msg::ProposalMessage, helpers::all_conditions_valid};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("global_state");
@@ -70,7 +70,7 @@ pub struct Proposal {
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_calls: Option<Vec<ProposalExecuteCall>>,
+    pub messages: Option<Vec<ProposalMessage>>,
     pub deposit_amount: Uint128,
 }
 

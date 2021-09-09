@@ -1,7 +1,7 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
-use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
-use mars::council::msg::ProposalExecuteCall;
+use mars::council::msg::ProposalMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +52,7 @@ pub enum ReceiveMsg {
         title: String,
         description: String,
         link: Option<String>,
-        execute_calls: Option<Vec<ProposalExecuteCall>>,
+        messages: Option<Vec<ProposalMessage>>,
     },
 }
 
@@ -105,14 +105,8 @@ pub struct ProposalInfo {
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_calls: Option<Vec<ProposalExecuteCallResponse>>,
+    pub messages: Option<Vec<ProposalMessage>>,
     pub deposit_amount: Uint128,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ProposalExecuteCallResponse {
-    pub execution_order: u64,
-    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -5,7 +5,7 @@ pub mod msg {
 
     /// Execute call that will be executed by the DAO if the proposal succeeds
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ProposalExecuteCall {
+    pub struct ProposalMessage {
         pub execution_order: u64,
         pub msg: CosmosMsg,
     }

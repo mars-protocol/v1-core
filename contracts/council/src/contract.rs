@@ -8,16 +8,15 @@ use cw_storage_plus::{Bound, U64Key};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::council::msg::ProposalExecuteCall;
+use mars::council::msg::ProposalMessage;
 use mars::error::MarsError;
 use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
 use mars::xmars_token;
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, ProposalExecuteCallResponse,
-    ProposalInfo, ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg,
-    ReceiveMsg,
+    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, ProposalInfo,
+    ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg, ReceiveMsg,
 };
 use crate::state::{
     Config, GlobalState, Proposal, ProposalStatus, ProposalVote, ProposalVoteOption, CONFIG,
@@ -134,7 +133,7 @@ pub fn execute_receive_cw20(
             title,
             description,
             link,
-            execute_calls,
+            messages,
         } => execute_submit_proposal(
             deps,
             env,
@@ -144,7 +143,7 @@ pub fn execute_receive_cw20(
             title,
             description,
             link,
-            execute_calls,
+            messages,
         ),
     }
 }
@@ -158,7 +157,7 @@ pub fn execute_submit_proposal(
     title: String,
     description: String,
     option_link: Option<String>,
-    option_msg_execute_calls: Option<Vec<ProposalExecuteCall>>,
+    option_messages: Option<Vec<ProposalMessage>>,
 ) -> Result<Response, ContractError> {
     // Validate title
     if title.len() < MIN_TITLE_LENGTH {
@@ -207,20 +206,6 @@ pub fn execute_submit_proposal(
     global_state.proposal_count += 1;
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
-    // Transform MsgExecuteCalls into ProposalExecuteCalls
-    let option_proposal_execute_calls = if let Some(calls) = option_msg_execute_calls {
-        let proposal_execute_calls = calls
-            .into_iter()
-            .map(|call| ProposalExecuteCall {
-                execution_order: call.execution_order,
-                msg: call.msg,
-            })
-            .collect();
-        Some(proposal_execute_calls)
-    } else {
-        None
-    };
-
     let new_proposal = Proposal {
         submitter_address: deps.api.addr_validate(&submitter_address_unchecked)?,
         status: ProposalStatus::Active,
@@ -231,7 +216,7 @@ pub fn execute_submit_proposal(
         title,
         description,
         link: option_link,
-        execute_calls: option_proposal_execute_calls,
+        messages: option_messages,
         deposit_amount,
     };
     PROPOSALS.save(
@@ -445,17 +430,13 @@ pub fn execute_execute_proposal(
     proposal.status = ProposalStatus::Executed;
     proposal_path.save(deps.storage, &proposal)?;
 
-    let messages: Vec<CosmosMsg> = proposal
-        .execute_calls
-        .map(|mut proposal_execute_calls| {
-            proposal_execute_calls.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
-
-            proposal_execute_calls
-                .into_iter()
-                .map(|execute_call| execute_call.msg)
-                .collect()
-        })
-        .unwrap_or_else(Vec::new);
+    let messages = match proposal.messages {
+        Some(mut messages) => {
+            messages.sort_by(|a, b| a.execution_order.cmp(&b.execution_order));
+            messages.into_iter().map(|message| message.msg).collect()
+        }
+        None => vec![],
+    };
 
     let response = Response::new()
         .add_attributes(vec![
@@ -590,7 +571,7 @@ fn query_proposals(
                 title: v.title,
                 description: v.description,
                 link: v.link,
-                execute_calls: map_execute_calls_response(v.execute_calls)?,
+                messages: v.messages,
                 deposit_amount: v.deposit_amount,
             })
         })
@@ -616,7 +597,7 @@ fn query_proposal(deps: Deps, proposal_id: u64) -> StdResult<ProposalInfo> {
         title: proposal.title,
         description: proposal.description,
         link: proposal.link,
-        execute_calls: map_execute_calls_response(proposal.execute_calls)?,
+        messages: proposal.messages,
         deposit_amount: proposal.deposit_amount,
     })
 }
@@ -687,23 +668,6 @@ fn xmars_get_balance_at(
     Ok(query.balance)
 }
 
-fn map_execute_calls_response(
-    execute_calls: Option<Vec<ProposalExecuteCall>>,
-) -> Result<Option<Vec<ProposalExecuteCallResponse>>, StdError> {
-    Ok(match execute_calls {
-        Some(execute_calls) => execute_calls
-            .iter()
-            .map(|execute_call| {
-                Some(ProposalExecuteCallResponse {
-                    execution_order: execute_call.execution_order,
-                    msg: execute_call.msg.clone(),
-                })
-            })
-            .collect(),
-        None => Option::None,
-    })
-}
-
 // TESTS
 
 #[cfg(test)]
@@ -717,6 +681,7 @@ mod tests {
     };
 
     use crate::msg::ExecuteMsg::UpdateConfig;
+    use crate::msg::MigrateMsg;
 
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
     const TEST_PROPOSAL_EFFECTIVE_DELAY: u64 = 200;
@@ -931,7 +896,7 @@ mod tests {
                     title: "a".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -949,7 +914,7 @@ mod tests {
                     title: (0..100).map(|_| "a").collect::<String>(),
                     description: "A valid description".to_string(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -970,7 +935,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: "a".to_string(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -991,7 +956,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: (0..1030).map(|_| "a").collect::<String>(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -1015,7 +980,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some("a".to_string()),
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -1033,7 +998,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: Some((0..150).map(|_| "a").collect::<String>()),
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -1054,7 +1019,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -1078,7 +1043,7 @@ mod tests {
                     title: "A valid Title".to_string(),
                     description: "A valid description".to_string(),
                     link: None,
-                    execute_calls: None,
+                    messages: None,
                 })
                 .unwrap(),
                 sender: String::from("submitter"),
@@ -1105,7 +1070,7 @@ mod tests {
                 title: "A valid title".to_string(),
                 description: "A valid description".to_string(),
                 link: None,
-                execute_calls: None,
+                messages: None,
             })
             .unwrap(),
             sender: submitter_address.to_string(),
@@ -1141,7 +1106,7 @@ mod tests {
         assert_eq!(proposal.title, "A valid title");
         assert_eq!(proposal.description, "A valid description");
         assert_eq!(proposal.link, None);
-        assert_eq!(proposal.execute_calls, None);
+        assert_eq!(proposal.messages, None);
         assert_eq!(proposal.deposit_amount, TEST_PROPOSAL_REQUIRED_DEPOSIT);
 
         // Submit Proposal with link and call data
@@ -1150,7 +1115,7 @@ mod tests {
                 title: "A valid title".to_string(),
                 description: "A valid description".to_string(),
                 link: Some("https://www.avalidlink.com".to_string()),
-                execute_calls: Some(vec![ProposalExecuteCall {
+                messages: Some(vec![ProposalMessage {
                     execution_order: 0,
                     msg: CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from(MOCK_CONTRACT_ADDR),
@@ -1192,8 +1157,8 @@ mod tests {
             Some("https://www.avalidlink.com".to_string())
         );
         assert_eq!(
-            proposal.execute_calls,
-            Some(vec![ProposalExecuteCall {
+            proposal.messages,
+            Some(vec![ProposalMessage {
                 execution_order: 0,
                 msg: CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from(MOCK_CONTRACT_ADDR),
@@ -1505,13 +1470,14 @@ mod tests {
         );
 
         let active_proposal_2_id = 2_u64;
-        let execute_calls = Option::from(vec![ProposalExecuteCall {
+        let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: String::from("test_address"),
+            msg: Binary::from(br#"{"some":123}"#),
+            funds: vec![],
+        });
+        let messages = Option::from(vec![ProposalMessage {
             execution_order: 0,
-            msg: CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: String::from("test_address"),
-                msg: Binary::from(br#"{"some":123}"#),
-                funds: vec![],
-            }),
+            msg: msg.clone(),
         }]);
         th_build_mock_proposal(
             deps.as_mut(),
@@ -1520,7 +1486,7 @@ mod tests {
                 status: ProposalStatus::Active,
                 start_height: 100_000,
                 end_height: 100_100,
-                execute_calls,
+                messages,
                 ..Default::default()
             },
         );
@@ -1535,18 +1501,7 @@ mod tests {
         assert_eq!(res.proposal_list.len(), 2);
         assert_eq!(res.proposal_list[0].proposal_id, active_proposal_1_id);
         assert_eq!(res.proposal_list[1].proposal_id, active_proposal_2_id);
-        match res.proposal_list[1].execute_calls.clone().unwrap()[0]
-            .msg
-            .clone()
-        {
-            CosmosMsg::Wasm(msg) => match msg {
-                WasmMsg::Execute { contract_addr, .. } => {
-                    assert_eq!(contract_addr, String::from("test_address"));
-                }
-                _ => panic!("incorrect WasmMsg variant"),
-            },
-            _ => panic!("incorrect CosmosMsg variant"),
-        }
+        assert_eq!(res.proposal_list[1].messages.clone().unwrap()[0].msg, msg);
 
         // Assert start != 0
         let res = query_proposals(deps.as_ref(), Some(2), None).unwrap();
@@ -1872,8 +1827,8 @@ mod tests {
                 id: 1,
                 status: ProposalStatus::Passed,
                 end_height: 100_000,
-                execute_calls: Some(vec![
-                    ProposalExecuteCall {
+                messages: Some(vec![
+                    ProposalMessage {
                         execution_order: 2,
                         msg: CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: other_address.to_string(),
@@ -1881,7 +1836,7 @@ mod tests {
                             funds: vec![],
                         }),
                     },
-                    ProposalExecuteCall {
+                    ProposalMessage {
                         execution_order: 3,
                         msg: CosmosMsg::Wasm(WasmMsg::Execute {
                             contract_addr: contract_address.to_string(),
@@ -1892,15 +1847,12 @@ mod tests {
                             funds: vec![],
                         }),
                     },
-                    ProposalExecuteCall {
+                    ProposalMessage {
                         execution_order: 1,
-                        msg: CosmosMsg::Wasm(WasmMsg::Execute {
+                        msg: CosmosMsg::Wasm(WasmMsg::Migrate {
                             contract_addr: contract_address.to_string(),
-                            msg: to_binary(&ExecuteMsg::UpdateConfig {
-                                config: CreateOrUpdateConfig::default(),
-                            })
-                            .unwrap(),
-                            funds: vec![],
+                            new_code_id: 123,
+                            msg: to_binary(&MigrateMsg {}).unwrap(),
                         }),
                     },
                 ]),
@@ -1929,13 +1881,10 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![
-                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: contract_address.to_string(),
-                    funds: vec![],
-                    msg: to_binary(&ExecuteMsg::UpdateConfig {
-                        config: CreateOrUpdateConfig::default()
-                    })
-                    .unwrap(),
+                    new_code_id: 123,
+                    msg: to_binary(&MigrateMsg {}).unwrap(),
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: other_address.to_string(),
@@ -2105,7 +2054,7 @@ mod tests {
         against_votes: Uint128,
         start_height: u64,
         end_height: u64,
-        execute_calls: Option<Vec<ProposalExecuteCall>>,
+        messages: Option<Vec<ProposalMessage>>,
     }
 
     impl Default for MockProposal {
@@ -2117,7 +2066,7 @@ mod tests {
                 against_votes: Uint128::zero(),
                 start_height: 1,
                 end_height: 1,
-                execute_calls: None,
+                messages: None,
             }
         }
     }
@@ -2133,7 +2082,7 @@ mod tests {
             title: "A valid title".to_string(),
             description: "A description".to_string(),
             link: None,
-            execute_calls: mock_proposal.execute_calls,
+            messages: mock_proposal.messages,
             deposit_amount: TEST_PROPOSAL_REQUIRED_DEPOSIT,
         };
 
