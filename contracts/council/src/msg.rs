@@ -1,5 +1,6 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
-use cosmwasm_std::{Binary, Decimal, Uint128};
+use crate::types::ProposalMessage;
+use cosmwasm_std::{Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,19 +52,8 @@ pub enum ReceiveMsg {
         title: String,
         description: String,
         link: Option<String>,
-        execute_calls: Option<Vec<MsgExecuteCall>>,
+        messages: Option<Vec<ProposalMessage>>,
     },
-}
-
-/// Execute call that will be done by the DAO if the proposal succeeds.
-/// Contains a the msg and contract_addr attributes of a WasmMsg::Execute call
-/// As this is part of the proposal creation call, the contract unchecked string is sent
-/// (vs the validated address when persisted)
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MsgExecuteCall {
-    pub execution_order: u64,
-    pub target_contract_address: String,
-    pub msg: Binary,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -115,15 +105,8 @@ pub struct ProposalInfo {
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_calls: Option<Vec<ProposalExecuteCallResponse>>,
+    pub messages: Option<Vec<ProposalMessage>>,
     pub deposit_amount: Uint128,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ProposalExecuteCallResponse {
-    pub execution_order: u64,
-    pub target_contract_address: String,
-    pub msg: Binary,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
