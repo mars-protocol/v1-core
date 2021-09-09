@@ -83,11 +83,25 @@ async function castVote(terra: LCDClient, wallet: Wallet, council: string, propo
 }
 
 async function waitUntilBlockHeight(blockHeight: number) {
-  let latestBlockHeight = await getLatestBlockHeight()
+  const maxTries = 10
+  let tries = 0
   let backoff = 1
-  while (latestBlockHeight < blockHeight) {
+  while (true) {
+    const latestBlockHeight = await getLatestBlockHeight()
+    if (latestBlockHeight >= blockHeight) {
+      break
+    }
+
+    // timeout
+    tries++
+    if (tries == maxTries) {
+      throw new Error(
+        `timed out waiting for block height ${blockHeight}, current block height: ${latestBlockHeight}`
+      )
+    }
+
+    // exponential backoff
     await sleep(backoff * 1000)
-    latestBlockHeight = await getLatestBlockHeight()
     backoff *= 2
   }
 }
