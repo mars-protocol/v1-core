@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use cosmwasm_std::{Addr, Decimal, StdResult, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
-use mars::{council::msg::ProposalMessage, helpers::all_conditions_valid};
+use crate::types::ProposalMessage;
+use mars::helpers::all_conditions_valid;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("global_state");

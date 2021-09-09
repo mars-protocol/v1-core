@@ -1,7 +1,7 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
+use crate::types::ProposalMessage;
 use cosmwasm_std::{Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
-use mars::council::msg::ProposalMessage;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

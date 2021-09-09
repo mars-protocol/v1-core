@@ -8,7 +8,6 @@ use cw_storage_plus::{Bound, U64Key};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
-use mars::council::msg::ProposalMessage;
 use mars::error::MarsError;
 use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
 use mars::xmars_token;
@@ -22,6 +21,7 @@ use crate::state::{
     Config, GlobalState, Proposal, ProposalStatus, ProposalVote, ProposalVoteOption, CONFIG,
     GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
 };
+use crate::types::ProposalMessage;
 
 // Proposal validation attributes
 const MIN_TITLE_LENGTH: usize = 4;
