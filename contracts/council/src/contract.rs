@@ -1819,6 +1819,7 @@ mod tests {
         let mut deps = th_setup(&[]);
         let contract_address = Addr::unchecked(MOCK_CONTRACT_ADDR);
         let other_address = Addr::unchecked("other");
+        let new_code_id = 123;
 
         let binary_msg = Binary::from(br#"{"key": 123}"#);
         let initial_proposal = th_build_mock_proposal(
@@ -1851,7 +1852,7 @@ mod tests {
                         execution_order: 1,
                         msg: CosmosMsg::Wasm(WasmMsg::Migrate {
                             contract_addr: contract_address.to_string(),
-                            new_code_id: 123,
+                            new_code_id,
                             msg: to_binary(&MigrateMsg {}).unwrap(),
                         }),
                     },
@@ -1883,7 +1884,7 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: contract_address.to_string(),
-                    new_code_id: 123,
+                    new_code_id,
                     msg: to_binary(&MigrateMsg {}).unwrap(),
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
