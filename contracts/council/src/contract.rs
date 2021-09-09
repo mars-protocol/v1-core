@@ -8,19 +8,20 @@ use cw_storage_plus::{Bound, U64Key};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
+use mars::council::msg::ProposalExecuteCall;
 use mars::error::MarsError;
 use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
 use mars::xmars_token;
 
 use crate::error::ContractError;
 use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, MsgExecuteCall,
-    ProposalExecuteCallResponse, ProposalInfo, ProposalVoteResponse, ProposalVotesResponse,
-    ProposalsListResponse, QueryMsg, ReceiveMsg,
+    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, ProposalExecuteCallResponse,
+    ProposalInfo, ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg,
+    ReceiveMsg,
 };
 use crate::state::{
-    Config, GlobalState, Proposal, ProposalExecuteCall, ProposalStatus, ProposalVote,
-    ProposalVoteOption, CONFIG, GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
+    Config, GlobalState, Proposal, ProposalStatus, ProposalVote, ProposalVoteOption, CONFIG,
+    GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
 };
 
 // Proposal validation attributes
@@ -157,7 +158,7 @@ pub fn execute_submit_proposal(
     title: String,
     description: String,
     option_link: Option<String>,
-    option_msg_execute_calls: Option<Vec<MsgExecuteCall>>,
+    option_msg_execute_calls: Option<Vec<ProposalExecuteCall>>,
 ) -> Result<Response, ContractError> {
     // Validate title
     if title.len() < MIN_TITLE_LENGTH {
@@ -1149,7 +1150,7 @@ mod tests {
                 title: "A valid title".to_string(),
                 description: "A valid description".to_string(),
                 link: Some("https://www.avalidlink.com".to_string()),
-                execute_calls: Some(vec![MsgExecuteCall {
+                execute_calls: Some(vec![ProposalExecuteCall {
                     execution_order: 0,
                     msg: CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from(MOCK_CONTRACT_ADDR),

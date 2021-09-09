@@ -1,6 +1,7 @@
 use crate::state::{ProposalStatus, ProposalVoteOption};
 use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
 use cw20::Cw20ReceiveMsg;
+use mars::council::msg::ProposalExecuteCall;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -51,15 +52,8 @@ pub enum ReceiveMsg {
         title: String,
         description: String,
         link: Option<String>,
-        execute_calls: Option<Vec<MsgExecuteCall>>,
+        execute_calls: Option<Vec<ProposalExecuteCall>>,
     },
-}
-
-/// Execute call that will be executed by the DAO if the proposal succeeds
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MsgExecuteCall {
-    pub execution_order: u64,
-    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -1,10 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, CosmosMsg, Decimal, StdResult, Uint128};
+use cosmwasm_std::{Addr, Decimal, StdResult, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
-use mars::helpers::all_conditions_valid;
+use mars::{council::msg::ProposalExecuteCall, helpers::all_conditions_valid};
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("global_state");
@@ -81,13 +81,6 @@ pub enum ProposalStatus {
     Passed,
     Rejected,
     Executed,
-}
-
-/// Execute call that will be executed by the DAO if the proposal succeeds
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ProposalExecuteCall {
-    pub execution_order: u64,
-    pub msg: CosmosMsg,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

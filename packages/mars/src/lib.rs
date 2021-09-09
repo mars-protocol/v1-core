@@ -1,5 +1,6 @@
 // Contracts
 pub mod address_provider;
+pub mod council;
 pub mod cw20_core;
 pub mod incentives;
 pub mod ma_token;
