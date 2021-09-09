@@ -222,44 +222,58 @@ async function main() {
             title: "Init Luna",
             description: "Initialise Luna",
             link: "http://www.terra.money",
-            execute_calls: [
+            messages: [
               // init luna as an asset in the red bank contract
               {
                 execution_order: 1,
-                target_contract_address: redBank,
-                msg: toEncodedBinary({
-                  init_asset: {
-                    asset: { native: { denom: "uluna" } },
-                    asset_params: {
-                      initial_borrow_rate: "0.1",
-                      max_loan_to_value: "0.55",
-                      reserve_factor: "0.2",
-                      maintenance_margin: "0.65",
-                      liquidation_bonus: "0.1",
-                      interest_rate_strategy: {
-                        dynamic: {
-                          min_borrow_rate: "0.0",
-                          max_borrow_rate: "2.0",
-                          kp_1: "0.02",
-                          optimal_utilization_rate: "0.7",
-                          kp_augmentation_threshold: "0.15",
-                          kp_2: "0.05"
+                msg: {
+                  wasm: {
+                    execute: {
+                      contract_addr: redBank,
+                      funds: [],
+                      msg: toEncodedBinary({
+                        init_asset: {
+                          asset: { native: { denom: "uluna" } },
+                          asset_params: {
+                            initial_borrow_rate: "0.1",
+                            max_loan_to_value: "0.55",
+                            reserve_factor: "0.2",
+                            maintenance_margin: "0.65",
+                            liquidation_bonus: "0.1",
+                            interest_rate_strategy: {
+                              dynamic: {
+                                min_borrow_rate: "0.0",
+                                max_borrow_rate: "2.0",
+                                kp_1: "0.02",
+                                optimal_utilization_rate: "0.7",
+                                kp_augmentation_threshold: "0.15",
+                                kp_2: "0.05"
+                              }
+                            }
+                          }
                         }
-                      }
+                      })
                     }
                   }
-                })
+                }
               },
               // set a fixed price for luna in the oracle contract
               {
                 execution_order: 2,
-                target_contract_address: oracle,
-                msg: toEncodedBinary({
-                  set_asset: {
-                    asset: { native: { denom: "uluna" } },
-                    price_source: { fixed: { price: String(LUNA_USD_PRICE) } }
+                msg: {
+                  wasm: {
+                    execute: {
+                      contract_addr: oracle,
+                      funds: [],
+                      msg: toEncodedBinary({
+                        set_asset: {
+                          asset: { native: { denom: "uluna" } },
+                          price_source: { fixed: { price: String(LUNA_USD_PRICE) } }
+                        }
+                      })
+                    }
                   }
-                })
+                }
               }
             ]
           }
