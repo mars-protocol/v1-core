@@ -34,7 +34,7 @@
       "minimum": 0.0
     },
     "proposal_required_deposit": {
-      "description": "Number of Mars needed to make a proposal. Will be returned if successful. Will be distributed between stakers if proposal is not executed.",
+      "description": "Number of Mars needed to make a proposal. Will be returned if successful. Will be distributed between stakers if rejected.",
       "allOf": [
         {
           "$ref": "#/definitions/Uint128"
