@@ -206,16 +206,15 @@ pub fn execute_submit_proposal(
     global_state.proposal_count += 1;
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
-    // Transform MsgExecuteCalls into ProposalExecuteCalls by validating the contract address
+    // Transform MsgExecuteCalls into ProposalExecuteCalls
     let option_proposal_execute_calls = if let Some(calls) = option_msg_execute_calls {
-        let mut proposal_execute_calls: Vec<ProposalExecuteCall> = vec![];
-        for call in calls {
-            // TODO validate contract address?
-            proposal_execute_calls.push(ProposalExecuteCall {
+        let proposal_execute_calls = calls
+            .into_iter()
+            .map(|call| ProposalExecuteCall {
                 execution_order: call.execution_order,
                 msg: call.msg,
-            });
-        }
+            })
+            .collect();
         Some(proposal_execute_calls)
     } else {
         None
@@ -655,7 +654,7 @@ fn query_proposal_votes(
 }
 
 // HELPERS
-//
+
 fn xmars_get_total_supply_at(
     querier: &QuerierWrapper,
     xmars_address: Addr,
