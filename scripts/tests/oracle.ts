@@ -1,8 +1,55 @@
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { deployContract, executeContract, queryContract, setTimeoutDuration } from "../helpers.js"
-import { strictEqual } from "assert"
+import { Dec, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { deployContract, executeContract, queryContract, setTimeoutDuration, sleep } from "../helpers.js"
+import { strictEqual, strict as assert } from "assert"
 
-async function testNativeTokenOracle(terra: LCDClient, deployer: Wallet, oracle: string, denom: string) {
+// HELPERS
+
+async function waitUntilTerraOracleAvailable(terra: LCDClient) {
+  let tries = 0
+  const maxTries = 10
+  let backoff = 1
+  while (true) {
+    const activeDenoms = await terra.oracle.activeDenoms()
+    if (activeDenoms.includes("uusd")) {
+      break
+    }
+
+    // timeout
+    tries++
+    if (tries == maxTries) {
+      throw new Error(`Terra oracle not available after ${maxTries} tries`)
+    }
+
+    // exponential backoff
+    console.log(`Terra oracle not available, sleeping for ${backoff} s`)
+    await sleep(backoff * 1000)
+    backoff *= 2
+  }
+}
+
+// TESTS
+
+async function testLunaPrice(terra: LCDClient, deployer: Wallet, oracle: string) {
+  console.log("testLunaPrice")
+
+  await executeContract(terra, deployer, oracle,
+    {
+      set_asset: {
+        asset: { native: { denom: "uluna" } },
+        price_source: { native: { denom: "uluna" } }
+      }
+    }
+  )
+
+  const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom: "uluna" } } } })
+  const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
+
+  strictEqual(new Dec(marsOraclePrice).toString(), terraOraclePrice?.amount.toString())
+}
+
+async function testNativeTokenPrice(terra: LCDClient, deployer: Wallet, oracle: string, denom: string) {
+  console.log("testNativeTokenPrice:", denom)
+
   await executeContract(terra, deployer, oracle,
     {
       set_asset: {
@@ -13,10 +60,16 @@ async function testNativeTokenOracle(terra: LCDClient, deployer: Wallet, oracle:
   )
 
   const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom } } } })
-  const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
+  const terraOraclePrice = await terra.oracle.exchangeRate(denom)
+  const terraOracleLunaUsdPrice = await terra.oracle.exchangeRate("uusd")
 
-  strictEqual(marsOraclePrice, terraOraclePrice?.amount)
+  const denomUsdPrice = new Dec(terraOracleLunaUsdPrice?.amount)
+    .div(new Dec(terraOraclePrice?.amount))
+
+  strictEqual(new Dec(marsOraclePrice).toString(), denomUsdPrice.toString())
 }
+
+// MAIN
 
 async function main() {
   setTimeoutDuration(0)
@@ -24,11 +77,9 @@ async function main() {
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
 
-  // Check Terra uusd oracle is available, if not, try again in a few seconds
-  const activeDenoms = await terra.oracle.activeDenoms()
-  if (!activeDenoms.includes("uusd")) {
-    throw new Error("Terra uusd oracle unavailable")
-  }
+  await waitUntilTerraOracleAvailable(terra)
+
+  console.log("upload contracts")
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
     {
@@ -36,6 +87,13 @@ async function main() {
     }
   )
 
-  await testNativeTokenOracle(terra, deployer, oracle, "uluna")
+  await testLunaPrice(terra, deployer, oracle)
+
+  await testNativeTokenPrice(terra, deployer, oracle, "uusd")
+  await testNativeTokenPrice(terra, deployer, oracle, "ueur")
+  await testNativeTokenPrice(terra, deployer, oracle, "ukrw")
+
+  console.log("OK")
 }
 
+main().catch(err => console.log(err))
