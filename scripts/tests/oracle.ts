@@ -1,6 +1,6 @@
 import { Dec, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { deployContract, executeContract, queryContract, setTimeoutDuration, sleep } from "../helpers.js"
-import { strictEqual, strict as assert } from "assert"
+import { strictEqual } from "assert"
 
 // HELPERS
 
