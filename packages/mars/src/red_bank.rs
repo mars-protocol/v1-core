@@ -241,6 +241,9 @@ pub mod msg {
         pub asset_type: AssetType,
         pub maintenance_margin: Decimal,
         pub liquidation_bonus: Decimal,
+        pub reserve_factor: Decimal,
+        pub interest_rate_strategy: InterestRateStrategy,
+        pub protocol_income_to_distribute: Uint128,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

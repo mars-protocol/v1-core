@@ -1783,6 +1783,9 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         asset_type: market.asset_type,
         maintenance_margin: market.maintenance_margin,
         liquidation_bonus: market.liquidation_bonus,
+        reserve_factor: market.reserve_factor,
+        interest_rate_strategy: market.interest_rate_strategy,
+        protocol_income_to_distribute: market.protocol_income_to_distribute,
     })
 }
 
