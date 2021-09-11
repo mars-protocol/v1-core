@@ -324,5 +324,12 @@ pub mod msg {
 
         /// Interest rate strategy to calculate borrow_rate and liquidity_rate
         pub interest_rate_strategy: Option<InterestRateStrategy>,
+
+        /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
+        pub active: Option<bool>,
+        /// If false cannot deposit
+        pub deposit_enabled: Option<bool>,
+        /// If false cannot borrow
+        pub borrow_enabled: Option<bool>,
     }
 }
