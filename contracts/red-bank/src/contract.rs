@@ -332,6 +332,12 @@ pub fn execute_withdraw(
     let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
+    if !market.allow_withdraw() {
+        return Err(
+            StdError::generic_err(format!("Cannot withdraw asset {}", asset_label,)).into(),
+        );
+    }
+
     let asset_ma_addr = market.ma_token_address.clone();
     let withdrawer_balance_scaled =
         cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
@@ -638,6 +644,10 @@ pub fn execute_deposit(
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
+    if !market.allow_deposit() {
+        return Err(StdError::generic_err(format!("Cannot deposit asset {}", asset_label,)).into());
+    }
+
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
         return Err(StdError::generic_err(format!(
@@ -718,7 +728,12 @@ pub fn execute_borrow(
     // Load market and user state
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
-        Ok(borrow_market) => borrow_market,
+        Ok(borrow_market) if borrow_market.allow_borrow() => borrow_market,
+        Ok(_) => {
+            return Err(
+                StdError::generic_err(format!("Cannot borrow asset {}", asset_label,)).into(),
+            );
+        }
         Err(_) => {
             return Err(StdError::generic_err(format!(
                 "no borrow market exists with asset reference: {}",
@@ -898,6 +913,10 @@ pub fn execute_repay(
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
+    if !market.allow_repay() {
+        return Err(StdError::generic_err(format!("Cannot repay asset {}", asset_label,)).into());
+    }
+
     // Get repay amount
     // Cannot repay zero amount
     if repay_amount.is_zero() {
@@ -1030,6 +1049,14 @@ pub fn execute_liquidate(
     let mut collateral_market =
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
+    if !collateral_market.allow_liquidate() {
+        return Err(StdError::generic_err(format!(
+            "Cannot liquidate. Collateral asset {}",
+            collateral_asset_label,
+        ))
+        .into());
+    }
+
     // check if user has available collateral in specified collateral asset to be liquidated
     let user_collateral_balance_scaled = cw20_get_balance(
         &deps.querier,
@@ -1094,6 +1121,14 @@ pub fn execute_liquidate(
     }
 
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
+
+    if !debt_market.allow_liquidate() {
+        return Err(StdError::generic_err(format!(
+            "Cannot liquidate. Debt asset {}",
+            debt_asset_label,
+        ))
+        .into());
+    }
 
     // 3. Compute debt to repay and collateral to liquidate
     let collateral_price = user_position.get_asset_price(

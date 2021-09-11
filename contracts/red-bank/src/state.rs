@@ -114,6 +114,13 @@ pub struct Market {
     pub debt_total_scaled: Uint128,
     /// Income to be distributed to other protocol contracts
     pub protocol_income_to_distribute: Uint128,
+
+    /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
+    pub active: bool,
+    /// If false cannot deposit nor borrow
+    pub unfrozen: bool,
+    /// If false cannot borrow
+    pub borrowing_enabled: bool,
 }
 
 impl Market {
@@ -133,6 +140,9 @@ impl Market {
             maintenance_margin,
             liquidation_bonus,
             interest_rate_strategy,
+            active,
+            unfrozen,
+            borrowing_enabled,
         } = params;
 
         // All fields should be available
@@ -141,7 +151,10 @@ impl Market {
             && reserve_factor.is_some()
             && maintenance_margin.is_some()
             && liquidation_bonus.is_some()
-            && interest_rate_strategy.is_some();
+            && interest_rate_strategy.is_some()
+            && active.is_some()
+            && unfrozen.is_some()
+            && borrowing_enabled.is_some();
 
         if !available {
             return Err(StdError::generic_err(
@@ -165,6 +178,9 @@ impl Market {
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint128::zero(),
             interest_rate_strategy: interest_rate_strategy.unwrap(),
+            active: active.unwrap(),
+            unfrozen: unfrozen.unwrap(),
+            borrowing_enabled: borrowing_enabled.unwrap(),
         };
 
         new_market.validate()?;
@@ -223,6 +239,9 @@ impl Market {
             maintenance_margin,
             liquidation_bonus,
             interest_rate_strategy,
+            active,
+            unfrozen,
+            borrowing_enabled,
         } = params;
 
         // If reserve factor or interest rates are updated we update indexes with
@@ -243,6 +262,9 @@ impl Market {
             maintenance_margin: maintenance_margin.unwrap_or(self.maintenance_margin),
             liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
             interest_rate_strategy: interest_rate_strategy.unwrap_or(self.interest_rate_strategy),
+            active: active.unwrap_or(self.active),
+            unfrozen: unfrozen.unwrap_or(self.unfrozen),
+            borrowing_enabled: borrowing_enabled.unwrap_or(self.borrowing_enabled),
             ..self
         };
 
@@ -253,6 +275,26 @@ impl Market {
         }
 
         Ok((updated_market, should_update_interest_rates))
+    }
+
+    pub fn allow_deposit(&self) -> bool {
+        self.active && self.unfrozen
+    }
+
+    pub fn allow_withdraw(&self) -> bool {
+        self.active
+    }
+
+    pub fn allow_borrow(&self) -> bool {
+        self.active && self.unfrozen && self.borrowing_enabled
+    }
+
+    pub fn allow_repay(&self) -> bool {
+        self.active
+    }
+
+    pub fn allow_liquidate(&self) -> bool {
+        self.active
     }
 }
 
