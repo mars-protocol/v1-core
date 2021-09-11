@@ -2443,6 +2443,9 @@ mod tests {
             maintenance_margin: Some(Decimal::one()),
             liquidation_bonus: Some(Decimal::zero()),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+            active: Some(true),
+            unfrozen: Some(true),
+            borrowing_enabled: Some(true),
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2784,6 +2787,9 @@ mod tests {
             maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+            active: Some(true),
+            unfrozen: Some(true),
+            borrowing_enabled: Some(true),
         };
 
         // *
@@ -2954,6 +2960,9 @@ mod tests {
                 maintenance_margin: Some(Decimal::from_ratio(90u128, 100u128)),
                 liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
                 interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+                active: Some(true),
+                unfrozen: Some(true),
+                borrowing_enabled: Some(true),
             };
             let msg = ExecuteMsg::UpdateAsset {
                 asset: Asset::Native {
@@ -3012,6 +3021,9 @@ mod tests {
                 maintenance_margin: None,
                 liquidation_bonus: None,
                 interest_rate_strategy: None,
+                active: None,
+                unfrozen: None,
+                borrowing_enabled: None,
             };
             let msg = ExecuteMsg::UpdateAsset {
                 asset: Asset::Native {
@@ -3097,6 +3109,9 @@ mod tests {
             maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
+            active: Some(true),
+            unfrozen: Some(true),
+            borrowing_enabled: Some(true),
         };
 
         let msg = ExecuteMsg::InitAsset {
@@ -3209,6 +3224,9 @@ mod tests {
             maintenance_margin: None,
             liquidation_bonus: None,
             interest_rate_strategy: None,
+            active: None,
+            unfrozen: None,
+            borrowing_enabled: None,
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3493,6 +3511,39 @@ mod tests {
             error_res,
             StdError::not_found("red_bank::state::Market").into()
         );
+    }
+
+    #[test]
+    fn test_cannot_deposit_if_market_inactive_or_frozen() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: false,
+            unfrozen: false,
+            borrowing_enabled: false,
+            ..Default::default()
+        };
+        let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        // Check error when deposit not allowed on market
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("depositor", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::DepositNative {
+            denom: String::from("somecoin"),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            StdError::generic_err("Cannot deposit asset somecoin").into()
+        );
+
+        // Validate different configurations for borrowing market flags
+        market.active = true;
+        assert!(!market.allow_deposit());
+        market.unfrozen = true;
+        assert!(market.allow_deposit());
     }
 
     #[test]
@@ -3792,6 +3843,35 @@ mod tests {
         let info = mock_info("withdrawer");
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(error_res, StdError::generic_err("Withdraw amount must be greater than 0 and less or equal user balance (asset: somecoin)").into());
+    }
+
+    #[test]
+    fn test_cannot_withdraw_if_market_inactive() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: false,
+            unfrozen: true,
+            borrowing_enabled: true,
+            ..Default::default()
+        };
+        let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("withdrawer", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::Withdraw {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: Some(Uint128::new(2000)),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            StdError::generic_err("Cannot withdraw asset somecoin").into()
+        );
     }
 
     #[test]
@@ -4763,6 +4843,32 @@ mod tests {
     }
 
     #[test]
+    fn test_cannot_repay_if_market_inactive() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: false,
+            unfrozen: true,
+            borrowing_enabled: true,
+            ..Default::default()
+        };
+        let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("borrower", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::RepayNative {
+            denom: "somecoin".to_string(),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            StdError::generic_err("Cannot repay asset somecoin").into()
+        );
+    }
+
+    #[test]
     fn test_borrow_uusd() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
@@ -5134,6 +5240,44 @@ mod tests {
     }
 
     #[test]
+    fn test_cannot_borrow_if_market_disabled() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: false,
+            unfrozen: false,
+            borrowing_enabled: false,
+            ..Default::default()
+        };
+        let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        // Check error when borrowing not allowed on market
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("borrower", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::Borrow {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: Uint128::new(1000),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            StdError::generic_err("Cannot borrow asset somecoin").into()
+        );
+
+        // Validate different configurations for borrowing market flags
+        market.active = true;
+        assert!(!market.allow_borrow());
+        market.unfrozen = true;
+        assert!(!market.allow_borrow());
+        market.borrowing_enabled = true;
+        assert!(market.allow_borrow());
+    }
+
+    #[test]
     pub fn test_execute_liquidate() {
         // Setup
         let available_liquidity_collateral = 1_000_000_000u128;
@@ -5410,6 +5554,86 @@ mod tests {
                 StdError::generic_err("Must send more than 0 cw20_debt in order to liquidate")
                     .into()
             );
+        }
+
+        // trying to liquidate when collateral market inactive
+        {
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info(cw20_debt_contract_addr.as_str());
+            let liquidate_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::LiquidateCw20 {
+                    collateral_asset: Asset::Native {
+                        denom: "collateral".to_string(),
+                    },
+                    user_address: user_address.to_string(),
+                    receive_ma_token: true,
+                })
+                .unwrap(),
+                sender: liquidator_address.to_string(),
+                amount: Uint128::new(100),
+            });
+
+            let mut collateral_market = MARKETS.load(&deps.storage, b"collateral").unwrap();
+            collateral_market.active = false;
+            MARKETS
+                .save(&mut deps.storage, b"collateral", &collateral_market)
+                .unwrap();
+
+            let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err("Cannot liquidate. Collateral asset collateral").into()
+            );
+
+            collateral_market.active = true;
+            MARKETS
+                .save(&mut deps.storage, b"collateral", &collateral_market)
+                .unwrap();
+        }
+
+        // trying to liquidate when debt market inactive
+        {
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info(cw20_debt_contract_addr.as_str());
+            let liquidate_msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::LiquidateCw20 {
+                    collateral_asset: Asset::Native {
+                        denom: "collateral".to_string(),
+                    },
+                    user_address: user_address.to_string(),
+                    receive_ma_token: true,
+                })
+                .unwrap(),
+                sender: liquidator_address.to_string(),
+                amount: Uint128::new(100),
+            });
+
+            let mut cw20_debt_market = MARKETS
+                .load(&deps.storage, cw20_debt_contract_addr.as_bytes())
+                .unwrap();
+            cw20_debt_market.active = false;
+            MARKETS
+                .save(
+                    &mut deps.storage,
+                    cw20_debt_contract_addr.as_bytes(),
+                    &cw20_debt_market,
+                )
+                .unwrap();
+
+            let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                StdError::generic_err("Cannot liquidate. Debt asset cw20_debt").into()
+            );
+
+            cw20_debt_market.active = true;
+            MARKETS
+                .save(
+                    &mut deps.storage,
+                    cw20_debt_contract_addr.as_bytes(),
+                    &cw20_debt_market,
+                )
+                .unwrap();
         }
 
         // Perform first successful liquidation receiving ma_token in return
@@ -7189,6 +7413,9 @@ mod tests {
                 liquidation_bonus: Decimal::zero(),
                 protocol_income_to_distribute: Uint128::zero(),
                 interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
+                active: true,
+                unfrozen: true,
+                borrowing_enabled: true,
             }
         }
     }
