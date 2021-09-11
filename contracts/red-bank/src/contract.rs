@@ -2444,8 +2444,8 @@ mod tests {
             liquidation_bonus: Some(Decimal::zero()),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
-            unfrozen: Some(true),
-            borrowing_enabled: Some(true),
+            deposit_enabled: Some(true),
+            borrow_enabled: Some(true),
         };
         let msg = ExecuteMsg::InitAsset {
             asset: Asset::Native {
@@ -2788,8 +2788,8 @@ mod tests {
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
-            unfrozen: Some(true),
-            borrowing_enabled: Some(true),
+            deposit_enabled: Some(true),
+            borrow_enabled: Some(true),
         };
 
         // *
@@ -2961,8 +2961,8 @@ mod tests {
                 liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
                 interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
                 active: Some(true),
-                unfrozen: Some(true),
-                borrowing_enabled: Some(true),
+                deposit_enabled: Some(true),
+                borrow_enabled: Some(true),
             };
             let msg = ExecuteMsg::UpdateAsset {
                 asset: Asset::Native {
@@ -3022,8 +3022,8 @@ mod tests {
                 liquidation_bonus: None,
                 interest_rate_strategy: None,
                 active: None,
-                unfrozen: None,
-                borrowing_enabled: None,
+                deposit_enabled: None,
+                borrow_enabled: None,
             };
             let msg = ExecuteMsg::UpdateAsset {
                 asset: Asset::Native {
@@ -3110,8 +3110,8 @@ mod tests {
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
-            unfrozen: Some(true),
-            borrowing_enabled: Some(true),
+            deposit_enabled: Some(true),
+            borrow_enabled: Some(true),
         };
 
         let msg = ExecuteMsg::InitAsset {
@@ -3225,8 +3225,8 @@ mod tests {
             liquidation_bonus: None,
             interest_rate_strategy: None,
             active: None,
-            unfrozen: None,
-            borrowing_enabled: None,
+            deposit_enabled: None,
+            borrow_enabled: None,
         };
         let msg = ExecuteMsg::UpdateAsset {
             asset: Asset::Native {
@@ -3514,15 +3514,15 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_deposit_if_market_inactive_or_frozen() {
+    fn test_cannot_deposit_if_market_disabled() {
         let mut deps = th_setup(&[]);
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            unfrozen: false,
-            borrowing_enabled: false,
+            deposit_enabled: false,
+            borrow_enabled: false,
             ..Default::default()
         };
         let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
@@ -3539,10 +3539,10 @@ mod tests {
             StdError::generic_err("Cannot deposit asset somecoin").into()
         );
 
-        // Validate different configurations for borrowing market flags
+        // Validate different configurations for market flags
         market.active = true;
         assert!(!market.allow_deposit());
-        market.unfrozen = true;
+        market.deposit_enabled = true;
         assert!(market.allow_deposit());
     }
 
@@ -3853,8 +3853,8 @@ mod tests {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            unfrozen: true,
-            borrowing_enabled: true,
+            deposit_enabled: true,
+            borrow_enabled: true,
             ..Default::default()
         };
         let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
@@ -4850,8 +4850,8 @@ mod tests {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            unfrozen: true,
-            borrowing_enabled: true,
+            deposit_enabled: true,
+            borrow_enabled: true,
             ..Default::default()
         };
         let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
@@ -5247,8 +5247,8 @@ mod tests {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            unfrozen: false,
-            borrowing_enabled: false,
+            deposit_enabled: false,
+            borrow_enabled: false,
             ..Default::default()
         };
         let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
@@ -5268,12 +5268,10 @@ mod tests {
             StdError::generic_err("Cannot borrow asset somecoin").into()
         );
 
-        // Validate different configurations for borrowing market flags
+        // Validate different configurations for market flags
         market.active = true;
         assert!(!market.allow_borrow());
-        market.unfrozen = true;
-        assert!(!market.allow_borrow());
-        market.borrowing_enabled = true;
+        market.borrow_enabled = true;
         assert!(market.allow_borrow());
     }
 
@@ -7414,8 +7412,8 @@ mod tests {
                 protocol_income_to_distribute: Uint128::zero(),
                 interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
                 active: true,
-                unfrozen: true,
-                borrowing_enabled: true,
+                deposit_enabled: true,
+                borrow_enabled: true,
             }
         }
     }

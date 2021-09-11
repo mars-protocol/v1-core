@@ -327,9 +327,9 @@ pub mod msg {
 
         /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
         pub active: Option<bool>,
-        /// If false cannot deposit nor borrow
-        pub unfrozen: Option<bool>,
+        /// If false cannot deposit
+        pub deposit_enabled: Option<bool>,
         /// If false cannot borrow
-        pub borrowing_enabled: Option<bool>,
+        pub borrow_enabled: Option<bool>,
     }
 }
