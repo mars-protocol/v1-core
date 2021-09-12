@@ -15,7 +15,7 @@ use crate::state::{Config, PriceConfig, CONFIG, PRICE_CONFIGS};
 
 // INIT
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -34,7 +34,7 @@ pub fn instantiate(
 
 // HANDLERS
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -106,7 +106,7 @@ pub fn execute_update_config(
 
 // QUERIES
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
