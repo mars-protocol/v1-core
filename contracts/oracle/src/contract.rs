@@ -536,7 +536,7 @@ mod tests {
             .unwrap();
 
         let env = mock_env(MockEnvParams::default());
-        let query: Decimal = from_binary(
+        let response: AssetPriceResponse = from_binary(
             &query(
                 deps.as_ref(),
                 env,
@@ -548,7 +548,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(query, Decimal::from_ratio(3_u128, 2_u128));
+        assert_eq!(response.price, Decimal::from_ratio(3_u128, 2_u128));
     }
 
     #[test]
@@ -577,7 +577,7 @@ mod tests {
             .unwrap();
 
         let env = mock_env(MockEnvParams::default());
-        let query: Decimal = from_binary(
+        let response: AssetPriceResponse = from_binary(
             &query(
                 deps.as_ref(),
                 env,
@@ -589,7 +589,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(query, Decimal::from_ratio(4_u128, 1_u128));
+        assert_eq!(response.price, Decimal::from_ratio(4_u128, 1_u128));
     }
 
     // TEST_HELPERS
