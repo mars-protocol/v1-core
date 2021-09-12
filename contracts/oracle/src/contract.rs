@@ -115,26 +115,23 @@ pub fn execute_set_asset(
     };
 
     // For TWAP, we need to record the initial cumulative prices as part of the setup
-    match &price_source {
-        PriceSourceChecked::Twap {
-            pair_address,
-            asset_address,
-            ..
-        } => {
-            let price_cumulative =
-                query_cumulative_price(deps.querier, pair_address, asset_address)?;
+    if let PriceSourceChecked::Twap {
+        pair_address,
+        asset_address,
+        ..
+    } = &price_source
+    {
+        let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
-            TWAP_DATA.save(
-                deps.storage,
-                asset_reference.as_slice(),
-                &TwapData {
-                    timestamp: env.block.time.seconds(),
-                    price_average: Decimal::zero(), // average price will be zero until the 1st update
-                    price_cumulative,
-                },
-            )?;
-        }
-        _ => (), // do nothing
+        TWAP_DATA.save(
+            deps.storage,
+            asset_reference.as_slice(),
+            &TwapData {
+                timestamp: env.block.time.seconds(),
+                price_average: Decimal::zero(), // average price will be zero until the 1st update
+                price_cumulative,
+            },
+        )?;
     };
 
     PRICE_CONFIGS.save(
@@ -187,7 +184,7 @@ pub fn execute_update_twap_data(
         let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
         let twap_data = TwapData {
-            timestamp: timestamp,
+            timestamp,
             price_average: Decimal::from_ratio(
                 price_cumulative - twap_data_last.price_cumulative,
                 time_elapsed,
