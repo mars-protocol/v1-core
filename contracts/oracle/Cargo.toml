@@ -1,36 +1,26 @@
 [package]
 name = "oracle"
 version = "0.1.0"
-authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
-edition = "2018"
-
-exclude = [
-  # Those files are rust-optimizer artifacts. You might want to commit them for convenience but they should not be part of the source code publication.
-  "contract.wasm",
-  "hash.txt",
+authors = [
+  "Spike Spiegel <spikeonmars@protonmail.com>",
+  "larry_0x <larry@delphidigital.io>"
 ]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2018"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# for more explicit tests, cargo test --features=backtraces
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
-
-cw20 = "0.8"
-
-terra-cosmwasm = "2.2.0"
-
 cosmwasm-std = "0.16.0"
+cw20 = "0.8"
 cw-storage-plus = "0.8.0"
-
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
+terra-cosmwasm = "2.2.0"
 thiserror = "1.0.20"
 
 [dev-dependencies]
