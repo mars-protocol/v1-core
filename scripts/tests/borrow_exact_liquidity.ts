@@ -1,5 +1,15 @@
+/*
+Borrowing exact liquidity amount of a market with linear interest rate causes a panic:
+
+```
+rpc error: code = InvalidArgument desc = failed to execute message; message index: 0: Error calling
+the VM: Error executing Wasm: Wasmer runtime error: RuntimeError: unreachable: execute wasm contract
+failed: invalid request
+```
+*/
 import { LocalTerra } from "@terra-money/terra.js"
 import { join } from "path"
+import 'dotenv/config.js'
 import {
   deployContract,
   executeContract,
@@ -9,13 +19,12 @@ import {
 } from "../helpers.js"
 
 // CONSTS
+
+// required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = "../../cw-plus/artifacts"
 
-const BORROW_CW20_UUSD_COLLATERAL = 100_000_000_000000
-const BORROW_CW20_MARS_COLLATERAL = 1_000_000_000000
-
-const BORROW_NATIVE_UUSD_COLLATERAL = 1_000_000_000000
-const BORROW_NATIVE_MARS_COLLATERAL = 100_000_000_000000
+const UUSD_COLLATERAL = 1_000_000_000000
+const MARS_COLLATERAL = 100_000_000_000000
 
 // MAIN
 
@@ -30,9 +39,7 @@ async function main() {
   console.log("upload contracts")
 
   const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const incentives = await deployContract(terra, deployer, "../artifacts/incentives.wasm",
@@ -43,9 +50,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
@@ -68,16 +73,7 @@ async function main() {
       name: "Mars",
       symbol: "MARS",
       decimals: 6,
-      initial_balances: [
-        {
-          address: provider.key.accAddress,
-          amount: String(BORROW_CW20_MARS_COLLATERAL)
-        }, {
-          address: borrower.key.accAddress,
-          amount: String(BORROW_NATIVE_MARS_COLLATERAL)
-        }
-      ],
-      mint: { minter: deployer.key.accAddress },
+      initial_balances: [{ address: borrower.key.accAddress, amount: String(MARS_COLLATERAL) }],
     }
   )
 
@@ -96,8 +92,6 @@ async function main() {
     }
   )
 
-
-
   console.log("init assets")
 
   // mars
@@ -112,6 +106,13 @@ async function main() {
           maintenance_margin: "0.65",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
+            // linear: {
+            //   optimal_utilization_rate: "1",
+            //   base: "0",
+            //   slope_1: "1",
+            //   slope_2: "0",
+            // }
+
             dynamic: {
               min_borrow_rate: "0.0",
               max_borrow_rate: "2.0",
@@ -147,14 +148,23 @@ async function main() {
           maintenance_margin: "0.85",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
-            dynamic: {
-              min_borrow_rate: "0.0",
-              max_borrow_rate: "1.0",
-              kp_1: "0.04",
-              optimal_utilization_rate: "0.9",
-              kp_augmentation_threshold: "0.15",
-              kp_2: "0.07"
+            // Borrowing exact liquidity amount panics with linear interest rate:
+            linear: {
+              optimal_utilization_rate: "1",
+              base: "0",
+              slope_1: "1",
+              slope_2: "0",
             }
+
+            // Borrowing exact liquidity amount succeeds with dynamic interest rate:
+            // dynamic: {
+            //   min_borrow_rate: "0.0",
+            //   max_borrow_rate: "2.0",
+            //   kp_1: "0.02",
+            //   optimal_utilization_rate: "0.7",
+            //   kp_augmentation_threshold: "0.15",
+            //   kp_2: "0.05"
+            // }
           }
         }
       }
@@ -172,46 +182,11 @@ async function main() {
 
   // TESTS
 
-  console.log("borrow cw20")
-
-  console.log("provide mars")
-
-  await executeContract(terra, provider, mars,
-    {
-      send: {
-        contract: redBank,
-        amount: String(BORROW_CW20_MARS_COLLATERAL),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
-
-  console.log("provide uusd")
-
-  await executeContract(terra, borrower, redBank,
-    { deposit_native: { denom: "uusd" } },
-    `${BORROW_CW20_UUSD_COLLATERAL}uusd`
-  )
-
-  console.log("borrow mars")
-
-  await executeContract(terra, borrower, redBank,
-    {
-      borrow: {
-        asset: { cw20: { contract_addr: mars } },
-        amount: String(BORROW_CW20_MARS_COLLATERAL)
-      }
-    }
-  )
-
-
-  console.log("borrow native token")
-
   console.log("provide uusd")
 
   await executeContract(terra, provider, redBank,
     { deposit_native: { denom: "uusd" } },
-    `${BORROW_NATIVE_UUSD_COLLATERAL}uusd`
+    `${UUSD_COLLATERAL}uusd`
   )
 
   console.log("provide mars")
@@ -220,7 +195,7 @@ async function main() {
     {
       send: {
         contract: redBank,
-        amount: String(BORROW_NATIVE_MARS_COLLATERAL),
+        amount: String(MARS_COLLATERAL),
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
     }
@@ -232,7 +207,7 @@ async function main() {
     {
       borrow: {
         asset: { native: { denom: "uusd" } },
-        amount: String(BORROW_NATIVE_UUSD_COLLATERAL)
+        amount: String(UUSD_COLLATERAL)
       }
     }
   )
