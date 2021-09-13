@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Attribute, Binary, Decimal, Deps, DepsMut, Env,
-    MessageInfo, QuerierWrapper, QueryRequest, Response, StdError, StdResult, Uint128, WasmQuery,
+    entry_point, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event, MessageInfo,
+    QuerierWrapper, QueryRequest, Response, StdError, StdResult, Uint128, WasmQuery,
 };
 use terra_cosmwasm::TerraQuerier;
 
@@ -150,7 +150,7 @@ pub fn execute_update_astroport_twap_data(
     _info: MessageInfo,
     assets: Vec<Asset>,
 ) -> StdResult<Response> {
-    let mut attrs: Vec<Attribute> = vec![];
+    let mut events: Vec<Event> = vec![];
 
     for asset in assets {
         let asset_reference = asset.get_reference();
@@ -191,17 +191,18 @@ pub fn execute_update_astroport_twap_data(
 
         ASTROPORT_TWAP_DATA.save(deps.storage, asset_reference.as_slice(), &twap_data)?;
 
-        attrs.extend(vec![
-            attr("asset", String::from_utf8(asset_reference).unwrap()),
-            attr("timestamp_last", twap_data_last.price_cumulative),
-            attr("timestamp", twap_data.price_cumulative),
-            attr("price_cumulative_last", twap_data_last.price_cumulative),
-            attr("price_cumulative", twap_data.price_cumulative),
-            attr("price_average", format!("{}", twap_data.price_average)),
-        ]);
+        events.push(
+            Event::new("update_astroport_twap_data")
+                .add_attribute("asset", String::from_utf8(asset_reference).unwrap())
+                .add_attribute("timestamp_last", twap_data_last.price_cumulative)
+                .add_attribute("timestamp", twap_data.price_cumulative)
+                .add_attribute("price_cumulative_last", twap_data_last.price_cumulative)
+                .add_attribute("price_cumulative", twap_data.price_cumulative)
+                .add_attribute("price_average", format!("{}", twap_data.price_average)),
+        );
     }
 
-    Ok(Response::new().add_attributes(attrs))
+    Ok(Response::new().add_events(events))
 }
 
 // QUERIES
