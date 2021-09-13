@@ -15,7 +15,7 @@ use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg
 
 // INIT
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -35,7 +35,7 @@ pub fn instantiate(
 
 // HANDLERS
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -451,7 +451,7 @@ fn compute_user_unclaimed_rewards(
 
 // QUERIES
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
