@@ -13,12 +13,13 @@ use mars::oracle::{PriceSourceChecked, PriceSourceUnchecked};
 
 use crate::state::{Config, PriceConfig, TwapData, CONFIG, PRICE_CONFIGS, TWAP_DATA};
 
-// Type definitions of relevant Astroport contracts. We have to define them in this crate
-// because Astroport has not uploaded their package to crates.io. Once they have uploaded,
-// we will decide whether to import from there instead.
-use crate::msg::{
-    Asset as AstroportAsset, AssetInfo, CumulativePricesResponse, QueryMsg as AstroportQueryMsg,
-    SimulationResponse,
+// Once astroport package is published on crates.io, update Cargo.toml and change these to
+// use astroport::asset::{...};
+// and
+// use astroport::pair::{...};
+use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
+use crate::astroport::pair::{
+    CumulativePricesResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
 };
 
 // INIT
@@ -291,7 +292,7 @@ fn query_asset_price(
                     contract_addr: pair_address.to_string(),
                     msg: to_binary(&AstroportQueryMsg::Simulation {
                         offer_asset: AstroportAsset {
-                            info: AssetInfo::Token {
+                            info: AstroportAssetInfo::Token {
                                 contract_addr: asset_address,
                             },
                             amount: Uint128::new(1000000u128),
@@ -336,8 +337,8 @@ fn query_cumulative_price(
     // if it matches asset 1, we return `price1_cumulative_last`. If it matches neither,
     // we throw an error.
     let asset_index = response.assets.iter().position(|asset| match &asset.info {
-        AssetInfo::Token { contract_addr } => contract_addr == asset_address,
-        AssetInfo::NativeToken { .. } => false,
+        AstroportAssetInfo::Token { contract_addr } => contract_addr == asset_address,
+        AstroportAssetInfo::NativeToken { .. } => false,
     });
 
     match asset_index {
