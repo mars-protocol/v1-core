@@ -59,8 +59,8 @@ async function queryBorrowRate(terra: LCDClient, redBank: string, asset: any) {
   return parseFloat(market.borrow_rate)
 }
 
-function approximatelyEqual(x: number, target: number, tol = 0.01) {
-  assert(x > target - tol && x < target + tol)
+function approximateEqual(actual: number, expected: number, tol = 0.01) {
+  assert(actual > expected - tol && actual < expected + tol)
 }
 
 // TESTS
@@ -93,6 +93,8 @@ async function testLinearInterestRate(env: Env) {
     {
       borrow: {
         asset: { native: { denom: "uusd" } },
+        // TODO change this to borrow `ALICE_UUSD_COLLATERAL` once borrowing exact liquidity amount
+        // bug is fixed
         amount: String(ALICE_UUSD_COLLATERAL - 1)
       }
     }
@@ -100,7 +102,7 @@ async function testLinearInterestRate(env: Env) {
 
   let uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
   // rate will be approximately the slope rate because almost all liquidity has been borrowed
-  approximatelyEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1)
+  approximateEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1)
 
   console.log("alice deposits uusd")
 
@@ -112,7 +114,7 @@ async function testLinearInterestRate(env: Env) {
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
   // rate will be approximately a quarter of the slope rate because a quarter of the liquidity has
   // been borrowed
-  approximatelyEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1 / 4)
+  approximateEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1 / 4)
 
   console.log("alice withdraws uusd")
 
@@ -127,7 +129,7 @@ async function testLinearInterestRate(env: Env) {
 
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
   // rate will be approximately the slope rate because almost all liquidity has been borrowed
-  approximatelyEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1)
+  approximateEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1)
 
   console.log("bob repays uusd")
 
@@ -139,7 +141,7 @@ async function testLinearInterestRate(env: Env) {
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
   // rate will be approximately a fifth of the slope rate because a fifth of the liquidity has
   // been borrowed
-  approximatelyEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1 / 5)
+  approximateEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1 / 5)
 
   // withdraw all liquidity to reset the red-bank before the next test
   await executeContract(terra, bob, redBank,
@@ -177,7 +179,7 @@ async function testLinearInterestRate(env: Env) {
   )
 
   const maUusdTokenInfo = await queryContract(terra, maUusd, { token_info: {} })
-  // why is `maUusdTokenInfo.total_supply == 1`? rounding error in `descaled_liquidity_amount`?
+  // TODO why is `maUusdTokenInfo.total_supply == 1`? rounding error in `descaled_liquidity_amount`?
   // strictEqual(parseInt(maUusdTokenInfo.total_supply), 0)
 
   const maMarsTokenInfo = await queryContract(terra, maMars, { token_info: {} })
@@ -212,6 +214,8 @@ async function testDynamicInterestRate(env: Env) {
     {
       borrow: {
         asset: { cw20: { contract_addr: mars } },
+        // TODO change this to borrow `ALICE_MARS_COLLATERAL` once borrowing exact liquidity amount
+        // bug is fixed
         amount: String(ALICE_MARS_COLLATERAL - 1)
       }
     }
