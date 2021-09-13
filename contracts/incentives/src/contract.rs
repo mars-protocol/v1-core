@@ -5,13 +5,13 @@ use cosmwasm_std::{
 };
 
 use crate::error::ContractError;
-use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{
     AssetIncentive, Config, ASSET_INCENTIVES, CONFIG, USER_ASSET_INDICES, USER_UNCLAIMED_REWARDS,
 };
 use mars::address_provider::{helpers::query_addresses, msg::MarsContract};
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
+use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 
 // INIT
 

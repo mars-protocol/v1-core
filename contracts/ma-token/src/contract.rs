@@ -641,7 +641,7 @@ mod tests {
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("incentives"),
-                msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                     user_address: Addr::unchecked(&winner),
                     user_balance_before: Uint128::zero(),
                     total_supply_before: amount,
@@ -841,7 +841,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr1),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
@@ -851,7 +851,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr2),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,
@@ -949,7 +949,7 @@ mod tests {
                 vec![
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from("incentives"),
-                        msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: Addr::unchecked(&addr1),
                             user_balance_before: amount1,
                             total_supply_before: amount1,
@@ -959,7 +959,7 @@ mod tests {
                     })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from("incentives"),
-                        msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: Addr::unchecked(&addr2),
                             user_balance_before: Uint128::zero(),
                             total_supply_before: amount1,
@@ -1044,7 +1044,7 @@ mod tests {
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("incentives"),
-                msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                     user_address: Addr::unchecked(&addr1),
                     user_balance_before: amount1,
                     total_supply_before: amount1,
@@ -1134,7 +1134,7 @@ mod tests {
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
 
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr1),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
@@ -1144,7 +1144,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&contract),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,

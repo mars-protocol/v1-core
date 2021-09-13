@@ -143,7 +143,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&owner),
                         user_balance_before: start,
                         total_supply_before: start,
@@ -153,7 +153,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&rcpt),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: start,
@@ -272,7 +272,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&owner),
                         user_balance_before: start,
                         total_supply_before: start,
@@ -282,7 +282,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&contract),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: start,

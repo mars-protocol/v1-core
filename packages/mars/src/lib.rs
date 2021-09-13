@@ -1,6 +1,7 @@
 // Contracts
 pub mod address_provider;
 pub mod cw20_core;
+pub mod incentives;
 pub mod ma_token;
 pub mod oracle;
 pub mod xmars_token;

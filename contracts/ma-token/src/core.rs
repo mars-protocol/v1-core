@@ -117,7 +117,7 @@ pub fn balance_change_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: incentives_address.into(),
-        msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
+        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
             user_address,
             user_balance_before,
             total_supply_before,

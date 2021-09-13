@@ -434,7 +434,6 @@ dependencies = [
  "cw2",
  "cw20",
  "cw20-base",
- "incentives",
  "mars",
  "red-bank",
  "schemars",
