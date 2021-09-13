@@ -42,7 +42,7 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum ExecuteMsg {
         /// Update contract config
-        SetConfig { owner: Option<String> },
+        UpdateConfig { owner: Option<String> },
         /// Specify parameters to query asset price
         SetAsset {
             asset: Asset,

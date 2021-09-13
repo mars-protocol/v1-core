@@ -51,7 +51,7 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, MarsError> {
     match msg {
-        ExecuteMsg::SetConfig { owner } => execute_set_config(deps, env, info, owner),
+        ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
         ExecuteMsg::SetAsset {
             asset,
             price_source,
@@ -60,7 +60,7 @@ pub fn execute(
     }
 }
 
-pub fn execute_set_config(
+pub fn execute_update_config(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
@@ -386,7 +386,7 @@ mod tests {
 
         // only owner can update
         {
-            let msg = ExecuteMsg::SetConfig {
+            let msg = ExecuteMsg::UpdateConfig {
                 owner: Some(String::from("new_owner")),
             };
             let info = mock_info("another_one", &[]);
@@ -397,7 +397,7 @@ mod tests {
         let info = mock_info("owner", &[]);
         // no change
         {
-            let msg = ExecuteMsg::SetConfig { owner: None };
+            let msg = ExecuteMsg::UpdateConfig { owner: None };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
             let config = CONFIG.load(&deps.storage).unwrap();
@@ -406,7 +406,7 @@ mod tests {
 
         // new owner
         {
-            let msg = ExecuteMsg::SetConfig {
+            let msg = ExecuteMsg::UpdateConfig {
                 owner: Some(String::from("new_owner")),
             };
             execute(deps.as_mut(), env, info, msg).unwrap();
