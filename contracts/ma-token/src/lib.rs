@@ -5,3 +5,5 @@ pub mod state;
 
 #[cfg(test)]
 mod test_helpers;
+
+pub use mars::ma_token::*;
