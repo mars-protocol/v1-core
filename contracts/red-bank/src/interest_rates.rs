@@ -1,8 +1,8 @@
+use crate::interest_rate_models::InterestRateModel;
 use crate::state::{Market, CONFIG};
 use cosmwasm_std::{Decimal, DepsMut, Env, StdError, StdResult, Uint128};
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
-use mars::interest_rate_models::InterestRateModel;
 use mars::math::{decimal_multiplication, reverse_decimal};
 use std::str;
 

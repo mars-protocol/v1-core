@@ -8,18 +8,15 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
 use cw_storage_plus::U32Key;
 
+use crate::msg::{
+    AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
+    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
+    MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
+    UserPositionResponse,
+};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::ma_token;
-use mars::red_bank::{
-    msg::{
-        AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
-        DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
-        MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg,
-        UncollateralizedLoanLimitResponse, UserPositionResponse,
-    },
-    UserHealthStatus,
-};
 
 use mars::asset::{Asset, AssetType};
 use mars::error::MarsError;
@@ -32,6 +29,7 @@ use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
 };
+use crate::msg::UserHealthStatus;
 use crate::state::{
     Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
     MARKET_REFERENCES_BY_INDEX, MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
@@ -2172,13 +2170,13 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
-    use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
-    use mars::interest_rate_models::{
+    use crate::interest_rate_models::{
         DynamicInterestRate, InterestRateModel, InterestRateStrategy, LinearInterestRate,
     };
-    use mars::red_bank::msg::ExecuteMsg::UpdateConfig;
+    use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
+    use crate::msg::ExecuteMsg::UpdateConfig;
+    use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
+    use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
         mock_info, MarsMockQuerier, MockEnvParams,

@@ -8,14 +8,14 @@ use terraswap::asset::AssetInfo;
 use crate::error::ContractError;
 use crate::state::{Config, Cooldown, CONFIG, COOLDOWNS};
 
+use crate::msg::{
+    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg,
+    ReceiveMsg,
+};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address};
-use mars::staking::msg::{
-    ConfigResponse, CooldownResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg,
-    ReceiveMsg,
-};
 use mars::swapping::execute_swap;
 
 // INIT
@@ -522,8 +522,8 @@ mod tests {
     };
     use mars::testing::{self, mock_dependencies, MarsMockQuerier, MockEnvParams};
 
+    use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use mars::staking::msg::ExecuteMsg::UpdateConfig;
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
     const TEST_UNSTAKE_WINDOW: u64 = 100;

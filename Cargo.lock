@@ -382,6 +382,7 @@ dependencies = [
  "mars",
  "schemars",
  "serde",
+ "staking",
  "thiserror",
 ]
 
@@ -434,6 +435,7 @@ dependencies = [
  "cw20",
  "cw20-base",
  "mars",
+ "red-bank",
  "schemars",
  "serde",
  "thiserror",

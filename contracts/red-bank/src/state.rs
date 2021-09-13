@@ -1,12 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::interest_rate_models::{InterestRateModel, InterestRateStrategy};
+use crate::msg::InitOrUpdateAssetParams;
 use cosmwasm_std::{Addr, Decimal, DepsMut, Env, StdError, StdResult, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::helpers::all_conditions_valid;
-use mars::interest_rate_models::{InterestRateModel, InterestRateStrategy};
-use mars::red_bank::msg::InitOrUpdateAssetParams;
 
 use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
 
