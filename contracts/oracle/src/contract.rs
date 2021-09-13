@@ -11,7 +11,9 @@ use mars::helpers::option_string_to_addr;
 use mars::oracle::msg::{AssetPriceResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use mars::oracle::{PriceSourceChecked, PriceSourceUnchecked};
 
-use crate::state::{Config, PriceConfig, TwapData, CONFIG, PRICE_CONFIGS, TWAP_DATA};
+use crate::state::{
+    AstroportTwapData, Config, PriceConfig, ASTROPORT_TWAP_DATA, CONFIG, PRICE_CONFIGS,
+};
 
 // Once astroport package is published on crates.io, update Cargo.toml and change these to
 // use astroport::asset::{...};
@@ -56,7 +58,9 @@ pub fn execute(
             asset,
             price_source,
         } => execute_set_asset(deps, env, info, asset, price_source),
-        ExecuteMsg::UpdateTwapData { assets } => execute_update_twap_data(deps, env, info, assets),
+        ExecuteMsg::UpdateAstroportTwapData { assets } => {
+            execute_update_astroport_twap_data(deps, env, info, assets)
+        }
     }
 }
 
@@ -97,18 +101,18 @@ pub fn execute_set_asset(
     let price_source: PriceSourceChecked = match price_source_unchecked {
         PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed { price },
         PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native { denom },
-        PriceSourceUnchecked::Spot {
+        PriceSourceUnchecked::AstroportSpot {
             pair_address,
             asset_address,
-        } => PriceSourceChecked::Spot {
+        } => PriceSourceChecked::AstroportSpot {
             pair_address: deps.api.addr_validate(&pair_address)?,
             asset_address: deps.api.addr_validate(&asset_address)?,
         },
-        PriceSourceUnchecked::Twap {
+        PriceSourceUnchecked::AstroportTwap {
             pair_address,
             asset_address,
             min_period,
-        } => PriceSourceChecked::Twap {
+        } => PriceSourceChecked::AstroportTwap {
             pair_address: deps.api.addr_validate(&pair_address)?,
             asset_address: deps.api.addr_validate(&asset_address)?,
             min_period,
@@ -116,7 +120,7 @@ pub fn execute_set_asset(
     };
 
     // For TWAP, we need to record the initial cumulative prices as part of the setup
-    if let PriceSourceChecked::Twap {
+    if let PriceSourceChecked::AstroportTwap {
         pair_address,
         asset_address,
         ..
@@ -124,10 +128,10 @@ pub fn execute_set_asset(
     {
         let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
-        TWAP_DATA.save(
+        ASTROPORT_TWAP_DATA.save(
             deps.storage,
             asset_reference.as_slice(),
-            &TwapData {
+            &AstroportTwapData {
                 timestamp: env.block.time.seconds(),
                 price_average: Decimal::zero(), // average price will be zero until the 1st update
                 price_cumulative,
@@ -146,7 +150,7 @@ pub fn execute_set_asset(
 
 /// Modified from
 /// https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/examples/ExampleOracleSimple.sol
-pub fn execute_update_twap_data(
+pub fn execute_update_astroport_twap_data(
     deps: DepsMut,
     env: Env,
     _info: MessageInfo,
@@ -157,11 +161,11 @@ pub fn execute_update_twap_data(
     for asset in assets {
         let asset_reference = asset.get_reference();
         let price_config = PRICE_CONFIGS.load(deps.storage, asset_reference.as_slice())?;
-        let twap_data_last = TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
+        let twap_data_last = ASTROPORT_TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
 
         // Asset must be configured to use TWAP price source
         let (pair_address, asset_address, min_period) = match &price_config.price_source {
-            PriceSourceChecked::Twap {
+            PriceSourceChecked::AstroportTwap {
                 pair_address,
                 asset_address,
                 min_period,
@@ -184,7 +188,7 @@ pub fn execute_update_twap_data(
         // Query new price data
         let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
-        let twap_data = TwapData {
+        let twap_data = AstroportTwapData {
             timestamp,
             price_average: Decimal::from_ratio(
                 price_cumulative - twap_data_last.price_cumulative,
@@ -193,7 +197,7 @@ pub fn execute_update_twap_data(
             price_cumulative,
         };
 
-        TWAP_DATA.save(deps.storage, asset_reference.as_slice(), &twap_data)?;
+        ASTROPORT_TWAP_DATA.save(deps.storage, asset_reference.as_slice(), &twap_data)?;
 
         attrs.extend(vec![
             attr("asset", String::from_utf8(asset_reference).unwrap()),
@@ -283,7 +287,7 @@ fn query_asset_price(
         // 3) The price is quoted in the other asset in the pair. For example, for MARS-UST
         // pair, the price of MARS is quoted in UST; for bLUNA-LUNA pair, the price of bLUNA
         // is quoted in LUNA.
-        PriceSourceChecked::Spot {
+        PriceSourceChecked::AstroportSpot {
             pair_address,
             asset_address,
         } => {
@@ -311,8 +315,8 @@ fn query_asset_price(
             })
         }
 
-        PriceSourceChecked::Twap { .. } => {
-            let twap_data = TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
+        PriceSourceChecked::AstroportTwap { .. } => {
+            let twap_data = ASTROPORT_TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
 
             Ok(AssetPriceResponse {
                 price: twap_data.price_average,
@@ -494,7 +498,7 @@ mod tests {
             let reference = asset.get_reference();
             let msg = ExecuteMsg::SetAsset {
                 asset: asset,
-                price_source: PriceSourceUnchecked::Spot {
+                price_source: PriceSourceUnchecked::AstroportSpot {
                     pair_address: "pair".to_string(),
                     asset_address: "asset".to_string(),
                 },
@@ -505,7 +509,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 price_config.price_source,
-                PriceSourceChecked::Spot {
+                PriceSourceChecked::AstroportSpot {
                     pair_address: Addr::unchecked("pair"),
                     asset_address: Addr::unchecked("asset")
                 }

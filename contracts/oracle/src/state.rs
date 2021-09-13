@@ -9,7 +9,7 @@ use mars::oracle::PriceSourceChecked;
 /// Stores config at the given key
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const PRICE_CONFIGS: Map<&[u8], PriceConfig> = Map::new("price_configs");
-pub const TWAP_DATA: Map<&[u8], TwapData> = Map::new("twap_data");
+pub const ASTROPORT_TWAP_DATA: Map<&[u8], AstroportTwapData> = Map::new("twap_data");
 
 /// Contract global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -24,7 +24,7 @@ pub struct PriceConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct TwapData {
+pub struct AstroportTwapData {
     /// Timestamp of the most recent TWAP data update
     pub timestamp: u64,
     /// Cumulative price of the asset retrieved by the most recent TWAP data update

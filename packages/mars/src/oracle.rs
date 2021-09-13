@@ -9,10 +9,10 @@ pub enum PriceSource<A> {
     Fixed { price: Decimal },
     /// Native Terra stablecoins transaction rate quoted in UST
     Native { denom: String },
-    /// TerraSwap spot price quoted in the other asset of the pair
-    Spot { pair_address: A, asset_address: A },
+    /// Astroport spot price quoted in the other asset of the pair
+    AstroportSpot { pair_address: A, asset_address: A },
     /// Astroport TWAP price quoted in the other asset of the pair
-    Twap {
+    AstroportTwap {
         pair_address: A,
         asset_address: A,
         /// Minimum time (in seconds) required to pass between two TWAP data updates.
@@ -49,7 +49,7 @@ pub mod msg {
             price_source: PriceSourceUnchecked,
         },
         /// Fetch cumulative price from Astroport pair and record in contract storage
-        UpdateTwapData { assets: Vec<Asset> },
+        UpdateAstroportTwapData { assets: Vec<Asset> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
