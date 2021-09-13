@@ -7,7 +7,7 @@ use crate::incentives::msg::QueryMsg;
 pub struct IncentivesQuerier {
     /// incentives contract address to be used in queries
     pub incentives_address: Addr,
-    /// maps human address and a block to a specific unclaimed xmars rewards balance
+    /// maps human address to a specific unclaimed Mars rewards balance (which will be staked with the staking contract and distributed as xMars)
     pub unclaimed_rewards_at: HashMap<Addr, Uint128>,
 }
 
