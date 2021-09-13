@@ -248,12 +248,12 @@ fn query_asset_price(
             last_updated: env.block.time.seconds(),
         }),
 
-        // NOTE: Exchange rate returns how much of the quote (second argument) is required to
-        // buy one unit of the base_denom (first argument).
-        // We want to know how much uusd we need to buy 1 of the target currency
         PriceSourceChecked::Native { denom } => {
             let terra_querier = TerraQuerier::new(&deps.querier);
 
+            // NOTE: Exchange rate returns how much of the quote (second argument) is required to
+            // buy one unit of the base_denom (first argument).
+            // We want to know how much uusd we need to buy 1 of the target currency
             let asset_prices_query = terra_querier
                 .query_exchange_rates(denom, vec!["uusd".to_string()])?
                 .exchange_rates
@@ -268,7 +268,7 @@ fn query_asset_price(
             }
         }
 
-        // Notes:
+        // NOTE:
         // 1) Spot price is defined as the amount of the other asset in the pair to be
         // returned when swapping x units of the asset, divided by x. In this implementation,
         // x = 1,000,000. For example, for MARS-UST pair, if swapping 1,000,000 uMARS returns
