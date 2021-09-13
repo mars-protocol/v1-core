@@ -106,11 +106,11 @@ pub fn execute_set_asset(
         PriceSourceUnchecked::Twap {
             pair_address,
             asset_address,
-            period,
+            min_period,
         } => PriceSourceChecked::Twap {
             pair_address: deps.api.addr_validate(&pair_address)?,
             asset_address: deps.api.addr_validate(&asset_address)?,
-            period,
+            min_period,
         },
     };
 
@@ -159,12 +159,12 @@ pub fn execute_update_twap_data(
         let twap_data_last = TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
 
         // Asset must be configured to use TWAP price source
-        let (pair_address, asset_address, period) = match &price_config.price_source {
+        let (pair_address, asset_address, min_period) = match &price_config.price_source {
             PriceSourceChecked::Twap {
                 pair_address,
                 asset_address,
-                period,
-            } => (pair_address, asset_address, period),
+                min_period,
+            } => (pair_address, asset_address, min_period),
             _ => {
                 return Err(MarsError::Std(StdError::generic_err(
                     "Price source is not TWAP!",
@@ -176,7 +176,7 @@ pub fn execute_update_twap_data(
         let timestamp = env.block.time.seconds();
         let time_elapsed = timestamp - twap_data_last.timestamp;
 
-        if &time_elapsed < period {
+        if &time_elapsed < min_period {
             return Err(MarsError::Std(StdError::generic_err("Period not elapsed")));
         }
 

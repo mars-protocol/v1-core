@@ -25,7 +25,10 @@ pub struct PriceConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TwapData {
+    /// Timestamp of the most recent TWAP data update
     pub timestamp: u64,
-    pub price_average: Decimal,
+    /// Cumulative price of the asset retrieved by the most recent TWAP data update
     pub price_cumulative: Uint128,
+    /// Price of the asset averaged over the last two TWAP data updates
+    pub price_average: Decimal,
 }

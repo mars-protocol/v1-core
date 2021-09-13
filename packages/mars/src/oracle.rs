@@ -15,7 +15,9 @@ pub enum PriceSource<A> {
     Twap {
         pair_address: A,
         asset_address: A,
-        period: u64,
+        /// Minimum time (in seconds) required to pass between two TWAP data updates.
+        /// E.g. if set to 300, then prices will be averaged over periods of no less than 5 minutes.
+        min_period: u64,
     },
 }
 
@@ -71,7 +73,10 @@ pub mod msg {
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct AssetPriceResponse {
+        /// Price of the asset averaged over the last two TWAP data updates
         pub price: Decimal,
+        /// Timestamp of the most recent TWAP data update. Contracts querying the price data are recommended
+        /// to check this value and determine if the data is too old to be considered valid.
         pub last_updated: u64,
     }
 }
