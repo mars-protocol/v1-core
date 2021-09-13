@@ -5,7 +5,6 @@ use cosmwasm_std::{
 use terra_cosmwasm::TerraQuerier;
 
 use mars::asset::Asset;
-use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
 
 use mars::oracle::msg::{AssetPriceResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
@@ -46,12 +45,7 @@ pub fn instantiate(
 // HANDLERS
 
 #[entry_point]
-pub fn execute(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: ExecuteMsg,
-) -> Result<Response, MarsError> {
+pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
     match msg {
         ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
         ExecuteMsg::SetAsset {
@@ -69,11 +63,11 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
-) -> Result<Response, MarsError> {
+) -> StdResult<Response> {
     let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {});
+        return Err(StdError::generic_err("Only owner can update config"));
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
@@ -89,13 +83,13 @@ pub fn execute_set_asset(
     info: MessageInfo,
     asset: Asset,
     price_source_unchecked: PriceSourceUnchecked,
-) -> Result<Response, MarsError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
     let asset_reference = asset.get_reference();
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {});
+        return Err(StdError::generic_err("Only owner can set asset"));
     }
 
     let price_source: PriceSourceChecked = match price_source_unchecked {
@@ -155,7 +149,7 @@ pub fn execute_update_astroport_twap_data(
     env: Env,
     _info: MessageInfo,
     assets: Vec<Asset>,
-) -> Result<Response, MarsError> {
+) -> StdResult<Response> {
     let mut attrs: Vec<Attribute> = vec![];
 
     for asset in assets {
@@ -171,9 +165,7 @@ pub fn execute_update_astroport_twap_data(
                 min_period,
             } => (pair_address, asset_address, min_period),
             _ => {
-                return Err(MarsError::Std(StdError::generic_err(
-                    "Price source is not TWAP!",
-                )));
+                return Err(StdError::generic_err("Price source is not TWAP!"));
             }
         };
 
@@ -182,7 +174,7 @@ pub fn execute_update_astroport_twap_data(
         let time_elapsed = timestamp - twap_data_last.timestamp;
 
         if &time_elapsed < min_period {
-            return Err(MarsError::Std(StdError::generic_err("Period not elapsed")));
+            return Err(StdError::generic_err("Minimum period not elapsed"));
         }
 
         // Query new price data
@@ -330,7 +322,7 @@ fn query_cumulative_price(
     querier: QuerierWrapper,
     pair_address: &Addr,
     asset_address: &Addr,
-) -> Result<Uint128, MarsError> {
+) -> StdResult<Uint128> {
     let response: CumulativePricesResponse =
         querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: pair_address.to_string(),
@@ -353,7 +345,7 @@ fn query_cumulative_price(
                 Ok(response.price1_cumulative_last)
             }
         }
-        None => Err(MarsError::Std(StdError::generic_err("Asset mismatch"))),
+        None => Err(StdError::generic_err("Asset mismatch")),
     }
 }
 
@@ -395,7 +387,7 @@ mod tests {
             };
             let info = mock_info("another_one", &[]);
             let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, MarsError::Unauthorized {}.into());
+            assert_eq!(err, StdError::generic_err("Only owner can update config"));
         }
 
         let info = mock_info("owner", &[]);
@@ -437,7 +429,7 @@ mod tests {
             };
             let info = mock_info("another_one", &[]);
             let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, MarsError::Unauthorized {}.into());
+            assert_eq!(err, StdError::generic_err("Only owner can set asset"));
         }
 
         let info = mock_info("owner", &[]);
