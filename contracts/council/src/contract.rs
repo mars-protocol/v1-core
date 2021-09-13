@@ -33,7 +33,7 @@ const MAX_LINK_LENGTH: usize = 128;
 
 // INIT
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -96,7 +96,7 @@ pub fn instantiate(
 
 // HANDLERS
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -509,7 +509,7 @@ pub fn execute_update_config(
 const PAGINATION_DEFAULT_LIMIT: u32 = 10;
 const PAGINATION_MAX_LIMIT: u32 = 30;
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),

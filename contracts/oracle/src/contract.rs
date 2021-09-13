@@ -25,7 +25,7 @@ use crate::astroport::pair::{
 
 // INIT
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -44,8 +44,13 @@ pub fn instantiate(
 
 // HANDLERS
 
-#[entry_point]
-pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response> {
     match msg {
         ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
         ExecuteMsg::SetAsset {
@@ -207,7 +212,7 @@ pub fn execute_update_astroport_twap_data(
 
 // QUERIES
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
