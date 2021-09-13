@@ -3,11 +3,13 @@ mod helpers;
 mod mock_address_provider;
 mod native_querier;
 mod oracle_querier;
+mod incentives_querier;
 
 pub use helpers::*;
 
 use native_querier::NativeQuerier;
 use oracle_querier::OracleQuerier;
+use incentives_querier::IncentivesQuerier;
 
 use cosmwasm_std::testing::{MockApi, MockQuerier, MockStorage, MOCK_CONTRACT_ADDR};
 use cosmwasm_std::{
@@ -333,6 +335,7 @@ pub struct MarsMockQuerier {
     xmars_querier: XMarsQuerier,
     terraswap_pair_querier: TerraswapPairQuerier,
     oracle_querier: OracleQuerier,
+    incentives_querier: IncentivesQuerier
 }
 
 impl Querier for MarsMockQuerier {
@@ -361,6 +364,7 @@ impl MarsMockQuerier {
             oracle_querier: OracleQuerier::default(),
             xmars_querier: XMarsQuerier::default(),
             terraswap_pair_querier: TerraswapPairQuerier::default(),
+            incentives_querier: IncentivesQuerier::default()
         }
     }
 
@@ -443,6 +447,14 @@ impl MarsMockQuerier {
         let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
         self.terraswap_pair_querier.pairs.insert(key, pair_info);
     }
+
+    pub fn set_incentives_address(&mut self, address: Addr) {
+        self.incentives_querier.incentives_address = address;
+    }
+
+    pub fn set_unclaimed_rewards(&mut self, user_address: String, unclaimed_rewards: Uint128) {
+        self.incentives_querier.unclaimed_rewards_at.insert(Addr::unchecked(user_address), unclaimed_rewards);
+    }    
 
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
