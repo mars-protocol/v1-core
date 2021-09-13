@@ -2,7 +2,7 @@ use std::env::current_dir;
 use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
-use mars::staking::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use staking::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 
 use staking::state::Config;
 

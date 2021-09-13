@@ -1,8 +1,8 @@
 use cosmwasm_std::{Addr, Decimal, Deps, StdError, StdResult, Uint128};
 
+use crate::msg::UserHealthStatus;
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
-use mars::red_bank::UserHealthStatus;
 
 use crate::contract::{get_bit, market_get_from_index};
 use crate::error::ContractError;

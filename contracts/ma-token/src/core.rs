@@ -98,15 +98,13 @@ pub fn finalize_transfer_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.into(),
-        msg: to_binary(
-            &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address,
-                recipient_address,
-                sender_previous_balance,
-                recipient_previous_balance,
-                amount,
-            },
-        )?,
+        msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        })?,
         funds: vec![],
     }))
 }
@@ -119,7 +117,7 @@ pub fn balance_change_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: incentives_address.into(),
-        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+        msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
             user_address,
             user_balance_before,
             total_supply_before,

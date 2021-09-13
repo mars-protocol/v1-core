@@ -1,5 +1,5 @@
-use crate::math::{decimal_division, decimal_multiplication};
 use cosmwasm_std::{Decimal, StdError, StdResult};
+use mars::math::{decimal_division, decimal_multiplication};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -210,8 +210,8 @@ impl InterestRateModel for LinearInterestRate {
 #[cfg(test)]
 mod tests {
     use crate::interest_rate_models::{DynamicInterestRate, InterestRateModel, LinearInterestRate};
-    use crate::math::{decimal_division, decimal_multiplication};
     use cosmwasm_std::Decimal;
+    use mars::math::{decimal_division, decimal_multiplication};
 
     #[test]
     fn test_dynamic_interest_rates_calculation() {

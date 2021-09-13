@@ -131,21 +131,19 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(
-                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                            sender_address: Addr::unchecked(&owner),
-                            recipient_address: Addr::unchecked(&rcpt),
-                            sender_previous_balance: start,
-                            recipient_previous_balance: Uint128::zero(),
-                            amount: transfer,
-                        }
-                    )
+                    msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                        sender_address: Addr::unchecked(&owner),
+                        recipient_address: Addr::unchecked(&rcpt),
+                        sender_previous_balance: start,
+                        recipient_previous_balance: Uint128::zero(),
+                        amount: transfer,
+                    })
                     .unwrap(),
                     funds: vec![],
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&owner),
                         user_balance_before: start,
                         total_supply_before: start,
@@ -155,7 +153,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&rcpt),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: start,
@@ -262,21 +260,19 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(
-                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                            sender_address: Addr::unchecked(&owner),
-                            recipient_address: Addr::unchecked(&contract),
-                            sender_previous_balance: start,
-                            recipient_previous_balance: Uint128::zero(),
-                            amount: transfer,
-                        }
-                    )
+                    msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                        sender_address: Addr::unchecked(&owner),
+                        recipient_address: Addr::unchecked(&contract),
+                        sender_previous_balance: start,
+                        recipient_previous_balance: Uint128::zero(),
+                        amount: transfer,
+                    })
                     .unwrap(),
                     funds: vec![],
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&owner),
                         user_balance_before: start,
                         total_supply_before: start,
@@ -286,7 +282,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&contract),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: start,
