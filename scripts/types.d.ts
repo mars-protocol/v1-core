@@ -65,6 +65,9 @@ interface InitOrUpdateAssetParams {
   maintenance_margin: string
   liquidation_bonus: string
   interest_rate_strategy: DynamicInterestRate | LinearInterestRate
+  active: boolean
+  deposit_enabled: boolean
+  borrow_enabled: boolean
 }
 
 interface Asset {

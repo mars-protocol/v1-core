@@ -351,7 +351,10 @@ async function main() {
               kp_augmentation_threshold: "0.15",
               kp_2: "0.05"
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
@@ -386,7 +389,10 @@ async function main() {
               slope_1: String(UUSD_LINEAR_INTEREST_RATE_SLOPE_1),
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
