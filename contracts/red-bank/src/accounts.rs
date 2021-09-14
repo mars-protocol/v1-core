@@ -198,7 +198,6 @@ fn get_user_asset_positions(
             &asset_label,
             asset_reference_vec.clone(),
             market.asset_type.clone(),
-            block_time,
         )?;
 
         let user_asset_position = UserAssetPosition {

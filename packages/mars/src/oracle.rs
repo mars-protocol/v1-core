@@ -83,14 +83,12 @@ pub mod msg {
 
 pub mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdError, StdResult, WasmQuery,
+        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdResult, WasmQuery,
     };
 
     use crate::asset::AssetType;
 
     use super::msg::{AssetPriceResponse, QueryMsg};
-
-    const MAXIMUM_LAST_UPDATED_TIME_ELAPSED: u64 = 120; // seconds
 
     pub fn query_price(
         querier: QuerierWrapper,
@@ -98,7 +96,6 @@ pub mod helpers {
         asset_label: &str,
         asset_reference: Vec<u8>,
         asset_type: AssetType,
-        block_time: u64,
     ) -> StdResult<Decimal> {
         let query: Decimal = if asset_type == AssetType::Native && asset_label == "uusd" {
             Decimal::one()
@@ -108,13 +105,6 @@ pub mod helpers {
                     contract_addr: oracle_address.into(),
                     msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
                 }))?;
-            let last_updated_time_elapsed = block_time - asset_price.last_updated;
-            if last_updated_time_elapsed > MAXIMUM_LAST_UPDATED_TIME_ELAPSED {
-                return Err(StdError::generic_err(format!(
-                    "asset price is stale (last updated {} s ago)",
-                    last_updated_time_elapsed
-                )));
-            };
             asset_price.price
         };
 

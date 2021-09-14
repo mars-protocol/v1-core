@@ -789,7 +789,6 @@ pub fn execute_borrow(
                 &asset_label,
                 asset_reference.clone(),
                 asset_type,
-                env.block.time.seconds(),
             )?
         };
 
