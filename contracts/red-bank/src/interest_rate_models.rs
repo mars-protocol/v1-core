@@ -197,10 +197,9 @@ impl InterestRateModel for LinearInterestRate {
     }
 
     fn validate(&self) -> StdResult<()> {
-        // if self.optimal_utilization_rate >= Decimal::one() {
         if self.optimal_utilization_rate > Decimal::one() {
             return Err(StdError::generic_err(
-                "Optimal utilization rate should be less than one",
+                "Optimal utilization rate can't be greater than one",
             ));
         }
 
