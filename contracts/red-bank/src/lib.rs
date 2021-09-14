@@ -3,4 +3,6 @@ pub mod error;
 pub mod state;
 
 mod accounts;
-mod interest_rate;
+pub mod interest_rate_models;
+mod interest_rates;
+pub mod msg;

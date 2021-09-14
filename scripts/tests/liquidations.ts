@@ -716,7 +716,10 @@ async function main() {
               slope_1: "0",
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
@@ -745,7 +748,10 @@ async function main() {
               slope_1: "0",
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
@@ -773,7 +779,10 @@ async function main() {
               slope_1: "0",
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
@@ -801,7 +810,10 @@ async function main() {
               slope_1: "0",
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }

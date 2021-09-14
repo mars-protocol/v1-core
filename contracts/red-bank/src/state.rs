@@ -3,13 +3,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
 use crate::error::ContractError::{InvalidFeeShareAmounts, InvalidMaintenanceMargin};
-use cosmwasm_std::{Addr, Decimal, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::error::MarsError;
 use mars::helpers::all_conditions_valid;
-use mars::interest_rate_models::{InterestRateModel, InterestRateStrategy};
-use mars::red_bank::msg::InitOrUpdateAssetParams;
+
+use crate::interest_rate_models::{InterestRateModel, InterestRateStrategy};
+use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
+use crate::msg::InitOrUpdateAssetParams;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
@@ -21,7 +23,7 @@ pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
 pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
     Map::new("uncollateralized_loan_limits");
 
-/// Lending pool global configuration
+/// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner
@@ -113,6 +115,13 @@ pub struct Market {
     pub debt_total_scaled: Uint128,
     /// Income to be distributed to other protocol contracts
     pub protocol_income_to_distribute: Uint128,
+
+    /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
+    pub active: bool,
+    /// If false cannot deposit
+    pub deposit_enabled: bool,
+    /// If false cannot borrow
+    pub borrow_enabled: bool,
 }
 
 impl Market {
@@ -132,6 +141,9 @@ impl Market {
             maintenance_margin,
             liquidation_bonus,
             interest_rate_strategy,
+            active,
+            deposit_enabled,
+            borrow_enabled,
         } = params;
 
         // All fields should be available
@@ -140,7 +152,10 @@ impl Market {
             && reserve_factor.is_some()
             && maintenance_margin.is_some()
             && liquidation_bonus.is_some()
-            && interest_rate_strategy.is_some();
+            && interest_rate_strategy.is_some()
+            && active.is_some()
+            && deposit_enabled.is_some()
+            && borrow_enabled.is_some();
 
         if !available {
             return Err(MarsError::InstantiateParamsUnavailable {}.into());
@@ -162,6 +177,9 @@ impl Market {
             liquidation_bonus: liquidation_bonus.unwrap(),
             protocol_income_to_distribute: Uint128::zero(),
             interest_rate_strategy: interest_rate_strategy.unwrap(),
+            active: active.unwrap(),
+            deposit_enabled: deposit_enabled.unwrap(),
+            borrow_enabled: borrow_enabled.unwrap(),
         };
 
         new_market.validate()?;
@@ -202,7 +220,13 @@ impl Market {
     }
 
     /// Update market based on new params
-    pub fn update_with(self, params: InitOrUpdateAssetParams) -> Result<Self, ContractError> {
+    pub fn update(
+        mut self,
+        deps: &DepsMut,
+        env: &Env,
+        reference: &[u8],
+        params: InitOrUpdateAssetParams,
+    ) -> Result<(Self, bool), ContractError> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -212,20 +236,62 @@ impl Market {
             maintenance_margin,
             liquidation_bonus,
             interest_rate_strategy,
+            active,
+            deposit_enabled,
+            borrow_enabled,
         } = params;
 
-        let updated_market = Market {
+        // If reserve factor or interest rates are updated we update indexes with
+        // current values before applying the change to prevent applying this
+        // new params to a period where they were not valid yet. Interests rates are
+        // recalculated after changes are applied.
+        let should_update_interest_rates = (reserve_factor.is_some()
+            && reserve_factor.unwrap() != self.reserve_factor)
+            || interest_rate_strategy.is_some();
+
+        if should_update_interest_rates {
+            apply_accumulated_interests(env, &mut self);
+        }
+
+        let mut updated_market = Market {
             max_loan_to_value: max_loan_to_value.unwrap_or(self.max_loan_to_value),
             reserve_factor: reserve_factor.unwrap_or(self.reserve_factor),
             maintenance_margin: maintenance_margin.unwrap_or(self.maintenance_margin),
             liquidation_bonus: liquidation_bonus.unwrap_or(self.liquidation_bonus),
             interest_rate_strategy: interest_rate_strategy.unwrap_or(self.interest_rate_strategy),
+            active: active.unwrap_or(self.active),
+            deposit_enabled: deposit_enabled.unwrap_or(self.deposit_enabled),
+            borrow_enabled: borrow_enabled.unwrap_or(self.borrow_enabled),
             ..self
         };
 
         updated_market.validate()?;
 
-        Ok(updated_market)
+        if should_update_interest_rates {
+            update_interest_rates(deps, env, reference, &mut updated_market, Uint128::zero())?;
+        }
+
+        Ok((updated_market, should_update_interest_rates))
+    }
+
+    pub fn allow_deposit(&self) -> bool {
+        self.active && self.deposit_enabled
+    }
+
+    pub fn allow_withdraw(&self) -> bool {
+        self.active
+    }
+
+    pub fn allow_borrow(&self) -> bool {
+        self.active && self.borrow_enabled
+    }
+
+    pub fn allow_repay(&self) -> bool {
+        self.active
+    }
+
+    pub fn allow_liquidate(&self) -> bool {
+        self.active
     }
 }
 

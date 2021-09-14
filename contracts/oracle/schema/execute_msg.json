@@ -47,6 +47,30 @@
         }
       },
       "additionalProperties": false
+    },
+    {
+      "description": "Fetch cumulative price from Astroport pair and record in contract storage",
+      "type": "object",
+      "required": [
+        "update_astroport_twap_data"
+      ],
+      "properties": {
+        "update_astroport_twap_data": {
+          "type": "object",
+          "required": [
+            "assets"
+          ],
+          "properties": {
+            "assets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Asset"
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
     }
   ],
   "definitions": {
@@ -102,6 +126,28 @@
     "PriceSource_for_String": {
       "anyOf": [
         {
+          "description": "Returns a fixed value; used for UST",
+          "type": "object",
+          "required": [
+            "fixed"
+          ],
+          "properties": {
+            "fixed": {
+              "type": "object",
+              "required": [
+                "price"
+              ],
+              "properties": {
+                "price": {
+                  "$ref": "#/definitions/Decimal"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Native Terra stablecoins transaction rate quoted in UST",
           "type": "object",
           "required": [
             "native"
@@ -122,17 +168,22 @@
           "additionalProperties": false
         },
         {
+          "description": "Astroport spot price quoted in the other asset of the pair",
           "type": "object",
           "required": [
-            "terraswap_uusd_pair"
+            "astroport_spot"
           ],
           "properties": {
-            "terraswap_uusd_pair": {
+            "astroport_spot": {
               "type": "object",
               "required": [
+                "asset_address",
                 "pair_address"
               ],
               "properties": {
+                "asset_address": {
+                  "type": "string"
+                },
                 "pair_address": {
                   "type": "string"
                 }
@@ -142,19 +193,31 @@
           "additionalProperties": false
         },
         {
+          "description": "Astroport TWAP price quoted in the other asset of the pair",
           "type": "object",
           "required": [
-            "fixed"
+            "astroport_twap"
           ],
           "properties": {
-            "fixed": {
+            "astroport_twap": {
               "type": "object",
               "required": [
-                "price"
+                "asset_address",
+                "min_period",
+                "pair_address"
               ],
               "properties": {
-                "price": {
-                  "$ref": "#/definitions/Decimal"
+                "asset_address": {
+                  "type": "string"
+                },
+                "min_period": {
+                  "description": "Minimum time (in seconds) required to pass between two TWAP data updates. E.g. if set to 300, then prices will be averaged over periods of no less than 5 minutes.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                },
+                "pair_address": {
+                  "type": "string"
                 }
               }
             }

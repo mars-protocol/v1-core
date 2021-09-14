@@ -15,6 +15,10 @@ pub fn transfer(
     amount: Uint128,
     finalize_on_red_bank: bool,
 ) -> Result<Vec<CosmosMsg>, ContractError> {
+    if sender_address == recipient_address {
+        return Err(StdError::generic_err("Sender and recipient cannot be the same").into());
+    }
+
     if amount == Uint128::zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
@@ -94,15 +98,13 @@ pub fn finalize_transfer_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.into(),
-        msg: to_binary(
-            &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                sender_address,
-                recipient_address,
-                sender_previous_balance,
-                recipient_previous_balance,
-                amount,
-            },
-        )?,
+        msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+            sender_address,
+            recipient_address,
+            sender_previous_balance,
+            recipient_previous_balance,
+            amount,
+        })?,
         funds: vec![],
     }))
 }

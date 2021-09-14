@@ -8,6 +8,7 @@
     "@terra-money/terra.js": "^2.0.4",
     "bignumber.js": "^9.0.1",
     "dotenv": "^8.2.0",
+    "node-fetch": "^3.0.0",
     "ts-custom-error": "^3.2.0"
   },
   "devDependencies": {

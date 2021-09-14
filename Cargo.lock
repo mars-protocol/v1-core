@@ -382,6 +382,7 @@ dependencies = [
  "mars",
  "schemars",
  "serde",
+ "staking",
  "thiserror",
 ]
 
@@ -434,6 +435,7 @@ dependencies = [
  "cw20",
  "cw20-base",
  "mars",
+ "red-bank",
  "schemars",
  "serde",
  "thiserror",
@@ -467,12 +469,10 @@ dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus",
- "cw20",
  "mars",
  "schemars",
  "serde",
  "terra-cosmwasm",
- "thiserror",
 ]
 
 [[package]]

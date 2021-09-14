@@ -15,7 +15,7 @@ use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg
 
 // INIT
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
@@ -35,7 +35,7 @@ pub fn instantiate(
 
 // HANDLERS
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -250,7 +250,7 @@ pub fn execute_claim_rewards(
             msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
                 amount: total_unclaimed_rewards,
-                msg: to_binary(&mars::staking::msg::ReceiveMsg::Stake {
+                msg: to_binary(&staking::msg::ReceiveMsg::Stake {
                     recipient: Some(user_address.to_string()),
                 })?,
             })?,
@@ -451,7 +451,7 @@ fn compute_user_unclaimed_rewards(
 
 // QUERIES
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
@@ -1233,7 +1233,7 @@ mod tests {
                 msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                     contract: String::from("staking"),
                     amount: expected_accrued_rewards,
-                    msg: to_binary(&mars::staking::msg::ReceiveMsg::Stake {
+                    msg: to_binary(&staking::msg::ReceiveMsg::Stake {
                         recipient: Some(user_address.to_string()),
                     })
                     .unwrap()

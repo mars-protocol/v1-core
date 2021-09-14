@@ -16,25 +16,20 @@
       "additionalProperties": false
     },
     {
-      "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
+      "description": "Get asset's price config",
       "type": "object",
       "required": [
-        "asset_price_by_reference"
+        "asset_config"
       ],
       "properties": {
-        "asset_price_by_reference": {
+        "asset_config": {
           "type": "object",
           "required": [
-            "asset_reference"
+            "asset"
           ],
           "properties": {
-            "asset_reference": {
-              "type": "array",
-              "items": {
-                "type": "integer",
-                "format": "uint8",
-                "minimum": 0.0
-              }
+            "asset": {
+              "$ref": "#/definitions/Asset"
             }
           }
         }
@@ -63,20 +58,25 @@
       "additionalProperties": false
     },
     {
-      "description": "Get asset's price config",
+      "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
       "type": "object",
       "required": [
-        "asset_price_config"
+        "asset_price_by_reference"
       ],
       "properties": {
-        "asset_price_config": {
+        "asset_price_by_reference": {
           "type": "object",
           "required": [
-            "asset"
+            "asset_reference"
           ],
           "properties": {
-            "asset": {
-              "$ref": "#/definitions/Asset"
+            "asset_reference": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint8",
+                "minimum": 0.0
+              }
             }
           }
         }

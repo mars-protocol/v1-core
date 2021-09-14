@@ -26,7 +26,7 @@ use crate::state::{Config, CONFIG};
 const CONTRACT_NAME: &str = "crates.io:ma-token";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     mut deps: DepsMut,
     _env: Env,
@@ -69,7 +69,7 @@ pub fn instantiate(
     Ok(res)
 }
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
     env: Env,
@@ -319,7 +319,7 @@ pub fn execute_send(
 
 // QUERY
 
-#[entry_point]
+#[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
@@ -374,10 +374,10 @@ pub fn query_underlying_asset_balance(
 
     let config = CONFIG.load(deps.storage)?;
 
-    let query: mars::red_bank::msg::AmountResponse =
+    let query: red_bank::msg::AmountResponse =
         deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: config.red_bank_address.into(),
-            msg: to_binary(&mars::red_bank::msg::QueryMsg::DescaledLiquidityAmount {
+            msg: to_binary(&red_bank::msg::QueryMsg::DescaledLiquidityAmount {
                 ma_token_address: env.contract.address.into(),
                 amount: balance,
             })?,
@@ -801,6 +801,21 @@ mod tests {
         let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert!(matches!(err, ContractError::Std(StdError::Overflow { .. })));
 
+        // cannot send to self
+        let info = mock_info(addr1.as_ref(), &[]);
+        let env = mock_env();
+        let msg = ExecuteMsg::Transfer {
+            recipient: addr1.clone(),
+            amount: transfer,
+        };
+        let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+        assert_eq!(
+            err,
+            ContractError::Std(StdError::generic_err(
+                "Sender and recipient cannot be the same"
+            ))
+        );
+
         // valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
         let env = mock_env();
@@ -814,15 +829,13 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(
-                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                            sender_address: Addr::unchecked(&addr1),
-                            recipient_address: Addr::unchecked(&addr2),
-                            sender_previous_balance: amount1,
-                            recipient_previous_balance: Uint128::zero(),
-                            amount: transfer,
-                        }
-                    )
+                    msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                        sender_address: Addr::unchecked(&addr1),
+                        recipient_address: Addr::unchecked(&addr2),
+                        sender_previous_balance: amount1,
+                        recipient_previous_balance: Uint128::zero(),
+                        amount: transfer,
+                    })
                     .unwrap(),
                     funds: vec![],
                 })),
@@ -1108,20 +1121,19 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(
-                        &mars::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                            sender_address: Addr::unchecked(&addr1),
-                            recipient_address: Addr::unchecked(&contract),
-                            sender_previous_balance: amount1,
-                            recipient_previous_balance: Uint128::zero(),
-                            amount: transfer,
-                        }
-                    )
+                    msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                        sender_address: Addr::unchecked(&addr1),
+                        recipient_address: Addr::unchecked(&contract),
+                        sender_previous_balance: amount1,
+                        recipient_previous_balance: Uint128::zero(),
+                        amount: transfer,
+                    })
                     .unwrap(),
                     funds: vec![],
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
+
                     msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr1),
                         user_balance_before: amount1,

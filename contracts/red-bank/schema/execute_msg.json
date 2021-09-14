@@ -659,6 +659,27 @@
     "InitOrUpdateAssetParams": {
       "type": "object",
       "properties": {
+        "active": {
+          "description": "If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "borrow_enabled": {
+          "description": "If false cannot borrow",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "deposit_enabled": {
+          "description": "If false cannot deposit",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "initial_borrow_rate": {
           "description": "Initial borrow rate",
           "anyOf": [

@@ -1,9 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Binary, Decimal, Uint128};
+use cosmwasm_std::{Addr, Decimal, Uint128};
 use cw_storage_plus::{Item, Map, U64Key};
 
+use crate::types::ProposalMessage;
 use mars::error::MarsError;
 use mars::helpers::all_conditions_valid;
 
@@ -25,7 +26,7 @@ pub struct Config {
     /// Blocks after the effective_delay during which a successful proposal can be activated before it expires
     pub proposal_expiration_period: u64,
     /// Number of Mars needed to make a proposal. Will be returned if successful. Will be
-    /// distributed between stakers if proposal is not executed.
+    /// distributed between stakers if rejected.
     pub proposal_required_deposit: Uint128,
     /// % of total voting power required to participate in the proposal in order to consider it successfull
     pub proposal_required_quorum: Decimal,
@@ -71,7 +72,7 @@ pub struct Proposal {
     pub title: String,
     pub description: String,
     pub link: Option<String>,
-    pub execute_calls: Option<Vec<ProposalExecuteCall>>,
+    pub messages: Option<Vec<ProposalMessage>>,
     pub deposit_amount: Uint128,
 }
 
@@ -82,16 +83,6 @@ pub enum ProposalStatus {
     Passed,
     Rejected,
     Executed,
-}
-
-/// Execute call that will be done by the DAO if the proposal succeeds. As this is persisted,
-/// the contract checked address is stored (vs the unchecked string when the proposal submit message is
-/// sent)
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ProposalExecuteCall {
-    pub execution_order: u64,
-    pub target_contract_address: Addr,
-    pub msg: Binary,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
