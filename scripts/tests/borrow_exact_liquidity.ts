@@ -1,12 +1,3 @@
-/*
-Borrowing exact liquidity amount of a market with linear interest rate causes a panic:
-
-```
-rpc error: code = InvalidArgument desc = failed to execute message; message index: 0: Error calling
-the VM: Error executing Wasm: Wasmer runtime error: RuntimeError: unreachable: execute wasm contract
-failed: invalid request
-```
-*/
 import { LocalTerra } from "@terra-money/terra.js"
 import { join } from "path"
 import 'dotenv/config.js'
@@ -106,14 +97,16 @@ async function main() {
           maintenance_margin: "0.65",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
-            // Doesn't matter whether which interest rate strategy the collateral market uses
             linear: {
               optimal_utilization_rate: "1",
               base: "0",
               slope_1: "1",
               slope_2: "0",
             }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
@@ -140,24 +133,16 @@ async function main() {
           maintenance_margin: "0.85",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
-            // Borrowing exact liquidity amount panics with linear interest rate:
             linear: {
               optimal_utilization_rate: "1",
               base: "0",
               slope_1: "1",
               slope_2: "0",
             }
-
-            // Borrowing exact liquidity amount succeeds with dynamic interest rate:
-            // dynamic: {
-            //   min_borrow_rate: "0.0",
-            //   max_borrow_rate: "2.0",
-            //   kp_1: "0.02",
-            //   optimal_utilization_rate: "0.7",
-            //   kp_augmentation_threshold: "0.15",
-            //   kp_2: "0.05"
-            // }
-          }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
         }
       }
     }
