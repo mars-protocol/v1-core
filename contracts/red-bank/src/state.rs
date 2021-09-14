@@ -20,7 +20,7 @@ pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
 pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
     Map::new("uncollateralized_loan_limits");
 
-/// Lending pool global configuration
+/// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     /// Contract owner

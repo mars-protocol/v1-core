@@ -36,14 +36,14 @@
           ]
         },
         "incentives_address": {
-          "description": "Incentives contract handles incentives to depositiors on the red bank",
+          "description": "Incentives contract handles incentives to depositors on the red bank",
           "type": [
             "string",
             "null"
           ]
         },
         "insurance_fund_address": {
-          "description": "Insurance funnd contract accumulates UST to protect the protocol from shortfall events",
+          "description": "Insurance fund contract accumulates UST to protect the protocol from shortfall events",
           "type": [
             "string",
             "null"
@@ -64,7 +64,7 @@
           ]
         },
         "owner": {
-          "description": "Contract owner (has special persmissions to update parameters)",
+          "description": "Contract owner (has special permissions to update parameters)",
           "type": [
             "string",
             "null"
@@ -92,7 +92,7 @@
           ]
         },
         "treasury_address": {
-          "description": "Treasury contract accumulates protocol fees that can be spent by the council tthrough the voting of proposals",
+          "description": "Treasury contract accumulates protocol fees that can be spent by the council through the voting of proposals",
           "type": [
             "string",
             "null"
