@@ -88,7 +88,7 @@ pub mod helpers {
 
     use crate::asset::AssetType;
 
-    use super::msg::QueryMsg;
+    use super::msg::{AssetPriceResponse, QueryMsg};
 
     pub fn query_price(
         querier: QuerierWrapper,
@@ -100,10 +100,12 @@ pub mod helpers {
         let query: Decimal = if asset_type == AssetType::Native && asset_label == "uusd" {
             Decimal::one()
         } else {
-            querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: oracle_address.into(),
-                msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
-            }))?
+            let asset_price: AssetPriceResponse =
+                querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                    contract_addr: oracle_address.into(),
+                    msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
+                }))?;
+            asset_price.price
         };
 
         Ok(query)
