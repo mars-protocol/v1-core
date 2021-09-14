@@ -104,6 +104,39 @@ pub enum ContractError {
         maintenance_margin: Decimal,
         max_loan_to_value: Decimal,
     },
+
+    #[error("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: {max_borrow_rate:?}, min_borrow_rate: {min_borrow_rate:?}")]
+    InvalidMinMaxBorrowRate {
+        max_borrow_rate: Decimal,
+        min_borrow_rate: Decimal,
+    },
+
+    #[error("Optimal utilization rate can't be greater than one")]
+    InvalidOptimalUtilizationRate {},
+
+    #[error("Failed to encode asset reference into string")]
+    CannotEncodeAssetReferenceIntoString {},
+
+    #[error("Protocol income to be distributed and liquidity taken cannot be greater than available liquidity")]
+    OperationExceedsAvailableLiquidity {},
+
+    #[error("Cannot withdraw asset {asset:?}")]
+    WithdrawNotAllowed { asset: String },
+
+    #[error("Cannot deposit asset {asset:?}")]
+    DepositNotAllowed { asset: String },
+
+    #[error("Cannot borrow asset {asset:?}")]
+    BorrowNotAllowed { asset: String },
+
+    #[error("Cannot repay asset {asset:?}")]
+    RepayNotAllowed { asset: String },
+
+    #[error("Cannot liquidate. Collateral asset {asset:?}")]
+    LiquidationNotAllowedWhenCollateralMarketInactive { asset: String },
+
+    #[error("Cannot liquidate. Debt asset {asset:?}")]
+    LiquidationNotAllowedWhenDebtMarketInactive { asset: String },
 }
 
 impl ContractError {

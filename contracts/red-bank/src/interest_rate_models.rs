@@ -1,4 +1,6 @@
-use cosmwasm_std::{Decimal, StdError, StdResult};
+use crate::error::ContractError;
+use crate::error::ContractError::{InvalidMinMaxBorrowRate, InvalidOptimalUtilizationRate};
+use cosmwasm_std::Decimal;
 use mars::math::{decimal_division, decimal_multiplication};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +15,7 @@ pub trait InterestRateModel {
     ) -> (Decimal, Decimal);
 
     /// Validate model parameters
-    fn validate(&self) -> StdResult<()>;
+    fn validate(&self) -> Result<(), ContractError>;
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -44,7 +46,7 @@ impl InterestRateModel for InterestRateStrategy {
         }
     }
 
-    fn validate(&self) -> StdResult<()> {
+    fn validate(&self) -> Result<(), ContractError> {
         match self {
             InterestRateStrategy::Dynamic(dynamic) => dynamic.validate(),
             InterestRateStrategy::Linear(linear) => linear.validate(),
@@ -127,20 +129,16 @@ impl InterestRateModel for DynamicInterestRate {
         (new_borrow_rate, new_liquidity_rate)
     }
 
-    fn validate(&self) -> StdResult<()> {
+    fn validate(&self) -> Result<(), ContractError> {
         if self.min_borrow_rate > self.max_borrow_rate {
-            return Err(StdError::generic_err(format!(
-                "max_borrow_rate should be greater than or equal to min_borrow_rate. \
-                    max_borrow_rate: {}, \
-                    min_borrow_rate: {}",
-                self.max_borrow_rate, self.min_borrow_rate
-            )));
+            return Err(InvalidMinMaxBorrowRate {
+                min_borrow_rate: self.min_borrow_rate,
+                max_borrow_rate: self.max_borrow_rate,
+            });
         }
 
         if self.optimal_utilization_rate > Decimal::one() {
-            return Err(StdError::generic_err(
-                "Optimal utilization rate can't be greater than one",
-            ));
+            return Err(InvalidOptimalUtilizationRate {});
         }
 
         Ok(())
@@ -196,11 +194,9 @@ impl InterestRateModel for LinearInterestRate {
         (new_borrow_rate, new_liquidity_rate)
     }
 
-    fn validate(&self) -> StdResult<()> {
+    fn validate(&self) -> Result<(), ContractError> {
         if self.optimal_utilization_rate > Decimal::one() {
-            return Err(StdError::generic_err(
-                "Optimal utilization rate can't be greater than one",
-            ));
+            return Err(InvalidOptimalUtilizationRate {});
         }
 
         Ok(())
