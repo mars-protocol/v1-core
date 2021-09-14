@@ -167,7 +167,7 @@ impl InterestRateModel for LinearInterestRate {
         _borrow_rate: Decimal,
         reserve_factor: Decimal,
     ) -> (Decimal, Decimal) {
-        let new_borrow_rate = if current_utilization_rate < self.optimal_utilization_rate {
+        let new_borrow_rate = if current_utilization_rate <= self.optimal_utilization_rate {
             // The borrow interest rates increase slowly with utilisation
             self.base
                 + decimal_multiplication(
@@ -379,6 +379,31 @@ mod tests {
         assert_eq!(new_liquidity_rate, expected_liquidity_rate);
 
         // *
+        // current utilization rate == optimal utilization rate
+        // *
+        let current_utilization_rate = Decimal::percent(80);
+        let (new_borrow_rate, new_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_borrow_rate = linear_ir.base
+            + decimal_division(
+                decimal_multiplication(linear_ir.slope_1, current_utilization_rate),
+                linear_ir.optimal_utilization_rate,
+            );
+
+        let expected_liquidity_rate = th_expected_liquidity_rate(
+            expected_borrow_rate,
+            current_utilization_rate,
+            reserve_factor,
+        );
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
         // current utilization rate >= optimal utilization rate
         // *
         let current_utilization_rate = Decimal::percent(81);
@@ -397,6 +422,37 @@ mod tests {
                 ),
                 Decimal::one() - linear_ir.optimal_utilization_rate,
             );
+        let expected_liquidity_rate = th_expected_liquidity_rate(
+            expected_borrow_rate,
+            current_utilization_rate,
+            reserve_factor,
+        );
+
+        assert_eq!(new_borrow_rate, expected_borrow_rate);
+        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+
+        // *
+        // current utilization rate == 100% and optimal utilization rate == 100%
+        // *
+
+        let borrow_rate = Decimal::percent(0);
+        let reserve_factor = Decimal::percent(1);
+        let linear_ir = LinearInterestRate {
+            optimal_utilization_rate: Decimal::percent(100),
+            base: Decimal::from_ratio(0u128, 100u128),
+            slope_1: Decimal::from_ratio(7u128, 100u128),
+            slope_2: Decimal::from_ratio(0u128, 100u128),
+        };
+
+        let current_utilization_rate = Decimal::percent(100);
+        let (new_borrow_rate, new_liquidity_rate) = linear_ir.get_updated_interest_rates(
+            current_utilization_rate,
+            borrow_rate,
+            reserve_factor,
+        );
+
+        let expected_borrow_rate = Decimal::percent(7);
+
         let expected_liquidity_rate = th_expected_liquidity_rate(
             expected_borrow_rate,
             current_utilization_rate,
