@@ -106,20 +106,12 @@ async function main() {
           maintenance_margin: "0.65",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
-            // linear: {
-            //   optimal_utilization_rate: "1",
-            //   base: "0",
-            //   slope_1: "1",
-            //   slope_2: "0",
-            // }
-
-            dynamic: {
-              min_borrow_rate: "0.0",
-              max_borrow_rate: "2.0",
-              kp_1: "0.02",
-              optimal_utilization_rate: "0.7",
-              kp_augmentation_threshold: "0.15",
-              kp_2: "0.05"
+            // Doesn't matter whether which interest rate strategy the collateral market uses
+            linear: {
+              optimal_utilization_rate: "1",
+              base: "0",
+              slope_1: "1",
+              slope_2: "0",
             }
           }
         }

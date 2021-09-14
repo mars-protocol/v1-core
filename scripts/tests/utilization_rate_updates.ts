@@ -1,3 +1,6 @@
+/*
+Tests that market utilization rates update when funds are sent to/from the red bank
+*/
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual, strict as assert } from "assert"
@@ -150,37 +153,15 @@ async function testLinearInterestRate(env: Env) {
   )
 
   await executeContract(terra, bob, redBank,
-    {
-      withdraw: {
-        asset: { cw20: { contract_addr: mars } },
-        amount: String(BOB_MARS_COLLATERAL),
-      }
-    }
-  )
-
-  const aliceMaUusdBalance = await queryContract(terra, maUusd, { balance: { address: alice.key.accAddress } })
-
-  const aliceUusdWithdrawableAmount = await queryContract(terra, redBank,
-    {
-      descaled_liquidity_amount: {
-        ma_token_address: maUusd,
-        amount: aliceMaUusdBalance.balance
-      }
-    }
+    { withdraw: { asset: { cw20: { contract_addr: mars } } } }
   )
 
   await executeContract(terra, alice, redBank,
-    {
-      withdraw: {
-        asset: { native: { denom: "uusd" } },
-        amount: aliceUusdWithdrawableAmount.amount,
-      }
-    }
+    { withdraw: { asset: { native: { denom: "uusd" } } } }
   )
 
   const maUusdTokenInfo = await queryContract(terra, maUusd, { token_info: {} })
-  // TODO why is `maUusdTokenInfo.total_supply == 1`? rounding error in `descaled_liquidity_amount`?
-  // strictEqual(parseInt(maUusdTokenInfo.total_supply), 0)
+  strictEqual(parseInt(maUusdTokenInfo.total_supply), 0)
 
   const maMarsTokenInfo = await queryContract(terra, maMars, { token_info: {} })
   strictEqual(parseInt(maMarsTokenInfo.total_supply), 0)
@@ -214,9 +195,7 @@ async function testDynamicInterestRate(env: Env) {
     {
       borrow: {
         asset: { cw20: { contract_addr: mars } },
-        // TODO change this to borrow `ALICE_MARS_COLLATERAL` once borrowing exact liquidity amount
-        // bug is fixed
-        amount: String(ALICE_MARS_COLLATERAL - 1)
+        amount: String(ALICE_MARS_COLLATERAL)
       }
     }
   )
@@ -304,9 +283,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
@@ -332,8 +309,7 @@ async function main() {
       initial_balances: [
         { address: alice.key.accAddress, amount: String(100 * ALICE_MARS_COLLATERAL) },
         { address: bob.key.accAddress, amount: String(100 * BOB_MARS_COLLATERAL) }
-      ],
-      mint: { minter: deployer.key.accAddress },
+      ]
     }
   )
 
