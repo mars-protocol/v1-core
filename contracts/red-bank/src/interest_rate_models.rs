@@ -167,7 +167,7 @@ impl InterestRateModel for LinearInterestRate {
         _borrow_rate: Decimal,
         reserve_factor: Decimal,
     ) -> (Decimal, Decimal) {
-        let new_borrow_rate = if current_utilization_rate < self.optimal_utilization_rate {
+        let new_borrow_rate = if current_utilization_rate <= self.optimal_utilization_rate {
             // The borrow interest rates increase slowly with utilisation
             self.base
                 + decimal_multiplication(
@@ -197,9 +197,10 @@ impl InterestRateModel for LinearInterestRate {
     }
 
     fn validate(&self) -> StdResult<()> {
+        // if self.optimal_utilization_rate >= Decimal::one() {
         if self.optimal_utilization_rate > Decimal::one() {
             return Err(StdError::generic_err(
-                "Optimal utilization rate can't be greater than one",
+                "Optimal utilization rate should be less than one",
             ));
         }
 
