@@ -1,7 +1,7 @@
 use cosmwasm_std::{
     attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdError, StdResult, Uint128,
-    WasmMsg, WasmQuery,
+    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
+    WasmQuery,
 };
 use cw_storage_plus::{Bound, U64Key};
 
@@ -39,7 +39,7 @@ pub fn instantiate(
     _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -62,9 +62,7 @@ pub fn instantiate(
         && proposal_required_threshold.is_some();
 
     if !available {
-        return Err(StdError::generic_err(
-            "All params should be available during initialization",
-        ));
+        return Err(MarsError::InstantiateParamsUnavailable {}.into());
     };
 
     // initialize Config
@@ -674,11 +672,8 @@ fn xmars_get_balance_at(
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{Coin, OwnedDeps, SubMsg};
-    use mars::testing::{
-        assert_generic_error_message, mock_dependencies, mock_env, mock_info, MarsMockQuerier,
-        MockEnvParams,
-    };
+    use cosmwasm_std::{Coin, OwnedDeps, StdError, SubMsg};
+    use mars::testing::{mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams};
 
     use crate::msg::ExecuteMsg::UpdateConfig;
     use crate::msg::MigrateMsg;
@@ -709,11 +704,8 @@ mod tests {
             };
             let info = mock_info("someone");
             let env = cosmwasm_std::testing::mock_env();
-            let response = instantiate(deps.as_mut(), env, info, msg);
-            assert_generic_error_message(
-                response,
-                "All params should be available during initialization",
-            );
+            let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
         }
 
         // init with proposal_required_quorum, proposal_required_threshold greater than 1
@@ -731,11 +723,16 @@ mod tests {
             let msg = InstantiateMsg { config };
             let env = cosmwasm_std::testing::mock_env();
             let info = mock_info("someone");
-            let response = instantiate(deps.as_mut(), env, info, msg);
-            assert_generic_error_message(
-                response,
-                "[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                    Invalid params: [proposal_required_quorum, proposal_required_threshold]",
+            let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                MarsError::ParamsNotLessOrEqualOne {
+                    expected_params: "proposal_required_quorum, proposal_required_threshold"
+                        .to_string(),
+                    invalid_params: "proposal_required_quorum, proposal_required_threshold"
+                        .to_string()
+                }
+                .into()
             );
         }
 
@@ -805,12 +802,16 @@ mod tests {
             let msg = UpdateConfig { config };
             let env = cosmwasm_std::testing::mock_env();
             let info = mock_info(MOCK_CONTRACT_ADDR);
-            let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
-                response,
-                StdError::generic_err("[proposal_required_quorum, proposal_required_threshold] should be less or equal 1. \
-                    Invalid params: [proposal_required_quorum, proposal_required_threshold]",
-                ).into()
+                error_res,
+                MarsError::ParamsNotLessOrEqualOne {
+                    expected_params: "proposal_required_quorum, proposal_required_threshold"
+                        .to_string(),
+                    invalid_params: "proposal_required_quorum, proposal_required_threshold"
+                        .to_string()
+                }
+                .into()
             );
         }
 

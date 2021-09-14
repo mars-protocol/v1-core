@@ -1,4 +1,4 @@
-use cosmwasm_std::{OverflowError, StdError};
+use cosmwasm_std::{Decimal, OverflowError, StdError};
 use mars::error::MarsError;
 use thiserror::Error;
 
@@ -15,6 +15,128 @@ pub enum ContractError {
 
     #[error("Price not found for asset: {label:?}")]
     PriceNotFound { label: String },
+
+    #[error("User has no balance (asset: {asset:?})")]
+    UserNoBalance { asset: String },
+
+    #[error(
+        "User address {user_address:?} has no balance in specified collateral asset {asset:?}"
+    )]
+    UserNoCollateralBalance { user_address: String, asset: String },
+
+    #[error(
+        "Withdraw amount must be greater than 0 and less or equal user balance (asset: {asset:?})"
+    )]
+    InvalidWithdrawAmount { asset: String },
+
+    #[error("User's health factor can't be less than 1 after withdraw")]
+    InvalidHealthFactorAfterWithdraw {},
+
+    #[error("User's health factor can't be less than 1 after withdraw")]
+    AssetAlreadyInitialized {},
+
+    #[error("Asset not initialized")]
+    AssetNotInitialized {},
+
+    #[error("Deposit amount must be greater than 0 {asset:?}")]
+    InvalidDepositAmount { asset: String },
+
+    #[error("Cannot have 0 as liquidity index")]
+    InvalidLiquidityIndex {},
+
+    #[error("Borrow amount must be greater than 0 {asset:?}")]
+    InvalidBorrowAmount { asset: String },
+
+    #[error("No borrow market exists with asset: {asset:?}")]
+    BorrowMarketNotExists { asset: String },
+
+    #[error("Address has no collateral deposited")]
+    UserNoCollateral {},
+
+    #[error("Borrow amount exceeds maximum allowed given current collateral value")]
+    BorrowAmountExceedsGivenCollateral {},
+
+    #[error("Borrow amount exceeds uncollateralized loan limit given existing debt")]
+    BorrowAmountExceedsUncollateralizedLoanLimit {},
+
+    #[error("Repay amount must be greater than 0 {asset:?}")]
+    InvalidRepayAmount { asset: String },
+
+    #[error("Cannot repay 0 debt")]
+    CannotRepayZeroDebt {},
+
+    #[error("Amount to repay is greater than total debt")]
+    CannotRepayMoreThanDebt {},
+
+    #[error("Amount to repay is greater than total debt")]
+    CannotLiquidateWhenPositiveUncollateralizedLoanLimit {},
+
+    #[error("Must send more than 0 {asset:?} in order to liquidate")]
+    InvalidLiquidateAmount { asset: String },
+
+    #[error("User has no balance in specified collateral asset to be liquidated")]
+    CannotLiquidateWhenNoCollateralBalance {},
+
+    #[error(
+        "User has no outstanding debt in the specified debt asset and thus cannot be liquidated"
+    )]
+    CannotLiquidateWhenNoDebtBalance {},
+
+    #[error("User's health factor is not less than 1 and thus cannot be liquidated")]
+    CannotLiquidateWhenValidHealthFactor {},
+
+    #[error("Contract does not have enough collateral liquidity to send back underlying asset")]
+    CannotLiquidateWhenNotEnoughCollateral {},
+
+    #[error(
+        "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
+    )]
+    CannotTransferTokenWhenInvalidHealthFactor {},
+
+    #[error("Amount specified exceeds market's income to be distributed")]
+    CannotDistributeProtocolIncome {},
+
+    #[error("Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one")]
+    InvalidFeeShareAmounts {},
+
+    #[error("maintenance_margin should be greater than max_loan_to_value. maintenance_margin: {maintenance_margin:?}, max_loan_to_value: {max_loan_to_value:?}")]
+    InvalidMaintenanceMargin {
+        maintenance_margin: Decimal,
+        max_loan_to_value: Decimal,
+    },
+
+    #[error("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: {max_borrow_rate:?}, min_borrow_rate: {min_borrow_rate:?}")]
+    InvalidMinMaxBorrowRate {
+        max_borrow_rate: Decimal,
+        min_borrow_rate: Decimal,
+    },
+
+    #[error("Optimal utilization rate can't be greater than one")]
+    InvalidOptimalUtilizationRate {},
+
+    #[error("Failed to encode asset reference into string")]
+    CannotEncodeAssetReferenceIntoString {},
+
+    #[error("Protocol income to be distributed and liquidity taken cannot be greater than available liquidity")]
+    OperationExceedsAvailableLiquidity {},
+
+    #[error("Cannot withdraw asset {asset:?}")]
+    WithdrawNotAllowed { asset: String },
+
+    #[error("Cannot deposit asset {asset:?}")]
+    DepositNotAllowed { asset: String },
+
+    #[error("Cannot borrow asset {asset:?}")]
+    BorrowNotAllowed { asset: String },
+
+    #[error("Cannot repay asset {asset:?}")]
+    RepayNotAllowed { asset: String },
+
+    #[error("Cannot liquidate. Collateral asset {asset:?}")]
+    LiquidationNotAllowedWhenCollateralMarketInactive { asset: String },
+
+    #[error("Cannot liquidate. Debt asset {asset:?}")]
+    LiquidationNotAllowedWhenDebtMarketInactive { asset: String },
 }
 
 impl ContractError {

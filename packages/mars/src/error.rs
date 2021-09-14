@@ -14,4 +14,12 @@ pub enum MarsError {
 
     #[error("Incorrect number of addresses, expected {expected:?}, got {actual:?}")]
     AddressesQueryWrongNumber { expected: u32, actual: u32 },
+
+    #[error(
+        "[{expected_params:?}] should be less or equal 1. Invalid params: [{invalid_params:?}]"
+    )]
+    ParamsNotLessOrEqualOne {
+        expected_params: String,
+        invalid_params: String,
+    },
 }
