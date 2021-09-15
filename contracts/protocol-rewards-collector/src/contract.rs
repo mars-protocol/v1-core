@@ -893,7 +893,7 @@ mod tests {
             res.messages,
             vec![
                 SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "safety_fund".to_string(),
+                    to_address: "insurance_fund".to_string(),
                     amount: vec![deduct_tax(
                         deps.as_ref(),
                         Coin {
@@ -956,7 +956,7 @@ mod tests {
             res.messages,
             vec![
                 SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "safety_fund".to_string(),
+                    to_address: "insurance_fund".to_string(),
                     amount: vec![deduct_tax(
                         deps.as_ref(),
                         Coin {
@@ -1075,7 +1075,7 @@ mod tests {
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "cw20_address".to_string(),
                     msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient: "safety_fund".to_string(),
+                        recipient: "insurance_fund".to_string(),
                         amount: expected_safety_fund_amount,
                     })
                     .unwrap(),
@@ -1132,7 +1132,7 @@ mod tests {
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "cw20_address".to_string(),
                     msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                        recipient: "safety_fund".to_string(),
+                        recipient: "insurance_fund".to_string(),
                         amount: expected_safety_fund_amount,
                     })
                     .unwrap(),
