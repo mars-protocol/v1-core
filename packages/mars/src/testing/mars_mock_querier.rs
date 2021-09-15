@@ -8,10 +8,13 @@ use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
 use terraswap::asset::PairInfo;
 
-use crate::{address_provider, ma_token, oracle, testing::mock_address_provider, xmars_token};
+use crate::{
+    address_provider, incentives, ma_token, oracle, testing::mock_address_provider, xmars_token,
+};
 
 use super::{
     cw20_querier::{mock_token_info_response, Cw20Querier},
+    incentives_querier::IncentivesQuerier,
     native_querier::NativeQuerier,
     oracle_querier::OracleQuerier,
     terraswap_pair_querier::TerraswapPairQuerier,
@@ -25,6 +28,7 @@ pub struct MarsMockQuerier {
     xmars_querier: XMarsQuerier,
     terraswap_pair_querier: TerraswapPairQuerier,
     oracle_querier: OracleQuerier,
+    incentives_querier: IncentivesQuerier,
 }
 
 impl Querier for MarsMockQuerier {
@@ -53,6 +57,7 @@ impl MarsMockQuerier {
             oracle_querier: OracleQuerier::default(),
             xmars_querier: XMarsQuerier::default(),
             terraswap_pair_querier: TerraswapPairQuerier::default(),
+            incentives_querier: IncentivesQuerier::default(),
         }
     }
 
@@ -136,6 +141,16 @@ impl MarsMockQuerier {
         self.terraswap_pair_querier.pairs.insert(key, pair_info);
     }
 
+    pub fn set_incentives_address(&mut self, address: Addr) {
+        self.incentives_querier.incentives_address = address;
+    }
+
+    pub fn set_unclaimed_rewards(&mut self, user_address: String, unclaimed_rewards: Uint128) {
+        self.incentives_querier
+            .unclaimed_rewards_at
+            .insert(Addr::unchecked(user_address), unclaimed_rewards);
+    }
+
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
@@ -189,6 +204,14 @@ impl MarsMockQuerier {
                     from_binary(msg);
                 if let Ok(pair_query) = terraswap_pair_query {
                     return self.terraswap_pair_querier.handle_query(&pair_query);
+                }
+
+                // Incentives Queries
+                let parse_incentives_query: StdResult<incentives::msg::QueryMsg> = from_binary(msg);
+                if let Ok(incentives_query) = parse_incentives_query {
+                    return self
+                        .incentives_querier
+                        .handle_query(&contract_addr, incentives_query);
                 }
 
                 panic!("[mock]: Unsupported wasm query: {:?}", msg);
