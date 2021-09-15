@@ -153,7 +153,7 @@ export async function setupOracle(
       let pairQueryResponse
       try {
         pairQueryResponse = await queryContract(terra, oracleFactoryAddress, pairQueryMsg)
-      } catch (error) {
+      } catch (error: any) {
         if (error.response.data.error.includes("PairInfoRaw not found")) {
           console.log("Pair not found, creating pair...");
 
@@ -188,8 +188,9 @@ export async function setupOracle(
       }
 
       assetPriceSource = {
-        "terraswap_uusd_pair": {
-          "pair_address": pairQueryResponse.contract_addr
+        "astroport_spot": {
+          "pair_address": pairQueryResponse.contract_addr,
+          "asset_address": asset.contract_addr
         }
       }
     } else {
