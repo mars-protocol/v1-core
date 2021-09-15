@@ -36,8 +36,8 @@ pub fn instantiate(
         address_provider_address,
         safety_fund_fee_share,
         treasury_fee_share,
-        terraswap_max_spread,
         terraswap_factory_address,
+        terraswap_max_spread,
     } = msg.config;
 
     // All fields should be available
@@ -70,6 +70,7 @@ pub fn instantiate(
         )?,
         terraswap_max_spread: terraswap_max_spread.unwrap(),
     };
+
     config.validate()?;
 
     CONFIG.save(deps.storage, &config)?;
@@ -136,7 +137,6 @@ pub fn execute_update_config(
         terraswap_max_spread,
     } = new_config;
 
-    // Update config
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
     config.address_provider_address = option_string_to_addr(
         deps.api,
@@ -152,7 +152,6 @@ pub fn execute_update_config(
     )?;
     config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
 
-    // Validate config
     config.validate()?;
 
     CONFIG.save(deps.storage, &config)?;
@@ -211,6 +210,7 @@ pub fn execute_withdraw_from_red_bank(
     let res = Response::new()
         .add_attribute("action", "withdraw_from_red_bank")
         .add_message(withdraw_msg);
+
     Ok(res)
 }
 
@@ -366,8 +366,8 @@ pub fn execute_execute_cosmos_msg(
     }
 
     let response = Response::new()
-        .add_message(msg)
-        .add_attribute("action", "execute_cosmos_msg");
+        .add_attribute("action", "execute_cosmos_msg")
+        .add_message(msg);
 
     Ok(response)
 }
@@ -390,11 +390,14 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         address_provider_address: config.address_provider_address,
         safety_fund_fee_share: config.safety_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
+        terraswap_factory_address: config.terraswap_factory_address,
+        terraswap_max_spread: config.terraswap_max_spread,
     })
 }
 
 fn query_asset_config(deps: Deps, asset: Asset) -> StdResult<AssetConfig> {
     let (_, reference, _) = asset.get_attributes();
+
     let asset_config = ASSET_CONFIG
         .load(deps.storage, &reference)
         .unwrap_or_default();
@@ -484,13 +487,14 @@ mod tests {
         let mut deps = mock_dependencies(&[]);
 
         // Config with base params valid (just update the rest)
+        let terraswap_max_spread = Decimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             safety_fund_fee_share: None,
             treasury_fee_share: None,
             terraswap_factory_address: Some("terraswap".to_string()),
-            terraswap_max_spread: Some(Decimal::percent(1)),
+            terraswap_max_spread: Some(terraswap_max_spread),
         };
 
         // *
@@ -515,7 +519,7 @@ mod tests {
         );
 
         // *
-        // init config with safety_fund_fee_share, treasury_fee_share greater than 1
+        // init config with safety_fund_fee_share and treasury_fee_share greater than 1
         // *
         let mut safety_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
         let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
@@ -568,8 +572,18 @@ mod tests {
         // it worked, let's query the state
         let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!(safety_fund_fee_share, value.safety_fund_fee_share);
-        assert_eq!(treasury_fee_share, value.treasury_fee_share);
+        assert_eq!(value.owner, Addr::unchecked("owner"));
+        assert_eq!(
+            value.address_provider_address,
+            Addr::unchecked("address_provider")
+        );
+        assert_eq!(value.safety_fund_fee_share, safety_fund_fee_share);
+        assert_eq!(value.treasury_fee_share, treasury_fee_share);
+        assert_eq!(
+            value.terraswap_factory_address,
+            Addr::unchecked("terraswap")
+        );
+        assert_eq!(value.terraswap_max_spread, terraswap_max_spread);
     }
 
     #[test]

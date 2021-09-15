@@ -72,4 +72,6 @@ pub struct ConfigResponse {
     pub address_provider_address: Addr,
     pub safety_fund_fee_share: Decimal,
     pub treasury_fee_share: Decimal,
+    pub terraswap_factory_address: Addr,
+    pub terraswap_max_spread: Decimal,
 }
