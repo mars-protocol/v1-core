@@ -592,13 +592,14 @@ mod tests {
 
         let mut safety_fund_fee_share = Decimal::percent(10);
         let mut treasury_fee_share = Decimal::percent(20);
+        let mut terraswap_max_spread = Decimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             safety_fund_fee_share: Some(safety_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
             terraswap_factory_address: Some("terraswap".to_string()),
-            terraswap_max_spread: Some(Decimal::percent(1)),
+            terraswap_max_spread: Some(terraswap_max_spread),
         };
 
         // *
@@ -660,13 +661,14 @@ mod tests {
         // *
         safety_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
         treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
+        terraswap_max_spread = Decimal::percent(2);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
             safety_fund_fee_share: Some(safety_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
             terraswap_factory_address: Some("new_terraswap".to_string()),
-            terraswap_max_spread: Some(Decimal::percent(2)),
+            terraswap_max_spread: Some(terraswap_max_spread),
         };
         let msg = UpdateConfig {
             config: config.clone(),
@@ -707,12 +709,11 @@ mod tests {
 
         // asset config with valid params
         let asset = Asset::Native {
-            denom: "uusd".to_string(),
+            denom: "somecoin".to_string(),
         };
-        let enabled = true;
         let msg = ExecuteMsg::UpdateAssetConfig {
             asset: asset.clone(),
-            enabled,
+            enabled: true,
         };
 
         // *
@@ -741,38 +742,43 @@ mod tests {
         )
         .unwrap();
         let value: AssetConfig = from_binary(&res).unwrap();
-        assert_eq!(value.enabled_for_distribution, enabled);
+        assert_eq!(value.enabled_for_distribution, true);
 
         // *
         // owner can update asset config
         // *
-        let enabled = false;
         let msg = ExecuteMsg::UpdateAssetConfig {
             asset: asset.clone(),
-            enabled,
+            enabled: false,
         };
         // we can just call .unwrap() to assert this was a success
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let (_, reference, _) = asset.get_attributes();
         let value = ASSET_CONFIG
             .load(deps.as_ref().storage, reference.as_slice())
             .unwrap();
-        assert_eq!(value.enabled_for_distribution, enabled);
+        assert_eq!(value.enabled_for_distribution, false);
 
         // *
         // unknown assets are not enabled
         // *
-        let res = query(
-            deps.as_ref(),
-            mock_env(),
-            QueryMsg::AssetConfig {
-                asset: Asset::Native {
-                    denom: "uluna".to_string(),
-                },
-            },
-        )
-        .unwrap();
+        let asset = Asset::Native {
+            denom: "uluna".to_string(),
+        };
+        let (_, reference, _) = asset.get_attributes();
+
+        // no asset config stored for unknown assets
+        let err = ASSET_CONFIG
+            .load(deps.as_ref().storage, reference.as_slice())
+            .unwrap_err();
+        assert_eq!(
+            err,
+            StdError::not_found("protocol_rewards_collector::types::AssetConfig")
+        );
+
+        // querying unknown assets returns that they are not enabled
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::AssetConfig { asset }).unwrap();
         let value: AssetConfig = from_binary(&res).unwrap();
         assert_eq!(value.enabled_for_distribution, false);
     }
@@ -785,7 +791,7 @@ mod tests {
         // anyone can execute a withdrawal
         // *
         let asset = Asset::Native {
-            denom: "uusd".to_string(),
+            denom: "somecoin".to_string(),
         };
         let amount = Uint128::new(123_456);
         let msg = ExecuteMsg::WithdrawFromRedBank {
@@ -816,8 +822,12 @@ mod tests {
 
     #[test]
     fn test_distribute_protocol_rewards_native() {
-        // initialize contract with balance
         let balance = 2_000_000_000u128;
+        let asset = Asset::Native {
+            denom: "somecoin".to_string(),
+        };
+
+        // initialize contract with balance
         let mut deps = th_setup(&[coin(balance, "somecoin")]);
 
         // Set tax data
@@ -825,10 +835,6 @@ mod tests {
             Decimal::from_ratio(1u128, 100u128),
             &[(String::from("somecoin"), Uint128::new(100u128))],
         );
-
-        let asset = Asset::Native {
-            denom: "somecoin".to_string(),
-        };
 
         // call function on an asset that isn't enabled
         let permissible_amount = Uint128::new(1_500_000_000);
@@ -938,12 +944,12 @@ mod tests {
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // verify messages are correct
-        let expected_remaining_rewards_to_be_distributed = Uint128::new(balance);
+        let expected_rewards_to_be_distributed = Uint128::new(balance);
         let expected_safety_fund_amount =
-            expected_remaining_rewards_to_be_distributed * config.safety_fund_fee_share;
+            expected_rewards_to_be_distributed * config.safety_fund_fee_share;
         let expected_treasury_amount =
-            expected_remaining_rewards_to_be_distributed * config.treasury_fee_share;
-        let expected_staking_amount = expected_remaining_rewards_to_be_distributed
+            expected_rewards_to_be_distributed * config.treasury_fee_share;
+        let expected_staking_amount = expected_rewards_to_be_distributed
             - (expected_safety_fund_amount + expected_treasury_amount);
 
         assert_eq!(
@@ -989,17 +995,17 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "somecoin"),
-                attr("amount", expected_remaining_rewards_to_be_distributed),
+                attr("amount", expected_rewards_to_be_distributed),
             ]
         );
     }
 
     #[test]
     fn test_distribute_protocol_rewards_cw20() {
-        // initialize contract with balance
-        let balance = 2_000_000_000u128;
         let mut deps = th_setup(&[]);
 
+        // initialize contract with balance
+        let balance = 2_000_000_000u128;
         deps.querier.set_cw20_balances(
             Addr::unchecked("cw20_address"),
             &[(Addr::unchecked(MOCK_CONTRACT_ADDR), balance.into())],
@@ -1112,12 +1118,12 @@ mod tests {
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // verify messages are correct
-        let expected_remaining_rewards_to_be_distributed = Uint128::new(balance);
+        let expected_rewards_to_be_distributed = Uint128::new(balance);
         let expected_safety_fund_amount =
-            expected_remaining_rewards_to_be_distributed * config.safety_fund_fee_share;
+            expected_rewards_to_be_distributed * config.safety_fund_fee_share;
         let expected_treasury_amount =
-            expected_remaining_rewards_to_be_distributed * config.treasury_fee_share;
-        let expected_staking_amount = expected_remaining_rewards_to_be_distributed
+            expected_rewards_to_be_distributed * config.treasury_fee_share;
+        let expected_staking_amount = expected_rewards_to_be_distributed
             - (expected_safety_fund_amount + expected_treasury_amount);
 
         assert_eq!(
@@ -1157,7 +1163,7 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "cw20_address"),
-                attr("amount", expected_remaining_rewards_to_be_distributed),
+                attr("amount", expected_rewards_to_be_distributed),
             ]
         );
     }

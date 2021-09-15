@@ -6,6 +6,8 @@
     "address_provider_address",
     "owner",
     "safety_fund_fee_share",
+    "terraswap_factory_address",
+    "terraswap_max_spread",
     "treasury_fee_share"
   ],
   "properties": {
@@ -16,6 +18,12 @@
       "$ref": "#/definitions/Addr"
     },
     "safety_fund_fee_share": {
+      "$ref": "#/definitions/Decimal"
+    },
+    "terraswap_factory_address": {
+      "$ref": "#/definitions/Addr"
+    },
+    "terraswap_max_spread": {
       "$ref": "#/definitions/Decimal"
     },
     "treasury_fee_share": {
