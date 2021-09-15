@@ -28,21 +28,19 @@ pub enum ExecuteMsg {
     /// Update asset config
     UpdateAssetConfig { asset: Asset, enabled: bool },
 
-    ///
+    /// Withdraw maTokens from the red bank
     WithdrawFromRedBank {
         asset: Asset,
         amount: Option<Uint128>,
     },
 
-    /// Distribute the accrued protocol income to the treasury, insurance fund, and staking contracts
+    /// Distribute the accrued protocol income to the safety fund, treasury and staking contracts,
     /// according to the split set in config.
-    /// Will transfer underlying asset to insurance fund and staking while minting maTokens to
-    /// the treasury.
-    /// Callable by any address, will fail if red bank has no liquidity.
+    /// Callable by any address.
     DistributeProtocolRewards {
         /// Asset market fees to distribute
         asset: Asset,
-        /// Amount to distribute to protocol contracts, defaults to full amount if not specified
+        /// Amount to distribute to protocol contracts, defaults to contract balance if not specified
         amount: Option<Uint128>,
     },
 
