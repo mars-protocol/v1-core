@@ -508,7 +508,7 @@ mod tests {
             config: empty_config,
         };
         let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), mock_env(), info, msg);
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
         assert_generic_error_message(
             response,
             "All params should be available during initialization",
@@ -525,8 +525,7 @@ mod tests {
             ..base_config.clone()
         };
         let msg = InstantiateMsg { config };
-        let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), mock_env(), info, msg);
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
         assert_generic_error_message(
             response,
             "[safety_fund_fee_share, treasury_fee_share] should be less or equal 1. \
@@ -544,8 +543,7 @@ mod tests {
             ..base_config.clone()
         };
         let exceeding_fees_msg = InstantiateMsg { config };
-        let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), mock_env(), info, exceeding_fees_msg);
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg);
         assert_generic_error_message(
             response,
             "Invalid fee share amounts. Sum of safety fund and treasury fee shares exceeds one",
@@ -564,8 +562,7 @@ mod tests {
         let msg = InstantiateMsg { config };
 
         // we can just call .unwrap() to assert this was a success
-        let info = mock_info("owner");
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
@@ -578,8 +575,6 @@ mod tests {
     #[test]
     fn test_update_config() {
         let mut deps = th_setup(&[]);
-
-        // let init_config = CONFIG.load(&deps.storage).unwrap();
 
         let mut safety_fund_fee_share = Decimal::percent(10);
         let mut treasury_fee_share = Decimal::percent(20);
@@ -615,7 +610,7 @@ mod tests {
         };
         let msg = UpdateConfig { config };
         let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
             StdError::generic_err(
@@ -636,8 +631,8 @@ mod tests {
             ..base_config
         };
         let exceeding_fees_msg = UpdateConfig { config };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), mock_env(), info, exceeding_fees_msg).unwrap_err();
+        let error_res =
+            execute(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg).unwrap_err();
         assert_eq!(
             error_res,
             StdError::generic_err(
@@ -662,10 +657,8 @@ mod tests {
         let msg = UpdateConfig {
             config: config.clone(),
         };
-
         // we can just call .unwrap() to assert this was a success
-        let info = mock_info("owner");
-        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         // Read config from state
@@ -698,9 +691,7 @@ mod tests {
     fn test_update_asset_config() {
         let mut deps = th_setup(&[]);
 
-        // *
         // asset config with valid params
-        // *
         let asset = Asset::Native {
             denom: "uusd".to_string(),
         };
@@ -722,7 +713,7 @@ mod tests {
         // *
         let info = mock_info("owner");
         // we can just call .unwrap() to assert this was a success
-        let _res = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        let _res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
         // *
         // query asset config
@@ -746,9 +737,8 @@ mod tests {
             asset: asset.clone(),
             enabled,
         };
-        let info = mock_info("owner");
         // we can just call .unwrap() to assert this was a success
-        let _res = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let (_, reference, _) = asset.get_attributes();
         let value = ASSET_CONFIG
@@ -790,7 +780,7 @@ mod tests {
         };
         let info = mock_info("anybody");
         // we can just call .unwrap() to assert this was a success
-        let res = execute(deps.as_mut(), mock_env(), info, msg.clone()).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         assert_eq!(
             res.messages,
@@ -802,7 +792,7 @@ mod tests {
                 })
                 .unwrap(),
                 funds: vec![]
-            })),]
+            }))]
         );
         assert_eq!(
             res.attributes,
@@ -825,7 +815,6 @@ mod tests {
         let asset = Asset::Native {
             denom: "somecoin".to_string(),
         };
-        let (label, reference, _) = asset.get_attributes();
 
         // call function on an asset that isn't enabled
         let permissible_amount = Uint128::new(1_500_000_000);
@@ -835,17 +824,20 @@ mod tests {
         };
         let info = mock_info("anybody");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
-        assert_eq!(error_res, ContractError::AssetNotEnabled { label });
+        assert_eq!(
+            error_res,
+            ContractError::AssetNotEnabled {
+                label: "somecoin".to_string()
+            }
+        );
 
-        ASSET_CONFIG
-            .save(
-                deps.as_mut().storage,
-                &reference,
-                &AssetConfig {
-                    enabled_for_distribution: true,
-                },
-            )
-            .unwrap();
+        // enable the asset
+        let msg = ExecuteMsg::UpdateAssetConfig {
+            asset: asset.clone(),
+            enabled: true,
+        };
+        let info = mock_info("owner");
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // call function providing amount exceeding balance
         let exceeding_amount = Uint128::new(2_000_000_001);
@@ -853,8 +845,8 @@ mod tests {
             asset: asset.clone(),
             amount: Some(exceeding_amount),
         };
+        let info = mock_info("anybody");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
-
         assert_eq!(
             error_res,
             ContractError::AmountTooLarge {
@@ -924,7 +916,7 @@ mod tests {
             ]
         );
 
-        // call function without providing an amount, should send amount to contracts
+        // call function without providing an amount
         let msg = ExecuteMsg::DistributeProtocolRewards {
             asset: asset.clone(),
             amount: None,
@@ -1002,7 +994,6 @@ mod tests {
         let asset = Asset::Cw20 {
             contract_addr: "cw20_address".to_string(),
         };
-        let (label, reference, _) = asset.get_attributes();
 
         // call function on an asset that isn't enabled
         let permissible_amount = Uint128::new(1_500_000_000);
@@ -1012,17 +1003,20 @@ mod tests {
         };
         let info = mock_info("anybody");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
-        assert_eq!(error_res, ContractError::AssetNotEnabled { label });
+        assert_eq!(
+            error_res,
+            ContractError::AssetNotEnabled {
+                label: "cw20_address".to_string()
+            }
+        );
 
-        ASSET_CONFIG
-            .save(
-                deps.as_mut().storage,
-                &reference,
-                &AssetConfig {
-                    enabled_for_distribution: true,
-                },
-            )
-            .unwrap();
+        // enable the asset
+        let msg = ExecuteMsg::UpdateAssetConfig {
+            asset: asset.clone(),
+            enabled: true,
+        };
+        let info = mock_info("owner");
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // call function providing amount exceeding balance
         let exceeding_amount = Uint128::new(2_000_000_001);
@@ -1030,6 +1024,7 @@ mod tests {
             asset: asset.clone(),
             amount: Some(exceeding_amount),
         };
+        let info = mock_info("anybody");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
 
         assert_eq!(
@@ -1095,7 +1090,7 @@ mod tests {
             ]
         );
 
-        // call function without providing an amount, should send amount to contracts
+        // call function without providing an amount
         let msg = ExecuteMsg::DistributeProtocolRewards {
             asset: asset.clone(),
             amount: None,
