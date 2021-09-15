@@ -405,9 +405,11 @@ pub fn execute_withdraw(
 
         let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
+        let weighted_maintenance_margin_in_uusd_after_withdraw = user_position
+            .weighted_maintenance_margin_in_uusd
+            .checked_sub(withdraw_amount_in_uusd * market.maintenance_margin)?;
         let health_factor_after_withdraw = Decimal::from_ratio(
-            user_position.weighted_maintenance_margin_in_uusd
-                - (withdraw_amount_in_uusd * market.maintenance_margin),
+            weighted_maintenance_margin_in_uusd_after_withdraw,
             user_position.total_collateralized_debt_in_uusd,
         );
         if health_factor_after_withdraw < Decimal::one() {
@@ -783,8 +785,10 @@ pub fn execute_borrow(
 
         let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
-        if user_position.total_debt_in_uusd + borrow_amount_in_uusd > user_position.max_debt_in_uusd
-        {
+        let total_debt_in_uusd_after_borrow = user_position
+            .total_debt_in_uusd
+            .checked_add(borrow_amount_in_uusd)?;
+        if total_debt_in_uusd_after_borrow > user_position.max_debt_in_uusd {
             return Err(BorrowAmountExceedsGivenCollateral {});
         }
     } else {
@@ -806,7 +810,9 @@ pub fn execute_borrow(
             borrower_debt.amount_scaled,
             get_updated_borrow_index(&asset_market, env.block.time.seconds()),
         );
-        if borrow_amount + debt_amount > uncollateralized_loan_limit {
+
+        let debt_after_borrow = debt_amount.checked_add(borrow_amount)?;
+        if debt_after_borrow > uncollateralized_loan_limit {
             return Err(BorrowAmountExceedsUncollateralizedLoanLimit {});
         }
     }
@@ -839,7 +845,7 @@ pub fn execute_borrow(
         borrow_amount,
         get_updated_borrow_index(&borrow_market, env.block.time.seconds()),
     );
-    debt.amount_scaled += borrow_amount_scaled;
+    debt.amount_scaled = debt.amount_scaled.checked_add(borrow_amount_scaled)?;
     DEBTS.save(
         deps.storage,
         (asset_reference.as_slice(), &borrower_address),
@@ -951,13 +957,13 @@ pub fn execute_repay(
         repay_amount_scaled = debt.amount_scaled;
     }
 
-    debt.amount_scaled -= repay_amount_scaled;
+    debt.amount_scaled = debt.amount_scaled.checked_sub(repay_amount_scaled)?;
     DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
         return Err(CannotRepayMoreThanDebt {});
     }
-    market.debt_total_scaled -= repay_amount_scaled;
+    market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
     update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
@@ -1173,13 +1179,17 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
-    debt.amount_scaled -= debt_amount_to_repay_scaled;
+    debt.amount_scaled = debt
+        .amount_scaled
+        .checked_sub(debt_amount_to_repay_scaled)?;
     DEBTS.save(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
         &debt,
     )?;
-    debt_market.debt_total_scaled -= debt_amount_to_repay_scaled;
+    debt_market.debt_total_scaled = debt_market
+        .debt_total_scaled
+        .checked_sub(debt_amount_to_repay_scaled)?;
 
     update_interest_rates(
         &deps,
@@ -1606,7 +1616,9 @@ pub fn execute_distribute_protocol_income(
         return Err(CannotDistributeProtocolIncome {});
     }
 
-    market.protocol_income_to_distribute -= amount_to_distribute;
+    market.protocol_income_to_distribute = market
+        .protocol_income_to_distribute
+        .checked_sub(amount_to_distribute)?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     let mars_contracts = vec![
@@ -1626,7 +1638,8 @@ pub fn execute_distribute_protocol_income(
 
     let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
     let treasury_amount = amount_to_distribute * config.treasury_fee_share;
-    let amount_to_distribute_before_staking_rewards = insurance_fund_amount + treasury_amount;
+    let amount_to_distribute_before_staking_rewards =
+        insurance_fund_amount.checked_add(treasury_amount)?;
     let staking_amount =
         amount_to_distribute.checked_sub(amount_to_distribute_before_staking_rewards)?;
 

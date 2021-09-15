@@ -83,17 +83,19 @@ pub fn get_user_position(
     for user_asset_position in &user_asset_positions {
         let asset_price = user_asset_position.asset_price;
         let collateral_in_uusd = user_asset_position.collateral_amount * asset_price;
-        total_collateral_in_uusd += collateral_in_uusd;
+        total_collateral_in_uusd = total_collateral_in_uusd.checked_add(collateral_in_uusd)?;
 
-        max_debt_in_uusd += collateral_in_uusd * user_asset_position.max_ltv;
-        weighted_maintenance_margin_in_uusd +=
-            collateral_in_uusd * user_asset_position.maintenance_margin;
+        max_debt_in_uusd =
+            max_debt_in_uusd.checked_add(collateral_in_uusd * user_asset_position.max_ltv)?;
+        weighted_maintenance_margin_in_uusd = weighted_maintenance_margin_in_uusd
+            .checked_add(collateral_in_uusd * user_asset_position.maintenance_margin)?;
 
         let debt_in_uusd = user_asset_position.debt_amount * asset_price;
-        total_debt_in_uusd += debt_in_uusd;
+        total_debt_in_uusd = total_debt_in_uusd.checked_add(debt_in_uusd)?;
 
         if !user_asset_position.uncollateralized_debt {
-            total_collateralized_debt_in_uusd += debt_in_uusd;
+            total_collateralized_debt_in_uusd =
+                total_collateralized_debt_in_uusd.checked_add(debt_in_uusd)?;
         }
     }
 
