@@ -226,10 +226,9 @@ pub fn execute_distribute_protocol_rewards(
 
     let (label, reference, _) = asset.get_attributes();
 
-    let asset_config = match ASSET_CONFIG.load(deps.storage, &reference) {
-        Ok(asset_config) => asset_config,
-        Err(_) => return Err(ContractError::AssetNotEnabled { label }),
-    };
+    let asset_config = ASSET_CONFIG
+        .load(deps.storage, &reference)
+        .unwrap_or_default();
 
     if !asset_config.enabled_for_distribution {
         return Err(ContractError::AssetNotEnabled { label });
@@ -395,15 +394,12 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
 }
 
 fn query_asset_config(deps: Deps, asset: Asset) -> StdResult<AssetConfig> {
-    let (label, reference, _) = asset.get_attributes();
+    let (_, reference, _) = asset.get_attributes();
+    let asset_config = ASSET_CONFIG
+        .load(deps.storage, &reference)
+        .unwrap_or_default();
 
-    match ASSET_CONFIG.load(deps.storage, &reference) {
-        Ok(asset_config) => Ok(asset_config),
-        Err(_) => Err(StdError::not_found(format!(
-            "failed to load asset config for: {}",
-            label
-        ))),
-    }
+    Ok(asset_config)
 }
 
 // HELPERS
@@ -761,9 +757,9 @@ mod tests {
         assert_eq!(value.enabled_for_distribution, enabled);
 
         // *
-        // query unknown asset config errors
+        // unknown assets are not enabled
         // *
-        let error_res = query(
+        let res = query(
             deps.as_ref(),
             mock_env(),
             QueryMsg::AssetConfig {
@@ -772,11 +768,9 @@ mod tests {
                 },
             },
         )
-        .unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::not_found("failed to load asset config for: uluna")
-        );
+        .unwrap();
+        let value: AssetConfig = from_binary(&res).unwrap();
+        assert_eq!(value.enabled_for_distribution, false);
     }
 
     #[test]
