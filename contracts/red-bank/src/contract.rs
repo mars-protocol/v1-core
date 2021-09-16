@@ -22,6 +22,7 @@ use mars::asset::{Asset, AssetType};
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars::tax::deduct_tax;
+use mars::math::reverse_decimal;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
@@ -46,7 +47,6 @@ use crate::state::{
     Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
     MARKET_REFERENCES_BY_INDEX, MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
-use mars::math::reverse_decimal;
 
 // INIT
 
@@ -758,16 +758,19 @@ pub fn execute_borrow(
 
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
 
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+    )?;
+    let protocol_rewards_collector_address = addresses_query.pop().unwrap();
+    let oracle_address = addresses_query.pop().unwrap();
+
     // Check if user can borrow specified amount
     let mut uncollateralized_debt = false;
     if uncollateralized_loan_limit.is_zero() {
         // Collateralized loan: check max ltv is not exceeded
         let config = CONFIG.load(deps.storage)?;
-        let oracle_address = address_provider::helpers::query_address(
-            &deps.querier,
-            config.address_provider_address,
-            MarsContract::Oracle,
-        )?;
 
         let user_position = get_user_position(
             deps.as_ref(),
@@ -825,14 +828,20 @@ pub fn execute_borrow(
         }
     }
 
-    apply_accumulated_interests(&env, &mut borrow_market);
+    let mut response = Response::new();
 
-    let mut events = vec![];
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut market,
+        response
+    );
+
     // Set borrowing asset for user
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_market.index)?;
         USERS.save(deps.storage, &borrower_address, &user)?;
-        events.push(build_debt_position_changed_event(
+        response = response.add_event(build_debt_position_changed_event(
             asset_label.as_str(),
             true,
             borrower_address.to_string(),
@@ -870,29 +879,26 @@ pub fn execute_borrow(
         borrow_amount,
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
+    response = response.add_event(build_interests_updated_event(
+        asset_label.as_str(),
+        &borrow_market,
+    ));
 
     // Send borrow amount to borrower
-    let send_msg = build_send_asset_msg(
+    response = response.add_message(build_send_asset_msg(
         deps.as_ref(),
         env.contract.address,
         borrower_address.clone(),
         asset,
         borrow_amount,
-    )?;
+    )?);
 
-    events.push(build_interests_updated_event(
-        asset_label.as_str(),
-        &borrow_market,
-    ));
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "borrow")
         .add_attribute("market", asset_label.as_str())
         .add_attribute("user", borrower_address.as_str())
         .add_attribute("amount", borrow_amount)
-        .add_events(events)
-        .add_message(send_msg);
-    Ok(res)
+    Ok(response)
 }
 
 /// Handle the repay of native tokens. Refund extra funds if they exist
@@ -929,14 +935,23 @@ pub fn execute_repay(
         return Err(CannotRepayZeroDebt {});
     }
 
-    apply_accumulated_interests(&env, &mut market);
+    let protocol_rewards_collector_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::ProtocolRewardsCollector,
+    )?;
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut market,
+        response
+    );
 
     let mut repay_amount_scaled = get_scaled_amount(
         repay_amount,
         get_updated_borrow_index(&market, env.block.time.seconds()),
     );
 
-    let mut messages = vec![];
     let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
         // refund any excess amounts
@@ -961,7 +976,7 @@ pub fn execute_repay(
                 )?
             }
         };
-        messages.push(refund_msg);
+        response = response.add_message(refund_msg);
         repay_amount_scaled = debt.amount_scaled;
     }
 
@@ -972,32 +987,29 @@ pub fn execute_repay(
         return Err(CannotRepayMoreThanDebt {});
     }
     market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
+
     update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
+    response = response.add_event(build_interests_updated_event(asset_label, &market));
 
-    let mut events = vec![];
     if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
         let mut user = USERS.load(deps.storage, &repayer_address)?;
         unset_bit(&mut user.borrowed_assets, market.index)?;
         USERS.save(deps.storage, &repayer_address, &user)?;
-        events.push(build_debt_position_changed_event(
+        response = response.add_event(build_debt_position_changed_event(
             asset_label,
             false,
             repayer_address.to_string(),
         ));
     }
 
-    events.push(build_interests_updated_event(asset_label, &market));
-
-    let res = Response::new()
+    response = response 
         .add_attribute("action", "repay")
         .add_attribute("market", asset_label)
         .add_attribute("user", repayer_address)
         .add_attribute("amount", repay_amount - refund_amount)
-        .add_messages(messages)
-        .add_events(events);
-    Ok(res)
+    Ok(response)
 }
 
 /// Execute loan liquidations on under-collateralized loans
