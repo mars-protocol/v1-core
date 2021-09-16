@@ -1,9 +1,10 @@
+use cosmwasm_std::{Addr, Decimal};
+use cw_storage_plus::{Item, Map};
 use mars::helpers::all_conditions_valid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, StdError, StdResult};
-use cw_storage_plus::{Item, Map};
+use crate::error::ContractError;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const ASSET_CONFIG: Map<&[u8], AssetConfig> = Map::new("assets");
@@ -26,7 +27,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn validate(&self) -> StdResult<()> {
+    pub fn validate(&self) -> Result<(), ContractError> {
         let conditions_and_names = vec![
             (
                 Self::less_or_equal_one(&self.safety_fund_fee_share),
@@ -42,9 +43,7 @@ impl Config {
         let combined_fee_share = self.safety_fund_fee_share + self.treasury_fee_share;
         // Combined fee shares cannot exceed one
         if combined_fee_share > Decimal::one() {
-            return Err(StdError::generic_err(
-                "Invalid fee share amounts. Sum of safety fund and treasury fee shares exceeds one",
-            ));
+            return Err(ContractError::InvalidFeeShareAmounts {});
         }
 
         Ok(())
