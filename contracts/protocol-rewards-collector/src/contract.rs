@@ -556,17 +556,11 @@ mod tests {
         // it worked, let's query the state
         let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!(value.owner, Addr::unchecked("owner"));
-        assert_eq!(
-            value.address_provider_address,
-            Addr::unchecked("address_provider")
-        );
+        assert_eq!(value.owner, "owner");
+        assert_eq!(value.address_provider_address, "address_provider");
         assert_eq!(value.safety_fund_fee_share, safety_fund_fee_share);
         assert_eq!(value.treasury_fee_share, treasury_fee_share);
-        assert_eq!(
-            value.terraswap_factory_address,
-            Addr::unchecked("terraswap")
-        );
+        assert_eq!(value.terraswap_factory_address, "terraswap");
         assert_eq!(value.terraswap_max_spread, terraswap_max_spread);
     }
 
@@ -712,7 +706,8 @@ mod tests {
         // *
         let info = mock_info("owner");
         // we can just call .unwrap() to assert this was a success
-        let _res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        assert_eq!(0, res.messages.len());
 
         // *
         // query asset config
@@ -736,7 +731,8 @@ mod tests {
             enabled: false,
         };
         // we can just call .unwrap() to assert this was a success
-        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+        assert_eq!(0, res.messages.len());
 
         let (_, reference, _) = asset.get_attributes();
         let value = ASSET_CONFIG
