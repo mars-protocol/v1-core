@@ -1,6 +1,6 @@
 use crate::interest_rate_models::InterestRateModel;
 use crate::state::{Market, CONFIG};
-use cosmwasm_std::{Decimal, DepsMut, Env, StdError, StdResult, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal, DepsMut, Env, StdError, StdResult, Response, Uint128};
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
 use mars::math::{decimal_multiplication, reverse_decimal};
@@ -11,16 +11,23 @@ pub const SCALING_FACTOR: u128 = 1_000_000;
 
 const SECONDS_PER_YEAR: u64 = 31536000u64;
 
-/// Updates market indices and protocol_income by applying current interest rates on the time between
-/// last interest update and current block.
-/// Note it does not save the market to the store (that is left to the caller)
-pub fn apply_accumulated_interests(env: &Env, market: &mut Market) {
+/// Calculates accumulated interest for the time between last time market index was updated
+/// and current block.
+/// Applies desired side effects:
+/// 1. Updates market borrow and liquidity indices.
+/// 2. If there are any protocol rewards, builds a mint to the rewards colletor and adds it
+///    to the returned response
+/// Note it does not save the market to store 
+pub fn apply_accumulated_interests(
+    env: &Env,
+    protocol_rewards_collector_address: Addr,
+    market: &mut Market,
+    response: Response,
+) -> Response {
     let current_timestamp = env.block.time.seconds();
-    // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
-    // of the indices and subtracting them returns the accrued borrow interest for the period since
-    // when the indices were last updated and the current point in time.
     let previous_borrow_index = market.borrow_index;
 
+    // Update market indices
     if market.interests_last_updated < current_timestamp {
         let time_elapsed = current_timestamp - market.interests_last_updated;
 
@@ -41,17 +48,38 @@ pub fn apply_accumulated_interests(env: &Env, market: &mut Market) {
         market.interests_last_updated = current_timestamp;
     }
 
-    let previous_debt_total = get_descaled_amount(market.debt_total_scaled, previous_borrow_index);
-    let new_debt_total = get_descaled_amount(market.debt_total_scaled, market.borrow_index);
+    // Compute accrued protocol rewards
+    let previous_debt_total =
+        get_descaled_amount(market.debt_total_scaled, previous_borrow_index);
+    let new_debt_total =
+        get_descaled_amount(market.debt_total_scaled, market.borrow_index);
 
-    let interest_accrued = if new_debt_total > previous_debt_total {
+    let borrow_interest_accrued = if new_debt_total > previous_debt_total {
+        // debt stays constant between the application of the interest rate
+        // so the differece between debt at the start and the end is the
+        // total borrow interest accrued
         new_debt_total - previous_debt_total
     } else {
         Uint128::zero()
     };
 
-    let new_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
-    market.protocol_income_to_distribute += new_protocol_income_to_distribute;
+    let accrued_protocol_rewards = borrow_interest_accrued * market.reserve_factor;
+
+    if accrued_protocol_rewards > 0 {
+        response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: market.ma_token_address.into(),
+            msg: to_binary(&Cw20ExecuteMsg::Mint {
+                recipient: protocol_rewards_collector_address.into(),
+                amount: get_scaled_amount(
+                    accrued_protocol_rewards
+                    market.borrow_index,
+                ),
+            })?,
+            funds: vec![],
+        }))
+    } else {
+        response
+    }
 }
 
 pub fn calculate_applied_linear_interest_rate(
@@ -67,7 +95,7 @@ pub fn calculate_applied_linear_interest_rate(
 }
 
 /// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
-/// the value is multiplied by SCALED_FACTOR for greater precision.
+/// the value is multiplied by SCALING_FACTOR for greater precision.
 /// Example:
 /// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
 /// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
@@ -163,27 +191,10 @@ pub fn update_interest_rates(
         }
     };
 
-    // Get protocol income to be deducted from liquidity (doesn't belong to the money market
-    // anymore)
-    let config = CONFIG.load(deps.storage)?;
-    // NOTE: No check for underflow because this is done on config validations
-    let protocol_income_minus_treasury_amount =
-        (Decimal::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
-    let liquidity_to_deduct_from_current_balance =
-        liquidity_taken + protocol_income_minus_treasury_amount;
-
-    let available_liquidity = if contract_current_balance < liquidity_to_deduct_from_current_balance
-    {
-        // liquidity_taken for deposit / repay is zero so we don't want to block these operations
-        if !liquidity_taken.is_zero() {
-            return Err(StdError::generic_err(
-                "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity",
-            ));
-        }
-        Uint128::zero()
-    } else {
-        contract_current_balance - liquidity_to_deduct_from_current_balance
-    };
+    if contract_current_balance < liquidity_taken {
+        return Err(StdError::generic_err("contract current balance cannot be less than liquidity taken");
+    }
+    let available_liquidity = contract_current_balance - liquidity_taken;
 
     let total_debt = get_descaled_amount(
         market.debt_total_scaled,

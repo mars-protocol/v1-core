@@ -31,41 +31,6 @@ pub struct Config {
     pub ma_token_code_id: u64,
     /// Maximum percentage of outstanding debt that can be covered by a liquidator
     pub close_factor: Decimal,
-    /// Percentage of fees that are sent to the insurance fund
-    pub insurance_fund_fee_share: Decimal,
-    /// Percentage of fees that are sent to the treasury
-    pub treasury_fee_share: Decimal,
-}
-
-impl Config {
-    pub fn validate(&self) -> StdResult<()> {
-        let conditions_and_names = vec![
-            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
-            (
-                Self::less_or_equal_one(&self.insurance_fund_fee_share),
-                "insurance_fund_fee_share",
-            ),
-            (
-                Self::less_or_equal_one(&self.treasury_fee_share),
-                "treasury_fee_share",
-            ),
-        ];
-        all_conditions_valid(conditions_and_names)?;
-
-        let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
-        // Combined fee shares cannot exceed one
-        if combined_fee_share > Decimal::one() {
-            return Err(StdError::generic_err(
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one",
-            ));
-        }
-
-        Ok(())
-    }
-
-    fn less_or_equal_one(value: &Decimal) -> bool {
-        value.le(&Decimal::one())
-    }
 }
 
 /// RedBank global state
@@ -112,8 +77,6 @@ pub struct Market {
 
     /// Total debt scaled for the market's currency
     pub debt_total_scaled: Uint128,
-    /// Income to be distributed to other protocol contracts
-    pub protocol_income_to_distribute: Uint128,
 
     /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
     pub active: bool,
@@ -176,7 +139,6 @@ impl Market {
             debt_total_scaled: Uint128::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
-            protocol_income_to_distribute: Uint128::zero(),
             interest_rate_strategy: interest_rate_strategy.unwrap(),
             active: active.unwrap(),
             deposit_enabled: deposit_enabled.unwrap(),
