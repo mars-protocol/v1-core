@@ -237,7 +237,7 @@ pub fn execute_distribute_protocol_rewards(
         }
         Asset::Cw20 { contract_addr } => cw20_get_balance(
             &deps.querier,
-            deps.api.addr_validate(&contract_addr)?,
+            deps.api.addr_validate(contract_addr)?,
             env.contract.address.clone(),
         )?,
     };
@@ -296,9 +296,9 @@ pub fn execute_distribute_protocol_rewards(
     if !staking_amount.is_zero() {
         let staking_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            env.contract.address.clone(),
+            env.contract.address,
             staking_address,
-            asset.clone(),
+            asset,
             staking_amount,
         )?;
         messages.push(staking_msg);
