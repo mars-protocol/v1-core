@@ -198,7 +198,7 @@ pub fn execute_withdraw_from_red_bank(
 
     let withdraw_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.to_string(),
-        msg: to_binary(&red_bank::msg::ExecuteMsg::Withdraw { asset, amount })?,      
+        msg: to_binary(&red_bank::msg::ExecuteMsg::Withdraw { asset, amount })?,
         funds: vec![],
     });
 
@@ -244,7 +244,7 @@ pub fn execute_distribute_protocol_rewards(
 
     let amount_to_distribute = match amount {
         Some(amount) if amount > balance => {
-            return Err(ContractError::AmountTooLarge { amount, balance })
+            return Err(ContractError::AmountToDistributeTooLarge { amount, balance })
         }
         Some(amount) => amount,
         None => balance,
@@ -792,7 +792,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::AmountTooLarge {
+            ContractError::AmountToDistributeTooLarge {
                 amount: exceeding_amount,
                 balance: Uint128::new(balance)
             }
@@ -972,7 +972,7 @@ mod tests {
 
         assert_eq!(
             error_res,
-            ContractError::AmountTooLarge {
+            ContractError::AmountToDistributeTooLarge {
                 amount: exceeding_amount,
                 balance: Uint128::new(balance)
             }
