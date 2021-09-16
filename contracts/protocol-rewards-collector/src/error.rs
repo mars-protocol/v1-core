@@ -18,4 +18,7 @@ pub enum ContractError {
 
     #[error("Amount to distribute {amount} is larger than available balance {balance}")]
     AmountToDistributeTooLarge { amount: Uint128, balance: Uint128 },
+
+    #[error("Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one")]
+    InvalidFeeShareAmounts {},
 }

@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128, WasmMsg,
 };
 use mars::{
@@ -25,7 +25,7 @@ pub fn instantiate(
     _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -46,9 +46,7 @@ pub fn instantiate(
         && astroport_max_spread.is_some();
 
     if !available {
-        return Err(StdError::generic_err(
-            "All params should be available during initialization",
-        ));
+        return Err(MarsError::InstantiateParamsUnavailable {}.into());
     };
 
     let config = Config {
@@ -401,12 +399,12 @@ mod tests {
     use cosmwasm_std::{
         attr, coin, from_binary,
         testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR},
-        Addr, BankMsg, Coin, Decimal, OwnedDeps, SubMsg,
+        Addr, BankMsg, Coin, Decimal, OwnedDeps, StdError, SubMsg,
     };
     use cw20::Cw20ExecuteMsg;
     use mars::{
         tax::deduct_tax,
-        testing::{assert_generic_error_message, mock_dependencies, mock_info, MarsMockQuerier},
+        testing::{mock_dependencies, mock_info, MarsMockQuerier},
     };
 
     #[test]
@@ -439,11 +437,8 @@ mod tests {
             config: empty_config,
         };
         let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
-        assert_generic_error_message(
-            response,
-            "All params should be available during initialization",
-        );
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(response, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
         // init config with safety_fund_fee_share and treasury_fee_share greater than 1
@@ -456,11 +451,14 @@ mod tests {
             ..base_config.clone()
         };
         let msg = InstantiateMsg { config };
-        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg);
-        assert_generic_error_message(
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(
             response,
-            "[safety_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [safety_fund_fee_share, treasury_fee_share]",
+            MarsError::ParamsNotLessOrEqualOne {
+                expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
+                invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
+            }
+            .into()
         );
 
         // *
@@ -474,11 +472,9 @@ mod tests {
             ..base_config.clone()
         };
         let exceeding_fees_msg = InstantiateMsg { config };
-        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg);
-        assert_generic_error_message(
-            response,
-            "Invalid fee share amounts. Sum of safety fund and treasury fee shares exceeds one",
-        );
+        let response =
+            instantiate(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg).unwrap_err();
+        assert_eq!(response, ContractError::InvalidFeeShareAmounts {});
 
         // *
         // init config with valid params
@@ -549,10 +545,10 @@ mod tests {
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "[safety_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [safety_fund_fee_share, treasury_fee_share]"
-            )
+            MarsError::ParamsNotLessOrEqualOne {
+                expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
+                invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
+            }
             .into()
         );
 
@@ -569,13 +565,7 @@ mod tests {
         let exceeding_fees_msg = UpdateConfig { config };
         let error_res =
             execute(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err(
-                "Invalid fee share amounts. Sum of safety fund and treasury fee shares exceeds one"
-            )
-            .into()
-        );
+        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
 
         // *
         // update config with all new params
