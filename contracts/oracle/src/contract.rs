@@ -173,19 +173,30 @@ pub fn execute_update_astroport_twap_data(
         let timestamp = env.block.time.seconds();
         let time_elapsed = timestamp - twap_data_last.timestamp;
 
-        if &time_elapsed < min_period {
+        if time_elapsed < *min_period {
             return Err(StdError::generic_err("Minimum period not elapsed"));
         }
 
         // Query new price data
         let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
-        let twap_data = AstroportTwapData {
-            timestamp,
-            price_average: Decimal::from_ratio(
+        // If the cumulative price overflows on Astroport pair contract, then for this update we don't
+        // change `price_average`. On the next update, `price_average` will resume updating as usual.
+        let price_average = if price_cumulative >= twap_data_last.price_cumulative {
+            Decimal::from_ratio(
                 price_cumulative - twap_data_last.price_cumulative,
                 time_elapsed,
-            ),
+            )
+        } else {
+            Decimal::from_ratio(
+                price_cumulative.checked_add(Uint128::MAX - twap_data_last.price_cumulative)?,
+                time_elapsed,
+            )
+        };
+
+        let twap_data = AstroportTwapData {
+            timestamp,
+            price_average,
             price_cumulative,
         };
 
@@ -339,13 +350,8 @@ fn query_cumulative_price(
     });
 
     match asset_index {
-        Some(index) => {
-            if index == 0 {
-                Ok(response.price0_cumulative_last)
-            } else {
-                Ok(response.price1_cumulative_last)
-            }
-        }
+        Some(index) if index == 0 => Ok(response.price0_cumulative_last),
+        Some(_) => Ok(response.price1_cumulative_last),
         None => Err(StdError::generic_err("Asset mismatch")),
     }
 }
