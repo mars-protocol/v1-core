@@ -248,12 +248,10 @@ pub fn execute_distribute_protocol_rewards(
     };
 
     let amount_to_distribute = match amount {
-        Some(amount) => {
-            if amount > balance {
-                return Err(ContractError::AmountTooLarge { amount, balance });
-            }
-            amount
+        Some(amount) if amount > balance => {
+            return Err(ContractError::AmountTooLarge { amount, balance })
         }
+        Some(amount) => amount,
         None => balance,
     };
 
