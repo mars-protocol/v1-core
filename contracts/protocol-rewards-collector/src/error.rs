@@ -17,5 +17,5 @@ pub enum ContractError {
     AssetNotEnabled { label: String },
 
     #[error("Amount to distribute {amount} is larger than available balance {balance}")]
-    AmountTooLarge { amount: Uint128, balance: Uint128 },
+    AmountToDistributeTooLarge { amount: Uint128, balance: Uint128 },
 }
