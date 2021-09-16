@@ -28,11 +28,12 @@ pub fn instantiate(
         insurance_fund_address: Addr::unchecked(""),
         mars_token_address: Addr::unchecked(""),
         oracle_address: Addr::unchecked(""),
+        protocol_admin_address: Addr::unchecked(""),
+        protocol_rewards_collector_address: Addr::unchecked(""),
         red_bank_address: Addr::unchecked(""),
         staking_address: Addr::unchecked(""),
         treasury_address: Addr::unchecked(""),
         xmars_token_address: Addr::unchecked(""),
-        protocol_admin_address: Addr::unchecked(""),
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -77,6 +78,7 @@ pub fn execute_update_config(
         mars_token_address,
         oracle_address,
         protocol_admin_address,
+        protocol_rewards_collector_address,
         red_bank_address,
         staking_address,
         treasury_address,
@@ -101,6 +103,11 @@ pub fn execute_update_config(
         deps.api,
         protocol_admin_address,
         config.protocol_admin_address,
+    )?;
+    config.protocol_rewards_collector_address = option_string_to_addr(
+        deps.api,
+        protocol_rewards_collector_address,
+        config.protocol_rewards_collector_address,
     )?;
     config.red_bank_address =
         option_string_to_addr(deps.api, red_bank_address, config.red_bank_address)?;
@@ -136,7 +143,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         insurance_fund_address: config.insurance_fund_address,
         mars_token_address: config.mars_token_address,
         oracle_address: config.oracle_address,
-        protocol_admin: config.protocol_admin_address,
+        protocol_admin_address: config.protocol_admin_address,
+        protocol_rewards_collector_address: config.protocol_rewards_collector_address,
         red_bank_address: config.red_bank_address,
         staking_address: config.staking_address,
         treasury_address: config.treasury_address,
@@ -167,6 +175,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
         MarsContract::MarsToken => config.mars_token_address.clone(),
         MarsContract::Oracle => config.oracle_address.clone(),
         MarsContract::ProtocolAdmin => config.protocol_admin_address.clone(),
+        MarsContract::ProtocolRewardsCollector => config.protocol_rewards_collector_address.clone(),
         MarsContract::RedBank => config.red_bank_address.clone(),
         MarsContract::Staking => config.staking_address.clone(),
         MarsContract::Treasury => config.treasury_address.clone(),

@@ -233,8 +233,6 @@ pub fn execute_update_config(
     let CreateOrUpdateConfig {
         owner,
         address_provider_address,
-        insurance_fund_fee_share,
-        treasury_fee_share,
         ma_token_code_id,
         close_factor,
     } = new_config;
@@ -248,9 +246,6 @@ pub fn execute_update_config(
     )?;
     config.ma_token_code_id = ma_token_code_id.unwrap_or(config.ma_token_code_id);
     config.close_factor = close_factor.unwrap_or(config.close_factor);
-    config.insurance_fund_fee_share =
-        insurance_fund_fee_share.unwrap_or(config.insurance_fund_fee_share);
-    config.treasury_fee_share = treasury_fee_share.unwrap_or(config.treasury_fee_share);
 
     // Validate config
     config.validate()?;
@@ -431,16 +426,17 @@ pub fn execute_withdraw(
         protocol_rewards_collector_address,
         &mut market,
         response
-    );
-    update_interest_rates(
+    )?;
+    response = update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
         &mut market,
         withdraw_amount,
+        &asset_label,
+        response
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
-    reponse = response.add_event(build_interests_updated_event(asset_label.as_str(), &market));
 
     // burn maToken
     response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -613,20 +609,29 @@ pub fn execute_update_asset(
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
-            let (updated_market, interest_rates_updated) =
-                market.update(&deps, &env, asset_reference.as_slice(), asset_params)?;
-
+            let protocol_rewards_collector_address = address_provider::helpers::query_address(
+                &deps.querier,
+                config.address_provider_address,
+                MarsContract::ProtocolRewardsCollector,
+            )?;
+            let mut response = Response::new();
+            let (updated_market, response) =
+                market.update(
+                    &deps,
+                    &env,
+                    asset_reference.as_slice(),
+                    asset_params,
+                    &asset_label,
+                    protocol_rewards_collector_address,
+                    response
+                )?;
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
-            let mut res = Response::new()
+            response = response 
                 .add_attribute("action", "update_asset")
                 .add_attribute("asset", &asset_label);
 
-            if interest_rates_updated {
-                res = res.add_event(build_interests_updated_event(&asset_label, &updated_market));
-            }
-
-            Ok(res)
+            Ok(response)
         }
         None => Err(AssetNotInitialized {}),
     }
@@ -684,11 +689,18 @@ pub fn execute_deposit(
         protocol_rewards_collector_address,
         &mut market,
         response
-    );
-    apply_accumulated_interests(&env, &mut market);
-    update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
+    )?;
+    response = 
+        update_interest_rates(
+            &deps,
+            &env,
+            asset_reference,
+            &mut market,
+            Uint128::zero(),
+            &asset_label,
+            response
+        )?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
-    events.push(build_interests_updated_event(asset_label, &market));
 
     if market.liquidity_index.is_zero() {
         return Err(InvalidLiquidityIndex {});
@@ -838,7 +850,7 @@ pub fn execute_borrow(
         protocol_rewards_collector_address,
         &mut market,
         response
-    );
+    )?;
 
     // Set borrowing asset for user
     if !is_borrowing_asset {
@@ -874,18 +886,16 @@ pub fn execute_borrow(
 
     borrow_market.debt_total_scaled += borrow_amount_scaled;
 
-    update_interest_rates(
+    response = update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
         &mut borrow_market,
         borrow_amount,
+        &asset_label,
+        response
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
-    response = response.add_event(build_interests_updated_event(
-        asset_label.as_str(),
-        &borrow_market,
-    ));
 
     // Send borrow amount to borrower
     response = response.add_message(build_send_asset_with_tax_deduction_msg(
@@ -923,7 +933,6 @@ pub fn execute_repay(
         });
     }
 
-    // Get repay amount
     // Cannot repay zero amount
     if repay_amount.is_zero() {
         return Err(InvalidRepayAmount {
@@ -943,21 +952,24 @@ pub fn execute_repay(
         config.address_provider_address,
         MarsContract::ProtocolRewardsCollector,
     )?;
+
+    let mut response = Response::new();
+
     response = apply_accumulated_interests(
         &env,
         protocol_rewards_collector_address,
         &mut market,
         response
-    );
+    )?;
 
     let mut repay_amount_scaled = get_scaled_amount(
         repay_amount,
         get_updated_borrow_index(&market, env.block.time.seconds()),
     );
 
+    // If repay amount exceeds debt, refund any excess amounts
     let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
-        // refund any excess amounts
         refund_amount = get_descaled_amount(
             repay_amount_scaled - debt.amount_scaled,
             get_updated_borrow_index(&market, env.block.time.seconds()),
@@ -991,9 +1003,16 @@ pub fn execute_repay(
     }
     market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
 
-    update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
+    response = update_interest_rates(
+        &deps,
+        &env,
+        asset_reference,
+        &mut market,
+        Uint128::zero(),
+        &asset_label,
+        response
+    )?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
-    response = response.add_event(build_interests_updated_event(asset_label, &market));
 
     if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
@@ -1085,13 +1104,17 @@ pub fn execute_liquidate(
 
     // 2. Compute health factor
     let config = CONFIG.load(deps.storage)?;
-    let global_state = GLOBAL_STATE.load(deps.storage)?;
-    let user = USERS.load(deps.storage, &user_address)?;
-    let oracle_address = address_provider::helpers::query_address(
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        MarsContract::Oracle,
+        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
     )?;
+    let protocol_rewards_collector_address = addresses_query.pop().unwrap();
+    let oracle_address = addresses_query.pop().unwrap();
+
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+    let user = USERS.load(deps.storage, &user_address)?;
     let user_position = get_user_position(
         deps.as_ref(),
         block_time,
@@ -1107,9 +1130,9 @@ pub fn execute_liquidate(
         UserHealthStatus::Borrowing(hf) => hf,
     };
 
-    // if health factor is not less than one the user cannot be liquidated
+    // if health factor is not less than one user cannot be liquidated
     if health_factor >= Decimal::one() {
-        return Err(CannotLiquidateWhenValidHealthFactor {});
+        return Err(ContractError::CannotLiquidateHealthyPosition {});
     }
 
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
@@ -1128,7 +1151,14 @@ pub fn execute_liquidate(
     let debt_price =
         user_position.get_asset_price(debt_asset_reference.as_slice(), &debt_asset_label)?;
 
-    apply_accumulated_interests(&env, &mut debt_market);
+    let mut response = Response::new();
+
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address.clone(),
+        &mut debt_market,
+        response
+    )?;
 
     let user_debt_asset_total_debt = get_descaled_amount(
         user_debt.amount_scaled,
@@ -1146,34 +1176,32 @@ pub fn execute_liquidate(
             sent_debt_asset_amount,
         );
 
-    let mut messages = vec![];
-    let mut events = vec![];
-
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
-        process_ma_token_transfer_to_liquidator(
+        response = process_ma_token_transfer_to_liquidator(
             deps.branch(),
             block_time,
             &user_address,
             &liquidator_address,
-            collateral_asset_label.as_str(),
+            &collateral_asset_label,
             &collateral_market,
             collateral_amount_to_liquidate,
-            &mut messages,
-            &mut events,
+            response
         )?;
     } else {
-        process_underlying_asset_transfer_to_liquidator(
+        response = process_underlying_asset_transfer_to_liquidator(
             deps.branch(),
             &env,
             &user_address,
             &liquidator_address,
             collateral_asset,
             collateral_asset_reference.as_slice(),
+            &collateral_asset_label,
             &mut collateral_market,
             collateral_amount_to_liquidate,
-            &mut messages,
+            protocol_rewards_collector_address,
+            response
         )?;
     }
 
@@ -1182,7 +1210,7 @@ pub fn execute_liquidate(
         let mut user = USERS.load(deps.storage, &user_address)?;
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, &user_address, &user)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             collateral_asset_label.as_str(),
             false,
             user_address.to_string(),
@@ -1214,12 +1242,14 @@ pub fn execute_liquidate(
         .debt_total_scaled
         .checked_sub(debt_amount_to_repay_scaled)?;
 
-    update_interest_rates(
+    response = update_interest_rates(
         &deps,
         &env,
         debt_asset_reference.as_slice(),
         &mut debt_market,
         refund_amount,
+        &debt_asset_label,
+        response
     )?;
 
     // save markets
@@ -1233,28 +1263,16 @@ pub fn execute_liquidate(
     // 6. Build response
     // refund sent amount in excess of actual debt amount to liquidate
     if refund_amount > Uint128::zero() {
-        let refund_msg = build_send_asset_with_tax_deduction_msg(
+        response = response.add_message(build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             env.contract.address,
             liquidator_address.clone(),
             debt_asset,
             refund_amount,
-        )?;
-        messages.push(refund_msg);
+        )?);
     }
 
-    events.push(build_interests_updated_event(
-        debt_asset_label.as_str(),
-        &debt_market,
-    ));
-    if !receive_ma_token {
-        events.push(build_interests_updated_event(
-            collateral_asset_label.as_str(),
-            &collateral_market,
-        ));
-    }
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "liquidate")
         .add_attribute("collateral_market", collateral_asset_label.as_str())
         .add_attribute("debt_market", debt_asset_label.as_str())
@@ -1266,12 +1284,11 @@ pub fn execute_liquidate(
         )
         .add_attribute("debt_amount_repaid", debt_amount_to_repay.to_string())
         .add_attribute("refund_amount", refund_amount.to_string())
-        .add_events(events)
-        .add_messages(messages);
-    Ok(res)
+    Ok(response)
 }
 
 /// Transfer ma tokens from user to liquidator
+/// Returns response with added messages and events
 fn process_ma_token_transfer_to_liquidator(
     deps: DepsMut,
     block_time: u64,
@@ -1280,21 +1297,20 @@ fn process_ma_token_transfer_to_liquidator(
     collateral_asset_label: &str,
     collateral_market: &Market,
     collateral_amount_to_liquidate: Uint128,
-    messages: &mut Vec<CosmosMsg>,
-    events: &mut Vec<Event>,
-) -> StdResult<()> {
+    mut response: Response,
+) -> StdResult<Response> {
     let mut liquidator = USERS
         .may_load(deps.storage, liquidator_addr)?
         .unwrap_or_default();
 
     // Set liquidator's deposited bit to true if not already true
-    // NOTE: previous checks should ensure this amount is not zero
+    // NOTE: previous checks should ensure amount to be sent is not zero
     let liquidator_is_using_as_collateral =
         get_bit(liquidator.collateral_assets, collateral_market.index)?;
     if !liquidator_is_using_as_collateral {
         set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, liquidator_addr, &liquidator)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             collateral_asset_label,
             true,
             liquidator_addr.to_string(),
@@ -1306,7 +1322,7 @@ fn process_ma_token_transfer_to_liquidator(
         get_updated_liquidity_index(collateral_market, block_time),
     );
 
-    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
             sender: user_addr.to_string(),
@@ -1316,10 +1332,11 @@ fn process_ma_token_transfer_to_liquidator(
         funds: vec![],
     }));
 
-    Ok(())
+    Ok(response)
 }
 
 /// Burn ma_tokens from user and send underlying asset to liquidator
+/// Returns response with added messages and events
 fn process_underlying_asset_transfer_to_liquidator(
     deps: DepsMut,
     env: &Env,
@@ -1327,10 +1344,12 @@ fn process_underlying_asset_transfer_to_liquidator(
     liquidator_addr: &Addr,
     collateral_asset: Asset,
     collateral_asset_reference: &[u8],
+    collateral_asset_label: &str,
     mut collateral_market: &mut Market,
     collateral_amount_to_liquidate: Uint128,
-    messages: &mut Vec<CosmosMsg>,
-) -> Result<(), ContractError> {
+    protocol_rewards_collector_address: Addr,
+    mut response: Response,
+) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
 
     // Ensure contract has enough collateral to send back underlying asset
@@ -1353,13 +1372,21 @@ fn process_underlying_asset_transfer_to_liquidator(
     }
 
     // Apply update collateral interest as liquidity is reduced
-    apply_accumulated_interests(env, &mut collateral_market);
-    update_interest_rates(
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut collateral_market,
+        response
+    )?;
+
+    response = update_interest_rates(
         &deps,
         env,
         collateral_asset_reference,
         &mut collateral_market,
         collateral_amount_to_liquidate,
+        &collateral_asset_label,
+        response,
     )?;
 
     let collateral_amount_to_liquidate_scaled = get_scaled_amount(
@@ -1367,7 +1394,7 @@ fn process_underlying_asset_transfer_to_liquidator(
         get_updated_liquidity_index(collateral_market, block_time),
     );
 
-    let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
             user: user_addr.to_string(),
@@ -1375,19 +1402,17 @@ fn process_underlying_asset_transfer_to_liquidator(
             amount: collateral_amount_to_liquidate_scaled,
         })?,
         funds: vec![],
-    });
+    }));
 
-    let send_underlying_asset_msg = build_send_asset_with_tax_deduction_msg(
+    response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address.clone(),
         liquidator_addr.clone(),
         collateral_asset,
         collateral_amount_to_liquidate,
-    )?;
-    messages.push(burn_ma_tokens_msg);
-    messages.push(send_underlying_asset_msg);
+    )?);
 
-    Ok(())
+    Ok(response)
 }
 
 /// Computes debt to repay (in debt asset),
@@ -1672,8 +1697,6 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner,
         address_provider_address: config.address_provider_address,
-        insurance_fund_fee_share: config.insurance_fund_fee_share,
-        treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
         market_count: money_market.market_count,
         close_factor: config.close_factor,
@@ -1877,14 +1900,6 @@ fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPos
 
 // EVENTS
 
-fn build_interests_updated_event(label: &str, market: &Market) -> Event {
-    Event::new("interests_updated")
-        .add_attribute("market", label)
-        .add_attribute("borrow_index", market.borrow_index.to_string())
-        .add_attribute("liquidity_index", market.liquidity_index.to_string())
-        .add_attribute("borrow_rate", market.borrow_rate.to_string())
-        .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
-}
 
 fn build_collateral_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
     Event::new("collateral_position_changed")
@@ -2022,8 +2037,6 @@ mod tests {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             ma_token_code_id: Some(10u64),
-            insurance_fund_fee_share: None,
-            treasury_fee_share: None,
             close_factor: None,
         };
 
@@ -2033,8 +2046,6 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             owner: None,
             address_provider_address: None,
-            insurance_fund_fee_share: None,
-            treasury_fee_share: None,
             ma_token_code_id: None,
             close_factor: None,
         };
@@ -2046,14 +2057,10 @@ mod tests {
         assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
-        // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // init config with close_factor greater than 1
         // *
-        let mut insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         let mut close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
@@ -2063,41 +2070,19 @@ mod tests {
         assert_eq!(
             error_res,
             MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                expected_params: "close_factor"
                     .to_string(),
-                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                invalid_params: "close_factor"
                     .to_string()
             }
             .into()
         );
 
         // *
-        // init config with invalid fee share amounts
-        // *
-        insurance_fund_fee_share = Decimal::from_ratio(7u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(4u128, 10u128);
-        close_factor = Decimal::from_ratio(1u128, 2u128);
-        let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
-            close_factor: Some(close_factor),
-            ..base_config.clone()
-        };
-        let exceeding_fees_msg = InstantiateMsg { config };
-        let info = mock_info("owner");
-        let error_res =
-            instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
-
-        // *
         // init config with valid params
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(5u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
         close_factor = Decimal::from_ratio(1u128, 2u128);
         let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..base_config
         };
@@ -2113,8 +2098,6 @@ mod tests {
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.market_count);
-        assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
-        assert_eq!(treasury_fee_share, value.treasury_fee_share);
     }
 
     #[test]
@@ -2125,15 +2108,11 @@ mod tests {
         // *
         // init config with valid params
         // *
-        let mut insurance_fund_fee_share = Decimal::from_ratio(1u128, 10u128);
-        let mut treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
         let mut close_factor = Decimal::from_ratio(1u128, 4u128);
         let init_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             ma_token_code_id: Some(20u64),
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = InstantiateMsg {
@@ -2154,15 +2133,11 @@ mod tests {
         assert_eq!(error_res, MarsError::Unauthorized {}.into());
 
         // *
-        // update config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // update config with close_factor
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..init_config.clone()
         };
@@ -2172,41 +2147,23 @@ mod tests {
         assert_eq!(
             error_res,
             MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                expected_params: "close_factor"
                     .to_string(),
-                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                invalid_params: "close_factor"
                     .to_string()
             }
             .into()
         );
 
-        // *
-        // update config with invalid fee share amounts
-        // *
-        insurance_fund_fee_share = Decimal::from_ratio(10u128, 10u128);
-        let config = CreateOrUpdateConfig {
-            owner: None,
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: None,
-            ..init_config
-        };
-        let exceeding_fees_msg = UpdateConfig { config };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
 
         // *
         // update config with all new params
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
-        treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
         close_factor = Decimal::from_ratio(1u128, 20u128);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
             ma_token_code_id: Some(40u64),
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = UpdateConfig {
@@ -2230,14 +2187,6 @@ mod tests {
             new_config.ma_token_code_id,
             config.ma_token_code_id.unwrap()
         );
-        assert_eq!(
-            new_config.insurance_fund_fee_share,
-            config.insurance_fund_fee_share.unwrap()
-        );
-        assert_eq!(
-            new_config.treasury_fee_share,
-            config.treasury_fee_share.unwrap()
-        );
         assert_eq!(new_config.close_factor, config.close_factor.unwrap());
     }
 
@@ -2249,8 +2198,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -2599,8 +2546,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -2926,8 +2871,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -6179,9 +6122,11 @@ mod tests {
                 &liquidator_addr,
                 native_collateral_asset.clone(),
                 b"native_collateral",
+                "native_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap_err();
             assert_eq!(
@@ -6200,9 +6145,11 @@ mod tests {
                 &liquidator_addr,
                 native_collateral_asset,
                 b"native_collateral",
+                "native_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap();
         }
@@ -6228,9 +6175,11 @@ mod tests {
                 &liquidator_addr,
                 cw20_collateral_asset.clone(),
                 b"cw20_collateral",
+                "cw20_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap_err();
             assert_eq!(
@@ -6249,9 +6198,11 @@ mod tests {
                 &liquidator_addr,
                 cw20_collateral_asset,
                 b"cw20_collateral",
+                "cw20_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap();
         }
@@ -6388,7 +6339,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::CannotLiquidateWhenValidHealthFactor {}
+            ContractError::CannotLiquidateHealthyPosition {}
         );
     }
 
@@ -6928,8 +6879,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(1u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -7059,12 +7008,10 @@ mod tests {
         let dec_debt_total = get_descaled_amount(new_debt_total_scaled, expected_indices.borrow);
         let config = CONFIG.load(deps.storage).unwrap();
 
-        let dec_protocol_income_minus_treasury_amount =
-            (Decimal::one() - config.treasury_fee_share) * total_protocol_income_to_distribute;
         let contract_current_balance = Uint128::from(initial_liquidity);
         let liquidity_taken = Uint128::from(deltas.less_liquidity);
         let dec_liquidity_total =
-            contract_current_balance - liquidity_taken - dec_protocol_income_minus_treasury_amount;
+            contract_current_balance - liquidity_taken;
         let expected_utilization_rate =
             Decimal::from_ratio(dec_debt_total, dec_liquidity_total + dec_debt_total);
 

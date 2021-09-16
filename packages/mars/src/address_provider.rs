@@ -35,6 +35,11 @@ pub mod msg {
         pub mars_token_address: Option<String>,
         /// Oracle contract provides prices in uusd for assets used in the protocol
         pub oracle_address: Option<String>,
+        /// Protocol admin is the Cosmos level contract admin that has permissions to migrate
+        /// contracts
+        pub protocol_admin_address: Option<String>,
+        /// Protocol Rewards Collector receives and distributes protocl rewards
+        pub protocol_rewards_collector_address: Option<String>,
         /// Red Bank contract handles user's depositing/borrowing and holds the protocol's
         /// liquidity
         pub red_bank_address: Option<String>,
@@ -45,9 +50,6 @@ pub mod msg {
         pub treasury_address: Option<String>,
         /// xMars token cw20 contract
         pub xmars_token_address: Option<String>,
-        /// Protocol admin is the Cosmos level contract admin that has permissions to migrate
-        /// contracts
-        pub protocol_admin_address: Option<String>,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -58,11 +60,12 @@ pub mod msg {
         InsuranceFund,
         MarsToken,
         Oracle,
+        ProtocolAdmin,
+        ProtocolRewardsCollector,
         RedBank,
         Staking,
         Treasury,
         XMarsToken,
-        ProtocolAdmin,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -84,11 +87,12 @@ pub mod msg {
         pub insurance_fund_address: Addr,
         pub mars_token_address: Addr,
         pub oracle_address: Addr,
+        pub protocol_admin_address: Addr,
+        pub protocol_rewards_collector_address: Addr,
         pub red_bank_address: Addr,
         pub staking_address: Addr,
         pub treasury_address: Addr,
         pub xmars_token_address: Addr,
-        pub protocol_admin: Addr,
     }
 }
 

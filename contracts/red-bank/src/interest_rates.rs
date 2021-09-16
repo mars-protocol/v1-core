@@ -1,5 +1,5 @@
 use std::str;
-use cosmwasm_std::{CosmosMsg, Decimal, DepsMut, Env, StdResult, Response, Uint128};
+use cosmwasm_std::{to_binary, Addr, CosmosMsg, Decimal, DepsMut, Env, Event, StdResult, Response, Uint128};
 
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
@@ -10,7 +10,7 @@ use crate::error::ContractError::{
     CannotEncodeAssetReferenceIntoString, OperationExceedsAvailableLiquidity,
 };
 use crate::interest_rate_models::InterestRateModel;
-use crate::state::{Market, CONFIG};
+use crate::state::{Market};
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
@@ -28,8 +28,8 @@ pub fn apply_accumulated_interests(
     env: &Env,
     protocol_rewards_collector_address: Addr,
     market: &mut Market,
-    response: Response,
-) -> Response {
+    mut response: Response,
+) -> StdResult<Response> {
     let current_timestamp = env.block.time.seconds();
     let previous_borrow_index = market.borrow_index;
 
@@ -71,8 +71,8 @@ pub fn apply_accumulated_interests(
 
     let accrued_protocol_rewards = borrow_interest_accrued * market.reserve_factor;
 
-    if accrued_protocol_rewards > 0 {
-        response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+    if accrued_protocol_rewards > Uint128::zero() {
+        response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: protocol_rewards_collector_address.into(),
@@ -83,9 +83,8 @@ pub fn apply_accumulated_interests(
             })?,
             funds: vec![],
         }))
-    } else {
-        response
     }
+    Ok(response)
 }
 
 pub fn calculate_applied_linear_interest_rate(
@@ -164,13 +163,16 @@ pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal 
 
 /// Update interest rates for current liquidity and debt levels
 /// Note it does not save the market to the store (that is left to the caller)
+/// Returns response with appended interest rates updated event
 pub fn update_interest_rates(
     deps: &DepsMut,
     env: &Env,
     reference: &[u8],
     market: &mut Market,
     liquidity_taken: Uint128,
-) -> Result<(), ContractError> {
+    asset_label: &str,
+    mut response: Response,
+) -> Result<Response, ContractError> {
     let contract_current_balance = match market.asset_type {
         AssetType::Native => {
             let denom = str::from_utf8(reference);
@@ -218,7 +220,17 @@ pub fn update_interest_rates(
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
-    Ok(())
+    response = response.add_event(build_interests_updated_event(asset_label, &market));
+    Ok(response)
+}
+
+pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
+    Event::new("interests_updated")
+        .add_attribute("market", label)
+        .add_attribute("borrow_index", market.borrow_index.to_string())
+        .add_attribute("liquidity_index", market.liquidity_index.to_string())
+        .add_attribute("borrow_rate", market.borrow_rate.to_string())
+        .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
 }
 
 #[cfg(test)]

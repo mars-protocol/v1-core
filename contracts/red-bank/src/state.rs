@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
 use crate::error::ContractError::{InvalidFeeShareAmounts, InvalidMaintenanceMargin};
-use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Timestamp, Uint128};
+use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Response, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::error::MarsError;
@@ -36,6 +36,21 @@ pub struct Config {
     pub close_factor: Decimal,
 }
 
+impl Config {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        let conditions_and_names = vec![
+            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
+        ];
+        all_conditions_valid(conditions_and_names)?;
+
+        Ok(())
+    }
+
+    fn less_or_equal_one(value: &Decimal) -> bool {
+        value.le(&Decimal::one())
+    }
+}
+
 /// RedBank global state
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct GlobalState {
@@ -61,7 +76,7 @@ pub struct Market {
     /// Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral
     /// from user in an amount equal to debt repayed + bonus)
     pub liquidation_bonus: Decimal,
-    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    /// Portion of the borrow rate that is kept as protocol rewards
     pub reserve_factor: Decimal,
 
     /// Interest rate strategy to calculate borrow_rate and liquidity_rate
@@ -184,13 +199,18 @@ impl Market {
     }
 
     /// Update market based on new params
+    /// Returns tuple with updated market and Response which may contain new events
+    /// and messages if interest rates are updated
     pub fn update(
         mut self,
         deps: &DepsMut,
         env: &Env,
         reference: &[u8],
         params: InitOrUpdateAssetParams,
-    ) -> Result<(Self, bool), ContractError> {
+        asset_label: &str,
+        protocol_rewards_collector_address: Addr,
+        mut response: Response,
+    ) -> Result<(Self, Response), ContractError> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -214,7 +234,13 @@ impl Market {
             || interest_rate_strategy.is_some();
 
         if should_update_interest_rates {
-            apply_accumulated_interests(env, &mut self);
+            response = 
+                apply_accumulated_interests(
+                    env,
+                    protocol_rewards_collector_address,
+                    &mut self,
+                    response
+                )?;
         }
 
         let mut updated_market = Market {
@@ -232,10 +258,19 @@ impl Market {
         updated_market.validate()?;
 
         if should_update_interest_rates {
-            update_interest_rates(deps, env, reference, &mut updated_market, Uint128::zero())?;
+            response = 
+                update_interest_rates(
+                    deps,
+                    env,
+                    reference,
+                    &mut updated_market,
+                    Uint128::zero(),
+                    asset_label,
+                    response
+                )?;
         }
 
-        Ok((updated_market, should_update_interest_rates))
+        Ok((updated_market, response))
     }
 
     pub fn allow_deposit(&self) -> bool {

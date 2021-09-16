@@ -83,7 +83,7 @@ pub enum ContractError {
     CannotLiquidateWhenNoDebtBalance {},
 
     #[error("User's health factor is not less than 1 and thus cannot be liquidated")]
-    CannotLiquidateWhenValidHealthFactor {},
+    CannotLiquidateHealthyPosition {},
 
     #[error("Contract does not have enough collateral liquidity to send back underlying asset")]
     CannotLiquidateWhenNotEnoughCollateral {},
