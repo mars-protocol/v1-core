@@ -1,8 +1,10 @@
 use std::str;
 
+#[cfg(not(feature = "library"))]
+use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps,
-    DepsMut, Env, Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
