@@ -377,13 +377,13 @@
             "null"
           ]
         },
-        "owner": {
+        "astroport_factory_address": {
           "type": [
             "string",
             "null"
           ]
         },
-        "safety_fund_fee_share": {
+        "astroport_max_spread": {
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"
@@ -393,13 +393,13 @@
             }
           ]
         },
-        "terraswap_factory_address": {
+        "owner": {
           "type": [
             "string",
             "null"
           ]
         },
-        "terraswap_max_spread": {
+        "safety_fund_fee_share": {
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"
