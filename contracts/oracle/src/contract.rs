@@ -188,7 +188,10 @@ pub fn execute_update_astroport_twap_data(
                 time_elapsed,
             )
         } else {
-            twap_data_last.price_average
+            Decimal::from_ratio(
+                price_cumulative.checked_add(Uint128::MAX - twap_data_last.price_cumulative)?,
+                time_elapsed,
+            )
         };
 
         let twap_data = AstroportTwapData {
