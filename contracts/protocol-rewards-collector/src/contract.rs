@@ -276,39 +276,28 @@ pub fn execute_distribute_protocol_rewards(
     let staking_amount =
         amount_to_distribute.checked_sub(amount_to_distribute_before_staking_rewards)?;
 
-    let mut messages = vec![];
+    let build_send_asset_msg_helper = |address, amount| {
+        build_send_asset_msg(
+            deps.as_ref(),
+            env.contract.address.clone(),
+            address,
+            asset.clone(),
+            amount,
+        )
+    };
 
     // only build and add send message if fee is non-zero
+    let mut messages = vec![];
     if !safety_fund_amount.is_zero() {
-        let safety_fund_msg = build_send_asset_msg(
-            deps.as_ref(),
-            env.contract.address.clone(),
-            safety_fund_address,
-            asset.clone(),
-            safety_fund_amount,
-        )?;
+        let safety_fund_msg = build_send_asset_msg_helper(safety_fund_address, safety_fund_amount)?;
         messages.push(safety_fund_msg);
     }
-
     if !treasury_amount.is_zero() {
-        let treasury_msg = build_send_asset_msg(
-            deps.as_ref(),
-            env.contract.address.clone(),
-            treasury_address,
-            asset.clone(),
-            treasury_amount,
-        )?;
+        let treasury_msg = build_send_asset_msg_helper(treasury_address, treasury_amount)?;
         messages.push(treasury_msg);
     }
-
     if !staking_amount.is_zero() {
-        let staking_msg = build_send_asset_msg(
-            deps.as_ref(),
-            env.contract.address,
-            staking_address,
-            asset,
-            staking_amount,
-        )?;
+        let staking_msg = build_send_asset_msg_helper(staking_address, staking_amount)?;
         messages.push(staking_msg);
     }
 
