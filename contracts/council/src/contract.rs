@@ -271,7 +271,7 @@ pub fn execute_cast_vote(
         balance_at_block,
     )?;
 
-    if voting_power == Uint128::zero() {
+    if voting_power.is_zero() {
         return Err(ContractError::VoteNoVotingPower {
             block: balance_at_block,
         });

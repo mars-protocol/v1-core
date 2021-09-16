@@ -133,7 +133,7 @@ pub fn execute_transfer(
     recipient_unchecked: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 
@@ -199,7 +199,7 @@ pub fn execute_burn(
         return Err(ContractError::Unauthorized {});
     }
 
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 
@@ -235,7 +235,7 @@ pub fn execute_mint(
     recipient_unchecked: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 
@@ -282,7 +282,7 @@ pub fn execute_send(
     amount: Uint128,
     msg: Binary,
 ) -> Result<Response, ContractError> {
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 

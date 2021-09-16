@@ -173,7 +173,7 @@ pub fn execute_update_astroport_twap_data(
         let timestamp = env.block.time.seconds();
         let time_elapsed = timestamp - twap_data_last.timestamp;
 
-        if &time_elapsed < min_period {
+        if time_elapsed < *min_period {
             return Err(StdError::generic_err("Minimum period not elapsed"));
         }
 
@@ -350,13 +350,8 @@ fn query_cumulative_price(
     });
 
     match asset_index {
-        Some(index) => {
-            if index == 0 {
-                Ok(response.price0_cumulative_last)
-            } else {
-                Ok(response.price1_cumulative_last)
-            }
-        }
+        Some(index) if index == 0 => Ok(response.price0_cumulative_last),
+        Some(_) => Ok(response.price1_cumulative_last),
         None => Err(StdError::generic_err("Asset mismatch")),
     }
 }

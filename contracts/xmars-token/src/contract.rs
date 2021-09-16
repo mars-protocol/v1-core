@@ -156,7 +156,7 @@ pub fn execute_mint(
     recipient: String,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 
