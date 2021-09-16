@@ -1,14 +1,17 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::interest_rate_models::{InterestRateModel, InterestRateStrategy};
-use crate::msg::InitOrUpdateAssetParams;
-use cosmwasm_std::{Addr, Decimal, DepsMut, Env, StdError, StdResult, Timestamp, Uint128};
+use crate::error::ContractError;
+use crate::error::ContractError::{InvalidFeeShareAmounts, InvalidMaintenanceMargin};
+use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
+use mars::error::MarsError;
 use mars::helpers::all_conditions_valid;
 
+use crate::interest_rate_models::{InterestRateModel, InterestRateStrategy};
 use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
+use crate::msg::InitOrUpdateAssetParams;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");
@@ -93,7 +96,7 @@ impl Market {
         index: u32,
         asset_type: AssetType,
         params: InitOrUpdateAssetParams,
-    ) -> StdResult<Self> {
+    ) -> Result<Self, ContractError> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -120,9 +123,7 @@ impl Market {
             && borrow_enabled.is_some();
 
         if !available {
-            return Err(StdError::generic_err(
-                "All params should be available during initialization",
-            ));
+            return Err(MarsError::InstantiateParamsUnavailable {}.into());
         }
 
         let new_market = Market {
@@ -150,7 +151,7 @@ impl Market {
         Ok(new_market)
     }
 
-    fn validate(&self) -> StdResult<()> {
+    fn validate(&self) -> Result<(), ContractError> {
         self.interest_rate_strategy.validate()?;
 
         // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
@@ -173,12 +174,10 @@ impl Market {
 
         // maintenance_margin should be greater than max_loan_to_value
         if self.maintenance_margin <= self.max_loan_to_value {
-            return Err(StdError::generic_err(format!(
-                "maintenance_margin should be greater than max_loan_to_value. \
-                    maintenance_margin: {}, \
-                    max_loan_to_value: {}",
-                self.maintenance_margin, self.max_loan_to_value
-            )));
+            return Err(InvalidMaintenanceMargin {
+                maintenance_margin: self.maintenance_margin,
+                max_loan_to_value: self.max_loan_to_value,
+            });
         }
 
         Ok(())
@@ -191,7 +190,7 @@ impl Market {
         env: &Env,
         reference: &[u8],
         params: InitOrUpdateAssetParams,
-    ) -> StdResult<(Self, bool)> {
+    ) -> Result<(Self, bool), ContractError> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {

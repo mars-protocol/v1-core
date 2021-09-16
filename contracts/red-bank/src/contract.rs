@@ -25,6 +25,18 @@ use mars::tax::deduct_tax;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
+use crate::error::ContractError::{
+    AssetAlreadyInitialized, AssetNotInitialized, BorrowAmountExceedsGivenCollateral,
+    BorrowAmountExceedsUncollateralizedLoanLimit, BorrowMarketNotExists, BorrowNotAllowed,
+    CannotDistributeProtocolIncome, CannotLiquidateWhenNoCollateralBalance,
+    CannotLiquidateWhenNoDebtBalance, CannotLiquidateWhenNotEnoughCollateral,
+    CannotLiquidateWhenPositiveUncollateralizedLoanLimit, CannotLiquidateWhenValidHealthFactor,
+    CannotRepayMoreThanDebt, CannotRepayZeroDebt, CannotTransferTokenWhenInvalidHealthFactor,
+    DepositNotAllowed, InvalidBorrowAmount, InvalidDepositAmount, InvalidHealthFactorAfterWithdraw,
+    InvalidLiquidateAmount, InvalidLiquidityIndex, InvalidRepayAmount, InvalidWithdrawAmount,
+    LiquidationNotAllowedWhenCollateralMarketInactive, LiquidationNotAllowedWhenDebtMarketInactive,
+    RepayNotAllowed, UserNoBalance, UserNoCollateral, UserNoCollateralBalance, WithdrawNotAllowed,
+};
 use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
@@ -44,7 +56,7 @@ pub fn instantiate(
     _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let CreateOrUpdateConfig {
@@ -61,9 +73,7 @@ pub fn instantiate(
         && close_factor.is_some();
 
     if !available {
-        return Err(StdError::generic_err(
-            "All params should be available during initialization",
-        ));
+        return Err(MarsError::InstantiateParamsUnavailable {}.into());
     };
 
     let config = Config {
@@ -320,9 +330,7 @@ pub fn execute_withdraw(
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     if !market.allow_withdraw() {
-        return Err(
-            StdError::generic_err(format!("Cannot withdraw asset {}", asset_label,)).into(),
-        );
+        return Err(WithdrawNotAllowed { asset: asset_label });
     }
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -330,10 +338,7 @@ pub fn execute_withdraw(
         cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
 
     if withdrawer_balance_scaled.is_zero() {
-        return Err(StdError::generic_err(
-            format!("User has no balance (asset: {})", asset_label,),
-        )
-        .into());
+        return Err(UserNoBalance { asset: asset_label });
     }
 
     // Check user has sufficient balance to send back
@@ -344,10 +349,7 @@ pub fn execute_withdraw(
                 get_updated_liquidity_index(&market, env.block.time.seconds()),
             );
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
-                return Err(StdError::generic_err(format!(
-                    "Withdraw amount must be greater than 0 and less or equal user balance (asset: {})",
-                    asset_label,
-                )).into());
+                return Err(InvalidWithdrawAmount { asset: asset_label });
             };
             (amount, amount_scaled)
         }
@@ -394,16 +396,15 @@ pub fn execute_withdraw(
 
         let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
+        let weighted_maintenance_margin_in_uusd_after_withdraw = user_position
+            .weighted_maintenance_margin_in_uusd
+            .checked_sub(withdraw_amount_in_uusd * market.maintenance_margin)?;
         let health_factor_after_withdraw = Decimal::from_ratio(
-            user_position.weighted_maintenance_margin_in_uusd
-                - (withdraw_amount_in_uusd * market.maintenance_margin),
+            weighted_maintenance_margin_in_uusd_after_withdraw,
             user_position.total_collateralized_debt_in_uusd,
         );
         if health_factor_after_withdraw < Decimal::one() {
-            return Err(StdError::generic_err(
-                "User's health factor can't be less than 1 after withdraw",
-            )
-            .into());
+            return Err(InvalidHealthFactorAfterWithdraw {});
         }
     }
 
@@ -563,7 +564,7 @@ pub fn execute_init_asset(
                 }));
             Ok(res)
         }
-        Some(_) => Err(StdError::generic_err("Asset already initialized").into()),
+        Some(_) => Err(AssetAlreadyInitialized {}),
     }
 }
 
@@ -624,7 +625,7 @@ pub fn execute_update_asset(
 
             Ok(res)
         }
-        None => Err(StdError::generic_err("Asset not initialized").into()),
+        None => Err(AssetNotInitialized {}),
     }
 }
 
@@ -641,16 +642,16 @@ pub fn execute_deposit(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_deposit() {
-        return Err(StdError::generic_err(format!("Cannot deposit asset {}", asset_label,)).into());
+        return Err(DepositNotAllowed {
+            asset: asset_label.to_string(),
+        });
     }
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "Deposit amount must be greater than 0 {}",
-            asset_label,
-        ))
-        .into());
+        return Err(InvalidDepositAmount {
+            asset: asset_label.to_string(),
+        });
     }
 
     let mut user = USERS
@@ -687,7 +688,7 @@ pub fn execute_deposit(
     events.push(build_interests_updated_event(asset_label, &market));
 
     if market.liquidity_index.is_zero() {
-        return Err(StdError::generic_err("Cannot have 0 as liquidity index").into());
+        return Err(InvalidLiquidityIndex {});
     }
     let mint_amount = get_scaled_amount(
         deposit_amount,
@@ -724,11 +725,7 @@ pub fn execute_borrow(
 
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "Borrow amount must be greater than 0 {}",
-            asset_label,
-        ))
-        .into());
+        return Err(InvalidBorrowAmount { asset: asset_label });
     }
 
     // Load market and user state
@@ -736,16 +733,10 @@ pub fn execute_borrow(
     let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
         Ok(borrow_market) if borrow_market.allow_borrow() => borrow_market,
         Ok(_) => {
-            return Err(
-                StdError::generic_err(format!("Cannot borrow asset {}", asset_label,)).into(),
-            );
+            return Err(BorrowNotAllowed { asset: asset_label });
         }
         Err(_) => {
-            return Err(StdError::generic_err(format!(
-                "no borrow market exists with asset reference: {}",
-                String::from_utf8(asset_reference).expect("Found invalid UTF-8")
-            ))
-            .into());
+            return Err(BorrowMarketNotExists { asset: asset_label });
         }
     };
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
@@ -758,7 +749,7 @@ pub fn execute_borrow(
         Some(user) => user,
         None => {
             if uncollateralized_loan_limit.is_zero() {
-                return Err(StdError::generic_err("address has no collateral deposited").into());
+                return Err(UserNoCollateral {});
             }
             // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
             User::default()
@@ -802,12 +793,11 @@ pub fn execute_borrow(
 
         let borrow_amount_in_uusd = borrow_amount * borrow_asset_price;
 
-        if user_position.total_debt_in_uusd + borrow_amount_in_uusd > user_position.max_debt_in_uusd
-        {
-            return Err(StdError::generic_err(
-                "borrow amount exceeds maximum allowed given current collateral value",
-            )
-            .into());
+        let total_debt_in_uusd_after_borrow = user_position
+            .total_debt_in_uusd
+            .checked_add(borrow_amount_in_uusd)?;
+        if total_debt_in_uusd_after_borrow > user_position.max_debt_in_uusd {
+            return Err(BorrowAmountExceedsGivenCollateral {});
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
@@ -828,11 +818,10 @@ pub fn execute_borrow(
             borrower_debt.amount_scaled,
             get_updated_borrow_index(&asset_market, env.block.time.seconds()),
         );
-        if borrow_amount + debt_amount > uncollateralized_loan_limit {
-            return Err(StdError::generic_err(
-                "borrow amount exceeds uncollateralized loan limit given existing debt",
-            )
-            .into());
+
+        let debt_after_borrow = debt_amount.checked_add(borrow_amount)?;
+        if debt_after_borrow > uncollateralized_loan_limit {
+            return Err(BorrowAmountExceedsUncollateralizedLoanLimit {});
         }
     }
 
@@ -864,7 +853,7 @@ pub fn execute_borrow(
         borrow_amount,
         get_updated_borrow_index(&borrow_market, env.block.time.seconds()),
     );
-    debt.amount_scaled += borrow_amount_scaled;
+    debt.amount_scaled = debt.amount_scaled.checked_add(borrow_amount_scaled)?;
     DEBTS.save(
         deps.storage,
         (asset_reference.as_slice(), &borrower_address),
@@ -920,24 +909,24 @@ pub fn execute_repay(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_repay() {
-        return Err(StdError::generic_err(format!("Cannot repay asset {}", asset_label,)).into());
+        return Err(RepayNotAllowed {
+            asset: asset_label.to_string(),
+        });
     }
 
     // Get repay amount
     // Cannot repay zero amount
     if repay_amount.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "Repay amount must be greater than 0 {}",
-            asset_label,
-        ))
-        .into());
+        return Err(InvalidRepayAmount {
+            asset: asset_label.to_string(),
+        });
     }
 
     // Check new debt
     let mut debt = DEBTS.load(deps.storage, (asset_reference, &repayer_address))?;
 
     if debt.amount_scaled.is_zero() {
-        return Err(StdError::generic_err("Cannot repay 0 debt").into());
+        return Err(CannotRepayZeroDebt {});
     }
 
     apply_accumulated_interests(&env, &mut market);
@@ -976,13 +965,13 @@ pub fn execute_repay(
         repay_amount_scaled = debt.amount_scaled;
     }
 
-    debt.amount_scaled -= repay_amount_scaled;
+    debt.amount_scaled = debt.amount_scaled.checked_sub(repay_amount_scaled)?;
     DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
-        return Err(StdError::generic_err("Amount to repay is greater than total debt").into());
+        return Err(CannotRepayMoreThanDebt {});
     }
-    market.debt_total_scaled -= repay_amount_scaled;
+    market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
     update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
@@ -1034,20 +1023,15 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )? {
         if !limit.is_zero() {
-            return Err(StdError::generic_err(
-                "user has a positive uncollateralized loan limit and thus cannot be liquidated",
-            )
-            .into());
+            return Err(CannotLiquidateWhenPositiveUncollateralizedLoanLimit {});
         }
     };
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_asset_amount.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "Must send more than 0 {} in order to liquidate",
-            debt_asset_label,
-        ))
-        .into());
+        return Err(InvalidLiquidateAmount {
+            asset: debt_asset_label,
+        });
     }
 
     let (collateral_asset_label, collateral_asset_reference, _) = collateral_asset.get_attributes();
@@ -1056,11 +1040,9 @@ pub fn execute_liquidate(
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
     if !collateral_market.allow_liquidate() {
-        return Err(StdError::generic_err(format!(
-            "Cannot liquidate. Collateral asset {}",
-            collateral_asset_label,
-        ))
-        .into());
+        return Err(LiquidationNotAllowedWhenCollateralMarketInactive {
+            asset: collateral_asset_label,
+        });
     }
 
     // check if user has available collateral in specified collateral asset to be liquidated
@@ -1074,10 +1056,7 @@ pub fn execute_liquidate(
         get_updated_liquidity_index(&collateral_market, block_time),
     );
     if user_collateral_balance.is_zero() {
-        return Err(StdError::generic_err(
-            "user has no balance in specified collateral asset to be liquidated",
-        )
-        .into());
+        return Err(CannotLiquidateWhenNoCollateralBalance {});
     }
 
     // check if user has outstanding debt in the deposited asset that needs to be repayed
@@ -1086,7 +1065,7 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     if user_debt.amount_scaled.is_zero() {
-        return Err(StdError::generic_err("User has no outstanding debt in the specified debt asset and thus cannot be liquidated").into());
+        return Err(CannotLiquidateWhenNoDebtBalance {});
     }
 
     // 2. Compute health factor
@@ -1109,31 +1088,21 @@ pub fn execute_liquidate(
 
     let health_factor = match user_position.health_status {
         // NOTE: Should not get in practice as it would fail on the debt asset check
-        UserHealthStatus::NotBorrowing => {
-            return Err(StdError::generic_err(
-                "User has no outstanding debt and thus cannot be liquidated",
-            )
-            .into())
-        }
+        UserHealthStatus::NotBorrowing => return Err(CannotLiquidateWhenNoDebtBalance {}),
         UserHealthStatus::Borrowing(hf) => hf,
     };
 
     // if health factor is not less than one the user cannot be liquidated
     if health_factor >= Decimal::one() {
-        return Err(StdError::generic_err(
-            "User's health factor is not less than 1 and thus cannot be liquidated",
-        )
-        .into());
+        return Err(CannotLiquidateWhenValidHealthFactor {});
     }
 
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
 
     if !debt_market.allow_liquidate() {
-        return Err(StdError::generic_err(format!(
-            "Cannot liquidate. Debt asset {}",
-            debt_asset_label,
-        ))
-        .into());
+        return Err(LiquidationNotAllowedWhenDebtMarketInactive {
+            asset: debt_asset_label,
+        });
     }
 
     // 3. Compute debt to repay and collateral to liquidate
@@ -1218,13 +1187,17 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
-    debt.amount_scaled -= debt_amount_to_repay_scaled;
+    debt.amount_scaled = debt
+        .amount_scaled
+        .checked_sub(debt_amount_to_repay_scaled)?;
     DEBTS.save(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
         &debt,
     )?;
-    debt_market.debt_total_scaled -= debt_amount_to_repay_scaled;
+    debt_market.debt_total_scaled = debt_market
+        .debt_total_scaled
+        .checked_sub(debt_amount_to_repay_scaled)?;
 
     update_interest_rates(
         &deps,
@@ -1342,7 +1315,7 @@ fn process_underlying_asset_transfer_to_liquidator(
     mut collateral_market: &mut Market,
     collateral_amount_to_liquidate: Uint128,
     messages: &mut Vec<CosmosMsg>,
-) -> StdResult<()> {
+) -> Result<(), ContractError> {
     let block_time = env.block.time.seconds();
 
     // Ensure contract has enough collateral to send back underlying asset
@@ -1361,9 +1334,7 @@ fn process_underlying_asset_transfer_to_liquidator(
     };
 
     if contract_collateral_balance < collateral_amount_to_liquidate {
-        return Err(StdError::generic_err(
-            "contract does not have enough collateral liquidity to send back underlying asset",
-        ));
+        return Err(CannotLiquidateWhenNotEnoughCollateral {});
     }
 
     // Apply update collateral interest as liquidity is reduced
@@ -1486,7 +1457,7 @@ pub fn execute_finalize_liquidity_token_transfer(
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
         if health_factor < Decimal::one() {
-            return Err(StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender").into());
+            return Err(CannotTransferTokenWhenInvalidHealthFactor {});
         }
     }
 
@@ -1604,12 +1575,10 @@ pub fn execute_update_user_collateral_asset_status(
                 user_address.to_string(),
             ));
         } else {
-            return Err(StdError::generic_err(format!(
-                "User address {} has no balance in specified collateral asset {}",
-                user_address.as_str(),
-                collateral_asset_label
-            ))
-            .into());
+            return Err(UserNoCollateralBalance {
+                user_address: user_address.to_string(),
+                asset: collateral_asset_label,
+            });
         }
     } else if has_collateral_asset && !enable {
         // disable collateral asset
@@ -2073,16 +2042,18 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ContractError::OperationExceedsAvailableLiquidity;
     use crate::interest_rate_models::{
         DynamicInterestRate, InterestRateModel, InterestRateStrategy, LinearInterestRate,
     };
     use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
+    use crate::msg::CreateOrUpdateConfig;
     use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
     use mars::testing::{
-        assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_time,
-        mock_info, MarsMockQuerier, MockEnvParams,
+        mock_dependencies, mock_env, mock_env_at_block_time, mock_info, MarsMockQuerier,
+        MockEnvParams,
     };
 
     #[test]
@@ -2115,11 +2086,8 @@ mod tests {
             config: empty_config,
         };
         let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), env.clone(), info, msg);
-        assert_generic_error_message(
-            response,
-            "All params should be available during initialization",
-        );
+        let error_res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
         // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
@@ -2135,9 +2103,17 @@ mod tests {
         };
         let msg = InstantiateMsg { config };
         let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), env.clone(), info, msg);
-        assert_generic_error_message(response, "[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]");
+        let error_res = instantiate(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+        assert_eq!(
+            error_res,
+            MarsError::ParamsNotLessOrEqualOne {
+                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                    .to_string(),
+                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                    .to_string()
+            }
+            .into()
+        );
 
         // *
         // init config with invalid fee share amounts
@@ -2153,11 +2129,9 @@ mod tests {
         };
         let exceeding_fees_msg = InstantiateMsg { config };
         let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg);
-        assert_generic_error_message(
-            response,
-            "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one",
-        );
+        let error_res =
+            instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
+        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
 
         // *
         // init config with valid params
@@ -2239,8 +2213,16 @@ mod tests {
         let msg = UpdateConfig { config };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("[close_factor, insurance_fund_fee_share, treasury_fee_share] should be less or equal 1. \
-                Invalid params: [close_factor, insurance_fund_fee_share, treasury_fee_share]").into());
+        assert_eq!(
+            error_res,
+            MarsError::ParamsNotLessOrEqualOne {
+                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                    .to_string(),
+                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
+                    .to_string()
+            }
+            .into()
+        );
 
         // *
         // update config with invalid fee share amounts
@@ -2255,13 +2237,7 @@ mod tests {
         let exceeding_fees_msg = UpdateConfig { config };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err(
-                "Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one"
-            )
-            .into()
-        );
+        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
 
         // *
         // update config with all new params
@@ -2375,10 +2351,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("All params should be available during initialization").into()
-        );
+        assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
         // init asset with some params greater than 1
@@ -2396,8 +2369,16 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
-                Invalid params: [max_loan_to_value, reserve_factor]").into());
+        assert_eq!(
+            error_res,
+            MarsError::ParamsNotLessOrEqualOne {
+                expected_params:
+                    "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
+                        .to_string(),
+                invalid_params: "max_loan_to_value, reserve_factor".to_string()
+            }
+            .into()
+        );
 
         // *
         // init asset where LTV >= liquidity threshold
@@ -2417,12 +2398,10 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "maintenance_margin should be greater than max_loan_to_value. \
-                    maintenance_margin: 0.5, \
-                    max_loan_to_value: 0.5",
-            )
-            .into()
+            ContractError::InvalidMaintenanceMargin {
+                maintenance_margin: Decimal::from_ratio(1u128, 2u128),
+                max_loan_to_value: Decimal::from_ratio(1u128, 2u128)
+            }
         );
 
         // *
@@ -2445,7 +2424,13 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+        assert_eq!(
+            error_res,
+            ContractError::InvalidMinMaxBorrowRate {
+                min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+                max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
+            }
+        );
 
         // *
         // init asset where optimal utilization rate > 1
@@ -2466,10 +2451,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("Optimal utilization rate can't be greater than one").into()
-        );
+        assert_eq!(error_res, ContractError::InvalidOptimalUtilizationRate {});
 
         // *
         // owner is authorized
@@ -2558,10 +2540,7 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("Asset already initialized").into()
-        );
+        assert_eq!(error_res, ContractError::AssetAlreadyInitialized {});
 
         // *
         // callback comes back with created token
@@ -2720,10 +2699,7 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(
-                error_res,
-                StdError::generic_err("Asset not initialized").into()
-            );
+            assert_eq!(error_res, ContractError::AssetNotInitialized {});
         }
 
         // *
@@ -2756,8 +2732,16 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(error_res, StdError::generic_err("[max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus] should be less or equal 1. \
-                    Invalid params: [maintenance_margin]").into());
+            assert_eq!(
+                error_res,
+                MarsError::ParamsNotLessOrEqualOne {
+                    expected_params:
+                        "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
+                            .to_string(),
+                    invalid_params: "maintenance_margin".to_string()
+                }
+                .into()
+            );
         }
 
         // *
@@ -2779,12 +2763,10 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err(
-                    "maintenance_margin should be greater than max_loan_to_value. \
-                        maintenance_margin: 0.5, \
-                        max_loan_to_value: 0.6"
-                )
-                .into()
+                ContractError::InvalidMaintenanceMargin {
+                    maintenance_margin: Decimal::from_ratio(1u128, 2u128),
+                    max_loan_to_value: Decimal::from_ratio(6u128, 10u128)
+                }
             );
         }
 
@@ -2811,7 +2793,13 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(error_res, StdError::generic_err("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: 0.4, min_borrow_rate: 0.5").into());
+            assert_eq!(
+                error_res,
+                ContractError::InvalidMinMaxBorrowRate {
+                    min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+                    max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
+                }
+            );
         }
 
         // *
@@ -2836,10 +2824,7 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(
-                error_res,
-                StdError::generic_err("Optimal utilization rate can't be greater than one").into()
-            );
+            assert_eq!(error_res, ContractError::InvalidOptimalUtilizationRate {});
         }
 
         // *
@@ -3275,7 +3260,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Deposit amount must be greater than 0 somecoin").into()
+            ContractError::InvalidDepositAmount {
+                asset: "somecoin".to_string()
+            }
         );
     }
 
@@ -3426,7 +3413,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Cannot deposit asset somecoin").into()
+            ContractError::DepositNotAllowed {
+                asset: "somecoin".to_string()
+            }
         );
 
         // Validate different configurations for market flags
@@ -3724,7 +3713,12 @@ mod tests {
 
         let info = mock_info("withdrawer");
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert_eq!(error_res, StdError::generic_err("Withdraw amount must be greater than 0 and less or equal user balance (asset: somecoin)").into());
+        assert_eq!(
+            error_res,
+            ContractError::InvalidWithdrawAmount {
+                asset: "somecoin".to_string()
+            }
+        );
     }
 
     #[test]
@@ -3752,7 +3746,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Cannot withdraw asset somecoin").into()
+            ContractError::WithdrawNotAllowed {
+                asset: "somecoin".to_string()
+            }
         );
     }
 
@@ -3903,8 +3899,7 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err("User's health factor can't be less than 1 after withdraw")
-                    .into()
+                ContractError::InvalidHealthFactorAfterWithdraw {}
             );
         }
 
@@ -4449,10 +4444,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "borrow amount exceeds maximum allowed given current collateral value"
-            )
-            .into()
+            ContractError::BorrowAmountExceedsGivenCollateral {}
         );
 
         // *
@@ -4466,7 +4458,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Repay amount must be greater than 0 borrowedcoinnative").into()
+            ContractError::InvalidRepayAmount {
+                asset: "borrowedcoinnative".to_string()
+            }
         );
 
         // *
@@ -4625,10 +4619,7 @@ mod tests {
             denom: String::from("borrowedcoinnative"),
         };
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            StdError::generic_err("Cannot repay 0 debt").into()
-        );
+        assert_eq!(error_res, ContractError::CannotRepayZeroDebt {});
 
         // *
         // Repay all cw20 debt (and then some)
@@ -4742,7 +4733,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Cannot repay asset somecoin").into()
+            ContractError::RepayNotAllowed {
+                asset: "somecoin".to_string()
+            }
         );
     }
 
@@ -4811,10 +4804,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "borrow amount exceeds maximum allowed given current collateral value"
-            )
-            .into()
+            ContractError::BorrowAmountExceedsGivenCollateral {}
         );
 
         let valid_amount = max_to_borrow - Uint128::from(1000u128);
@@ -4936,13 +4926,7 @@ mod tests {
                 amount: 100u128.into(),
             };
             let error_res = execute(deps.as_mut(), env, info.clone(), msg).unwrap_err();
-            assert_eq!(
-                error_res,
-                StdError::generic_err(
-                    "Protocol income to be distributed and liquidity taken cannot be greater than available liquidity"
-                )
-                    .into()
-            );
+            assert_eq!(error_res, OperationExceedsAvailableLiquidity {});
         }
 
         // Repay part of the debt
@@ -5095,10 +5079,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), borrow_msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "borrow amount exceeds maximum allowed given current collateral value"
-            )
-            .into()
+            ContractError::BorrowAmountExceedsGivenCollateral {}
         );
 
         // borrow permissible amount given current collateral, should succeed
@@ -5137,7 +5118,9 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err("Cannot borrow asset somecoin").into()
+            ContractError::BorrowNotAllowed {
+                asset: "somecoin".to_string()
+            }
         );
 
         // Validate different configurations for market flags
@@ -5315,10 +5298,7 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err(
-                    "user has no balance in specified collateral asset to be liquidated"
-                )
-                .into()
+                ContractError::CannotLiquidateWhenNoCollateralBalance {}
             );
         }
 
@@ -5372,7 +5352,10 @@ mod tests {
             let env = mock_env(MockEnvParams::default());
             let info = mock_info(cw20_debt_contract_addr.as_str());
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
-            assert_eq!(error_res, StdError::generic_err("User has no outstanding debt in the specified debt asset and thus cannot be liquidated").into());
+            assert_eq!(
+                error_res,
+                ContractError::CannotLiquidateWhenNoDebtBalance {}
+            );
         }
 
         // set user to have positive debt amount in debt asset
@@ -5421,8 +5404,9 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err("Must send more than 0 cw20_debt in order to liquidate")
-                    .into()
+                ContractError::InvalidLiquidateAmount {
+                    asset: "cw20_debt".to_string()
+                }
             );
         }
 
@@ -5452,7 +5436,9 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err("Cannot liquidate. Collateral asset collateral").into()
+                ContractError::LiquidationNotAllowedWhenCollateralMarketInactive {
+                    asset: "collateral".to_string()
+                }
             );
 
             collateral_market.active = true;
@@ -5493,7 +5479,9 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err("Cannot liquidate. Debt asset cw20_debt").into()
+                ContractError::LiquidationNotAllowedWhenDebtMarketInactive {
+                    asset: "cw20_debt".to_string()
+                }
             );
 
             cw20_debt_market.active = true;
@@ -6242,9 +6230,7 @@ mod tests {
             .unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err(
-                    "contract does not have enough collateral liquidity to send back underlying asset"
-                )
+                ContractError::CannotLiquidateWhenNotEnoughCollateral {}
             );
         }
 
@@ -6293,9 +6279,7 @@ mod tests {
             .unwrap_err();
             assert_eq!(
                 error_res,
-                StdError::generic_err(
-                    "contract does not have enough collateral liquidity to send back underlying asset"
-                )
+                ContractError::CannotLiquidateWhenNotEnoughCollateral {}
             );
         }
 
@@ -6448,10 +6432,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "User's health factor is not less than 1 and thus cannot be liquidated"
-            )
-            .into()
+            ContractError::CannotLiquidateWhenValidHealthFactor {}
         );
     }
 
@@ -6566,7 +6547,10 @@ mod tests {
 
             let error_res =
                 execute(deps.as_mut(), env.clone(), info_matoken.clone(), msg).unwrap_err();
-            assert_eq!(error_res, StdError::generic_err("Cannot make token transfer if it results in a health factor lower than 1 for the sender").into());
+            assert_eq!(
+                error_res,
+                ContractError::CannotTransferTokenWhenInvalidHealthFactor {}
+            );
         }
 
         // Finalize transfer with health factor > 1 for goes through
@@ -6796,10 +6780,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), borrow_env, info, borrow_msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(
-                "borrow amount exceeds uncollateralized loan limit given existing debt"
-            )
-            .into()
+            ContractError::BorrowAmountExceedsUncollateralizedLoanLimit {}
         );
 
         // Borrow a valid amount given uncollateralized loan limit
@@ -6889,12 +6870,10 @@ mod tests {
             execute(deps.as_mut(), env.clone(), info.clone(), update_msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::generic_err(format!(
-                "User address {} has no balance in specified collateral asset {}",
-                user_addr.as_str(),
-                String::from(cw20_contract_addr.as_str())
-            ))
-            .into()
+            UserNoCollateralBalance {
+                user_address: user_addr.to_string(),
+                asset: String::from(cw20_contract_addr.as_str())
+            }
         );
 
         let user = USERS.load(&deps.storage, &user_addr).unwrap();

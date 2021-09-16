@@ -8,7 +8,7 @@ export const testnet: Config = {
       "proposal_expiration_period": 115200, // 115200 blocks = ~10 days
       "proposal_required_deposit": "100000000",
       "proposal_required_quorum": "0.1",
-      "proposal_required_threshold": "0.05"
+      "proposal_required_threshold": "0.5"
     }
   },
   stakingInitMsg: {
@@ -174,7 +174,7 @@ export const bombay: Config = {
       "proposal_expiration_period": 115200, // 115200 blocks = ~10 days
       "proposal_required_deposit": "100000000",
       "proposal_required_quorum": "0.1",
-      "proposal_required_threshold": "0.05"
+      "proposal_required_threshold": "0.5"
     }
   },
   stakingInitMsg: {
@@ -340,7 +340,7 @@ export const local: Config = {
       "proposal_expiration_period": 3000,
       "proposal_required_deposit": "100000000",
       "proposal_required_quorum": "0.1",
-      "proposal_required_threshold": "0.05"
+      "proposal_required_threshold": "0.5"
     }
   },
   stakingInitMsg: {

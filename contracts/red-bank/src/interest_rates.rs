@@ -1,10 +1,16 @@
-use crate::interest_rate_models::InterestRateModel;
-use crate::state::{Market, CONFIG};
-use cosmwasm_std::{CosmosMsg, Decimal, DepsMut, Env, StdError, StdResult, Response, Uint128};
+use std::str;
+use cosmwasm_std::{CosmosMsg, Decimal, DepsMut, Env, StdResult, Response, Uint128};
+
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
 use mars::math::{decimal_multiplication, reverse_decimal};
-use std::str;
+
+use crate::error::ContractError;
+use crate::error::ContractError::{
+    CannotEncodeAssetReferenceIntoString, OperationExceedsAvailableLiquidity,
+};
+use crate::interest_rate_models::InterestRateModel;
+use crate::state::{Market, CONFIG};
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
@@ -164,13 +170,13 @@ pub fn update_interest_rates(
     reference: &[u8],
     market: &mut Market,
     liquidity_taken: Uint128,
-) -> StdResult<()> {
+) -> Result<(), ContractError> {
     let contract_current_balance = match market.asset_type {
         AssetType::Native => {
             let denom = str::from_utf8(reference);
             let denom = match denom {
                 Ok(denom) => denom,
-                Err(_) => return Err(StdError::generic_err("failed to encode denom into string")),
+                Err(_) => return Err(CannotEncodeAssetReferenceIntoString {}),
             };
             deps.querier
                 .query_balance(env.contract.address.clone(), denom)?
@@ -180,11 +186,7 @@ pub fn update_interest_rates(
             let cw20_addr = str::from_utf8(reference);
             let cw20_addr = match cw20_addr {
                 Ok(cw20_addr) => cw20_addr,
-                Err(_) => {
-                    return Err(StdError::generic_err(
-                        "failed to encode Cw20 address into string",
-                    ))
-                }
+                Err(_) => return Err(CannotEncodeAssetReferenceIntoString {}),
             };
             let cw20_addr = deps.api.addr_validate(cw20_addr)?;
             cw20_get_balance(&deps.querier, cw20_addr, env.contract.address.clone())?
@@ -192,7 +194,7 @@ pub fn update_interest_rates(
     };
 
     if contract_current_balance < liquidity_taken {
-        return Err(StdError::generic_err("contract current balance cannot be less than liquidity taken");
+        return Err(OperationExceedsAvailableLiquidity {});
     }
     let available_liquidity = contract_current_balance - liquidity_taken;
 
@@ -201,7 +203,8 @@ pub fn update_interest_rates(
         get_updated_borrow_index(market, env.block.time.seconds()),
     );
     let current_utilization_rate = if total_debt > Uint128::zero() {
-        Decimal::from_ratio(total_debt, available_liquidity + total_debt)
+        let liquidity_and_debt = available_liquidity.checked_add(total_debt)?;
+        Decimal::from_ratio(total_debt, liquidity_and_debt)
     } else {
         Decimal::zero()
     };

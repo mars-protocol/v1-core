@@ -2,6 +2,7 @@ use cosmwasm_std::{
     to_binary, Addr, Api, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
 };
 
+use crate::error::MarsError;
 use cw20::{BalanceResponse, Cw20QueryMsg, TokenInfoResponse};
 use std::convert::TryInto;
 
@@ -77,7 +78,7 @@ pub fn option_string_to_addr(
 }
 
 /// Verify if all conditions are met. If not return list of invalid params.
-pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> StdResult<()> {
+pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> Result<(), MarsError> {
     // All params which should meet criteria
     let param_names: Vec<_> = conditions_and_names.iter().map(|elem| elem.1).collect();
     // Filter params which don't meet criteria
@@ -87,11 +88,10 @@ pub fn all_conditions_valid(conditions_and_names: Vec<(bool, &str)>) -> StdResul
         .map(|elem| elem.1)
         .collect();
     if !invalid_params.is_empty() {
-        return Err(StdError::generic_err(format!(
-            "[{}] should be less or equal 1. Invalid params: [{}]",
-            param_names.join(", "),
-            invalid_params.join(", ")
-        )));
+        return Err(MarsError::ParamsNotLessOrEqualOne {
+            expected_params: param_names.join(", "),
+            invalid_params: invalid_params.join(", "),
+        });
     }
 
     Ok(())
