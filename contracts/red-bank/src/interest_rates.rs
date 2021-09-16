@@ -170,7 +170,7 @@ pub fn update_interest_rates(
     let protocol_income_minus_treasury_amount =
         (Decimal::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
     let liquidity_to_deduct_from_current_balance =
-        liquidity_taken + protocol_income_minus_treasury_amount;
+        liquidity_taken.checked_add(protocol_income_minus_treasury_amount)?;
 
     let available_liquidity = if contract_current_balance < liquidity_to_deduct_from_current_balance
     {
@@ -188,7 +188,8 @@ pub fn update_interest_rates(
         get_updated_borrow_index(market, env.block.time.seconds()),
     );
     let current_utilization_rate = if total_debt > Uint128::zero() {
-        Decimal::from_ratio(total_debt, available_liquidity + total_debt)
+        let liquidity_and_debt = available_liquidity.checked_add(total_debt)?;
+        Decimal::from_ratio(total_debt, liquidity_and_debt)
     } else {
         Decimal::zero()
     };
