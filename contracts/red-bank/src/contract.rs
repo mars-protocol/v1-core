@@ -3,8 +3,8 @@ use std::str;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
-    Event, MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, Event,
+    MessageInfo, Order, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
@@ -20,10 +20,12 @@ use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::ma_token;
 
-use mars::asset::{Asset, AssetType};
+use mars::asset::{
+    build_send_asset_with_tax_deduction_msg, build_send_cw20_token_msg,
+    build_send_native_asset_with_tax_deduction_msg, Asset, AssetType,
+};
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
-use mars::tax::deduct_tax;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
@@ -450,7 +452,7 @@ pub fn execute_withdraw(
         funds: vec![],
     });
 
-    let send_underlying_asset_msg = build_send_asset_msg(
+    let send_underlying_asset_msg = build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address,
         withdrawer_addr.clone(),
@@ -866,7 +868,7 @@ pub fn execute_borrow(
     MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
 
     // Send borrow amount to borrower
-    let send_msg = build_send_asset_msg(
+    let send_msg = build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address,
         borrower_address.clone(),
@@ -939,7 +941,7 @@ pub fn execute_repay(
             get_updated_borrow_index(&market, env.block.time.seconds()),
         );
         let refund_msg = match asset_type {
-            AssetType::Native => build_send_native_asset_msg(
+            AssetType::Native => build_send_native_asset_with_tax_deduction_msg(
                 deps.as_ref(),
                 env.contract.address.clone(),
                 repayer_address.clone(),
@@ -1212,7 +1214,7 @@ pub fn execute_liquidate(
     // 6. Build response
     // refund sent amount in excess of actual debt amount to liquidate
     if refund_amount > Uint128::zero() {
-        let refund_msg = build_send_asset_msg(
+        let refund_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             env.contract.address,
             liquidator_address.clone(),
@@ -1356,7 +1358,7 @@ fn process_underlying_asset_transfer_to_liquidator(
         funds: vec![],
     });
 
-    let send_underlying_asset_msg = build_send_asset_msg(
+    let send_underlying_asset_msg = build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address.clone(),
         liquidator_addr.clone(),
@@ -1648,7 +1650,7 @@ pub fn execute_distribute_protocol_income(
     let mut messages = vec![];
     // only build and add send message if fee is non-zero
     if !insurance_fund_amount.is_zero() {
-        let insurance_fund_msg = build_send_asset_msg(
+        let insurance_fund_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             env.contract.address.clone(),
             insurance_fund_address,
@@ -1675,7 +1677,7 @@ pub fn execute_distribute_protocol_income(
     }
 
     if !staking_amount.is_zero() {
-        let staking_msg = build_send_asset_msg(
+        let staking_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             env.contract.address,
             staking_address,
@@ -2049,66 +2051,6 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     Ok(())
 }
 
-fn build_send_asset_msg(
-    deps: Deps,
-    sender_address: Addr,
-    recipient_address: Addr,
-    asset: Asset,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    match asset {
-        Asset::Native { denom } => Ok(build_send_native_asset_msg(
-            deps,
-            sender_address,
-            recipient_address,
-            denom.as_str(),
-            amount,
-        )?),
-        Asset::Cw20 { contract_addr } => {
-            let contract_addr = deps.api.addr_validate(&contract_addr)?;
-            build_send_cw20_token_msg(recipient_address, contract_addr, amount)
-        }
-    }
-}
-
-/// Prepare BankMsg::Send message.
-/// When doing native transfers a "tax" is charged.
-/// The actual amount taken from the contract is: amount + tax.
-/// Instead of sending amount, send: amount - compute_tax(amount).
-fn build_send_native_asset_msg(
-    deps: Deps,
-    _sender: Addr,
-    recipient: Addr,
-    denom: &str,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Bank(BankMsg::Send {
-        to_address: recipient.into(),
-        amount: vec![deduct_tax(
-            deps,
-            Coin {
-                denom: denom.to_string(),
-                amount,
-            },
-        )?],
-    }))
-}
-
-fn build_send_cw20_token_msg(
-    recipient: Addr,
-    token_contract_address: Addr,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: token_contract_address.into(),
-        msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: recipient.into(),
-            amount,
-        })?,
-        funds: vec![],
-    }))
-}
-
 pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec =
         match MARKET_REFERENCES_BY_INDEX.load(deps.storage, U32Key::new(index)) {
@@ -2143,7 +2085,8 @@ mod tests {
     use crate::msg::CreateOrUpdateConfig;
     use crate::msg::ExecuteMsg::UpdateConfig;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, coin, from_binary, Decimal, OwnedDeps, SubMsg};
+    use cosmwasm_std::{attr, coin, from_binary, BankMsg, Decimal, OwnedDeps, SubMsg};
+    use mars::tax::deduct_tax;
     use mars::testing::{
         mock_dependencies, mock_env, mock_env_at_block_time, mock_info, MarsMockQuerier,
         MockEnvParams,
