@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, BalanceResponse, BankMsg, BankQuery, Binary, Coin, CosmosMsg,
-    Deps, DepsMut, Env, MessageInfo, QueryRequest, Response, StdError, StdResult, Uint128, WasmMsg,
+    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
+    MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
 use mars::{
@@ -236,12 +236,9 @@ pub fn execute_distribute_protocol_rewards(
 
     let balance = match asset.clone() {
         Asset::Native { denom } => {
-            let balance: BalanceResponse =
-                deps.querier.query(&QueryRequest::Bank(BankQuery::Balance {
-                    address: env.contract.address.to_string(),
-                    denom,
-                }))?;
-            balance.amount.amount
+            deps.querier
+                .query_balance(env.contract.address.clone(), denom.as_str())?
+                .amount
         }
         Asset::Cw20 { contract_addr } => cw20_get_balance(
             &deps.querier,
