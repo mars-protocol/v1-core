@@ -1,23 +1,20 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdError,
+    StdResult, Uint128, WasmMsg,
 };
-use cw20::Cw20ExecuteMsg;
 use mars::{
     address_provider::{self, msg::MarsContract},
-    asset::Asset,
+    asset::{build_send_asset_with_tax_deduction_msg, Asset},
     error::MarsError,
     helpers::{cw20_get_balance, option_string_to_addr, zero_address},
     swapping::execute_swap,
-    tax::deduct_tax,
 };
 use terraswap::asset::AssetInfo;
 
 use crate::{
     error::ContractError,
     msg::{ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg},
-    state::{Config, ASSET_CONFIG, CONFIG},
-    types::AssetConfig,
+    state::{AssetConfig, Config, ASSET_CONFIG, CONFIG},
 };
 
 // INIT
@@ -36,8 +33,8 @@ pub fn instantiate(
         address_provider_address,
         safety_fund_fee_share,
         treasury_fee_share,
-        terraswap_factory_address,
-        terraswap_max_spread,
+        astroport_factory_address,
+        astroport_max_spread,
     } = msg.config;
 
     // All fields should be available
@@ -45,8 +42,8 @@ pub fn instantiate(
         && address_provider_address.is_some()
         && safety_fund_fee_share.is_some()
         && treasury_fee_share.is_some()
-        && terraswap_factory_address.is_some()
-        && terraswap_max_spread.is_some();
+        && astroport_factory_address.is_some()
+        && astroport_max_spread.is_some();
 
     if !available {
         return Err(StdError::generic_err(
@@ -63,12 +60,12 @@ pub fn instantiate(
         )?,
         safety_fund_fee_share: safety_fund_fee_share.unwrap(),
         treasury_fee_share: treasury_fee_share.unwrap(),
-        terraswap_factory_address: option_string_to_addr(
+        astroport_factory_address: option_string_to_addr(
             deps.api,
-            terraswap_factory_address,
+            astroport_factory_address,
             zero_address(),
         )?,
-        terraswap_max_spread: terraswap_max_spread.unwrap(),
+        astroport_max_spread: astroport_max_spread.unwrap(),
     };
 
     config.validate()?;
@@ -133,8 +130,8 @@ pub fn execute_update_config(
         address_provider_address,
         safety_fund_fee_share,
         treasury_fee_share,
-        terraswap_factory_address,
-        terraswap_max_spread,
+        astroport_factory_address,
+        astroport_max_spread,
     } = new_config;
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
@@ -145,12 +142,12 @@ pub fn execute_update_config(
     )?;
     config.safety_fund_fee_share = safety_fund_fee_share.unwrap_or(config.safety_fund_fee_share);
     config.treasury_fee_share = treasury_fee_share.unwrap_or(config.treasury_fee_share);
-    config.terraswap_factory_address = option_string_to_addr(
+    config.astroport_factory_address = option_string_to_addr(
         deps.api,
-        terraswap_factory_address,
-        config.terraswap_factory_address,
+        astroport_factory_address,
+        config.astroport_factory_address,
     )?;
-    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
+    config.astroport_max_spread = astroport_max_spread.unwrap_or(config.astroport_max_spread);
 
     config.validate()?;
 
@@ -173,7 +170,7 @@ pub fn execute_update_asset_config(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    let (_, reference, _) = asset.get_attributes();
+    let reference = asset.get_reference();
 
     let new_asset_config = AssetConfig {
         enabled_for_distribution: enabled,
@@ -193,13 +190,11 @@ pub fn execute_withdraw_from_red_bank(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    let mut addresses_query = address_provider::helpers::query_addresses(
+    let red_bank_address = address_provider::helpers::query_address(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::RedBank],
+        MarsContract::RedBank,
     )?;
-
-    let red_bank_address = addresses_query.pop().unwrap();
 
     let withdraw_msg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.to_string(),
@@ -234,7 +229,7 @@ pub fn execute_distribute_protocol_rewards(
         return Err(ContractError::AssetNotEnabled { label });
     }
 
-    let balance = match asset.clone() {
+    let balance = match &asset {
         Asset::Native { denom } => {
             deps.querier
                 .query_balance(env.contract.address.clone(), denom.as_str())?
@@ -276,28 +271,36 @@ pub fn execute_distribute_protocol_rewards(
     let staking_amount =
         amount_to_distribute.checked_sub(amount_to_distribute_before_staking_rewards)?;
 
-    let build_send_asset_msg_helper = |address, amount| {
-        build_send_asset_msg(
-            deps.as_ref(),
-            env.contract.address.clone(),
-            address,
-            asset.clone(),
-            amount,
-        )
-    };
-
     // only build and add send message if fee is non-zero
     let mut messages = vec![];
     if !safety_fund_amount.is_zero() {
-        let safety_fund_msg = build_send_asset_msg_helper(safety_fund_address, safety_fund_amount)?;
+        let safety_fund_msg = build_send_asset_with_tax_deduction_msg(
+            deps.as_ref(),
+            env.contract.address.clone(),
+            safety_fund_address,
+            asset.clone(),
+            safety_fund_amount,
+        )?;
         messages.push(safety_fund_msg);
     }
     if !treasury_amount.is_zero() {
-        let treasury_msg = build_send_asset_msg_helper(treasury_address, treasury_amount)?;
+        let treasury_msg = build_send_asset_with_tax_deduction_msg(
+            deps.as_ref(),
+            env.contract.address.clone(),
+            treasury_address,
+            asset.clone(),
+            treasury_amount,
+        )?;
         messages.push(treasury_msg);
     }
     if !staking_amount.is_zero() {
-        let staking_msg = build_send_asset_msg_helper(staking_address, staking_amount)?;
+        let staking_msg = build_send_asset_with_tax_deduction_msg(
+            deps.as_ref(),
+            env.contract.address.clone(),
+            staking_address,
+            asset.clone(),
+            staking_amount,
+        )?;
         messages.push(staking_msg);
     }
 
@@ -323,7 +326,7 @@ pub fn execute_swap_asset_to_uusd(
         denom: "uusd".to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     execute_swap(
         deps,
@@ -331,8 +334,8 @@ pub fn execute_swap_asset_to_uusd(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )
 }
 
@@ -370,85 +373,23 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
 
     Ok(ConfigResponse {
-        owner: config.owner,
-        address_provider_address: config.address_provider_address,
+        owner: config.owner.to_string(),
+        address_provider_address: config.address_provider_address.to_string(),
         safety_fund_fee_share: config.safety_fund_fee_share,
         treasury_fee_share: config.treasury_fee_share,
-        terraswap_factory_address: config.terraswap_factory_address,
-        terraswap_max_spread: config.terraswap_max_spread,
+        astroport_factory_address: config.astroport_factory_address.to_string(),
+        astroport_max_spread: config.astroport_max_spread,
     })
 }
 
 fn query_asset_config(deps: Deps, asset: Asset) -> StdResult<AssetConfig> {
-    let (_, reference, _) = asset.get_attributes();
+    let reference = asset.get_reference();
 
     let asset_config = ASSET_CONFIG
         .load(deps.storage, &reference)
         .unwrap_or_default();
 
     Ok(asset_config)
-}
-
-// HELPERS
-
-fn build_send_asset_msg(
-    deps: Deps,
-    sender_address: Addr,
-    recipient_address: Addr,
-    asset: Asset,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    match asset {
-        Asset::Native { denom } => Ok(build_send_native_asset_msg(
-            deps,
-            sender_address,
-            recipient_address,
-            denom.as_str(),
-            amount,
-        )?),
-        Asset::Cw20 { contract_addr } => {
-            let contract_addr = deps.api.addr_validate(&contract_addr)?;
-            build_send_cw20_token_msg(recipient_address, contract_addr, amount)
-        }
-    }
-}
-
-/// Prepare BankMsg::Send message.
-/// When doing native transfers a "tax" is charged.
-/// The actual amount taken from the contract is: amount + tax.
-/// Instead of sending amount, send: amount - compute_tax(amount).
-fn build_send_native_asset_msg(
-    deps: Deps,
-    _sender: Addr,
-    recipient: Addr,
-    denom: &str,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Bank(BankMsg::Send {
-        to_address: recipient.into(),
-        amount: vec![deduct_tax(
-            deps,
-            Coin {
-                denom: denom.to_string(),
-                amount,
-            },
-        )?],
-    }))
-}
-
-fn build_send_cw20_token_msg(
-    recipient: Addr,
-    token_contract_address: Addr,
-    amount: Uint128,
-) -> StdResult<CosmosMsg> {
-    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: token_contract_address.into(),
-        msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: recipient.into(),
-            amount,
-        })?,
-        funds: vec![],
-    }))
 }
 
 // TESTS
@@ -460,10 +401,12 @@ mod tests {
     use cosmwasm_std::{
         attr, coin, from_binary,
         testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR},
-        BankMsg, Coin, Decimal, OwnedDeps, SubMsg,
+        Addr, BankMsg, Coin, Decimal, OwnedDeps, SubMsg,
     };
-    use mars::testing::{
-        assert_generic_error_message, mock_dependencies, mock_info, MarsMockQuerier,
+    use cw20::Cw20ExecuteMsg;
+    use mars::{
+        tax::deduct_tax,
+        testing::{assert_generic_error_message, mock_dependencies, mock_info, MarsMockQuerier},
     };
 
     #[test]
@@ -471,14 +414,14 @@ mod tests {
         let mut deps = mock_dependencies(&[]);
 
         // Config with base params valid (just update the rest)
-        let terraswap_max_spread = Decimal::percent(1);
+        let astroport_max_spread = Decimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             safety_fund_fee_share: None,
             treasury_fee_share: None,
-            terraswap_factory_address: Some("terraswap".to_string()),
-            terraswap_max_spread: Some(terraswap_max_spread),
+            astroport_factory_address: Some("astroport".to_string()),
+            astroport_max_spread: Some(astroport_max_spread),
         };
 
         // *
@@ -489,8 +432,8 @@ mod tests {
             address_provider_address: None,
             safety_fund_fee_share: None,
             treasury_fee_share: None,
-            terraswap_factory_address: None,
-            terraswap_max_spread: None,
+            astroport_factory_address: None,
+            astroport_max_spread: None,
         };
         let msg = InstantiateMsg {
             config: empty_config,
@@ -560,8 +503,8 @@ mod tests {
         assert_eq!(value.address_provider_address, "address_provider");
         assert_eq!(value.safety_fund_fee_share, safety_fund_fee_share);
         assert_eq!(value.treasury_fee_share, treasury_fee_share);
-        assert_eq!(value.terraswap_factory_address, "terraswap");
-        assert_eq!(value.terraswap_max_spread, terraswap_max_spread);
+        assert_eq!(value.astroport_factory_address, "astroport");
+        assert_eq!(value.astroport_max_spread, astroport_max_spread);
     }
 
     #[test]
@@ -570,14 +513,14 @@ mod tests {
 
         let mut safety_fund_fee_share = Decimal::percent(10);
         let mut treasury_fee_share = Decimal::percent(20);
-        let mut terraswap_max_spread = Decimal::percent(1);
+        let mut astroport_max_spread = Decimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             safety_fund_fee_share: Some(safety_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
-            terraswap_factory_address: Some("terraswap".to_string()),
-            terraswap_max_spread: Some(terraswap_max_spread),
+            astroport_factory_address: Some("astroport".to_string()),
+            astroport_max_spread: Some(astroport_max_spread),
         };
 
         // *
@@ -639,14 +582,14 @@ mod tests {
         // *
         safety_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
         treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
-        terraswap_max_spread = Decimal::percent(2);
+        astroport_max_spread = Decimal::percent(2);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
             safety_fund_fee_share: Some(safety_fund_fee_share),
             treasury_fee_share: Some(treasury_fee_share),
-            terraswap_factory_address: Some("new_terraswap".to_string()),
-            terraswap_max_spread: Some(terraswap_max_spread),
+            astroport_factory_address: Some("new_astroport".to_string()),
+            astroport_max_spread: Some(astroport_max_spread),
         };
         let msg = UpdateConfig {
             config: config.clone(),
@@ -672,12 +615,12 @@ mod tests {
             config.treasury_fee_share.unwrap()
         );
         assert_eq!(
-            new_config.terraswap_factory_address,
-            config.terraswap_factory_address.unwrap()
+            new_config.astroport_factory_address,
+            config.astroport_factory_address.unwrap()
         );
         assert_eq!(
-            new_config.terraswap_max_spread,
-            config.terraswap_max_spread.unwrap()
+            new_config.astroport_max_spread,
+            config.astroport_max_spread.unwrap()
         );
     }
 
@@ -734,7 +677,7 @@ mod tests {
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
-        let (_, reference, _) = asset.get_attributes();
+        let reference = asset.get_reference();
         let value = ASSET_CONFIG
             .load(deps.as_ref().storage, reference.as_slice())
             .unwrap();
@@ -746,7 +689,7 @@ mod tests {
         let asset = Asset::Native {
             denom: "uluna".to_string(),
         };
-        let (_, reference, _) = asset.get_attributes();
+        let reference = asset.get_reference();
 
         // no asset config stored for unknown assets
         let err = ASSET_CONFIG
@@ -754,7 +697,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            StdError::not_found("protocol_rewards_collector::types::AssetConfig")
+            StdError::not_found("protocol_rewards_collector::state::AssetConfig")
         );
 
         // querying unknown assets returns that they are not enabled
@@ -1188,8 +1131,8 @@ mod tests {
             address_provider_address: Some("address_provider".to_string()),
             safety_fund_fee_share: Some(Decimal::percent(10)),
             treasury_fee_share: Some(Decimal::percent(20)),
-            terraswap_factory_address: Some("terraswap".to_string()),
-            terraswap_max_spread: Some(Decimal::percent(1)),
+            astroport_factory_address: Some("astroport".to_string()),
+            astroport_max_spread: Some(Decimal::percent(1)),
         };
         let msg = InstantiateMsg { config };
         instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();

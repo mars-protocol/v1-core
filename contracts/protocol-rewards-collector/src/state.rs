@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use cosmwasm_std::{Addr, Decimal, StdError, StdResult};
 use cw_storage_plus::{Item, Map};
 
-use crate::types::AssetConfig;
-
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const ASSET_CONFIG: Map<&[u8], AssetConfig> = Map::new("assets");
 
@@ -21,10 +19,10 @@ pub struct Config {
     pub safety_fund_fee_share: Decimal,
     /// Percentage of fees that are sent to the treasury
     pub treasury_fee_share: Decimal,
-    /// Terraswap factory contract address
-    pub terraswap_factory_address: Addr,
-    /// Terraswap max spread
-    pub terraswap_max_spread: Decimal,
+    /// Astroport factory contract address
+    pub astroport_factory_address: Addr,
+    /// Astroport max spread
+    pub astroport_max_spread: Decimal,
 }
 
 impl Config {
@@ -54,5 +52,18 @@ impl Config {
 
     fn less_or_equal_one(value: &Decimal) -> bool {
         value.le(&Decimal::one())
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AssetConfig {
+    pub enabled_for_distribution: bool,
+}
+
+impl Default for AssetConfig {
+    fn default() -> Self {
+        AssetConfig {
+            enabled_for_distribution: false,
+        }
     }
 }

@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
 use mars::asset::Asset;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -15,8 +15,8 @@ pub struct CreateOrUpdateConfig {
     pub address_provider_address: Option<String>,
     pub safety_fund_fee_share: Option<Decimal>,
     pub treasury_fee_share: Option<Decimal>,
-    pub terraswap_factory_address: Option<String>,
-    pub terraswap_max_spread: Option<Decimal>,
+    pub astroport_factory_address: Option<String>,
+    pub astroport_max_spread: Option<Decimal>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -66,10 +66,10 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
-    pub owner: Addr,
-    pub address_provider_address: Addr,
+    pub owner: String,
+    pub address_provider_address: String,
     pub safety_fund_fee_share: Decimal,
     pub treasury_fee_share: Decimal,
-    pub terraswap_factory_address: Addr,
-    pub terraswap_max_spread: Decimal,
+    pub astroport_factory_address: String,
+    pub astroport_max_spread: Decimal,
 }
