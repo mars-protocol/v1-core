@@ -180,12 +180,23 @@ pub fn execute_update_astroport_twap_data(
         // Query new price data
         let price_cumulative = query_cumulative_price(deps.querier, pair_address, asset_address)?;
 
-        let twap_data = AstroportTwapData {
-            timestamp,
-            price_average: Decimal::from_ratio(
+        // If the cumulative price overflows on Astroport pair contract, then for this update we don't
+        // change `price_average`. On the next update, `price_average` will resume updating as usual.
+        let price_average = if price_cumulative >= twap_data_last.price_cumulative {
+            Decimal::from_ratio(
                 price_cumulative - twap_data_last.price_cumulative,
                 time_elapsed,
-            ),
+            )
+        } else {
+            Decimal::from_ratio(
+                price_cumulative.checked_add(Uint128::MAX - twap_data_last.price_cumulative)?,
+                time_elapsed,
+            )
+        };
+
+        let twap_data = AstroportTwapData {
+            timestamp,
+            price_average,
             price_cumulative,
         };
 
