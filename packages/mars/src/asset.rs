@@ -73,7 +73,7 @@ pub fn build_send_asset_with_tax_deduction_msg(
 /// When doing native transfers a "tax" is charged.
 /// The actual amount taken from the contract is: amount + tax.
 /// Instead of sending amount, send: amount - compute_tax(amount).
-fn build_send_native_asset_with_tax_deduction_msg(
+pub fn build_send_native_asset_with_tax_deduction_msg(
     deps: Deps,
     _sender: Addr,
     recipient: Addr,
@@ -92,7 +92,7 @@ fn build_send_native_asset_with_tax_deduction_msg(
     }))
 }
 
-fn build_send_cw20_token_msg(
+pub fn build_send_cw20_token_msg(
     recipient: Addr,
     token_contract_address: Addr,
     amount: Uint128,

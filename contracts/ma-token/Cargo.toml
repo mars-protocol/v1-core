@@ -20,7 +20,7 @@ library = []
 
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
-red-bank = { path = "../../contracts/red-bank", version = "0.1.0" }
+red-bank = { path = "../../contracts/red-bank", version = "0.1.0", features = ["library"] }
 
 cw0 = "0.8"
 cw2 = "0.8"
