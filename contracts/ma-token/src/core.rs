@@ -19,7 +19,7 @@ pub fn transfer(
         return Err(StdError::generic_err("Sender and recipient cannot be the same").into());
     }
 
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 

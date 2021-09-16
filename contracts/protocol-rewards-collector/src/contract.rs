@@ -265,7 +265,8 @@ pub fn execute_distribute_protocol_rewards(
 
     let safety_fund_amount = amount_to_distribute * config.safety_fund_fee_share;
     let treasury_amount = amount_to_distribute * config.treasury_fee_share;
-    let amount_to_distribute_before_staking_rewards = safety_fund_amount + treasury_amount;
+    let amount_to_distribute_before_staking_rewards =
+        safety_fund_amount.checked_add(treasury_amount)?;
     let staking_amount =
         amount_to_distribute.checked_sub(amount_to_distribute_before_staking_rewards)?;
 

@@ -182,7 +182,7 @@ pub fn execute_stake(
     if info.sender != mars_token_address {
         return Err(MarsError::Unauthorized {}.into());
     }
-    if stake_amount == Uint128::zero() {
+    if stake_amount.is_zero() {
         return Err(ContractError::StakeAmountZero {});
     }
 
@@ -195,13 +195,12 @@ pub fn execute_stake(
 
     let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
-    let mint_amount = if net_total_mars_in_staking_contract == Uint128::zero()
-        || total_xmars_supply == Uint128::zero()
-    {
-        stake_amount
-    } else {
-        stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_staking_contract)
-    };
+    let mint_amount =
+        if net_total_mars_in_staking_contract.is_zero() || total_xmars_supply.is_zero() {
+            stake_amount
+        } else {
+            stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_staking_contract)
+        };
 
     let recipient = option_recipient.unwrap_or_else(|| staker.clone());
 
@@ -238,7 +237,7 @@ pub fn execute_unstake(
     if info.sender != xmars_token_address {
         return Err(MarsError::Unauthorized {}.into());
     }
-    if burn_amount == Uint128::zero() {
+    if burn_amount.is_zero() {
         return Err(ContractError::UnstakeAmountZero {});
     }
 

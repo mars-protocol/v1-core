@@ -11,7 +11,7 @@ pub fn transfer(
     option_recipient: Option<&Addr>,
     amount: Uint128,
 ) -> Result<(), ContractError> {
-    if amount == Uint128::zero() {
+    if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
 
