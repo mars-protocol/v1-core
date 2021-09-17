@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
-use crate::error::ContractError::{InvalidFeeShareAmounts, InvalidMaintenanceMargin};
+use crate::error::ContractError::InvalidMaintenanceMargin;
 use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Response, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
@@ -38,9 +38,8 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), ContractError> {
-        let conditions_and_names = vec![
-            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
-        ];
+        let conditions_and_names =
+            vec![(Self::less_or_equal_one(&self.close_factor), "close_factor")];
         all_conditions_valid(conditions_and_names)?;
 
         Ok(())
@@ -234,13 +233,12 @@ impl Market {
             || interest_rate_strategy.is_some();
 
         if should_update_interest_rates {
-            response = 
-                apply_accumulated_interests(
-                    env,
-                    protocol_rewards_collector_address,
-                    &mut self,
-                    response
-                )?;
+            response = apply_accumulated_interests(
+                env,
+                protocol_rewards_collector_address,
+                &mut self,
+                response,
+            )?;
         }
 
         let mut updated_market = Market {
@@ -258,16 +256,15 @@ impl Market {
         updated_market.validate()?;
 
         if should_update_interest_rates {
-            response = 
-                update_interest_rates(
-                    deps,
-                    env,
-                    reference,
-                    &mut updated_market,
-                    Uint128::zero(),
-                    asset_label,
-                    response
-                )?;
+            response = update_interest_rates(
+                deps,
+                env,
+                reference,
+                &mut updated_market,
+                Uint128::zero(),
+                asset_label,
+                response,
+            )?;
         }
 
         Ok((updated_market, response))

@@ -1,5 +1,8 @@
+use cosmwasm_std::{
+    to_binary, Addr, CosmosMsg, Decimal, DepsMut, Env, Event, Response, StdResult, Uint128, WasmMsg,
+};
+use cw20::Cw20ExecuteMsg;
 use std::str;
-use cosmwasm_std::{to_binary, Addr, CosmosMsg, Decimal, DepsMut, Env, Event, StdResult, Response, Uint128};
 
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
@@ -10,7 +13,7 @@ use crate::error::ContractError::{
     CannotEncodeAssetReferenceIntoString, OperationExceedsAvailableLiquidity,
 };
 use crate::interest_rate_models::InterestRateModel;
-use crate::state::{Market};
+use crate::state::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
@@ -23,7 +26,7 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 /// 1. Updates market borrow and liquidity indices.
 /// 2. If there are any protocol rewards, builds a mint to the rewards colletor and adds it
 ///    to the returned response
-/// Note it does not save the market to store 
+/// Note it does not save the market to store
 pub fn apply_accumulated_interests(
     env: &Env,
     protocol_rewards_collector_address: Addr,
@@ -55,10 +58,8 @@ pub fn apply_accumulated_interests(
     }
 
     // Compute accrued protocol rewards
-    let previous_debt_total =
-        get_descaled_amount(market.debt_total_scaled, previous_borrow_index);
-    let new_debt_total =
-        get_descaled_amount(market.debt_total_scaled, market.borrow_index);
+    let previous_debt_total = get_descaled_amount(market.debt_total_scaled, previous_borrow_index);
+    let new_debt_total = get_descaled_amount(market.debt_total_scaled, market.borrow_index);
 
     let borrow_interest_accrued = if new_debt_total > previous_debt_total {
         // debt stays constant between the application of the interest rate
@@ -73,13 +74,10 @@ pub fn apply_accumulated_interests(
 
     if accrued_protocol_rewards > Uint128::zero() {
         response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: market.ma_token_address.into(),
+            contract_addr: market.ma_token_address.clone().into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: protocol_rewards_collector_address.into(),
-                amount: get_scaled_amount(
-                    accrued_protocol_rewards
-                    market.borrow_index,
-                ),
+                amount: accrued_protocol_rewards,
             })?,
             funds: vec![],
         }))
@@ -220,7 +218,7 @@ pub fn update_interest_rates(
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
-    response = response.add_event(build_interests_updated_event(asset_label, &market));
+    response = response.add_event(build_interests_updated_event(asset_label, market));
     Ok(response)
 }
 
