@@ -374,7 +374,19 @@ pub fn execute_withdraw(
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
     let oracle_address = addresses_query.pop().unwrap();
 
-    let mut withdrawer = USERS.load(deps.storage, &withdrawer_addr)?;
+    let mut withdrawer = match USERS.may_load(deps.storage, &withdrawer_addr)? {
+        Some(user) => user,
+        None => {
+            // No address should withdraw without an existing user position already in
+            // storage (If this happens the protocol did something wrong). The exception is
+            // the protocol_rewards_collector which gets minted token without depositing
+            // nor receiving a transfer from another user.
+            if withdrawer_addr != protocol_rewards_collector_address {
+                return Err(ContractError::ExistingUserPositionRequired {});
+            }
+            User::default()
+        }
+    };
     let asset_as_collateral = get_bit(withdrawer.collateral_assets, market.index)?;
     let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
 
@@ -4043,6 +4055,62 @@ mod tests {
         // User should have unset bit for collateral after full withdraw
         let user = USERS.load(&deps.storage, &withdrawer_addr).unwrap();
         assert!(!get_bit(user.collateral_assets, market_initial.index).unwrap());
+    }
+
+    #[test]
+    fn test_withdraw_without_existing_position() {
+        // Withdraw native token
+        let initial_available_liquidity = 12000000u128;
+        let mut deps = th_setup(&[coin(initial_available_liquidity, "somecoin")]);
+
+        // Set tax data
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("somecoin"), Uint128::new(100u128))],
+        );
+
+        deps.querier.set_cw20_balances(
+            Addr::unchecked("matoken"),
+            &[
+                (
+                    Addr::unchecked("withdrawer"),
+                    Uint128::new(2_000_000 * SCALING_FACTOR),
+                ),
+                (
+                    Addr::unchecked("protocol_rewards_collector"),
+                    Uint128::new(2_000_000 * SCALING_FACTOR),
+                ),
+            ],
+        );
+
+        let market = Market {
+            ma_token_address: Addr::unchecked("matoken"),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        th_init_market(deps.as_mut(), b"somecoin", &market);
+
+        let msg = ExecuteMsg::Withdraw {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: None,
+        };
+
+        // normal address cannot withdraw without an existing position
+        {
+            let info = mock_info("withdrawer");
+            let env = mock_env(MockEnvParams::default());
+            let error = execute(deps.as_mut(), env, info, msg.clone()).unwrap_err();
+            assert_eq!(error, ContractError::ExistingUserPositionRequired {});
+        }
+
+        // protocol_rewards_collector can withdraw without an existing position
+        {
+            let info = mock_info("protocol_rewards_collector");
+            let env = mock_env(MockEnvParams::default());
+            execute(deps.as_mut(), env, info, msg).unwrap();
+        }
     }
 
     #[test]

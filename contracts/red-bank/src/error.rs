@@ -29,6 +29,9 @@ pub enum ContractError {
     )]
     InvalidWithdrawAmount { asset: String },
 
+    #[error("Sender requires to have an existing user position")]
+    ExistingUserPositionRequired {},
+
     #[error("User's health factor can't be less than 1 after withdraw")]
     InvalidHealthFactorAfterWithdraw {},
 
