@@ -73,11 +73,12 @@ pub fn apply_accumulated_interests(
     let accrued_protocol_rewards = borrow_interest_accrued * market.reserve_factor;
 
     if accrued_protocol_rewards > Uint128::zero() {
+        let mint_amount = get_scaled_amount(accrued_protocol_rewards, market.liquidity_index);
         response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.clone().into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
                 recipient: protocol_rewards_collector_address.into(),
-                amount: accrued_protocol_rewards,
+                amount: mint_amount,
             })?,
             funds: vec![],
         }))
