@@ -2,8 +2,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
-use crate::error::ContractError::{InvalidFeeShareAmounts, InvalidMaintenanceMargin};
-use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Timestamp, Uint128};
+use crate::error::ContractError::InvalidMaintenanceMargin;
+use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Response, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::error::MarsError;
@@ -34,32 +34,13 @@ pub struct Config {
     pub ma_token_code_id: u64,
     /// Maximum percentage of outstanding debt that can be covered by a liquidator
     pub close_factor: Decimal,
-    /// Percentage of fees that are sent to the insurance fund
-    pub insurance_fund_fee_share: Decimal,
-    /// Percentage of fees that are sent to the treasury
-    pub treasury_fee_share: Decimal,
 }
 
 impl Config {
     pub fn validate(&self) -> Result<(), ContractError> {
-        let conditions_and_names = vec![
-            (Self::less_or_equal_one(&self.close_factor), "close_factor"),
-            (
-                Self::less_or_equal_one(&self.insurance_fund_fee_share),
-                "insurance_fund_fee_share",
-            ),
-            (
-                Self::less_or_equal_one(&self.treasury_fee_share),
-                "treasury_fee_share",
-            ),
-        ];
+        let conditions_and_names =
+            vec![(Self::less_or_equal_one(&self.close_factor), "close_factor")];
         all_conditions_valid(conditions_and_names)?;
-
-        let combined_fee_share = self.insurance_fund_fee_share + self.treasury_fee_share;
-        // Combined fee shares cannot exceed one
-        if combined_fee_share > Decimal::one() {
-            return Err(InvalidFeeShareAmounts {});
-        }
 
         Ok(())
     }
@@ -94,7 +75,7 @@ pub struct Market {
     /// Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral
     /// from user in an amount equal to debt repayed + bonus)
     pub liquidation_bonus: Decimal,
-    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    /// Portion of the borrow rate that is kept as protocol rewards
     pub reserve_factor: Decimal,
 
     /// Interest rate strategy to calculate borrow_rate and liquidity_rate
@@ -113,8 +94,6 @@ pub struct Market {
 
     /// Total debt scaled for the market's currency
     pub debt_total_scaled: Uint128,
-    /// Income to be distributed to other protocol contracts
-    pub protocol_income_to_distribute: Uint128,
 
     /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
     pub active: bool,
@@ -175,7 +154,6 @@ impl Market {
             debt_total_scaled: Uint128::zero(),
             maintenance_margin: maintenance_margin.unwrap(),
             liquidation_bonus: liquidation_bonus.unwrap(),
-            protocol_income_to_distribute: Uint128::zero(),
             interest_rate_strategy: interest_rate_strategy.unwrap(),
             active: active.unwrap(),
             deposit_enabled: deposit_enabled.unwrap(),
@@ -220,13 +198,18 @@ impl Market {
     }
 
     /// Update market based on new params
+    /// Returns tuple with updated market and Response which may contain new events
+    /// and messages if interest rates are updated
     pub fn update(
         mut self,
         deps: &DepsMut,
         env: &Env,
         reference: &[u8],
         params: InitOrUpdateAssetParams,
-    ) -> Result<(Self, bool), ContractError> {
+        asset_label: &str,
+        protocol_rewards_collector_address: Addr,
+        mut response: Response,
+    ) -> Result<(Self, Response), ContractError> {
         // Destructuring a struct’s fields into separate variables in order to force
         // compile error if we add more params
         let InitOrUpdateAssetParams {
@@ -250,7 +233,12 @@ impl Market {
             || interest_rate_strategy.is_some();
 
         if should_update_interest_rates {
-            apply_accumulated_interests(env, &mut self);
+            response = apply_accumulated_interests(
+                env,
+                protocol_rewards_collector_address,
+                &mut self,
+                response,
+            )?;
         }
 
         let mut updated_market = Market {
@@ -268,10 +256,18 @@ impl Market {
         updated_market.validate()?;
 
         if should_update_interest_rates {
-            update_interest_rates(deps, env, reference, &mut updated_market, Uint128::zero())?;
+            response = update_interest_rates(
+                deps,
+                env,
+                reference,
+                &mut updated_market,
+                Uint128::zero(),
+                asset_label,
+                response,
+            )?;
         }
 
-        Ok((updated_market, should_update_interest_rates))
+        Ok((updated_market, response))
     }
 
     pub fn allow_deposit(&self) -> bool {

@@ -21,8 +21,6 @@ pub struct InstantiateMsg {
 pub struct CreateOrUpdateConfig {
     pub owner: Option<String>,
     pub address_provider_address: Option<String>,
-    pub insurance_fund_fee_share: Option<Decimal>,
-    pub treasury_fee_share: Option<Decimal>,
     pub ma_token_code_id: Option<u64>,
     pub close_factor: Option<Decimal>,
 }
@@ -136,18 +134,6 @@ pub enum ExecuteMsg {
         enable: bool,
     },
 
-    /// Distribute the accrued protocol income to the treasury, insurance fund, and staking contracts
-    /// according to the split set in config.
-    /// Will transfer underlying asset to insurance fund and staking while minting maTokens to
-    /// the treasury.
-    /// Callable by any address, will fail if red bank has no liquidity.
-    DistributeProtocolIncome {
-        /// Asset market fees to distribute
-        asset: Asset,
-        /// Amount to distribute to protocol contracts, defaults to full amount if not specified
-        amount: Option<Uint128>,
-    },
-
     /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
     /// If asset is a Terra native token, the amount sent to the user
     /// is selected so that the sum of the transfered amount plus the stability tax
@@ -215,8 +201,6 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub owner: Addr,
     pub address_provider_address: Addr,
-    pub insurance_fund_fee_share: Decimal,
-    pub treasury_fee_share: Decimal,
     pub ma_token_code_id: u64,
     pub market_count: u32,
     pub close_factor: Decimal,
@@ -237,7 +221,6 @@ pub struct MarketResponse {
     pub liquidation_bonus: Decimal,
     pub reserve_factor: Decimal,
     pub interest_rate_strategy: InterestRateStrategy,
-    pub protocol_income_to_distribute: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -307,7 +290,7 @@ pub struct InitOrUpdateAssetParams {
     /// Initial borrow rate
     pub initial_borrow_rate: Option<Decimal>,
 
-    /// Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards
+    /// Portion of the borrow rate that is kept as protocol rewards
     pub reserve_factor: Option<Decimal>,
     /// Max percentage of collateral that can be borrowed
     pub max_loan_to_value: Option<Decimal>,

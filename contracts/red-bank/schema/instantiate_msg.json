@@ -30,16 +30,6 @@
             }
           ]
         },
-        "insurance_fund_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "ma_token_code_id": {
           "type": [
             "integer",
@@ -52,16 +42,6 @@
           "type": [
             "string",
             "null"
-          ]
-        },
-        "treasury_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
           ]
         }
       }

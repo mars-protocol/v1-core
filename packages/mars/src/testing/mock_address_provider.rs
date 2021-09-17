@@ -4,8 +4,6 @@ use crate::address_provider::msg::{MarsContract, QueryMsg};
 
 // NOTE: Addresses here are all hardcoded as we always use those to target a specific contract
 // in tests. This module implicitly supposes those are used.
-// Having to explicitly inject each address on each needed test vs doing this
-// seems overkill for now.
 
 pub fn handle_query(contract_addr: &Addr, query: QueryMsg) -> QuerierResult {
     let address_provider = Addr::unchecked("address_provider");
@@ -41,6 +39,7 @@ fn get_contract_address(contract: MarsContract) -> Addr {
         MarsContract::MarsToken => Addr::unchecked("mars_token"),
         MarsContract::Oracle => Addr::unchecked("oracle"),
         MarsContract::ProtocolAdmin => Addr::unchecked("protocol_admin"),
+        MarsContract::ProtocolRewardsCollector => Addr::unchecked("protocol_rewards_collector"),
         MarsContract::RedBank => Addr::unchecked("red_bank"),
         MarsContract::Staking => Addr::unchecked("staking"),
         MarsContract::Treasury => Addr::unchecked("treasury"),

@@ -24,6 +24,8 @@ pub struct Config {
     pub oracle_address: Addr,
     /// Protocol admin address (admin for all the contracts)
     pub protocol_admin_address: Addr,
+    /// Protocol Rewards Collector address
+    pub protocol_rewards_collector_address: Addr,
     /// Red bank contract address
     pub red_bank_address: Addr,
     /// Staking contract address

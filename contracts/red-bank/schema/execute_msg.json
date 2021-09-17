@@ -387,43 +387,6 @@
       "additionalProperties": false
     },
     {
-      "description": "Distribute the accrued protocol income to the treasury, insurance fund, and staking contracts according to the split set in config. Will transfer underlying asset to insurance fund and staking while minting maTokens to the treasury. Callable by any address, will fail if red bank has no liquidity.",
-      "type": "object",
-      "required": [
-        "distribute_protocol_income"
-      ],
-      "properties": {
-        "distribute_protocol_income": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "amount": {
-              "description": "Amount to distribute to protocol contracts, defaults to full amount if not specified",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "asset": {
-              "description": "Asset market fees to distribute",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
       "description": "Withdraw an amount of the asset burning an equivalent amount of maTokens. If asset is a Terra native token, the amount sent to the user is selected so that the sum of the transfered amount plus the stability tax payed is equal to the withdrawn amount.",
       "type": "object",
       "required": [
@@ -534,16 +497,6 @@
             }
           ]
         },
-        "insurance_fund_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "ma_token_code_id": {
           "type": [
             "integer",
@@ -556,16 +509,6 @@
           "type": [
             "string",
             "null"
-          ]
-        },
-        "treasury_fee_share": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/Decimal"
-            },
-            {
-              "type": "null"
-            }
           ]
         }
       }
@@ -736,7 +679,7 @@
           ]
         },
         "reserve_factor": {
-          "description": "Portion of the borrow rate that is sent to the treasury, insurance fund, and rewards",
+          "description": "Portion of the borrow rate that is kept as protocol rewards",
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"

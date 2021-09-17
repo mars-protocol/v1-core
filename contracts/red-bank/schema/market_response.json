@@ -15,7 +15,6 @@
     "ma_token_address",
     "maintenance_margin",
     "max_loan_to_value",
-    "protocol_income_to_distribute",
     "reserve_factor"
   ],
   "properties": {
@@ -56,9 +55,6 @@
     },
     "max_loan_to_value": {
       "$ref": "#/definitions/Decimal"
-    },
-    "protocol_income_to_distribute": {
-      "$ref": "#/definitions/Uint128"
     },
     "reserve_factor": {
       "$ref": "#/definitions/Decimal"

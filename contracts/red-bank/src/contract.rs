@@ -26,15 +26,15 @@ use mars::asset::{
 };
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
+use mars::math::reverse_decimal;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::error::ContractError::{
     AssetAlreadyInitialized, AssetNotInitialized, BorrowAmountExceedsGivenCollateral,
     BorrowAmountExceedsUncollateralizedLoanLimit, BorrowMarketNotExists, BorrowNotAllowed,
-    CannotDistributeProtocolIncome, CannotLiquidateWhenNoCollateralBalance,
-    CannotLiquidateWhenNoDebtBalance, CannotLiquidateWhenNotEnoughCollateral,
-    CannotLiquidateWhenPositiveUncollateralizedLoanLimit, CannotLiquidateWhenValidHealthFactor,
+    CannotLiquidateWhenNoCollateralBalance, CannotLiquidateWhenNoDebtBalance,
+    CannotLiquidateWhenNotEnoughCollateral, CannotLiquidateWhenPositiveUncollateralizedLoanLimit,
     CannotRepayMoreThanDebt, CannotRepayZeroDebt, CannotTransferTokenWhenInvalidHealthFactor,
     DepositNotAllowed, InvalidBorrowAmount, InvalidDepositAmount, InvalidHealthFactorAfterWithdraw,
     InvalidLiquidateAmount, InvalidLiquidityIndex, InvalidRepayAmount, InvalidWithdrawAmount,
@@ -50,7 +50,6 @@ use crate::state::{
     Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
     MARKET_REFERENCES_BY_INDEX, MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
-use mars::math::reverse_decimal;
 
 // INIT
 
@@ -66,8 +65,6 @@ pub fn instantiate(
     let CreateOrUpdateConfig {
         owner,
         address_provider_address,
-        insurance_fund_fee_share,
-        treasury_fee_share,
         ma_token_code_id,
         close_factor,
     } = msg.config;
@@ -75,8 +72,6 @@ pub fn instantiate(
     // All fields should be available
     let available = owner.is_some()
         && address_provider_address.is_some()
-        && insurance_fund_fee_share.is_some()
-        && treasury_fee_share.is_some()
         && ma_token_code_id.is_some()
         && close_factor.is_some();
 
@@ -93,9 +88,8 @@ pub fn instantiate(
         )?,
         ma_token_code_id: ma_token_code_id.unwrap(),
         close_factor: close_factor.unwrap(),
-        insurance_fund_fee_share: insurance_fund_fee_share.unwrap(),
-        treasury_fee_share: treasury_fee_share.unwrap(),
     };
+
     config.validate()?;
 
     CONFIG.save(deps.storage, &config)?;
@@ -218,10 +212,6 @@ pub fn execute(
             execute_update_user_collateral_asset_status(deps, env, info, asset, enable)
         }
 
-        ExecuteMsg::DistributeProtocolIncome { asset, amount } => {
-            execute_distribute_protocol_income(deps, env, info, asset, amount)
-        }
-
         ExecuteMsg::Withdraw { asset, amount } => execute_withdraw(deps, env, info, asset, amount),
     }
 }
@@ -244,8 +234,6 @@ pub fn execute_update_config(
     let CreateOrUpdateConfig {
         owner,
         address_provider_address,
-        insurance_fund_fee_share,
-        treasury_fee_share,
         ma_token_code_id,
         close_factor,
     } = new_config;
@@ -259,9 +247,6 @@ pub fn execute_update_config(
     )?;
     config.ma_token_code_id = ma_token_code_id.unwrap_or(config.ma_token_code_id);
     config.close_factor = close_factor.unwrap_or(config.close_factor);
-    config.insurance_fund_fee_share =
-        insurance_fund_fee_share.unwrap_or(config.insurance_fund_fee_share);
-    config.treasury_fee_share = treasury_fee_share.unwrap_or(config.treasury_fee_share);
 
     // Validate config
     config.validate()?;
@@ -379,6 +364,16 @@ pub fn execute_withdraw(
         }
     };
 
+    let config = CONFIG.load(deps.storage)?;
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+    )?;
+    let protocol_rewards_collector_address = addresses_query.pop().unwrap();
+    let oracle_address = addresses_query.pop().unwrap();
+
     let mut withdrawer = USERS.load(deps.storage, &withdrawer_addr)?;
     let asset_as_collateral = get_bit(withdrawer.collateral_assets, market.index)?;
     let user_is_borrowing = !withdrawer.borrowed_assets.is_zero();
@@ -387,13 +382,6 @@ pub fn execute_withdraw(
     // otherwise no reasons to block the withdraw
     if asset_as_collateral && user_is_borrowing {
         let global_state = GLOBAL_STATE.load(deps.storage)?;
-        let config = CONFIG.load(deps.storage)?;
-
-        let oracle_address = address_provider::helpers::query_address(
-            &deps.querier,
-            config.address_provider_address,
-            MarsContract::Oracle,
-        )?;
 
         let user_position = get_user_position(
             deps.as_ref(),
@@ -421,57 +409,63 @@ pub fn execute_withdraw(
         }
     }
 
-    let mut events = vec![];
+    let mut response = Response::new();
+
     // if amount to withdraw equals the user's balance then unset collateral bit
     if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
         unset_bit(&mut withdrawer.collateral_assets, market.index)?;
         USERS.save(deps.storage, &withdrawer_addr, &withdrawer)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             asset_label.as_str(),
             false,
             withdrawer_addr.to_string(),
         ));
     }
 
-    apply_accumulated_interests(&env, &mut market);
-    update_interest_rates(
+    // update indexes and interest rates
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut market,
+        response,
+    )?;
+    response = update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
         &mut market,
         withdraw_amount,
+        &asset_label,
+        response,
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
-    let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+    // burn maToken
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
             user: withdrawer_addr.to_string(),
             amount: withdraw_amount_scaled,
         })?,
         funds: vec![],
-    });
+    }));
 
-    let send_underlying_asset_msg = build_send_asset_with_tax_deduction_msg(
+    // send underlying asset to user
+    response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address,
         withdrawer_addr.clone(),
         asset,
         withdraw_amount,
-    )?;
+    )?);
 
-    events.push(build_interests_updated_event(asset_label.as_str(), &market));
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "withdraw")
         .add_attribute("market", asset_label.as_str())
         .add_attribute("user", withdrawer_addr.as_str())
         .add_attribute("burn_amount", withdraw_amount_scaled)
-        .add_attribute("withdraw_amount", withdraw_amount)
-        .add_message(burn_ma_tokens_msg)
-        .add_message(send_underlying_asset_msg)
-        .add_events(events);
-    Ok(res)
+        .add_attribute("withdraw_amount", withdraw_amount);
+    Ok(response)
 }
 
 /// Initialize asset if not exist.
@@ -616,20 +610,28 @@ pub fn execute_update_asset(
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         Some(market) => {
-            let (updated_market, interest_rates_updated) =
-                market.update(&deps, &env, asset_reference.as_slice(), asset_params)?;
+            let protocol_rewards_collector_address = address_provider::helpers::query_address(
+                &deps.querier,
+                config.address_provider_address,
+                MarsContract::ProtocolRewardsCollector,
+            )?;
 
+            let (updated_market, mut response) = market.update(
+                &deps,
+                &env,
+                asset_reference.as_slice(),
+                asset_params,
+                &asset_label,
+                protocol_rewards_collector_address,
+                Response::new(),
+            )?;
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
-            let mut res = Response::new()
+            response = response
                 .add_attribute("action", "update_asset")
                 .add_attribute("asset", &asset_label);
 
-            if interest_rates_updated {
-                res = res.add_event(build_interests_updated_event(&asset_label, &updated_market));
-            }
-
-            Ok(res)
+            Ok(response)
         }
         None => Err(AssetNotInitialized {}),
     }
@@ -664,20 +666,41 @@ pub fn execute_deposit(
         .may_load(deps.storage, &depositor_address)?
         .unwrap_or_default();
 
-    let mut events = vec![];
+    let mut response = Response::new();
     let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.collateral_assets, market.index)?;
         USERS.save(deps.storage, &depositor_address, &user)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             asset_label,
             true,
             depositor_address.to_string(),
         ));
     }
 
-    apply_accumulated_interests(&env, &mut market);
-    update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
+    let config = CONFIG.load(deps.storage)?;
+
+    // update indexes and interest rates
+    let protocol_rewards_collector_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::ProtocolRewardsCollector,
+    )?;
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut market,
+        response,
+    )?;
+    response = update_interest_rates(
+        &deps,
+        &env,
+        asset_reference,
+        &mut market,
+        Uint128::zero(),
+        asset_label,
+        response,
+    )?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
     if market.liquidity_index.is_zero() {
@@ -688,14 +711,11 @@ pub fn execute_deposit(
         get_updated_liquidity_index(&market, env.block.time.seconds()),
     );
 
-    events.push(build_interests_updated_event(asset_label, &market));
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "deposit")
         .add_attribute("market", asset_label)
         .add_attribute("user", depositor_address.as_str())
         .add_attribute("amount", deposit_amount)
-        .add_events(events)
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
@@ -705,7 +725,7 @@ pub fn execute_deposit(
             funds: vec![],
         }));
 
-    Ok(res)
+    Ok(response)
 }
 
 /// Add debt for the borrower and send the borrowed funds
@@ -754,17 +774,20 @@ pub fn execute_borrow(
 
     let is_borrowing_asset = get_bit(user.borrowed_assets, borrow_market.index)?;
 
+    let config = CONFIG.load(deps.storage)?;
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+    )?;
+    let protocol_rewards_collector_address = addresses_query.pop().unwrap();
+    let oracle_address = addresses_query.pop().unwrap();
+
     // Check if user can borrow specified amount
     let mut uncollateralized_debt = false;
     if uncollateralized_loan_limit.is_zero() {
         // Collateralized loan: check max ltv is not exceeded
-        let config = CONFIG.load(deps.storage)?;
-        let oracle_address = address_provider::helpers::query_address(
-            &deps.querier,
-            config.address_provider_address,
-            MarsContract::Oracle,
-        )?;
-
         let user_position = get_user_position(
             deps.as_ref(),
             env.block.time.seconds(),
@@ -821,14 +844,20 @@ pub fn execute_borrow(
         }
     }
 
-    apply_accumulated_interests(&env, &mut borrow_market);
+    let mut response = Response::new();
 
-    let mut events = vec![];
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut borrow_market,
+        response,
+    )?;
+
     // Set borrowing asset for user
     if !is_borrowing_asset {
         set_bit(&mut user.borrowed_assets, borrow_market.index)?;
         USERS.save(deps.storage, &borrower_address, &user)?;
-        events.push(build_debt_position_changed_event(
+        response = response.add_event(build_debt_position_changed_event(
             asset_label.as_str(),
             true,
             borrower_address.to_string(),
@@ -858,37 +887,32 @@ pub fn execute_borrow(
 
     borrow_market.debt_total_scaled += borrow_amount_scaled;
 
-    update_interest_rates(
+    response = update_interest_rates(
         &deps,
         &env,
         asset_reference.as_slice(),
         &mut borrow_market,
         borrow_amount,
+        &asset_label,
+        response,
     )?;
     MARKETS.save(deps.storage, asset_reference.as_slice(), &borrow_market)?;
 
     // Send borrow amount to borrower
-    let send_msg = build_send_asset_with_tax_deduction_msg(
+    response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address,
         borrower_address.clone(),
         asset,
         borrow_amount,
-    )?;
+    )?);
 
-    events.push(build_interests_updated_event(
-        asset_label.as_str(),
-        &borrow_market,
-    ));
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "borrow")
         .add_attribute("market", asset_label.as_str())
         .add_attribute("user", borrower_address.as_str())
-        .add_attribute("amount", borrow_amount)
-        .add_events(events)
-        .add_message(send_msg);
-    Ok(res)
+        .add_attribute("amount", borrow_amount);
+    Ok(response)
 }
 
 /// Handle the repay of native tokens. Refund extra funds if they exist
@@ -910,7 +934,6 @@ pub fn execute_repay(
         });
     }
 
-    // Get repay amount
     // Cannot repay zero amount
     if repay_amount.is_zero() {
         return Err(InvalidRepayAmount {
@@ -925,17 +948,31 @@ pub fn execute_repay(
         return Err(CannotRepayZeroDebt {});
     }
 
-    apply_accumulated_interests(&env, &mut market);
+    let config = CONFIG.load(deps.storage)?;
+
+    let protocol_rewards_collector_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::ProtocolRewardsCollector,
+    )?;
+
+    let mut response = Response::new();
+
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address,
+        &mut market,
+        response,
+    )?;
 
     let mut repay_amount_scaled = get_scaled_amount(
         repay_amount,
         get_updated_borrow_index(&market, env.block.time.seconds()),
     );
 
-    let mut messages = vec![];
+    // If repay amount exceeds debt, refund any excess amounts
     let mut refund_amount = Uint128::zero();
     if repay_amount_scaled > debt.amount_scaled {
-        // refund any excess amounts
         refund_amount = get_descaled_amount(
             repay_amount_scaled - debt.amount_scaled,
             get_updated_borrow_index(&market, env.block.time.seconds()),
@@ -957,7 +994,7 @@ pub fn execute_repay(
                 )?
             }
         };
-        messages.push(refund_msg);
+        response = response.add_message(refund_msg);
         repay_amount_scaled = debt.amount_scaled;
     }
 
@@ -968,32 +1005,36 @@ pub fn execute_repay(
         return Err(CannotRepayMoreThanDebt {});
     }
     market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
-    update_interest_rates(&deps, &env, asset_reference, &mut market, Uint128::zero())?;
+
+    response = update_interest_rates(
+        &deps,
+        &env,
+        asset_reference,
+        &mut market,
+        Uint128::zero(),
+        asset_label,
+        response,
+    )?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
-    let mut events = vec![];
     if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
         let mut user = USERS.load(deps.storage, &repayer_address)?;
         unset_bit(&mut user.borrowed_assets, market.index)?;
         USERS.save(deps.storage, &repayer_address, &user)?;
-        events.push(build_debt_position_changed_event(
+        response = response.add_event(build_debt_position_changed_event(
             asset_label,
             false,
             repayer_address.to_string(),
         ));
     }
 
-    events.push(build_interests_updated_event(asset_label, &market));
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "repay")
         .add_attribute("market", asset_label)
         .add_attribute("user", repayer_address)
-        .add_attribute("amount", repay_amount - refund_amount)
-        .add_messages(messages)
-        .add_events(events);
-    Ok(res)
+        .add_attribute("amount", repay_amount.checked_sub(refund_amount)?);
+    Ok(response)
 }
 
 /// Execute loan liquidations on under-collateralized loans
@@ -1066,13 +1107,17 @@ pub fn execute_liquidate(
 
     // 2. Compute health factor
     let config = CONFIG.load(deps.storage)?;
-    let global_state = GLOBAL_STATE.load(deps.storage)?;
-    let user = USERS.load(deps.storage, &user_address)?;
-    let oracle_address = address_provider::helpers::query_address(
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        MarsContract::Oracle,
+        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
     )?;
+    let protocol_rewards_collector_address = addresses_query.pop().unwrap();
+    let oracle_address = addresses_query.pop().unwrap();
+
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+    let user = USERS.load(deps.storage, &user_address)?;
     let user_position = get_user_position(
         deps.as_ref(),
         block_time,
@@ -1088,9 +1133,9 @@ pub fn execute_liquidate(
         UserHealthStatus::Borrowing(hf) => hf,
     };
 
-    // if health factor is not less than one the user cannot be liquidated
+    // if health factor is not less than one user cannot be liquidated
     if health_factor >= Decimal::one() {
-        return Err(CannotLiquidateWhenValidHealthFactor {});
+        return Err(ContractError::CannotLiquidateHealthyPosition {});
     }
 
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
@@ -1109,7 +1154,14 @@ pub fn execute_liquidate(
     let debt_price =
         user_position.get_asset_price(debt_asset_reference.as_slice(), &debt_asset_label)?;
 
-    apply_accumulated_interests(&env, &mut debt_market);
+    let mut response = Response::new();
+
+    response = apply_accumulated_interests(
+        &env,
+        protocol_rewards_collector_address.clone(),
+        &mut debt_market,
+        response,
+    )?;
 
     let user_debt_asset_total_debt = get_descaled_amount(
         user_debt.amount_scaled,
@@ -1127,34 +1179,32 @@ pub fn execute_liquidate(
             sent_debt_asset_amount,
         );
 
-    let mut messages = vec![];
-    let mut events = vec![];
-
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
     if receive_ma_token {
-        process_ma_token_transfer_to_liquidator(
+        response = process_ma_token_transfer_to_liquidator(
             deps.branch(),
             block_time,
             &user_address,
             &liquidator_address,
-            collateral_asset_label.as_str(),
+            &collateral_asset_label,
             &collateral_market,
             collateral_amount_to_liquidate,
-            &mut messages,
-            &mut events,
+            response,
         )?;
     } else {
-        process_underlying_asset_transfer_to_liquidator(
+        response = process_underlying_asset_transfer_to_liquidator(
             deps.branch(),
             &env,
             &user_address,
             &liquidator_address,
             collateral_asset,
             collateral_asset_reference.as_slice(),
+            &collateral_asset_label,
             &mut collateral_market,
             collateral_amount_to_liquidate,
-            &mut messages,
+            protocol_rewards_collector_address,
+            response,
         )?;
     }
 
@@ -1163,7 +1213,7 @@ pub fn execute_liquidate(
         let mut user = USERS.load(deps.storage, &user_address)?;
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, &user_address, &user)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             collateral_asset_label.as_str(),
             false,
             user_address.to_string(),
@@ -1195,12 +1245,14 @@ pub fn execute_liquidate(
         .debt_total_scaled
         .checked_sub(debt_amount_to_repay_scaled)?;
 
-    update_interest_rates(
+    response = update_interest_rates(
         &deps,
         &env,
         debt_asset_reference.as_slice(),
         &mut debt_market,
         refund_amount,
+        &debt_asset_label,
+        response,
     )?;
 
     // save markets
@@ -1214,28 +1266,16 @@ pub fn execute_liquidate(
     // 6. Build response
     // refund sent amount in excess of actual debt amount to liquidate
     if refund_amount > Uint128::zero() {
-        let refund_msg = build_send_asset_with_tax_deduction_msg(
+        response = response.add_message(build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             env.contract.address,
             liquidator_address.clone(),
             debt_asset,
             refund_amount,
-        )?;
-        messages.push(refund_msg);
+        )?);
     }
 
-    events.push(build_interests_updated_event(
-        debt_asset_label.as_str(),
-        &debt_market,
-    ));
-    if !receive_ma_token {
-        events.push(build_interests_updated_event(
-            collateral_asset_label.as_str(),
-            &collateral_market,
-        ));
-    }
-
-    let res = Response::new()
+    response = response
         .add_attribute("action", "liquidate")
         .add_attribute("collateral_market", collateral_asset_label.as_str())
         .add_attribute("debt_market", debt_asset_label.as_str())
@@ -1246,13 +1286,12 @@ pub fn execute_liquidate(
             collateral_amount_to_liquidate.to_string(),
         )
         .add_attribute("debt_amount_repaid", debt_amount_to_repay.to_string())
-        .add_attribute("refund_amount", refund_amount.to_string())
-        .add_events(events)
-        .add_messages(messages);
-    Ok(res)
+        .add_attribute("refund_amount", refund_amount.to_string());
+    Ok(response)
 }
 
 /// Transfer ma tokens from user to liquidator
+/// Returns response with added messages and events
 fn process_ma_token_transfer_to_liquidator(
     deps: DepsMut,
     block_time: u64,
@@ -1261,21 +1300,20 @@ fn process_ma_token_transfer_to_liquidator(
     collateral_asset_label: &str,
     collateral_market: &Market,
     collateral_amount_to_liquidate: Uint128,
-    messages: &mut Vec<CosmosMsg>,
-    events: &mut Vec<Event>,
-) -> StdResult<()> {
+    mut response: Response,
+) -> StdResult<Response> {
     let mut liquidator = USERS
         .may_load(deps.storage, liquidator_addr)?
         .unwrap_or_default();
 
     // Set liquidator's deposited bit to true if not already true
-    // NOTE: previous checks should ensure this amount is not zero
+    // NOTE: previous checks should ensure amount to be sent is not zero
     let liquidator_is_using_as_collateral =
         get_bit(liquidator.collateral_assets, collateral_market.index)?;
     if !liquidator_is_using_as_collateral {
         set_bit(&mut liquidator.collateral_assets, collateral_market.index)?;
         USERS.save(deps.storage, liquidator_addr, &liquidator)?;
-        events.push(build_collateral_position_changed_event(
+        response = response.add_event(build_collateral_position_changed_event(
             collateral_asset_label,
             true,
             liquidator_addr.to_string(),
@@ -1287,7 +1325,7 @@ fn process_ma_token_transfer_to_liquidator(
         get_updated_liquidity_index(collateral_market, block_time),
     );
 
-    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
             sender: user_addr.to_string(),
@@ -1297,10 +1335,11 @@ fn process_ma_token_transfer_to_liquidator(
         funds: vec![],
     }));
 
-    Ok(())
+    Ok(response)
 }
 
 /// Burn ma_tokens from user and send underlying asset to liquidator
+/// Returns response with added messages and events
 fn process_underlying_asset_transfer_to_liquidator(
     deps: DepsMut,
     env: &Env,
@@ -1308,10 +1347,12 @@ fn process_underlying_asset_transfer_to_liquidator(
     liquidator_addr: &Addr,
     collateral_asset: Asset,
     collateral_asset_reference: &[u8],
+    collateral_asset_label: &str,
     mut collateral_market: &mut Market,
     collateral_amount_to_liquidate: Uint128,
-    messages: &mut Vec<CosmosMsg>,
-) -> Result<(), ContractError> {
+    protocol_rewards_collector_address: Addr,
+    mut response: Response,
+) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
 
     // Ensure contract has enough collateral to send back underlying asset
@@ -1334,13 +1375,21 @@ fn process_underlying_asset_transfer_to_liquidator(
     }
 
     // Apply update collateral interest as liquidity is reduced
-    apply_accumulated_interests(env, &mut collateral_market);
-    update_interest_rates(
+    response = apply_accumulated_interests(
+        env,
+        protocol_rewards_collector_address,
+        &mut collateral_market,
+        response,
+    )?;
+
+    response = update_interest_rates(
         &deps,
         env,
         collateral_asset_reference,
         &mut collateral_market,
         collateral_amount_to_liquidate,
+        collateral_asset_label,
+        response,
     )?;
 
     let collateral_amount_to_liquidate_scaled = get_scaled_amount(
@@ -1348,7 +1397,7 @@ fn process_underlying_asset_transfer_to_liquidator(
         get_updated_liquidity_index(collateral_market, block_time),
     );
 
-    let burn_ma_tokens_msg = CosmosMsg::Wasm(WasmMsg::Execute {
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
             user: user_addr.to_string(),
@@ -1356,19 +1405,17 @@ fn process_underlying_asset_transfer_to_liquidator(
             amount: collateral_amount_to_liquidate_scaled,
         })?,
         funds: vec![],
-    });
+    }));
 
-    let send_underlying_asset_msg = build_send_asset_with_tax_deduction_msg(
+    response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
         env.contract.address.clone(),
         liquidator_addr.clone(),
         collateral_asset,
         collateral_amount_to_liquidate,
-    )?;
-    messages.push(burn_ma_tokens_msg);
-    messages.push(send_underlying_asset_msg);
+    )?);
 
-    Ok(())
+    Ok(response)
 }
 
 /// Computes debt to repay (in debt asset),
@@ -1597,104 +1644,6 @@ pub fn execute_update_user_collateral_asset_status(
     Ok(res)
 }
 
-/// Send accumulated asset income to protocol contracts
-pub fn execute_distribute_protocol_income(
-    deps: DepsMut,
-    env: Env,
-    _info: MessageInfo,
-    asset: Asset,
-    amount: Option<Uint128>,
-) -> Result<Response, ContractError> {
-    // Get config
-    let config = CONFIG.load(deps.storage)?;
-
-    let (asset_label, asset_reference, _) = asset.get_attributes();
-    let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
-
-    let amount_to_distribute = match amount {
-        Some(amount) => amount,
-        None => market.protocol_income_to_distribute,
-    };
-
-    if amount_to_distribute > market.protocol_income_to_distribute {
-        return Err(CannotDistributeProtocolIncome {});
-    }
-
-    market.protocol_income_to_distribute = market
-        .protocol_income_to_distribute
-        .checked_sub(amount_to_distribute)?;
-    MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
-
-    let mars_contracts = vec![
-        MarsContract::InsuranceFund,
-        MarsContract::Staking,
-        MarsContract::Treasury,
-    ];
-    let mut addresses_query = address_provider::helpers::query_addresses(
-        &deps.querier,
-        config.address_provider_address,
-        mars_contracts,
-    )?;
-
-    let treasury_address = addresses_query.pop().unwrap();
-    let staking_address = addresses_query.pop().unwrap();
-    let insurance_fund_address = addresses_query.pop().unwrap();
-
-    let insurance_fund_amount = amount_to_distribute * config.insurance_fund_fee_share;
-    let treasury_amount = amount_to_distribute * config.treasury_fee_share;
-    let amount_to_distribute_before_staking_rewards =
-        insurance_fund_amount.checked_add(treasury_amount)?;
-    let staking_amount =
-        amount_to_distribute.checked_sub(amount_to_distribute_before_staking_rewards)?;
-
-    let mut messages = vec![];
-    // only build and add send message if fee is non-zero
-    if !insurance_fund_amount.is_zero() {
-        let insurance_fund_msg = build_send_asset_with_tax_deduction_msg(
-            deps.as_ref(),
-            env.contract.address.clone(),
-            insurance_fund_address,
-            asset.clone(),
-            insurance_fund_amount,
-        )?;
-        messages.push(insurance_fund_msg);
-    }
-
-    if !treasury_amount.is_zero() {
-        let scaled_mint_amount = get_scaled_amount(
-            treasury_amount,
-            get_updated_liquidity_index(&market, env.block.time.seconds()),
-        );
-        let treasury_fund_msg = CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: market.ma_token_address.into(),
-            msg: to_binary(&Cw20ExecuteMsg::Mint {
-                recipient: treasury_address.into(),
-                amount: scaled_mint_amount,
-            })?,
-            funds: vec![],
-        });
-        messages.push(treasury_fund_msg);
-    }
-
-    if !staking_amount.is_zero() {
-        let staking_msg = build_send_asset_with_tax_deduction_msg(
-            deps.as_ref(),
-            env.contract.address,
-            staking_address,
-            asset,
-            staking_amount,
-        )?;
-        messages.push(staking_msg);
-    }
-
-    let res = Response::new()
-        .add_attribute("action", "distribute_protocol_income")
-        .add_attribute("asset", asset_label)
-        .add_attribute("amount", amount_to_distribute)
-        .add_messages(messages);
-    Ok(res)
-}
-
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -1751,8 +1700,6 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner,
         address_provider_address: config.address_provider_address,
-        insurance_fund_fee_share: config.insurance_fund_fee_share,
-        treasury_fee_share: config.treasury_fee_share,
         ma_token_code_id: config.ma_token_code_id,
         market_count: money_market.market_count,
         close_factor: config.close_factor,
@@ -1785,7 +1732,6 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         liquidation_bonus: market.liquidation_bonus,
         reserve_factor: market.reserve_factor,
         interest_rate_strategy: market.interest_rate_strategy,
-        protocol_income_to_distribute: market.protocol_income_to_distribute,
     })
 }
 
@@ -1957,15 +1903,6 @@ fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPos
 
 // EVENTS
 
-fn build_interests_updated_event(label: &str, market: &Market) -> Event {
-    Event::new("interests_updated")
-        .add_attribute("market", label)
-        .add_attribute("borrow_index", market.borrow_index.to_string())
-        .add_attribute("liquidity_index", market.liquidity_index.to_string())
-        .add_attribute("borrow_rate", market.borrow_rate.to_string())
-        .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
-}
-
 fn build_collateral_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
     Event::new("collateral_position_changed")
         .add_attribute("market", label)
@@ -2102,8 +2039,6 @@ mod tests {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             ma_token_code_id: Some(10u64),
-            insurance_fund_fee_share: None,
-            treasury_fee_share: None,
             close_factor: None,
         };
 
@@ -2113,8 +2048,6 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             owner: None,
             address_provider_address: None,
-            insurance_fund_fee_share: None,
-            treasury_fee_share: None,
             ma_token_code_id: None,
             close_factor: None,
         };
@@ -2126,14 +2059,10 @@ mod tests {
         assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
-        // init config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // init config with close_factor greater than 1
         // *
-        let mut insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         let mut close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..base_config.clone()
         };
@@ -2143,41 +2072,17 @@ mod tests {
         assert_eq!(
             error_res,
             MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
-                    .to_string(),
-                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
-                    .to_string()
+                expected_params: "close_factor".to_string(),
+                invalid_params: "close_factor".to_string()
             }
             .into()
         );
 
         // *
-        // init config with invalid fee share amounts
-        // *
-        insurance_fund_fee_share = Decimal::from_ratio(7u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(4u128, 10u128);
-        close_factor = Decimal::from_ratio(1u128, 2u128);
-        let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
-            close_factor: Some(close_factor),
-            ..base_config.clone()
-        };
-        let exceeding_fees_msg = InstantiateMsg { config };
-        let info = mock_info("owner");
-        let error_res =
-            instantiate(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
-
-        // *
         // init config with valid params
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(5u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
         close_factor = Decimal::from_ratio(1u128, 2u128);
         let config = CreateOrUpdateConfig {
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..base_config
         };
@@ -2193,8 +2098,6 @@ mod tests {
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!(10, value.ma_token_code_id);
         assert_eq!(0, value.market_count);
-        assert_eq!(insurance_fund_fee_share, value.insurance_fund_fee_share);
-        assert_eq!(treasury_fee_share, value.treasury_fee_share);
     }
 
     #[test]
@@ -2205,15 +2108,11 @@ mod tests {
         // *
         // init config with valid params
         // *
-        let mut insurance_fund_fee_share = Decimal::from_ratio(1u128, 10u128);
-        let mut treasury_fee_share = Decimal::from_ratio(3u128, 10u128);
         let mut close_factor = Decimal::from_ratio(1u128, 4u128);
         let init_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
             ma_token_code_id: Some(20u64),
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = InstantiateMsg {
@@ -2234,15 +2133,11 @@ mod tests {
         assert_eq!(error_res, MarsError::Unauthorized {}.into());
 
         // *
-        // update config with close_factor, insurance_fund_fee_share, treasury_fee_share greater than 1
+        // update config with close_factor
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         close_factor = Decimal::from_ratio(13u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
             ..init_config.clone()
         };
@@ -2252,41 +2147,20 @@ mod tests {
         assert_eq!(
             error_res,
             MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
-                    .to_string(),
-                invalid_params: "close_factor, insurance_fund_fee_share, treasury_fee_share"
-                    .to_string()
+                expected_params: "close_factor".to_string(),
+                invalid_params: "close_factor".to_string()
             }
             .into()
         );
 
         // *
-        // update config with invalid fee share amounts
-        // *
-        insurance_fund_fee_share = Decimal::from_ratio(10u128, 10u128);
-        let config = CreateOrUpdateConfig {
-            owner: None,
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: None,
-            ..init_config
-        };
-        let exceeding_fees_msg = UpdateConfig { config };
-        let info = mock_info("owner");
-        let error_res = execute(deps.as_mut(), env.clone(), info, exceeding_fees_msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
-
-        // *
         // update config with all new params
         // *
-        insurance_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
-        treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
         close_factor = Decimal::from_ratio(1u128, 20u128);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
             ma_token_code_id: Some(40u64),
-            insurance_fund_fee_share: Some(insurance_fund_fee_share),
-            treasury_fee_share: Some(treasury_fee_share),
             close_factor: Some(close_factor),
         };
         let msg = UpdateConfig {
@@ -2310,14 +2184,6 @@ mod tests {
             new_config.ma_token_code_id,
             config.ma_token_code_id.unwrap()
         );
-        assert_eq!(
-            new_config.insurance_fund_fee_share,
-            config.insurance_fund_fee_share.unwrap()
-        );
-        assert_eq!(
-            new_config.treasury_fee_share,
-            config.treasury_fee_share.unwrap()
-        );
         assert_eq!(new_config.close_factor, config.close_factor.unwrap());
     }
 
@@ -2329,8 +2195,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -2679,8 +2543,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -2807,7 +2669,7 @@ mod tests {
         }
 
         // *
-        // init asset where min borrow rate >= max borrow rate
+        // update asset where min borrow rate >= max borrow rate
         // *
         {
             let invalid_dynamic_ir = DynamicInterestRate {
@@ -2839,7 +2701,7 @@ mod tests {
         }
 
         // *
-        // init asset where optimal utilization rate > 1
+        // update asset where optimal utilization rate > 1
         // *
         {
             let invalid_dynamic_ir = DynamicInterestRate {
@@ -3006,8 +2868,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(5u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -3105,6 +2965,9 @@ mod tests {
                 .add_attribute("borrow_rate", expected_borrow_rate.to_string())
                 .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
         );
+
+        // mint message is not sent as debt is 0
+        assert_eq!(res.messages, vec![])
     }
 
     #[test]
@@ -3126,7 +2989,6 @@ mod tests {
             b"somecoin",
             &Market {
                 reserve_factor: Decimal::from_ratio(1_u128, 10_u128),
-                protocol_income_to_distribute: Uint128::zero(),
                 borrow_index: Decimal::one(),
                 liquidity_index: Decimal::one(),
                 interests_last_updated: 1_000_000,
@@ -3161,7 +3023,6 @@ mod tests {
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let new_market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
-        let config = CONFIG.load(&deps.storage).unwrap();
 
         // Indices should have been updated using previous interest rate
         let expected_indices = th_get_expected_indices(&market_before, 1_500_000);
@@ -3172,9 +3033,7 @@ mod tests {
         // Interest rate should have been recomputed using new strategy and values
         let expected_debt =
             get_descaled_amount(new_market.debt_total_scaled, new_market.borrow_index);
-        let expected_liquidity = Uint128::new(asset_liquidity)
-            - (Decimal::one() - config.treasury_fee_share)
-                * new_market.protocol_income_to_distribute;
+        let expected_liquidity = Uint128::new(asset_liquidity);
         let expected_utilization_rate =
             Decimal::from_ratio(expected_debt, expected_liquidity + expected_debt);
         let (expected_borrow_rate, expected_liquidity_rate) = linear_ir.get_updated_interest_rates(
@@ -3194,6 +3053,24 @@ mod tests {
                 .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
                 .add_attribute("borrow_rate", expected_borrow_rate.to_string())
                 .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
+        );
+
+        let current_debt_total =
+            get_descaled_amount(new_market.debt_total_scaled, new_market.borrow_index);
+        let interest_accrued = current_debt_total - asset_initial_debt;
+        let expected_protocol_rewards = interest_accrued * market_before.reserve_factor;
+        // mint message is sent because debt is non zero
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: market_before.ma_token_address.to_string(),
+                msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                    recipient: "protocol_rewards_collector".to_string(),
+                    amount: expected_protocol_rewards,
+                })
+                .unwrap(),
+                funds: vec![]
+            })),]
         );
     }
 
@@ -3243,7 +3120,6 @@ mod tests {
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market,
             env.block.time.seconds(),
             initial_liquidity,
@@ -3290,10 +3166,6 @@ mod tests {
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
         assert_eq!(market.borrow_index, expected_params.borrow_index);
-        assert_eq!(
-            market.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
-        );
 
         // empty deposit fails
         let info = mock_info("depositor");
@@ -3355,7 +3227,6 @@ mod tests {
         let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market,
             env.block.time.seconds(),
             initial_liquidity,
@@ -3367,8 +3238,11 @@ mod tests {
             expected_params.liquidity_index,
         );
 
-        let market = MARKETS.load(&deps.storage, cw20_addr.as_bytes()).unwrap();
-
+        // No rewards to distribute so no mint message
+        assert_eq!(
+            expected_params.protocol_rewards_to_distribute,
+            Uint128::zero()
+        );
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -3401,10 +3275,6 @@ mod tests {
                 ),
                 th_build_interests_updated_event(cw20_addr.as_str(), &expected_params)
             ]
-        );
-        assert_eq!(
-            market.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
         );
 
         // empty deposit fails
@@ -3538,7 +3408,6 @@ mod tests {
         let market = MARKETS.load(&deps.storage, b"somecoin").unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_initial,
             mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
@@ -3554,6 +3423,15 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: "matoken".to_string(),
+                    msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                        recipient: "protocol_rewards_collector".to_string(),
+                        amount: expected_params.protocol_rewards_to_distribute,
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "matoken".to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
@@ -3598,10 +3476,6 @@ mod tests {
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
         assert_eq!(market.borrow_index, expected_params.borrow_index);
-        assert_eq!(
-            market.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
-        );
     }
 
     #[test]
@@ -3677,7 +3551,6 @@ mod tests {
             .unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_initial,
             mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
@@ -3693,6 +3566,15 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: ma_token_addr.to_string(),
+                    msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                        recipient: "protocol_rewards_collector".to_string(),
+                        amount: expected_params.protocol_rewards_to_distribute,
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: ma_token_addr.to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
@@ -3735,10 +3617,6 @@ mod tests {
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
         assert_eq!(market.borrow_index, expected_params.borrow_index);
-        assert_eq!(
-            market.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
-        );
     }
 
     #[test]
@@ -4080,7 +3958,6 @@ mod tests {
         );
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_initial,
             mock_market.interests_last_updated + seconds_elapsed,
             initial_available_liquidity,
@@ -4093,6 +3970,15 @@ mod tests {
         assert_eq!(
             res.messages,
             vec![
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: "matoken".to_string(),
+                    msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                        recipient: "protocol_rewards_collector".to_string(),
+                        amount: expected_params.protocol_rewards_to_distribute,
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: "matoken".to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
@@ -4141,10 +4027,6 @@ mod tests {
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
         assert_eq!(market.borrow_index, expected_params.borrow_index);
-        assert_eq!(
-            market.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
-        );
 
         // User should have unset bit for collateral after full withdraw
         let user = USERS.load(&deps.storage, &withdrawer_addr).unwrap();
@@ -4257,7 +4139,6 @@ mod tests {
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_1_initial,
             block_time,
             available_liquidity_cw20,
@@ -4354,7 +4235,6 @@ mod tests {
         assert!(!get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_1_after_borrow,
             block_time,
             available_liquidity_cw20,
@@ -4417,7 +4297,6 @@ mod tests {
         assert!(get_bit(user.borrowed_assets, 1).unwrap());
 
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_2_initial,
             block_time,
             available_liquidity_native,
@@ -4538,7 +4417,6 @@ mod tests {
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_2_after_borrow_2,
             block_time,
             available_liquidity_native,
@@ -4604,7 +4482,6 @@ mod tests {
         let block_time = market_2_after_repay_some_2.interests_last_updated + 10000u64;
         // need this to compute the repay amount
         let expected_params_native = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_2_after_repay_some_2,
             block_time,
             available_liquidity_native,
@@ -4643,12 +4520,12 @@ mod tests {
         assert_eq!(
             res.events,
             vec![
+                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native),
                 build_debt_position_changed_event(
                     "borrowedcoinnative",
                     false,
                     "borrower".to_string()
                 ),
-                th_build_interests_updated_event("borrowedcoinnative", &expected_params_native)
             ]
         );
 
@@ -4687,7 +4564,6 @@ mod tests {
         let repay_amount = 4800u128;
 
         let expected_params_cw20 = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_1_after_borrow_again,
             block_time,
             available_liquidity_cw20,
@@ -4745,12 +4621,12 @@ mod tests {
         assert_eq!(
             res.events,
             vec![
+                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20),
                 build_debt_position_changed_event(
                     "borrowedcoincw20",
                     false,
                     "borrower".to_string()
                 ),
-                th_build_interests_updated_event("borrowedcoincw20", &expected_params_cw20)
             ]
         );
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4877,18 +4753,6 @@ mod tests {
         let info = mock_info("borrower");
         execute(deps.as_mut(), env, info, msg).unwrap();
 
-        let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
-            &market,
-            block_time,
-            initial_liquidity,
-            TestUtilizationDeltas {
-                less_liquidity: valid_amount.into(),
-                more_debt: valid_amount.into(),
-                ..Default::default()
-            },
-        );
-
         let market_after_borrow = MARKETS.load(&deps.storage, b"uusd").unwrap();
 
         let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
@@ -4901,10 +4765,6 @@ mod tests {
         assert_eq!(
             valid_amount,
             get_descaled_amount(debt.amount_scaled, market_after_borrow.borrow_index)
-        );
-        assert_eq!(
-            market_after_borrow.protocol_income_to_distribute,
-            expected_params.protocol_income_to_distribute
         );
     }
 
@@ -4999,10 +4859,8 @@ mod tests {
             let msg = ExecuteMsg::RepayNative {
                 denom: String::from("uusd"),
             };
-            let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-
-            let market_after_deposit = MARKETS.load(&deps.storage, b"uusd").unwrap();
-            assert!(!market_after_deposit.protocol_income_to_distribute.is_zero());
+            // check that repay succeeds
+            execute(deps.as_mut(), env, info, msg).unwrap();
         }
     }
 
@@ -5297,6 +5155,7 @@ mod tests {
             reserve_factor: Decimal::from_ratio(3u128, 100u128),
             asset_type: AssetType::Cw20,
             interests_last_updated: 0,
+            ma_token_address: Addr::unchecked("ma_cw20_debt"),
             ..Default::default()
         };
 
@@ -5310,6 +5169,7 @@ mod tests {
             reserve_factor: Decimal::from_ratio(2u128, 100u128),
             asset_type: AssetType::Native,
             interests_last_updated: 0,
+            ma_token_address: Addr::unchecked("ma_native_debt"),
             ..Default::default()
         };
 
@@ -5586,7 +5446,6 @@ mod tests {
 
             // get expected indices and rates for debt market
             let expected_debt_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &cw20_debt_market_initial,
                 block_time,
                 available_liquidity_cw20_debt,
@@ -5613,16 +5472,27 @@ mod tests {
 
             assert_eq!(
                 res.messages,
-                vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: collateral_market_ma_token_addr.to_string(),
-                    msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
-                        sender: user_address.to_string(),
-                        recipient: liquidator_address.to_string(),
-                        amount: expected_liquidated_collateral_amount_scaled.into(),
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                })),]
+                vec![
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: cw20_debt_market.ma_token_address.clone().to_string(),
+                        msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                            recipient: "protocol_rewards_collector".to_string(),
+                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                        })
+                        .unwrap(),
+                        funds: vec![]
+                    })),
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: collateral_market_ma_token_addr.to_string(),
+                        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
+                            sender: user_address.to_string(),
+                            recipient: liquidator_address.to_string(),
+                            amount: expected_liquidated_collateral_amount_scaled.into(),
+                        })
+                        .unwrap(),
+                        funds: vec![]
+                    })),
+                ]
             );
 
             mars::testing::assert_eq_vec(
@@ -5686,17 +5556,6 @@ mod tests {
                 expected_global_cw20_debt_scaled,
                 debt_market_after.debt_total_scaled
             );
-
-            // check correct accumulated protocol income to distribute
-            assert_eq!(
-                Uint128::zero(),
-                collateral_market_after.protocol_income_to_distribute
-            );
-            assert_eq!(
-                debt_market_before.protocol_income_to_distribute
-                    + expected_debt_rates.protocol_income_to_distribute,
-                debt_market_after.protocol_income_to_distribute
-            );
         }
 
         // Perform second successful liquidation sending an excess amount (should refund)
@@ -5735,7 +5594,6 @@ mod tests {
             let expected_refund_amount = second_debt_to_repay - expected_less_debt;
 
             let expected_debt_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &debt_market_before,
                 block_time,
                 available_liquidity_cw20_debt, // this is the same as before as it comes from mocks
@@ -5752,7 +5610,6 @@ mod tests {
                 * reverse_decimal(collateral_price);
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &collateral_market_before,
                 block_time,
                 available_liquidity_collateral, // this is the same as before as it comes from mocks
@@ -5762,7 +5619,6 @@ mod tests {
                 },
             );
 
-            let collateral_market_after = MARKETS.load(&deps.storage, b"collateral").unwrap();
             let debt_market_after = MARKETS
                 .load(&deps.storage, cw20_debt_contract_addr.as_bytes())
                 .unwrap();
@@ -5775,6 +5631,24 @@ mod tests {
             assert_eq!(
                 res.messages,
                 vec![
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: cw20_debt_market.ma_token_address.clone().to_string(),
+                        msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                            recipient: "protocol_rewards_collector".to_string(),
+                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                        })
+                        .unwrap(),
+                        funds: vec![]
+                    })),
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: collateral_market_ma_token_addr.to_string(),
+                        msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                            recipient: "protocol_rewards_collector".to_string(),
+                            amount: expected_collateral_rates.protocol_rewards_to_distribute,
+                        })
+                        .unwrap(),
+                        funds: vec![]
+                    })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
                         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
@@ -5826,11 +5700,11 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                     th_build_interests_updated_event(
                         cw20_debt_contract_addr.as_str(),
                         &expected_debt_rates
                     ),
-                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
             );
 
@@ -5861,17 +5735,6 @@ mod tests {
             assert_eq!(
                 expected_global_cw20_debt_scaled,
                 debt_market_after.debt_total_scaled
-            );
-
-            // check correct accumulated protocol income to distribute
-            assert_eq!(
-                debt_market_before.protocol_income_to_distribute
-                    + expected_debt_rates.protocol_income_to_distribute,
-                debt_market_after.protocol_income_to_distribute
-            );
-            assert_eq!(
-                expected_collateral_rates.protocol_income_to_distribute,
-                collateral_market_after.protocol_income_to_distribute
             );
         }
 
@@ -5940,7 +5803,6 @@ mod tests {
             let expected_refund_amount = debt_to_repay - expected_less_debt;
 
             let expected_debt_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &debt_market_before,
                 block_time,
                 available_liquidity_cw20_debt, // this is the same as before as it comes from mocks
@@ -5952,7 +5814,6 @@ mod tests {
             );
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &collateral_market_before,
                 block_time,
                 available_liquidity_collateral, // this is the same as before as it comes from mocks
@@ -5962,7 +5823,6 @@ mod tests {
                 },
             );
 
-            let collateral_market_after = MARKETS.load(&deps.storage, b"collateral").unwrap();
             let debt_market_after = MARKETS
                 .load(&deps.storage, cw20_debt_contract_addr.as_bytes())
                 .unwrap();
@@ -6028,6 +5888,7 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                     build_collateral_position_changed_event(
                         "collateral",
                         false,
@@ -6037,7 +5898,6 @@ mod tests {
                         cw20_debt_contract_addr.as_str(),
                         &expected_debt_rates
                     ),
-                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
             );
 
@@ -6067,18 +5927,6 @@ mod tests {
             assert_eq!(
                 expected_global_cw20_debt_scaled,
                 debt_market_after.debt_total_scaled
-            );
-
-            // check correct accumulated protocol income to distribute
-            assert_eq!(
-                expected_debt_rates.protocol_income_to_distribute,
-                debt_market_after.protocol_income_to_distribute
-                    - debt_market_before.protocol_income_to_distribute
-            );
-            assert_eq!(
-                expected_collateral_rates.protocol_income_to_distribute,
-                collateral_market_after.protocol_income_to_distribute
-                    - collateral_market_before.protocol_income_to_distribute
             );
         }
 
@@ -6151,7 +5999,6 @@ mod tests {
             let expected_refund_amount = debt_to_repay - expected_less_debt;
 
             let expected_debt_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &debt_market_before,
                 block_time,
                 available_liquidity_native_debt, // this is the same as before as it comes from mocks
@@ -6163,7 +6010,6 @@ mod tests {
             );
 
             let expected_collateral_rates = th_get_expected_indices_and_rates(
-                &deps.as_ref(),
                 &collateral_market_before,
                 block_time,
                 available_liquidity_collateral, // this is the same as before as it comes from mocks
@@ -6173,7 +6019,6 @@ mod tests {
                 },
             );
 
-            let collateral_market_after = MARKETS.load(&deps.storage, b"collateral").unwrap();
             let debt_market_after = MARKETS.load(&deps.storage, b"native_debt").unwrap();
 
             // NOTE: expected_liquidated_collateral_amount_scaled should be equal user_collateral_balance_scaled
@@ -6183,9 +6028,25 @@ mod tests {
                 expected_collateral_rates.liquidity_index,
             );
 
+            // no rewards to distribute for collateral asset, so no mint message is
+            // sent
+            assert_eq!(
+                expected_collateral_rates.protocol_rewards_to_distribute,
+                Uint128::zero()
+            );
+
             assert_eq!(
                 res.messages,
                 vec![
+                    SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                        contract_addr: debt_market_after.ma_token_address.to_string(),
+                        msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
+                            recipient: "protocol_rewards_collector".to_string(),
+                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                        })
+                        .unwrap(),
+                        funds: vec![]
+                    })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
                         msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
@@ -6239,13 +6100,13 @@ mod tests {
             assert_eq!(
                 res.events,
                 vec![
+                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                     build_collateral_position_changed_event(
                         "collateral",
                         false,
                         user_address.to_string()
                     ),
                     th_build_interests_updated_event("native_debt", &expected_debt_rates),
-                    th_build_interests_updated_event("collateral", &expected_collateral_rates),
                 ]
             );
 
@@ -6272,18 +6133,6 @@ mod tests {
             assert_eq!(
                 expected_global_native_debt_scaled,
                 debt_market_after.debt_total_scaled
-            );
-
-            // check correct accumulated protocol income to distribute
-            assert_eq!(
-                expected_debt_rates.protocol_income_to_distribute,
-                debt_market_after.protocol_income_to_distribute
-                    - debt_market_before.protocol_income_to_distribute
-            );
-            assert_eq!(
-                expected_collateral_rates.protocol_income_to_distribute,
-                collateral_market_after.protocol_income_to_distribute
-                    - collateral_market_before.protocol_income_to_distribute
             );
         }
     }
@@ -6334,9 +6183,11 @@ mod tests {
                 &liquidator_addr,
                 native_collateral_asset.clone(),
                 b"native_collateral",
+                "native_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap_err();
             assert_eq!(
@@ -6355,9 +6206,11 @@ mod tests {
                 &liquidator_addr,
                 native_collateral_asset,
                 b"native_collateral",
+                "native_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap();
         }
@@ -6383,9 +6236,11 @@ mod tests {
                 &liquidator_addr,
                 cw20_collateral_asset.clone(),
                 b"cw20_collateral",
+                "cw20_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap_err();
             assert_eq!(
@@ -6404,9 +6259,11 @@ mod tests {
                 &liquidator_addr,
                 cw20_collateral_asset,
                 b"cw20_collateral",
+                "cw20_collateral",
                 &mut market,
                 collateral_amount_to_liquidate,
-                &mut vec![],
+                Addr::unchecked("protocol_rewards_collector"),
+                Response::new(),
             )
             .unwrap();
         }
@@ -6541,10 +6398,7 @@ mod tests {
         let env = mock_env(MockEnvParams::default());
         let info = mock_info(debt_contract_addr.as_str());
         let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
-        assert_eq!(
-            error_res,
-            ContractError::CannotLiquidateWhenValidHealthFactor {}
-        );
+        assert_eq!(error_res, ContractError::CannotLiquidateHealthyPosition {});
     }
 
     #[test]
@@ -6819,7 +6673,6 @@ mod tests {
         let res = execute(deps.as_mut(), borrow_env, info, borrow_msg).unwrap();
 
         let expected_params = th_get_expected_indices_and_rates(
-            &deps.as_ref(),
             &market_initial,
             block_time,
             available_liquidity,
@@ -7019,210 +6872,6 @@ mod tests {
     }
 
     #[test]
-    fn test_distribute_protocol_income() {
-        // initialize contract with liquidity
-        let available_liquidity = 2000000000u128;
-        let mut deps = th_setup(&[coin(available_liquidity, "somecoin")]);
-
-        // Set tax data
-        deps.querier.set_native_tax(
-            Decimal::from_ratio(1u128, 100u128),
-            &[(String::from("somecoin"), Uint128::new(100u128))],
-        );
-
-        let asset = Asset::Native {
-            denom: String::from("somecoin"),
-        };
-        let protocol_income_to_distribute = Uint128::from(1_000_000_u64);
-
-        // initialize market with non-zero amount of protocol_income_to_distribute
-        let mock_market = Market {
-            ma_token_address: Addr::unchecked("matoken"),
-            borrow_index: Decimal::from_ratio(12u128, 10u128),
-            liquidity_index: Decimal::from_ratio(8u128, 10u128),
-            borrow_rate: Decimal::from_ratio(20u128, 100u128),
-            liquidity_rate: Decimal::from_ratio(10u128, 100u128),
-            reserve_factor: Decimal::from_ratio(1u128, 10u128),
-            debt_total_scaled: Uint128::zero(),
-            interests_last_updated: 10000000,
-            asset_type: AssetType::Native,
-            protocol_income_to_distribute,
-            ..Default::default()
-        };
-        // should get index 0
-        let market_initial = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
-
-        let mut block_time = mock_market.interests_last_updated + 10000u64;
-
-        // call function providing amount exceeding protocol_income_to_distribute, should fail
-        let exceeding_amount = protocol_income_to_distribute + Uint128::from(1_000_u64);
-        let distribute_income_msg = ExecuteMsg::DistributeProtocolIncome {
-            asset: Asset::Native {
-                denom: "somecoin".to_string(),
-            },
-            amount: Some(exceeding_amount),
-        };
-        let env = mock_env_at_block_time(block_time);
-        let info = mock_info("anyone");
-
-        let error_res = execute(
-            deps.as_mut(),
-            env.clone(),
-            info.clone(),
-            distribute_income_msg,
-        )
-        .unwrap_err();
-        assert_eq!(error_res, ContractError::CannotDistributeProtocolIncome {});
-
-        // call function providing amount less than protocol_income_to_distribute
-        let permissible_amount = Decimal::from_ratio(1u128, 2u128) * protocol_income_to_distribute;
-        let distribute_income_msg = ExecuteMsg::DistributeProtocolIncome {
-            asset: asset.clone(),
-            amount: Some(permissible_amount),
-        };
-        let res = execute(deps.as_mut(), env.clone(), info, distribute_income_msg).unwrap();
-
-        let config = CONFIG.load(&deps.storage).unwrap();
-        let market_after_distribution = MARKETS.load(&deps.storage, b"somecoin").unwrap();
-
-        let expected_insurance_fund_amount = permissible_amount * config.insurance_fund_fee_share;
-        let expected_treasury_amount = permissible_amount * config.treasury_fee_share;
-        let expected_staking_amount =
-            permissible_amount - (expected_insurance_fund_amount + expected_treasury_amount);
-
-        let scaled_mint_amount = get_scaled_amount(
-            expected_treasury_amount,
-            get_updated_liquidity_index(&market_initial, env.block.time.seconds()),
-        );
-
-        assert_eq!(
-            res.messages,
-            vec![
-                SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "insurance_fund".to_string(),
-                    amount: vec![deduct_tax(
-                        deps.as_ref(),
-                        Coin {
-                            denom: "somecoin".to_string(),
-                            amount: expected_insurance_fund_amount.into(),
-                        }
-                    )
-                    .unwrap()],
-                })),
-                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: market_initial.ma_token_address.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Mint {
-                        recipient: "treasury".to_string(),
-                        amount: scaled_mint_amount.into(),
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                })),
-                SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "staking".to_string(),
-                    amount: vec![deduct_tax(
-                        deps.as_ref(),
-                        Coin {
-                            denom: "somecoin".to_string(),
-                            amount: expected_staking_amount.into(),
-                        }
-                    )
-                    .unwrap()],
-                }))
-            ]
-        );
-        assert_eq!(
-            res.attributes,
-            vec![
-                attr("action", "distribute_protocol_income"),
-                attr("asset", "somecoin"),
-                attr("amount", permissible_amount),
-            ]
-        );
-
-        let expected_remaining_income_to_be_distributed =
-            protocol_income_to_distribute - permissible_amount;
-        assert_eq!(
-            market_after_distribution.protocol_income_to_distribute,
-            expected_remaining_income_to_be_distributed
-        );
-
-        // call function without providing an amount, should send full remaining amount to contracts
-        block_time += 1000;
-        let env = mock_env_at_block_time(block_time);
-        let info = mock_info("anyone");
-        let distribute_income_msg = ExecuteMsg::DistributeProtocolIncome {
-            asset,
-            amount: None,
-        };
-        let res = execute(deps.as_mut(), env.clone(), info, distribute_income_msg).unwrap();
-
-        // verify messages are correct and protocol_income_to_distribute field is now zero
-        let expected_insurance_amount =
-            expected_remaining_income_to_be_distributed * config.insurance_fund_fee_share;
-        let expected_treasury_amount =
-            expected_remaining_income_to_be_distributed * config.treasury_fee_share;
-        let expected_staking_amount = expected_remaining_income_to_be_distributed
-            - (expected_insurance_amount + expected_treasury_amount);
-
-        let scaled_mint_amount = get_scaled_amount(
-            expected_treasury_amount,
-            get_updated_liquidity_index(&market_after_distribution, env.block.time.seconds()),
-        );
-
-        assert_eq!(
-            res.messages,
-            vec![
-                SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "insurance_fund".to_string(),
-                    amount: vec![deduct_tax(
-                        deps.as_ref(),
-                        Coin {
-                            denom: "somecoin".to_string(),
-                            amount: expected_insurance_fund_amount.into(),
-                        }
-                    )
-                    .unwrap()],
-                })),
-                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: market_initial.ma_token_address.to_string(),
-                    msg: to_binary(&Cw20ExecuteMsg::Mint {
-                        recipient: "treasury".to_string(),
-                        amount: scaled_mint_amount.into(),
-                    })
-                    .unwrap(),
-                    funds: vec![]
-                })),
-                SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
-                    to_address: "staking".to_string(),
-                    amount: vec![deduct_tax(
-                        deps.as_ref(),
-                        Coin {
-                            denom: "somecoin".to_string(),
-                            amount: expected_staking_amount.into(),
-                        }
-                    )
-                    .unwrap()],
-                }))
-            ]
-        );
-        assert_eq!(
-            res.attributes,
-            vec![
-                attr("action", "distribute_protocol_income"),
-                attr("asset", "somecoin"),
-                attr("amount", expected_remaining_income_to_be_distributed),
-            ]
-        );
-
-        let market_after_second_distribution = MARKETS.load(&deps.storage, b"somecoin").unwrap();
-        assert_eq!(
-            market_after_second_distribution.protocol_income_to_distribute,
-            Uint128::zero()
-        );
-    }
-
-    #[test]
     fn test_query_collateral() {
         let mut deps = th_setup(&[]);
 
@@ -7287,8 +6936,6 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            insurance_fund_fee_share: Some(Decimal::from_ratio(5u128, 10u128)),
-            treasury_fee_share: Some(Decimal::from_ratio(3u128, 10u128)),
             ma_token_code_id: Some(1u64),
             close_factor: Some(Decimal::from_ratio(1u128, 2u128)),
         };
@@ -7321,7 +6968,6 @@ mod tests {
                 asset_type: AssetType::Native,
                 maintenance_margin: Decimal::one(),
                 liquidation_bonus: Decimal::zero(),
-                protocol_income_to_distribute: Uint128::zero(),
                 interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
                 active: true,
                 deposit_enabled: true,
@@ -7368,7 +7014,7 @@ mod tests {
         liquidity_index: Decimal,
         borrow_rate: Decimal,
         liquidity_rate: Decimal,
-        protocol_income_to_distribute: Uint128,
+        protocol_rewards_to_distribute: Uint128,
     }
 
     fn th_build_interests_updated_event(label: &str, ir: &TestInterestResults) -> Event {
@@ -7391,7 +7037,6 @@ mod tests {
     /// Takes a market before an action (ie: a borrow) among some test parameters
     /// used in that action and computes the expected indices and rates after that action.
     fn th_get_expected_indices_and_rates(
-        deps: &Deps,
         market: &Market,
         block_time: u64,
         initial_liquidity: u128,
@@ -7399,8 +7044,8 @@ mod tests {
     ) -> TestInterestResults {
         let expected_indices = th_get_expected_indices(market, block_time);
 
-        let expected_protocol_income_to_distribute =
-            th_get_expected_protocol_income(market, &expected_indices);
+        let expected_protocol_rewards_to_distribute =
+            th_get_expected_protocol_rewards(market, &expected_indices);
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled =
@@ -7417,17 +7062,9 @@ mod tests {
                 Uint128::zero()
             };
         let dec_debt_total = get_descaled_amount(new_debt_total_scaled, expected_indices.borrow);
-        let total_protocol_income_to_distribute =
-            market.protocol_income_to_distribute + expected_protocol_income_to_distribute;
-
-        let config = CONFIG.load(deps.storage).unwrap();
-
-        let dec_protocol_income_minus_treasury_amount =
-            (Decimal::one() - config.treasury_fee_share) * total_protocol_income_to_distribute;
         let contract_current_balance = Uint128::from(initial_liquidity);
         let liquidity_taken = Uint128::from(deltas.less_liquidity);
-        let dec_liquidity_total =
-            contract_current_balance - liquidity_taken - dec_protocol_income_minus_treasury_amount;
+        let dec_liquidity_total = contract_current_balance - liquidity_taken;
         let expected_utilization_rate =
             Decimal::from_ratio(dec_debt_total, dec_liquidity_total + dec_debt_total);
 
@@ -7444,13 +7081,13 @@ mod tests {
             liquidity_index: expected_indices.liquidity,
             borrow_rate: expected_borrow_rate,
             liquidity_rate: expected_liquidity_rate,
-            protocol_income_to_distribute: expected_protocol_income_to_distribute,
+            protocol_rewards_to_distribute: expected_protocol_rewards_to_distribute,
         }
     }
 
     /// Compute protocol income to be distributed (using values up to the instant
     /// before the contract call is made)
-    fn th_get_expected_protocol_income(
+    fn th_get_expected_protocol_rewards(
         market: &Market,
         expected_indices: &TestExpectedIndices,
     ) -> Uint128 {

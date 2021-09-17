@@ -83,7 +83,7 @@ pub enum ContractError {
     CannotLiquidateWhenNoDebtBalance {},
 
     #[error("User's health factor is not less than 1 and thus cannot be liquidated")]
-    CannotLiquidateWhenValidHealthFactor {},
+    CannotLiquidateHealthyPosition {},
 
     #[error("Contract does not have enough collateral liquidity to send back underlying asset")]
     CannotLiquidateWhenNotEnoughCollateral {},
@@ -92,12 +92,6 @@ pub enum ContractError {
         "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
     )]
     CannotTransferTokenWhenInvalidHealthFactor {},
-
-    #[error("Amount specified exceeds market's income to be distributed")]
-    CannotDistributeProtocolIncome {},
-
-    #[error("Invalid fee share amounts. Sum of insurance and treasury fee shares exceeds one")]
-    InvalidFeeShareAmounts {},
 
     #[error("maintenance_margin should be greater than max_loan_to_value. maintenance_margin: {maintenance_margin:?}, max_loan_to_value: {max_loan_to_value:?}")]
     InvalidMaintenanceMargin {
@@ -117,7 +111,7 @@ pub enum ContractError {
     #[error("Failed to encode asset reference into string")]
     CannotEncodeAssetReferenceIntoString {},
 
-    #[error("Protocol income to be distributed and liquidity taken cannot be greater than available liquidity")]
+    #[error("Contract current asset balance cannot be less than liquidity taken")]
     OperationExceedsAvailableLiquidity {},
 
     #[error("Cannot withdraw asset {asset:?}")]

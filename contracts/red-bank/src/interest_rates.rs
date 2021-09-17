@@ -1,30 +1,42 @@
+use cosmwasm_std::{
+    to_binary, Addr, CosmosMsg, Decimal, DepsMut, Env, Event, Response, StdResult, Uint128, WasmMsg,
+};
+use cw20::Cw20ExecuteMsg;
+use std::str;
+
+use mars::asset::AssetType;
+use mars::helpers::cw20_get_balance;
+use mars::math::{decimal_multiplication, reverse_decimal};
+
 use crate::error::ContractError;
 use crate::error::ContractError::{
     CannotEncodeAssetReferenceIntoString, OperationExceedsAvailableLiquidity,
 };
 use crate::interest_rate_models::InterestRateModel;
-use crate::state::{Market, CONFIG};
-use cosmwasm_std::{Decimal, DepsMut, Env, Uint128};
-use mars::asset::AssetType;
-use mars::helpers::cw20_get_balance;
-use mars::math::{decimal_multiplication, reverse_decimal};
-use std::str;
+use crate::state::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
 
 const SECONDS_PER_YEAR: u64 = 31536000u64;
 
-/// Updates market indices and protocol_income by applying current interest rates on the time between
-/// last interest update and current block.
-/// Note it does not save the market to the store (that is left to the caller)
-pub fn apply_accumulated_interests(env: &Env, market: &mut Market) {
+/// Calculates accumulated interest for the time between last time market index was updated
+/// and current block.
+/// Applies desired side effects:
+/// 1. Updates market borrow and liquidity indices.
+/// 2. If there are any protocol rewards, builds a mint to the rewards collector and adds it
+///    to the returned response
+/// Note it does not save the market to store
+pub fn apply_accumulated_interests(
+    env: &Env,
+    protocol_rewards_collector_address: Addr,
+    market: &mut Market,
+    mut response: Response,
+) -> StdResult<Response> {
     let current_timestamp = env.block.time.seconds();
-    // Since interest is updated on every change on scale debt, multiplying the scaled debt for each
-    // of the indices and subtracting them returns the accrued borrow interest for the period since
-    // when the indices were last updated and the current point in time.
     let previous_borrow_index = market.borrow_index;
 
+    // Update market indices
     if market.interests_last_updated < current_timestamp {
         let time_elapsed = current_timestamp - market.interests_last_updated;
 
@@ -45,17 +57,32 @@ pub fn apply_accumulated_interests(env: &Env, market: &mut Market) {
         market.interests_last_updated = current_timestamp;
     }
 
+    // Compute accrued protocol rewards
     let previous_debt_total = get_descaled_amount(market.debt_total_scaled, previous_borrow_index);
     let new_debt_total = get_descaled_amount(market.debt_total_scaled, market.borrow_index);
 
-    let interest_accrued = if new_debt_total > previous_debt_total {
+    let borrow_interest_accrued = if new_debt_total > previous_debt_total {
+        // debt stays constant between the application of the interest rate
+        // so the differece between debt at the start and the end is the
+        // total borrow interest accrued
         new_debt_total - previous_debt_total
     } else {
         Uint128::zero()
     };
 
-    let new_protocol_income_to_distribute = interest_accrued * market.reserve_factor;
-    market.protocol_income_to_distribute += new_protocol_income_to_distribute;
+    let accrued_protocol_rewards = borrow_interest_accrued * market.reserve_factor;
+
+    if accrued_protocol_rewards > Uint128::zero() {
+        response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: market.ma_token_address.clone().into(),
+            msg: to_binary(&Cw20ExecuteMsg::Mint {
+                recipient: protocol_rewards_collector_address.into(),
+                amount: accrued_protocol_rewards,
+            })?,
+            funds: vec![],
+        }))
+    }
+    Ok(response)
 }
 
 pub fn calculate_applied_linear_interest_rate(
@@ -71,7 +98,7 @@ pub fn calculate_applied_linear_interest_rate(
 }
 
 /// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
-/// the value is multiplied by SCALED_FACTOR for greater precision.
+/// the value is multiplied by SCALING_FACTOR for greater precision.
 /// Example:
 /// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
 /// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
@@ -134,13 +161,16 @@ pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal 
 
 /// Update interest rates for current liquidity and debt levels
 /// Note it does not save the market to the store (that is left to the caller)
+/// Returns response with appended interest rates updated event
 pub fn update_interest_rates(
     deps: &DepsMut,
     env: &Env,
     reference: &[u8],
     market: &mut Market,
     liquidity_taken: Uint128,
-) -> Result<(), ContractError> {
+    asset_label: &str,
+    mut response: Response,
+) -> Result<Response, ContractError> {
     let contract_current_balance = match market.asset_type {
         AssetType::Native => {
             let denom = str::from_utf8(reference);
@@ -163,25 +193,10 @@ pub fn update_interest_rates(
         }
     };
 
-    // Get protocol income to be deducted from liquidity (doesn't belong to the money market
-    // anymore)
-    let config = CONFIG.load(deps.storage)?;
-    // NOTE: No check for underflow because this is done on config validations
-    let protocol_income_minus_treasury_amount =
-        (Decimal::one() - config.treasury_fee_share) * market.protocol_income_to_distribute;
-    let liquidity_to_deduct_from_current_balance =
-        liquidity_taken.checked_add(protocol_income_minus_treasury_amount)?;
-
-    let available_liquidity = if contract_current_balance < liquidity_to_deduct_from_current_balance
-    {
-        // liquidity_taken for deposit / repay is zero so we don't want to block these operations
-        if !liquidity_taken.is_zero() {
-            return Err(OperationExceedsAvailableLiquidity {});
-        }
-        Uint128::zero()
-    } else {
-        contract_current_balance - liquidity_to_deduct_from_current_balance
-    };
+    if contract_current_balance < liquidity_taken {
+        return Err(OperationExceedsAvailableLiquidity {});
+    }
+    let available_liquidity = contract_current_balance - liquidity_taken;
 
     let total_debt = get_descaled_amount(
         market.debt_total_scaled,
@@ -203,7 +218,17 @@ pub fn update_interest_rates(
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
-    Ok(())
+    response = response.add_event(build_interests_updated_event(asset_label, market));
+    Ok(response)
+}
+
+pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
+    Event::new("interests_updated")
+        .add_attribute("market", label)
+        .add_attribute("borrow_index", market.borrow_index.to_string())
+        .add_attribute("liquidity_index", market.liquidity_index.to_string())
+        .add_attribute("borrow_rate", market.borrow_rate.to_string())
+        .add_attribute("liquidity_rate", market.liquidity_rate.to_string())
 }
 
 #[cfg(test)]
