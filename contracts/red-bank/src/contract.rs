@@ -4859,8 +4859,8 @@ mod tests {
             let msg = ExecuteMsg::RepayNative {
                 denom: String::from("uusd"),
             };
-            let _res = execute(deps.as_mut(), env, info, msg).unwrap();
-            // TODO: Should I delete this test?
+            // check that repay succeeds
+            execute(deps.as_mut(), env, info, msg).unwrap();
         }
     }
 

@@ -1,15 +1,13 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Config",
-  "description": "Lending pool global configuration",
+  "description": "Global configuration",
   "type": "object",
   "required": [
     "address_provider_address",
     "close_factor",
-    "insurance_fund_fee_share",
     "ma_token_code_id",
-    "owner",
-    "treasury_fee_share"
+    "owner"
   ],
   "properties": {
     "address_provider_address": {
@@ -28,14 +26,6 @@
         }
       ]
     },
-    "insurance_fund_fee_share": {
-      "description": "Percentage of fees that are sent to the insurance fund",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Decimal"
-        }
-      ]
-    },
     "ma_token_code_id": {
       "description": "maToken code id used to instantiate new tokens",
       "type": "integer",
@@ -47,14 +37,6 @@
       "allOf": [
         {
           "$ref": "#/definitions/Addr"
-        }
-      ]
-    },
-    "treasury_fee_share": {
-      "description": "Percentage of fees that are sent to the treasury",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Decimal"
         }
       ]
     }

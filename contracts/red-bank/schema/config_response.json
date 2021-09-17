@@ -5,20 +5,15 @@
   "required": [
     "address_provider_address",
     "close_factor",
-    "insurance_fund_fee_share",
     "ma_token_code_id",
     "market_count",
-    "owner",
-    "treasury_fee_share"
+    "owner"
   ],
   "properties": {
     "address_provider_address": {
       "$ref": "#/definitions/Addr"
     },
     "close_factor": {
-      "$ref": "#/definitions/Decimal"
-    },
-    "insurance_fund_fee_share": {
       "$ref": "#/definitions/Decimal"
     },
     "ma_token_code_id": {
@@ -33,9 +28,6 @@
     },
     "owner": {
       "$ref": "#/definitions/Addr"
-    },
-    "treasury_fee_share": {
-      "$ref": "#/definitions/Decimal"
     }
   },
   "definitions": {
