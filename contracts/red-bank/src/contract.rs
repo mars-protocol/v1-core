@@ -3066,7 +3066,10 @@ mod tests {
                 contract_addr: market_before.ma_token_address.to_string(),
                 msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                     recipient: "protocol_rewards_collector".to_string(),
-                    amount: expected_protocol_rewards,
+                    amount: get_scaled_amount(
+                        expected_protocol_rewards,
+                        new_market.liquidity_index
+                    )
                 })
                 .unwrap(),
                 funds: vec![]
@@ -3427,7 +3430,10 @@ mod tests {
                     contract_addr: "matoken".to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                         recipient: "protocol_rewards_collector".to_string(),
-                        amount: expected_params.protocol_rewards_to_distribute,
+                        amount: get_scaled_amount(
+                            expected_params.protocol_rewards_to_distribute,
+                            market.liquidity_index
+                        ),
                     })
                     .unwrap(),
                     funds: vec![]
@@ -3570,7 +3576,10 @@ mod tests {
                     contract_addr: ma_token_addr.to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                         recipient: "protocol_rewards_collector".to_string(),
-                        amount: expected_params.protocol_rewards_to_distribute,
+                        amount: get_scaled_amount(
+                            expected_params.protocol_rewards_to_distribute,
+                            market.liquidity_index
+                        ),
                     })
                     .unwrap(),
                     funds: vec![]
@@ -3974,7 +3983,10 @@ mod tests {
                     contract_addr: "matoken".to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                         recipient: "protocol_rewards_collector".to_string(),
-                        amount: expected_params.protocol_rewards_to_distribute,
+                        amount: get_scaled_amount(
+                            expected_params.protocol_rewards_to_distribute,
+                            expected_params.liquidity_index
+                        ),
                     })
                     .unwrap(),
                     funds: vec![]
@@ -5477,7 +5489,10 @@ mod tests {
                         contract_addr: cw20_debt_market.ma_token_address.clone().to_string(),
                         msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                             recipient: "protocol_rewards_collector".to_string(),
-                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                            amount: get_scaled_amount(
+                                expected_debt_rates.protocol_rewards_to_distribute,
+                                expected_debt_rates.liquidity_index
+                            ),
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5635,7 +5650,10 @@ mod tests {
                         contract_addr: cw20_debt_market.ma_token_address.clone().to_string(),
                         msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                             recipient: "protocol_rewards_collector".to_string(),
-                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                            amount: get_scaled_amount(
+                                expected_debt_rates.protocol_rewards_to_distribute,
+                                expected_debt_rates.liquidity_index
+                            ),
                         })
                         .unwrap(),
                         funds: vec![]
@@ -5644,7 +5662,10 @@ mod tests {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
                         msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                             recipient: "protocol_rewards_collector".to_string(),
-                            amount: expected_collateral_rates.protocol_rewards_to_distribute,
+                            amount: get_scaled_amount(
+                                expected_collateral_rates.protocol_rewards_to_distribute,
+                                expected_collateral_rates.liquidity_index
+                            ),
                         })
                         .unwrap(),
                         funds: vec![]
@@ -6042,7 +6063,10 @@ mod tests {
                         contract_addr: debt_market_after.ma_token_address.to_string(),
                         msg: to_binary(&ma_token::msg::ExecuteMsg::Mint {
                             recipient: "protocol_rewards_collector".to_string(),
-                            amount: expected_debt_rates.protocol_rewards_to_distribute,
+                            amount: get_scaled_amount(
+                                expected_debt_rates.protocol_rewards_to_distribute,
+                                expected_debt_rates.liquidity_index
+                            ),
                         })
                         .unwrap(),
                         funds: vec![]
