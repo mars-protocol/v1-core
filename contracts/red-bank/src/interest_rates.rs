@@ -24,7 +24,7 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 /// and current block.
 /// Applies desired side effects:
 /// 1. Updates market borrow and liquidity indices.
-/// 2. If there are any protocol rewards, builds a mint to the rewards colletor and adds it
+/// 2. If there are any protocol rewards, builds a mint to the rewards collector and adds it
 ///    to the returned response
 /// Note it does not save the market to store
 pub fn apply_accumulated_interests(
