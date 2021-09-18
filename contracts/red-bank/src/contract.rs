@@ -30,17 +30,6 @@ use mars::math::reverse_decimal;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
-use crate::error::ContractError::{
-    AssetAlreadyInitialized, AssetNotInitialized, BorrowAmountExceedsGivenCollateral,
-    BorrowAmountExceedsUncollateralizedLoanLimit, BorrowMarketNotExists, BorrowNotAllowed,
-    CannotLiquidateWhenNoCollateralBalance, CannotLiquidateWhenNoDebtBalance,
-    CannotLiquidateWhenNotEnoughCollateral, CannotLiquidateWhenPositiveUncollateralizedLoanLimit,
-    CannotRepayMoreThanDebt, CannotRepayZeroDebt, CannotTransferTokenWhenInvalidHealthFactor,
-    DepositNotAllowed, InvalidBorrowAmount, InvalidDepositAmount, InvalidHealthFactorAfterWithdraw,
-    InvalidLiquidateAmount, InvalidLiquidityIndex, InvalidRepayAmount, InvalidWithdrawAmount,
-    LiquidationNotAllowedWhenCollateralMarketInactive, LiquidationNotAllowedWhenDebtMarketInactive,
-    RepayNotAllowed, UserNoBalance, UserNoCollateral, UserNoCollateralBalance, WithdrawNotAllowed,
-};
 use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
@@ -330,7 +319,7 @@ pub fn execute_withdraw(
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     if !market.allow_withdraw() {
-        return Err(WithdrawNotAllowed { asset: asset_label });
+        return Err(ContractError::WithdrawNotAllowed { asset: asset_label });
     }
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -338,7 +327,7 @@ pub fn execute_withdraw(
         cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
 
     if withdrawer_balance_scaled.is_zero() {
-        return Err(UserNoBalance { asset: asset_label });
+        return Err(ContractError::UserNoBalance { asset: asset_label });
     }
 
     // Check user has sufficient balance to send back
@@ -349,7 +338,7 @@ pub fn execute_withdraw(
                 get_updated_liquidity_index(&market, env.block.time.seconds()),
             );
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
-                return Err(InvalidWithdrawAmount { asset: asset_label });
+                return Err(ContractError::InvalidWithdrawAmount { asset: asset_label });
             };
             (amount, amount_scaled)
         }
@@ -417,7 +406,7 @@ pub fn execute_withdraw(
             user_position.total_collateralized_debt_in_uusd,
         );
         if health_factor_after_withdraw < Decimal::one() {
-            return Err(InvalidHealthFactorAfterWithdraw {});
+            return Err(ContractError::InvalidHealthFactorAfterWithdraw {});
         }
     }
 
@@ -576,7 +565,7 @@ pub fn execute_init_asset(
                 }));
             Ok(res)
         }
-        Some(_) => Err(AssetAlreadyInitialized {}),
+        Some(_) => Err(ContractError::AssetAlreadyInitialized {}),
     }
 }
 
@@ -645,7 +634,7 @@ pub fn execute_update_asset(
 
             Ok(response)
         }
-        None => Err(AssetNotInitialized {}),
+        None => Err(ContractError::AssetNotInitialized {}),
     }
 }
 
@@ -662,14 +651,14 @@ pub fn execute_deposit(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_deposit() {
-        return Err(DepositNotAllowed {
+        return Err(ContractError::DepositNotAllowed {
             asset: asset_label.to_string(),
         });
     }
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
-        return Err(InvalidDepositAmount {
+        return Err(ContractError::InvalidDepositAmount {
             asset: asset_label.to_string(),
         });
     }
@@ -716,7 +705,7 @@ pub fn execute_deposit(
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
     if market.liquidity_index.is_zero() {
-        return Err(InvalidLiquidityIndex {});
+        return Err(ContractError::InvalidLiquidityIndex {});
     }
     let mint_amount = get_scaled_amount(
         deposit_amount,
@@ -753,7 +742,7 @@ pub fn execute_borrow(
 
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
-        return Err(InvalidBorrowAmount { asset: asset_label });
+        return Err(ContractError::InvalidBorrowAmount { asset: asset_label });
     }
 
     // Load market and user state
@@ -761,10 +750,10 @@ pub fn execute_borrow(
     let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
         Ok(borrow_market) if borrow_market.allow_borrow() => borrow_market,
         Ok(_) => {
-            return Err(BorrowNotAllowed { asset: asset_label });
+            return Err(ContractError::BorrowNotAllowed { asset: asset_label });
         }
         Err(_) => {
-            return Err(BorrowMarketNotExists { asset: asset_label });
+            return Err(ContractError::BorrowMarketNotExists { asset: asset_label });
         }
     };
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
@@ -777,7 +766,7 @@ pub fn execute_borrow(
         Some(user) => user,
         None => {
             if uncollateralized_loan_limit.is_zero() {
-                return Err(UserNoCollateral {});
+                return Err(ContractError::UserNoCollateral {});
             }
             // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
             User::default()
@@ -828,7 +817,7 @@ pub fn execute_borrow(
             .total_debt_in_uusd
             .checked_add(borrow_amount_in_uusd)?;
         if total_debt_in_uusd_after_borrow > user_position.max_debt_in_uusd {
-            return Err(BorrowAmountExceedsGivenCollateral {});
+            return Err(ContractError::BorrowAmountExceedsGivenCollateral {});
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
@@ -852,7 +841,7 @@ pub fn execute_borrow(
 
         let debt_after_borrow = debt_amount.checked_add(borrow_amount)?;
         if debt_after_borrow > uncollateralized_loan_limit {
-            return Err(BorrowAmountExceedsUncollateralizedLoanLimit {});
+            return Err(ContractError::BorrowAmountExceedsUncollateralizedLoanLimit {});
         }
     }
 
@@ -941,14 +930,14 @@ pub fn execute_repay(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_repay() {
-        return Err(RepayNotAllowed {
+        return Err(ContractError::RepayNotAllowed {
             asset: asset_label.to_string(),
         });
     }
 
     // Cannot repay zero amount
     if repay_amount.is_zero() {
-        return Err(InvalidRepayAmount {
+        return Err(ContractError::InvalidRepayAmount {
             asset: asset_label.to_string(),
         });
     }
@@ -957,7 +946,7 @@ pub fn execute_repay(
     let mut debt = DEBTS.load(deps.storage, (asset_reference, &repayer_address))?;
 
     if debt.amount_scaled.is_zero() {
-        return Err(CannotRepayZeroDebt {});
+        return Err(ContractError::CannotRepayZeroDebt {});
     }
 
     let config = CONFIG.load(deps.storage)?;
@@ -1014,7 +1003,7 @@ pub fn execute_repay(
     DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
-        return Err(CannotRepayMoreThanDebt {});
+        return Err(ContractError::CannotRepayMoreThanDebt {});
     }
     market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
 
@@ -1072,13 +1061,13 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )? {
         if !limit.is_zero() {
-            return Err(CannotLiquidateWhenPositiveUncollateralizedLoanLimit {});
+            return Err(ContractError::CannotLiquidateWhenPositiveUncollateralizedLoanLimit {});
         }
     };
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_asset_amount.is_zero() {
-        return Err(InvalidLiquidateAmount {
+        return Err(ContractError::InvalidLiquidateAmount {
             asset: debt_asset_label,
         });
     }
@@ -1089,9 +1078,11 @@ pub fn execute_liquidate(
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
     if !collateral_market.allow_liquidate() {
-        return Err(LiquidationNotAllowedWhenCollateralMarketInactive {
-            asset: collateral_asset_label,
-        });
+        return Err(
+            ContractError::LiquidationNotAllowedWhenCollateralMarketInactive {
+                asset: collateral_asset_label,
+            },
+        );
     }
 
     // check if user has available collateral in specified collateral asset to be liquidated
@@ -1105,7 +1096,7 @@ pub fn execute_liquidate(
         get_updated_liquidity_index(&collateral_market, block_time),
     );
     if user_collateral_balance.is_zero() {
-        return Err(CannotLiquidateWhenNoCollateralBalance {});
+        return Err(ContractError::CannotLiquidateWhenNoCollateralBalance {});
     }
 
     // check if user has outstanding debt in the deposited asset that needs to be repayed
@@ -1114,7 +1105,7 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     if user_debt.amount_scaled.is_zero() {
-        return Err(CannotLiquidateWhenNoDebtBalance {});
+        return Err(ContractError::CannotLiquidateWhenNoDebtBalance {});
     }
 
     // 2. Compute health factor
@@ -1141,7 +1132,9 @@ pub fn execute_liquidate(
 
     let health_factor = match user_position.health_status {
         // NOTE: Should not get in practice as it would fail on the debt asset check
-        UserHealthStatus::NotBorrowing => return Err(CannotLiquidateWhenNoDebtBalance {}),
+        UserHealthStatus::NotBorrowing => {
+            return Err(ContractError::CannotLiquidateWhenNoDebtBalance {})
+        }
         UserHealthStatus::Borrowing(hf) => hf,
     };
 
@@ -1153,7 +1146,7 @@ pub fn execute_liquidate(
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
 
     if !debt_market.allow_liquidate() {
-        return Err(LiquidationNotAllowedWhenDebtMarketInactive {
+        return Err(ContractError::LiquidationNotAllowedWhenDebtMarketInactive {
             asset: debt_asset_label,
         });
     }
@@ -1383,7 +1376,7 @@ fn process_underlying_asset_transfer_to_liquidator(
     };
 
     if contract_collateral_balance < collateral_amount_to_liquidate {
-        return Err(CannotLiquidateWhenNotEnoughCollateral {});
+        return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
     }
 
     // Apply update collateral interest as liquidity is reduced
@@ -1512,7 +1505,7 @@ pub fn execute_finalize_liquidity_token_transfer(
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
         if health_factor < Decimal::one() {
-            return Err(CannotTransferTokenWhenInvalidHealthFactor {});
+            return Err(ContractError::CannotTransferTokenWhenInvalidHealthFactor {});
         }
     }
 
@@ -1630,7 +1623,7 @@ pub fn execute_update_user_collateral_asset_status(
                 user_address.to_string(),
             ));
         } else {
-            return Err(UserNoCollateralBalance {
+            return Err(ContractError::UserNoCollateralBalance {
                 user_address: user_address.to_string(),
                 asset: collateral_asset_label,
             });
@@ -2026,7 +2019,6 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::ContractError::OperationExceedsAvailableLiquidity;
     use crate::interest_rate_models::{
         DynamicInterestRate, InterestRateModel, InterestRateStrategy, LinearInterestRate,
     };
@@ -4929,7 +4921,10 @@ mod tests {
                 amount: 100u128.into(),
             };
             let error_res = execute(deps.as_mut(), env, info.clone(), msg).unwrap_err();
-            assert_eq!(error_res, OperationExceedsAvailableLiquidity {});
+            assert_eq!(
+                error_res,
+                ContractError::OperationExceedsAvailableLiquidity {}
+            );
         }
 
         // Repay part of the debt
@@ -6926,7 +6921,7 @@ mod tests {
             execute(deps.as_mut(), env.clone(), info.clone(), update_msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            UserNoCollateralBalance {
+            ContractError::UserNoCollateralBalance {
                 user_address: user_addr.to_string(),
                 asset: String::from(cw20_contract_addr.as_str())
             }

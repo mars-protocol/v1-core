@@ -9,9 +9,6 @@ use mars::helpers::cw20_get_balance;
 use mars::math::{decimal_multiplication, reverse_decimal};
 
 use crate::error::ContractError;
-use crate::error::ContractError::{
-    CannotEncodeAssetReferenceIntoString, OperationExceedsAvailableLiquidity,
-};
 use crate::interest_rate_models::InterestRateModel;
 use crate::state::Market;
 
@@ -177,7 +174,7 @@ pub fn update_interest_rates(
             let denom = str::from_utf8(reference);
             let denom = match denom {
                 Ok(denom) => denom,
-                Err(_) => return Err(CannotEncodeAssetReferenceIntoString {}),
+                Err(_) => return Err(ContractError::CannotEncodeAssetReferenceIntoString {}),
             };
             deps.querier
                 .query_balance(env.contract.address.clone(), denom)?
@@ -187,7 +184,7 @@ pub fn update_interest_rates(
             let cw20_addr = str::from_utf8(reference);
             let cw20_addr = match cw20_addr {
                 Ok(cw20_addr) => cw20_addr,
-                Err(_) => return Err(CannotEncodeAssetReferenceIntoString {}),
+                Err(_) => return Err(ContractError::CannotEncodeAssetReferenceIntoString {}),
             };
             let cw20_addr = deps.api.addr_validate(cw20_addr)?;
             cw20_get_balance(&deps.querier, cw20_addr, env.contract.address.clone())?
@@ -195,7 +192,7 @@ pub fn update_interest_rates(
     };
 
     if contract_current_balance < liquidity_taken {
-        return Err(OperationExceedsAvailableLiquidity {});
+        return Err(ContractError::OperationExceedsAvailableLiquidity {});
     }
     let available_liquidity = contract_current_balance - liquidity_taken;
 
