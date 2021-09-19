@@ -759,6 +759,7 @@ dependencies = [
  "mars",
  "schemars",
  "serde",
+ "terraswap",
 ]
 
 [[package]]
