@@ -8,7 +8,8 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use terraswap::asset::AssetInfo;
 
 use crate::error::ContractError;
-use crate::state::{Config, Cooldown, CONFIG, COOLDOWNS};
+use crate::types::{Config, Claim, GlobalState, SlashEvent};
+use crate::state::{CONFIG, COOLDOWNS, GLOBAL_STATE};
 
 use crate::msg::{
     ConfigResponse, CooldownResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg,
@@ -33,20 +34,18 @@ pub fn instantiate(
     // compile error if we add more params
     let CreateOrUpdateConfig {
         owner,
-        address_provider_address,
-        terraswap_factory_address,
-        terraswap_max_spread,
         cooldown_duration,
-        unstake_window,
+        address_provider_address,
+        astroport_factory_address,
+        astroport_max_spread,
     } = msg.config;
 
     // All fields should be available
     let available = owner.is_some()
-        && address_provider_address.is_some()
-        && terraswap_factory_address.is_some()
-        && terraswap_max_spread.is_some()
         && cooldown_duration.is_some()
-        && unstake_window.is_some();
+        && address_provider_address.is_some()
+        && astroport_factory_address.is_some()
+        && astroport_max_spread.is_some()
 
     if !available {
         return Err(MarsError::InstantiateParamsUnavailable {}.into());
@@ -55,22 +54,27 @@ pub fn instantiate(
     // Initialize config
     let config = Config {
         owner: option_string_to_addr(deps.api, owner, zero_address())?,
+        cooldown_duration: cooldown_duration.unwrap(),
         address_provider_address: option_string_to_addr(
             deps.api,
             address_provider_address,
             zero_address(),
         )?,
-        terraswap_factory_address: option_string_to_addr(
+        astroport_factory_address: option_string_to_addr(
             deps.api,
-            terraswap_factory_address,
+            astroport_factory_address,
             zero_address(),
         )?,
-        terraswap_max_spread: terraswap_max_spread.unwrap(),
-        cooldown_duration: cooldown_duration.unwrap(),
-        unstake_window: unstake_window.unwrap(),
+        astroport_max_spread: astroport_max_spread.unwrap(),
     };
 
     CONFIG.save(deps.storage, &config)?;
+
+    // Initialize global state
+    GLOBAL_STATE.save(
+        deps.storage,
+        &GlobalState { total_mars_on_open_claims: Uint128::zero() },
+    )?;
 
     Ok(Response::default())
 }
@@ -85,12 +89,12 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::UpdateConfig { config } => Ok(execute_update_config(deps, info, config)?),
         ExecuteMsg::Receive(cw20_msg) => Ok(execute_receive_cw20(deps, env, info, cw20_msg)?),
-        ExecuteMsg::Cooldown {} => Ok(execute_cooldown(deps, env, info)?),
-        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
-            Ok(execute_execute_cosmos_msg(deps, info, cosmos_msg)?)
-        }
+
+        ExecuteMsg::UpdateConfig { config } => Ok(execute_update_config(deps, info, config)?),
+
+        ExecuteMsg::Claim { recipient } => Ok(execute_claim(deps, env, info, recipient)?),
+
         ExecuteMsg::SwapAssetToUusd {
             offer_asset_info,
             amount,
@@ -100,7 +104,30 @@ pub fn execute(
             offer_asset_info,
             amount,
         )?),
+
         ExecuteMsg::SwapUusdToMars { amount } => Ok(execute_swap_uusd_to_mars(deps, env, amount)?),
+
+        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
+            Ok(execute_execute_cosmos_msg(deps, info, cosmos_msg)?)
+        }
+    }
+}
+
+/// cw20 receive implementation
+pub fn execute_receive_cw20(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    cw20_msg: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    match from_binary(&cw20_msg.msg)? {
+        ReceiveMsg::Stake { recipient } => {
+            execute_stake(deps, env, info, cw20_msg.sender, recipient, cw20_msg.amount)
+        }
+
+        ReceiveMsg::Unstake { } => {
+            execute_unstake(deps, env, info, cw20_msg.sender, cw20_msg.amount)
+        }
     }
 }
 
@@ -120,11 +147,10 @@ pub fn execute_update_config(
     // compile error if we add more params
     let CreateOrUpdateConfig {
         owner,
-        address_provider_address,
-        terraswap_factory_address,
-        terraswap_max_spread,
         cooldown_duration,
-        unstake_window,
+        address_provider_address,
+        astroport_factory_address,
+        astroport_max_spread,
     } = new_config;
 
     // Update config
@@ -134,36 +160,19 @@ pub fn execute_update_config(
         address_provider_address,
         config.address_provider_address,
     )?;
-    config.terraswap_factory_address = option_string_to_addr(
+    config.astroport_factory_address = option_string_to_addr(
         deps.api,
-        terraswap_factory_address,
-        config.terraswap_factory_address,
+        astroport_factory_address,
+        config.astroport_factory_address,
     )?;
-    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
+    config.astroport_max_spread = astroport_max_spread.unwrap_or(config.astroport_max_spread);
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
-    config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
     CONFIG.save(deps.storage, &config)?;
 
     Ok(Response::default())
 }
 
-/// cw20 receive implementation
-pub fn execute_receive_cw20(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    cw20_msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
-    match from_binary(&cw20_msg.msg)? {
-        ReceiveMsg::Stake { recipient } => {
-            execute_stake(deps, env, info, cw20_msg.sender, recipient, cw20_msg.amount)
-        }
-        ReceiveMsg::Unstake { recipient } => {
-            execute_unstake(deps, env, info, cw20_msg.sender, recipient, cw20_msg.amount)
-        }
-    }
-}
 
 /// Mint xMars tokens to staker
 pub fn execute_stake(
@@ -186,20 +195,27 @@ pub fn execute_stake(
         return Err(ContractError::StakeAmountZero {});
     }
 
+
     let total_mars_in_staking_contract =
         cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
+
     // Mars amount needs to be before the stake transaction (which is already in the staking contract's
     // balance so it needs to be deducted)
     let net_total_mars_in_staking_contract =
         total_mars_in_staking_contract.checked_sub(stake_amount)?;
 
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+    let total_mars_for_stakers =
+        net_total_mars_in_staking_contract
+            .checked_sub(global_state.total_mars_for_claimers)?;
+
     let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
 
     let mint_amount =
-        if net_total_mars_in_staking_contract.is_zero() || total_xmars_supply.is_zero() {
+        if total_mars_for_stakers.is_zero() || total_xmars_supply.is_zero() {
             stake_amount
         } else {
-            stake_amount.multiply_ratio(total_xmars_supply, net_total_mars_in_staking_contract)
+            stake_amount.multiply_ratio(total_xmars_supply, total_mars_for_stakers)
         };
 
     let recipient = option_recipient.unwrap_or_else(|| staker.clone());
@@ -222,13 +238,11 @@ pub fn execute_stake(
     Ok(res)
 }
 
-/// Burn xMars tokens and send corresponding Mars
 pub fn execute_unstake(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
     staker: String,
-    option_recipient: Option<String>,
     burn_amount: Uint128,
 ) -> Result<Response, ContractError> {
     // check if unstake is valid
@@ -244,45 +258,37 @@ pub fn execute_unstake(
     // check valid cooldown
     let staker_addr = deps.api.addr_validate(&staker)?;
 
-    match COOLDOWNS.may_load(deps.storage, &staker_addr)? {
-        Some(mut cooldown) => {
-            if burn_amount > cooldown.amount {
-                return Err(ContractError::UnstakeAmountTooLarge {});
-            }
-            if env.block.time.seconds() < cooldown.timestamp + config.cooldown_duration {
-                return Err(ContractError::UnstakeCooldownNotFinished {});
-            }
-            if env.block.time.seconds()
-                > cooldown.timestamp + config.cooldown_duration + config.unstake_window
-            {
-                return Err(ContractError::UnstakeCooldownExpired {});
-            }
-
-            if burn_amount == cooldown.amount {
-                COOLDOWNS.remove(deps.storage, &staker_addr);
-            } else {
-                cooldown.amount = cooldown.amount.checked_sub(burn_amount)?;
-                COOLDOWNS.save(deps.storage, &staker_addr, &cooldown)?;
-            }
-        }
-
-        None => {
-            return Err(ContractError::UnstakeNoCooldown {});
-        }
-    };
-
     let total_mars_in_staking_contract = cw20_get_balance(
         &deps.querier,
         mars_token_address.clone(),
         env.contract.address,
     )?;
 
-    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
+    let mut global_state = GLOBAL_STATE.load(deps.storage)?
 
-    let unstake_amount =
-        burn_amount.multiply_ratio(total_mars_in_staking_contract, total_xmars_supply);
+    let total_mars_for_stakers =
+        net_total_mars_in_staking_contract
+            .checked_sub(global_state.total_mars_for_claimers)?;
 
-    let recipient = option_recipient.unwrap_or_else(|| staker.clone());
+    let total_xmars_supply =
+        cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
+
+    let claimable_amount =
+        burn_amount.multiply_ratio(total_mars_for_stakers, total_xmars_supply);
+
+    let timestamp_start = env.block.time.seconds();
+
+    let claim = Claim {
+        timestamp_start,
+        timestamp_unlocked: timestamp_start + config.cooldown_duration,
+        amount: claimable_amount,
+    }
+
+    CLAIMS.save(deps.storage, &claim);
+
+    global_state.total_mars_for_claimers += claimable_amount;
+     
+    GLOBAL_STATE.save(deps.storage, &global_state)?;
 
     let res = Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -292,6 +298,20 @@ pub fn execute_unstake(
                 amount: burn_amount,
             })?,
         }))
+        .add_attribute("action", "unstake")
+        .add_attribute("staker", staker)
+        .add_attribute("mars_claimable", unstake_amount)
+        .add_attribute("xmars_burned", burn_amount);
+    Ok(res)
+}
+
+pub fn execute_claim(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    option_recipient: Option<String>,
+) -> Result<Response, ContractError> {
+    let res = Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.to_string(),
             funds: vec![],
@@ -300,76 +320,9 @@ pub fn execute_unstake(
                 amount: unstake_amount,
             })?,
         }))
-        .add_attribute("action", "unstake")
-        .add_attribute("staker", staker)
-        .add_attribute("recipient", recipient)
-        .add_attribute("mars_unstaked", unstake_amount)
-        .add_attribute("xmars_burned", burn_amount);
     Ok(res)
 }
 
-/// Handles cooldown. if staking non zero amount, activates a cooldown for that amount.
-/// If a cooldown exists and amount has changed it computes the weighted average
-/// for the cooldown
-pub fn execute_cooldown(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-
-    let xmars_token_address = address_provider::helpers::query_address(
-        &deps.querier,
-        config.address_provider_address,
-        MarsContract::XMarsToken,
-    )?;
-
-    // get total xMars in contract before the stake transaction
-    let xmars_balance = cw20_get_balance(&deps.querier, xmars_token_address, info.sender.clone())?;
-
-    if xmars_balance.is_zero() {
-        return Err(MarsError::Unauthorized {}.into());
-    }
-
-    // compute new cooldown timestamp
-    let new_cooldown_timestamp = match COOLDOWNS.may_load(deps.storage, &info.sender)? {
-        Some(cooldown) => {
-            let minimal_valid_cooldown_timestamp =
-                env.block.time.seconds() - config.cooldown_duration - config.unstake_window;
-
-            if cooldown.timestamp < minimal_valid_cooldown_timestamp {
-                env.block.time.seconds()
-            } else {
-                let mut extra_amount: u128 = 0;
-                if xmars_balance > cooldown.amount {
-                    extra_amount = (xmars_balance.checked_sub(cooldown.amount)?).u128();
-                };
-
-                (((cooldown.timestamp as u128) * cooldown.amount.u128()
-                    + (env.block.time.seconds() as u128) * extra_amount)
-                    / (cooldown.amount.u128() + extra_amount)) as u64
-            }
-        }
-
-        None => env.block.time.seconds(),
-    };
-
-    COOLDOWNS.save(
-        deps.storage,
-        &info.sender,
-        &Cooldown {
-            amount: xmars_balance,
-            timestamp: new_cooldown_timestamp,
-        },
-    )?;
-
-    let res = Response::new()
-        .add_attribute("action", "cooldown")
-        .add_attribute("user", info.sender)
-        .add_attribute("cooldown_amount", xmars_balance.to_string())
-        .add_attribute("cooldown_timestamp", new_cooldown_timestamp.to_string());
-    Ok(res)
-}
 
 /// Execute Cosmos message
 pub fn execute_execute_cosmos_msg(
@@ -415,7 +368,7 @@ pub fn execute_swap_asset_to_uusd(
         denom: "uusd".to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     Ok(execute_swap(
         deps,
@@ -423,8 +376,8 @@ pub fn execute_swap_asset_to_uusd(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )?)
 }
 
@@ -450,7 +403,7 @@ pub fn execute_swap_uusd_to_mars(
         contract_addr: mars_token_address.to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     execute_swap(
         deps,
@@ -458,8 +411,8 @@ pub fn execute_swap_uusd_to_mars(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )
 }
 
@@ -478,7 +431,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner.to_string(),
         address_provider_address: config.address_provider_address.to_string(),
-        terraswap_max_spread: config.terraswap_max_spread,
+        astroport_max_spread: config.astroport_max_spread,
         cooldown_duration: config.cooldown_duration,
         unstake_window: config.unstake_window,
     })
@@ -539,8 +492,8 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             owner: None,
             address_provider_address: None,
-            terraswap_factory_address: None,
-            terraswap_max_spread: None,
+            astroport_factory_address: None,
+            astroport_max_spread: None,
             cooldown_duration: None,
             unstake_window: None,
         };
@@ -557,8 +510,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -585,8 +538,8 @@ mod tests {
         let init_config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -612,8 +565,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("new_owner")),
             address_provider_address: Some(String::from("new_address_provider")),
-            terraswap_factory_address: Some(String::from("new_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
+            astroport_factory_address: Some(String::from("new_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
             cooldown_duration: Some(200),
             unstake_window: Some(100),
         };
@@ -630,7 +583,7 @@ mod tests {
 
         assert_eq!(new_config.owner, "new_owner");
         assert_eq!(new_config.address_provider_address, "new_address_provider");
-        assert_eq!(new_config.terraswap_factory_address, "new_factory");
+        assert_eq!(new_config.astroport_factory_address, "new_factory");
         assert_eq!(
             new_config.cooldown_duration,
             config.cooldown_duration.unwrap()
@@ -1117,8 +1070,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(TEST_COOLDOWN_DURATION),
             unstake_window: Some(TEST_UNSTAKE_WINDOW),
         };

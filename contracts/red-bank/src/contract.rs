@@ -109,9 +109,9 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::UpdateConfig { config } => execute_update_config(deps, env, info, config),
-
         ExecuteMsg::Receive(cw20_msg) => execute_receive_cw20(deps, env, info, cw20_msg),
+
+        ExecuteMsg::UpdateConfig { config } => execute_update_config(deps, env, info, config),
 
         ExecuteMsg::InitAsset {
             asset,
