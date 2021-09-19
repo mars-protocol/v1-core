@@ -1,13 +1,24 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "InstantiateMsg",
+  "title": "ConfigResponse",
   "type": "object",
   "required": [
+    "address_provider_address",
+    "cooldown_duration",
     "owner",
     "terraswap_factory_address",
-    "terraswap_max_spread"
+    "terraswap_max_spread",
+    "unstake_window"
   ],
   "properties": {
+    "address_provider_address": {
+      "type": "string"
+    },
+    "cooldown_duration": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "owner": {
       "type": "string"
     },
@@ -16,6 +27,11 @@
     },
     "terraswap_max_spread": {
       "$ref": "#/definitions/Decimal"
+    },
+    "unstake_window": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     }
   },
   "definitions": {

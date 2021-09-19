@@ -6,12 +6,13 @@
   "required": [
     "council_address",
     "incentives_address",
-    "insurance_fund_address",
     "mars_token_address",
     "oracle_address",
     "owner",
     "protocol_admin_address",
+    "protocol_rewards_collector_address",
     "red_bank_address",
+    "safety_fund_address",
     "staking_address",
     "treasury_address",
     "xmars_token_address"
@@ -27,14 +28,6 @@
     },
     "incentives_address": {
       "description": "Incentives contract address",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Addr"
-        }
-      ]
-    },
-    "insurance_fund_address": {
-      "description": "Insurance fund contract address",
       "allOf": [
         {
           "$ref": "#/definitions/Addr"
@@ -73,8 +66,24 @@
         }
       ]
     },
+    "protocol_rewards_collector_address": {
+      "description": "Protocol Rewards Collector address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
+    },
     "red_bank_address": {
       "description": "Red bank contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
+    },
+    "safety_fund_address": {
+      "description": "Safety fund contract address",
       "allOf": [
         {
           "$ref": "#/definitions/Addr"

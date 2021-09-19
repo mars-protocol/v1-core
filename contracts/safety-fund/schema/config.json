@@ -1,6 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ConfigResponse",
+  "title": "Config",
+  "description": "Safety fund global configuration",
   "type": "object",
   "required": [
     "owner",
@@ -12,10 +13,20 @@
       "$ref": "#/definitions/Addr"
     },
     "terraswap_factory_address": {
-      "type": "string"
+      "description": "Terraswap factory contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
     },
     "terraswap_max_spread": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Terraswap max spread",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     }
   },
   "definitions": {

@@ -21,7 +21,7 @@ interface StakingInitMsg {
   }
 }
 
-interface InsuranceFundInitMsg {
+interface SafetyFundInitMsg {
   owner?: string
   terraswap_factory_address?: string
   terraswap_max_spread: string
@@ -31,7 +31,7 @@ interface RedBankInitMsg {
   config: {
     owner?: string
     address_provider_address?: string
-    insurance_fund_fee_share: string
+    safety_fund_fee_share: string
     treasury_fee_share: string
     ma_token_code_id?: number
     close_factor: string
@@ -80,7 +80,7 @@ interface Asset {
 interface Config {
   councilInitMsg: CouncilInitMsg
   stakingInitMsg: StakingInitMsg
-  insuranceFundInitMsg: InsuranceFundInitMsg
+  safetyFundInitMsg: SafetyFundInitMsg
   redBankInitMsg: RedBankInitMsg
   initialAssets: Asset[]
   mirFarmingStratContractAddress: string | undefined

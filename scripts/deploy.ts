@@ -119,16 +119,16 @@ async function main() {
   )
   console.log("Staking Contract Address: " + stakingContractAddress)
 
-  /************************************* Deploy Insurance Fund Contract *************************************/
-  console.log("Deploying Insurance Fund...")
-  deployConfig.insuranceFundInitMsg.owner = councilContractAddress
-  const insuranceFundContractAddress = await deployContract(
+  /************************************* Deploy Safety Fund Contract *************************************/
+  console.log("Deploying Safety Fund...")
+  deployConfig.safetyFundInitMsg.owner = councilContractAddress
+  const safetyFundContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'insurance_fund.wasm'),
-    deployConfig.insuranceFundInitMsg,
+    join(MARS_ARTIFACTS_PATH, 'safety_fund.wasm'),
+    deployConfig.safetyFundInitMsg,
   )
-  console.log("Insurance Fund Contract Address: " + insuranceFundContractAddress)
+  console.log("Safety Fund Contract Address: " + safetyFundContractAddress)
 
   /**************************************** Deploy Treasury Contract ****************************************/
   console.log("Deploying Treasury...")
@@ -221,7 +221,7 @@ async function main() {
           "owner": councilContractAddress,
           "council_address": councilContractAddress,
           "incentives_address": incentivesContractAddress,
-          "insurance_fund_address": insuranceFundContractAddress,
+          "safety_fund_address": safetyFundContractAddress,
           "mars_token_address": deployConfig.marsTokenContractAddress,
           "oracle_address": oracleContractAddress,
           "red_bank_address": redBankContractAddress,

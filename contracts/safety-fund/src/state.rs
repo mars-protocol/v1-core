@@ -7,7 +7,7 @@ use cw_storage_plus::Item;
 // Key
 pub const CONFIG: Item<Config> = Item::new("config");
 
-/// Insurance fund global configuration
+/// Safety fund global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,

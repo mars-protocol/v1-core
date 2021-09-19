@@ -68,14 +68,15 @@
       "enum": [
         "Council",
         "Incentives",
-        "InsuranceFund",
+        "SafetyFund",
         "MarsToken",
         "Oracle",
+        "ProtocolAdmin",
+        "ProtocolRewardsCollector",
         "RedBank",
         "Staking",
         "Treasury",
-        "XMarsToken",
-        "ProtocolAdmin"
+        "XMarsToken"
       ]
     }
   }

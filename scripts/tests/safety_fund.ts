@@ -1,5 +1,5 @@
 /*
-Integration test for the insurance fund contract swapping assets to UST via Terraswap.
+Integration test for the safety fund contract swapping assets to UST via Terraswap.
 
 Required directory structure:
 ```
@@ -31,7 +31,7 @@ const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
 const USD_LP = 1_000_000_000000
-const INSURANCE_FUND_TOKEN_BALANCE = 100_000_000000
+const SAFETY_FUND_TOKEN_BALANCE = 100_000_000000
 
 // TYPES
 
@@ -56,7 +56,7 @@ interface Env {
   pairCodeID: number,
   factoryCodeID: number,
   factoryAddress: string,
-  insuranceFundAddress: string,
+  safetyFundAddress: string,
 }
 
 // HELPERS
@@ -113,39 +113,39 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
 
   await provideLiquidity(env, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
 
-  // transfer some native token to the insurance fund
+  // transfer some native token to the safety fund
   await performTransaction(env.terra, env.wallet,
     new MsgSend(
       env.wallet.key.accAddress,
-      env.insuranceFundAddress,
+      env.safetyFundAddress,
       {
-        [denom]: INSURANCE_FUND_TOKEN_BALANCE
+        [denom]: SAFETY_FUND_TOKEN_BALANCE
       }
     )
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await getBalance(env, env.insuranceFundAddress, "uusd")
+  const prevUsdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
 
-  // swap the native token balance in the insurance fund to USD
-  await executeContract(env.terra, env.wallet, env.insuranceFundAddress,
+  // swap the native token balance in the safety fund to USD
+  await executeContract(env.terra, env.wallet, env.safetyFundAddress,
     {
       "swap_asset_to_uusd": {
         "offer_asset_info": NATIVE_TOKEN,
-        "amount": String(INSURANCE_FUND_TOKEN_BALANCE)
+        "amount": String(SAFETY_FUND_TOKEN_BALANCE)
       }
     }
   )
 
-  // check the insurance fund balances
-  const usdBalance = await getBalance(env, env.insuranceFundAddress, "uusd")
+  // check the safety fund balances
+  const usdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
   assert(usdBalance.gt(prevUsdBalance))
-  const tokenBalance = await getBalance(env, env.insuranceFundAddress, denom)
+  const tokenBalance = await getBalance(env, env.safetyFundAddress, denom)
   strictEqual(tokenBalance, ZERO)
 
   // check the Terraswap pair balances
   const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
-  strictEqual(pool.assets[0].amount, String(TOKEN_LP + INSURANCE_FUND_TOKEN_BALANCE))
+  strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
@@ -165,38 +165,38 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   )
   await provideLiquidity(env, pairAddress, TOKEN, `${USD_LP}uusd`)
 
-  // transfer some tokens to the insurance fund
+  // transfer some tokens to the safety fund
   await executeContract(env.terra, env.wallet, address,
     {
       "transfer": {
-        "amount": String(INSURANCE_FUND_TOKEN_BALANCE),
-        "recipient": env.insuranceFundAddress
+        "amount": String(SAFETY_FUND_TOKEN_BALANCE),
+        "recipient": env.safetyFundAddress
       }
     }
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await getBalance(env, env.insuranceFundAddress, "uusd")
+  const prevUsdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
 
-  // swap the token balance in the insurance fund to USD
-  await executeContract(env.terra, env.wallet, env.insuranceFundAddress,
+  // swap the token balance in the safety fund to USD
+  await executeContract(env.terra, env.wallet, env.safetyFundAddress,
     {
       "swap_asset_to_uusd": {
         "offer_asset_info": TOKEN,
-        "amount": String(INSURANCE_FUND_TOKEN_BALANCE)
+        "amount": String(SAFETY_FUND_TOKEN_BALANCE)
       }
     }
   )
 
-  // check the insurance fund balances
-  const usdBalance = await getBalance(env, env.insuranceFundAddress, "uusd")
+  // check the safety fund balances
+  const usdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
   assert(usdBalance.gt(prevUsdBalance))
-  const tokenBalance = await queryContract(env.terra, address, { "balance": { "address": env.insuranceFundAddress } })
+  const tokenBalance = await queryContract(env.terra, address, { "balance": { "address": env.safetyFundAddress } })
   strictEqual(tokenBalance.balance, "0")
 
   // check the Terraswap pair balances
   const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
-  strictEqual(pool.assets[0].amount, String(TOKEN_LP + INSURANCE_FUND_TOKEN_BALANCE))
+  strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
@@ -220,8 +220,8 @@ async function main() {
     }
   )
 
-  console.log("deploying Mars insurance fund")
-  const insuranceFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "insurance_fund.wasm"),
+  console.log("deploying Mars safety fund")
+  const safetyFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "safety_fund.wasm"),
     {
       "owner": wallet.key.accAddress,
       "terraswap_factory_address": factoryAddress,
@@ -251,7 +251,7 @@ async function main() {
     pairCodeID,
     factoryCodeID,
     factoryAddress,
-    insuranceFundAddress,
+    safetyFundAddress,
   }
 
   console.log("testSwapNativeTokenToUsd")

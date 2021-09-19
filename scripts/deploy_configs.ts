@@ -21,7 +21,7 @@ export const testnet: Config = {
       "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
     }
   },
-  insuranceFundInitMsg: {
+  safetyFundInitMsg: {
     "owner": undefined,
     "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "terraswap_max_spread": "0.05",
@@ -30,7 +30,7 @@ export const testnet: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "insurance_fund_fee_share": "0.1",
+      "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
@@ -187,7 +187,7 @@ export const bombay: Config = {
       "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
     }
   },
-  insuranceFundInitMsg: {
+  safetyFundInitMsg: {
     "owner": undefined,
     "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "terraswap_max_spread": "0.05",
@@ -196,7 +196,7 @@ export const bombay: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "insurance_fund_fee_share": "0.1",
+      "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
@@ -353,7 +353,7 @@ export const local: Config = {
       "unstake_window": 300,
     }
   },
-  insuranceFundInitMsg: {
+  safetyFundInitMsg: {
     "owner": undefined,
     "terraswap_factory_address": undefined,
     "terraswap_max_spread": "0.05",
@@ -362,7 +362,7 @@ export const local: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "insurance_fund_fee_share": "0.1",
+      "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
