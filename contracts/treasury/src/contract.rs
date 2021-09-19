@@ -158,6 +158,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
         owner: config.owner,
+        terraswap_factory_address: config.terraswap_factory_address.to_string(),
+        terraswap_max_spread: config.terraswap_max_spread,
     })
 }
 
