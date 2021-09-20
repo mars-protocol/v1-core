@@ -139,6 +139,413 @@ interface CW20 { cw20: { contract_addr: string } }
 
 type Asset = Native | CW20
 
+interface Env {
+  terra: LCDClient
+  deployer: Wallet
+  provider: Wallet
+  borrower: Wallet
+  maUusd: string
+  redBank: string
+  protocolRewardsCollector: string
+  treasury: string
+  safetyFund: string
+  staking: string
+}
+
+// TESTS
+
+async function testNative(env: Env) {
+  const {
+    terra,
+    deployer,
+    provider,
+    borrower,
+    maUusd,
+    redBank,
+    protocolRewardsCollector,
+    treasury,
+    safetyFund,
+    staking
+  } = env
+
+  {
+    console.log("provider provides uusd")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    strictEqual(maUusdBalanceBefore, 0)
+
+    await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    strictEqual(maUusdBalanceAfter, 0)
+  }
+
+
+  console.log("borrower provides uluna")
+
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
+
+  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
+
+  await borrowNative(terra, borrower, redBank, "uusd", Math.floor(USD_BORROW_AMOUNT))
+
+  {
+    console.log("repay")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+
+    await executeContract(terra, borrower, redBank,
+      { repay_native: { denom: "uusd" } },
+      `${Math.floor(USD_BORROW_AMOUNT)}uusd`
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+  }
+
+  {
+    console.log("withdraw")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+
+    await executeContract(terra, provider, redBank,
+      {
+        withdraw: {
+          asset: { native: { denom: "uusd" } },
+          amount: String(Math.floor(USD_COLLATERAL_AMOUNT / 2))
+        }
+      }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+  }
+
+  console.log("protocol rewards collector withdraws from the red bank")
+
+  {
+    console.log("- specify an amount")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+
+    // withdraw half
+    await executeContract(terra, deployer, protocolRewardsCollector,
+      {
+        withdraw_from_red_bank: {
+          asset: { native: { denom: "uusd" } },
+          amount: String(Math.floor(maUusdBalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
+        }
+      }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    assert(maUusdBalanceAfter < maUusdBalanceBefore)
+    assert(uusdBalanceAfter > uusdBalanceBefore)
+  }
+
+  {
+    console.log("- don't specify an amount")
+
+    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+
+    // withdraw remaining balance
+    let result = await executeContract(terra, deployer, protocolRewardsCollector,
+      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    assert(uusdBalanceAfter > uusdBalanceBefore)
+
+    // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
+    // collector, so the maUusd balance will not be zero after this call
+    const maUusdMintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
+    strictEqual(maUusdBalanceAfter, maUusdMintAmount)
+  }
+
+
+  console.log("try to distribute uusd rewards")
+
+  await assert.rejects(
+    executeContract(terra, deployer, protocolRewardsCollector,
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
+    ),
+    (error: any) => {
+      return error.response.data.error.includes("Asset is not enabled for distribution: \"uusd\"")
+    }
+  )
+
+  console.log("enable uusd for distribution")
+
+  await executeContract(terra, deployer, protocolRewardsCollector,
+    {
+      update_asset_config: {
+        asset: { native: { denom: "uusd" } },
+        enabled: true
+      }
+    }
+  )
+
+  {
+    console.log("distribute uusd rewards")
+
+    const protocolRewardsCollectorUusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceBefore = await queryNativeBalance(terra, treasury, "uusd")
+    const safetyFundUusdBalanceBefore = await queryNativeBalance(terra, safetyFund, "uusd")
+    const stakingUusdBalanceBefore = await queryNativeBalance(terra, staking, "uusd")
+
+    await executeContract(terra, deployer, protocolRewardsCollector,
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
+    )
+
+    const protocolRewardsCollectorUusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceAfter = await queryNativeBalance(terra, treasury, "uusd")
+    const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
+    const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
+
+    // TODO why is `protocolRewardsCollectorUusdBalanceAfter == 3`? rounding errors from integer arithmetic?
+    // strictEqual(protocolRewardsCollectorUusdBalanceAfter, 0)
+    // Check a tight interval instead of equality
+    assert(protocolRewardsCollectorUusdBalanceAfter < 4)
+
+    const protocolRewardsCollectorUusdBalanceDifference =
+      protocolRewardsCollectorUusdBalanceBefore - protocolRewardsCollectorUusdBalanceAfter
+    const treasuryUusdBalanceDifference = treasuryUusdBalanceAfter - treasuryUusdBalanceBefore
+    const safetyFundUusdBalanceDifference = safetyFundUusdBalanceAfter - safetyFundUusdBalanceBefore
+    const stakingUusdBalanceDifference = stakingUusdBalanceAfter - stakingUusdBalanceBefore
+
+    const expectedTreasuryUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * TREASURY_FEE_SHARE)
+      )).toNumber()
+    const expectedSafetyFundUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * SAFETY_FUND_FEE_SHARE)
+      )).toNumber()
+
+    const expectedStakingUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
+      )).toNumber()
+
+    // TODO why is treasuryUusdBalanceDifference 1 uusd different from expected?
+    // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(treasuryUusdBalanceDifference - expectedTreasuryUusdBalanceDifference) < 2)
+
+    // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
+    // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(safetyFundUusdBalanceDifference - expectedSafetyFundUusdBalanceDifference) < 2)
+
+    // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
+    // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(stakingUusdBalanceDifference - expectedStakingUusdBalanceDifference) < 5)
+  }
+}
+
+async function testCw20(env: Env) {
+  const {
+    terra,
+    deployer,
+    provider,
+    borrower,
+    maUusd,
+    redBank,
+    protocolRewardsCollector,
+    treasury,
+    safetyFund,
+    staking
+  } = env
+
+  {
+    console.log("provider provides uusd")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    strictEqual(maUusdBalanceBefore, 0)
+
+    await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    strictEqual(maUusdBalanceAfter, 0)
+  }
+
+
+  console.log("borrower provides uluna")
+
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
+
+  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
+
+  await borrowNative(terra, borrower, redBank, "uusd", Math.floor(USD_BORROW_AMOUNT))
+
+  {
+    console.log("repay")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+
+    await executeContract(terra, borrower, redBank,
+      { repay_native: { denom: "uusd" } },
+      `${Math.floor(USD_BORROW_AMOUNT)}uusd`
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+  }
+
+  {
+    console.log("withdraw")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+
+    await executeContract(terra, provider, redBank,
+      {
+        withdraw: {
+          asset: { native: { denom: "uusd" } },
+          amount: String(Math.floor(USD_COLLATERAL_AMOUNT / 2))
+        }
+      }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+  }
+
+  console.log("protocol rewards collector withdraws from the red bank")
+
+  {
+    console.log("- specify an amount")
+
+    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+
+    // withdraw half
+    await executeContract(terra, deployer, protocolRewardsCollector,
+      {
+        withdraw_from_red_bank: {
+          asset: { native: { denom: "uusd" } },
+          amount: String(Math.floor(maUusdBalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
+        }
+      }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    assert(maUusdBalanceAfter < maUusdBalanceBefore)
+    assert(uusdBalanceAfter > uusdBalanceBefore)
+  }
+
+  {
+    console.log("- don't specify an amount")
+
+    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+
+    // withdraw remaining balance
+    let result = await executeContract(terra, deployer, protocolRewardsCollector,
+      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
+    )
+
+    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    assert(uusdBalanceAfter > uusdBalanceBefore)
+
+    // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
+    // collector, so the maUusd balance will not be zero after this call
+    const maUusdMintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
+    strictEqual(maUusdBalanceAfter, maUusdMintAmount)
+  }
+
+
+  console.log("try to distribute uusd rewards")
+
+  await assert.rejects(
+    executeContract(terra, deployer, protocolRewardsCollector,
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
+    ),
+    (error: any) => {
+      return error.response.data.error.includes("Asset is not enabled for distribution: \"uusd\"")
+    }
+  )
+
+  console.log("enable uusd for distribution")
+
+  await executeContract(terra, deployer, protocolRewardsCollector,
+    {
+      update_asset_config: {
+        asset: { native: { denom: "uusd" } },
+        enabled: true
+      }
+    }
+  )
+
+  {
+    console.log("distribute uusd rewards")
+
+    const protocolRewardsCollectorUusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceBefore = await queryNativeBalance(terra, treasury, "uusd")
+    const safetyFundUusdBalanceBefore = await queryNativeBalance(terra, safetyFund, "uusd")
+    const stakingUusdBalanceBefore = await queryNativeBalance(terra, staking, "uusd")
+
+    await executeContract(terra, deployer, protocolRewardsCollector,
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
+    )
+
+    const protocolRewardsCollectorUusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceAfter = await queryNativeBalance(terra, treasury, "uusd")
+    const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
+    const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
+
+    // TODO why is `protocolRewardsCollectorUusdBalanceAfter == 3`? rounding errors from integer arithmetic?
+    // strictEqual(protocolRewardsCollectorUusdBalanceAfter, 0)
+    // Check a tight interval instead of equality
+    assert(protocolRewardsCollectorUusdBalanceAfter < 4)
+
+    const protocolRewardsCollectorUusdBalanceDifference =
+      protocolRewardsCollectorUusdBalanceBefore - protocolRewardsCollectorUusdBalanceAfter
+    const treasuryUusdBalanceDifference = treasuryUusdBalanceAfter - treasuryUusdBalanceBefore
+    const safetyFundUusdBalanceDifference = safetyFundUusdBalanceAfter - safetyFundUusdBalanceBefore
+    const stakingUusdBalanceDifference = stakingUusdBalanceAfter - stakingUusdBalanceBefore
+
+    const expectedTreasuryUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * TREASURY_FEE_SHARE)
+      )).toNumber()
+    const expectedSafetyFundUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * SAFETY_FUND_FEE_SHARE)
+      )).toNumber()
+
+    const expectedStakingUusdBalanceDifference =
+      (await deductTax(
+        terra,
+        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
+      )).toNumber()
+
+    // TODO why is treasuryUusdBalanceDifference 1 uusd different from expected?
+    // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(treasuryUusdBalanceDifference - expectedTreasuryUusdBalanceDifference) < 2)
+
+    // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
+    // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(safetyFundUusdBalanceDifference - expectedSafetyFundUusdBalanceDifference) < 2)
+
+    // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
+    // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
+    // Check a tight interval instead of equality
+    assert(Math.abs(stakingUusdBalanceDifference - expectedStakingUusdBalanceDifference) < 5)
+  }
+}
+
 // MAIN
 
 async function main() {
@@ -150,8 +557,8 @@ async function main() {
 
   // addresses
   const deployer = terra.wallets.test1
-  const alice = terra.wallets.test2
-  const bob = terra.wallets.test3
+  const provider = terra.wallets.test2
+  const borrower = terra.wallets.test3
   // mock contract addresses
   const staking = terra.wallets.test8.key.accAddress
   const safetyFund = terra.wallets.test9.key.accAddress
@@ -374,193 +781,28 @@ async function main() {
   //   `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   // )
 
+  const env = {
+    terra,
+    deployer,
+    provider,
+    borrower,
+    maUusd,
+    redBank,
+    protocolRewardsCollector,
+    treasury,
+    safetyFund,
+    staking
+  }
+
   // TESTS
 
-  console.log("tests")
+  console.log("testNative")
+  await testNative(env)
 
-  const provider = alice
-  const borrower = bob
-
-  {
-    console.log("provider provides uusd")
-
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    strictEqual(maUusdBalanceBefore, 0)
-
-    await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
-
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    strictEqual(maUusdBalanceAfter, 0)
-  }
+  console.log("testCw20")
+  await testCw20(env)
 
 
-  console.log("borrower provides uluna")
-
-  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
-
-  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
-
-  await borrowNative(terra, borrower, redBank, "uusd", Math.floor(USD_BORROW_AMOUNT))
-
-  {
-    console.log("repay")
-
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-
-    await executeContract(terra, borrower, redBank,
-      { repay_native: { denom: "uusd" } },
-      `${Math.floor(USD_BORROW_AMOUNT)}uusd`
-    )
-
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    assert(maUusdBalanceAfter > maUusdBalanceBefore)
-  }
-
-  {
-    console.log("withdraw")
-
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-
-    await executeContract(terra, provider, redBank,
-      {
-        withdraw: {
-          asset: { native: { denom: "uusd" } },
-          amount: String(Math.floor(USD_COLLATERAL_AMOUNT / 2))
-        }
-      }
-    )
-
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    assert(maUusdBalanceAfter > maUusdBalanceBefore)
-  }
-
-  console.log("protocol rewards collector withdraws from the red bank")
-
-  {
-    console.log("- specify an amount")
-
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-
-    // withdraw half
-    await executeContract(terra, deployer, protocolRewardsCollector,
-      {
-        withdraw_from_red_bank: {
-          asset: { native: { denom: "uusd" } },
-          amount: String(Math.floor(maUusdBalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
-        }
-      }
-    )
-
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    assert(maUusdBalanceAfter < maUusdBalanceBefore)
-    assert(uusdBalanceAfter > uusdBalanceBefore)
-  }
-
-  {
-    console.log("- don't specify an amount")
-
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-
-    // withdraw remaining balance
-    let result = await executeContract(terra, deployer, protocolRewardsCollector,
-      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
-    )
-
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    assert(uusdBalanceAfter > uusdBalanceBefore)
-
-    // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
-    // collector, so the maUusd balance will not be zero after this call
-    const maUusdMintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
-    strictEqual(maUusdBalanceAfter, maUusdMintAmount)
-  }
-
-
-  console.log("try to distribute uusd rewards")
-
-  await assert.rejects(
-    executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
-    ),
-    (error: any) => {
-      return error.response.data.error.includes("Asset is not enabled for distribution: \"uusd\"")
-    }
-  )
-
-  console.log("enable uusd for distribution")
-
-  await executeContract(terra, deployer, protocolRewardsCollector,
-    {
-      update_asset_config: {
-        asset: { native: { denom: "uusd" } },
-        enabled: true
-      }
-    }
-  )
-
-  {
-    console.log("distribute uusd rewards")
-
-    const protocolRewardsCollectorUusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceBefore = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceBefore = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceBefore = await queryNativeBalance(terra, staking, "uusd")
-
-    await executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
-    )
-
-    const protocolRewardsCollectorUusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceAfter = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
-
-    // TODO why is `protocolRewardsCollectorUusdBalanceAfter == 3`? rounding errors from integer arithmetic?
-    // strictEqual(protocolRewardsCollectorUusdBalanceAfter, 0)
-    // Check a tight interval instead of equality
-    assert(protocolRewardsCollectorUusdBalanceAfter < 4)
-
-    const protocolRewardsCollectorUusdBalanceDifference =
-      protocolRewardsCollectorUusdBalanceBefore - protocolRewardsCollectorUusdBalanceAfter
-    const treasuryUusdBalanceDifference = treasuryUusdBalanceAfter - treasuryUusdBalanceBefore
-    const safetyFundUusdBalanceDifference = safetyFundUusdBalanceAfter - safetyFundUusdBalanceBefore
-    const stakingUusdBalanceDifference = stakingUusdBalanceAfter - stakingUusdBalanceBefore
-
-    const expectedTreasuryUusdBalanceDifference =
-      (await deductTax(
-        terra,
-        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * TREASURY_FEE_SHARE)
-      )).toNumber()
-    const expectedSafetyFundUusdBalanceDifference =
-      (await deductTax(
-        terra,
-        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * SAFETY_FUND_FEE_SHARE)
-      )).toNumber()
-
-    const expectedStakingUusdBalanceDifference =
-      (await deductTax(
-        terra,
-        new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
-      )).toNumber()
-
-    // TODO why is treasuryUusdBalanceDifference 1 uusd different from expected?
-    // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
-    // Check a tight interval instead of equality
-    assert(Math.abs(treasuryUusdBalanceDifference - expectedTreasuryUusdBalanceDifference) < 2)
-
-    // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
-    // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
-    // Check a tight interval instead of equality
-    assert(Math.abs(safetyFundUusdBalanceDifference - expectedSafetyFundUusdBalanceDifference) < 2)
-
-    // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
-    // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
-    // Check a tight interval instead of equality
-    assert(Math.abs(stakingUusdBalanceDifference - expectedStakingUusdBalanceDifference) < 5)
-  }
 
   console.log("OK")
 }
