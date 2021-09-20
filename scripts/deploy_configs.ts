@@ -26,12 +26,20 @@ export const testnet: Config = {
     "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "terraswap_max_spread": "0.05",
   },
-  redBankInitMsg: {
+  protocolRewardsCollectorInitMsg: {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
       "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
+      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_max_spread": "0.05",
+    }
+  },
+  redBankInitMsg: {
+    "config": {
+      "owner": undefined,
+      "address_provider_address": undefined,
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
     }
@@ -192,12 +200,20 @@ export const bombay: Config = {
     "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "terraswap_max_spread": "0.05",
   },
-  redBankInitMsg: {
+  protocolRewardsCollectorInitMsg: {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
       "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
+      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_max_spread": "0.05",
+    }
+  },
+  redBankInitMsg: {
+    "config": {
+      "owner": undefined,
+      "address_provider_address": undefined,
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
     }
@@ -358,12 +374,20 @@ export const local: Config = {
     "terraswap_factory_address": undefined,
     "terraswap_max_spread": "0.05",
   },
-  redBankInitMsg: {
+  protocolRewardsCollectorInitMsg: {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
       "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
+      "astroport_factory_address": undefined,
+      "astroport_max_spread": "0.05",
+    }
+  },
+  redBankInitMsg: {
+    "config": {
+      "owner": undefined,
+      "address_provider_address": undefined,
       "ma_token_code_id": undefined,
       "close_factor": "0.5"
     }

@@ -14,8 +14,8 @@ interface StakingInitMsg {
   config: {
     owner?: string
     address_provider_address?: string
-    terraswap_factory_address?: string
-    terraswap_max_spread: string
+    astroport_factory_address?: string
+    astroport_max_spread: string
     cooldown_duration: number
     unstake_window: number
   }
@@ -23,16 +23,25 @@ interface StakingInitMsg {
 
 interface SafetyFundInitMsg {
   owner?: string
-  terraswap_factory_address?: string
-  terraswap_max_spread: string
+  astroport_factory_address?: string
+  astroport_max_spread: string
+}
+
+interface ProtocolRewardsCollectorInitMsg {
+  config: {
+    owner?: string,
+    address_provider_address?: string,
+    safety_fund_fee_share: string,
+    treasury_fee_share: string,
+    astroport_factory_address?: string,
+    astroport_max_spread: string,
+  }
 }
 
 interface RedBankInitMsg {
   config: {
     owner?: string
     address_provider_address?: string
-    safety_fund_fee_share: string
-    treasury_fee_share: string
     ma_token_code_id?: number
     close_factor: string
   }
@@ -81,6 +90,7 @@ interface Config {
   councilInitMsg: CouncilInitMsg
   stakingInitMsg: StakingInitMsg
   safetyFundInitMsg: SafetyFundInitMsg
+  protocolRewardsCollectorInitMsg: ProtocolRewardsCollectorInitMsg
   redBankInitMsg: RedBankInitMsg
   initialAssets: Asset[]
   mirFarmingStratContractAddress: string | undefined

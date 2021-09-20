@@ -50,6 +50,7 @@ async function main() {
 
   console.log(`Wallet address from seed: ${wallet.key.accAddress}`)
 
+  /*************************************** Validate deploy config file *****************************************/
   if (!deployConfig.minterProxyContractAddress) {
     console.log(`Please deploy CW1-Whitelist proxy contract set as the MARS tokens minter address,
                 use the same deploy address as "Wallet address from seed" above
@@ -57,7 +58,7 @@ async function main() {
     return
   }
 
-  if (!deployConfig.minterProxyContractAddress || !deployConfig.marsTokenContractAddress) {
+  if (!deployConfig.marsTokenContractAddress) {
     console.log(`Please deploy the CW20-base MARS token,
                 and then set this address in the deploy config before running this script...`)
     return
@@ -66,6 +67,15 @@ async function main() {
   if (!deployConfig.oracleFactoryAddress) {
     console.log(
       "Please specify the oracle price source (TerraSwap/Astroport) in the deploy config before running this script..."
+    )
+    return
+  }
+
+  if (!deployConfig.stakingInitMsg.config.terraswap_factory_address ||
+    !deployConfig.insuranceFundInitMsg.terraswap_factory_address ||
+    !deployConfig.protocolRewardsCollectorInitMsg.config.astroport_factory_address) {
+    console.log(
+      "Please specify the TerraSwap/Astroport factory addresses in the deploy config before running this script..."
     )
     return
   }
@@ -184,6 +194,18 @@ async function main() {
   )
   console.log(`Uploaded ma_token contract code: ${maTokenCodeId}`)
 
+  /************************************* Deploy Protocol Rewards Collector Contract *************************************/
+  console.log("Deploying Protocol Rewards Collector...")
+  deployConfig.protocolRewardsCollectorInitMsg.config.owner = councilContractAddress
+  deployConfig.protocolRewardsCollectorInitMsg.config.address_provider_address = addressProviderContractAddress
+  const protocolRewardsCollectorContractAddress = await deployContract(
+    terra,
+    wallet,
+    join(MARS_ARTIFACTS_PATH, 'protocol_rewards_collector.wasm'),
+    deployConfig.protocolRewardsCollectorInitMsg,
+  )
+  console.log("Protocol Rewards Collector Contract Address: " + protocolRewardsCollectorContractAddress)
+
   /************************************* Deploy Red Bank Contract *************************************/
   console.log("Deploying Red Bank...")
   deployConfig.redBankInitMsg.config.owner = wallet.key.accAddress
@@ -224,12 +246,12 @@ async function main() {
           "safety_fund_address": safetyFundContractAddress,
           "mars_token_address": deployConfig.marsTokenContractAddress,
           "oracle_address": oracleContractAddress,
+          "protocol_admin_address": wallet.key.accAddress, // TODO should this be the council address or the multisig address?
+          "protocol_rewards_collector_address": protocolRewardsCollectorContractAddress,
           "red_bank_address": redBankContractAddress,
           "staking_address": stakingContractAddress,
           "treasury_address": treasuryContractAddress,
           "xmars_token_address": xMarsTokenContractAddress,
-          // TODO should this be the council address or the multisig address?
-          "protocol_admin_address": wallet.key.accAddress
         }
       }
     }
