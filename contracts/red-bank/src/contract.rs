@@ -1761,6 +1761,9 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         liquidation_bonus: market.liquidation_bonus,
         reserve_factor: market.reserve_factor,
         interest_rate_strategy: market.interest_rate_strategy,
+        active: market.active,
+        deposit_enabled: market.deposit_enabled,
+        borrow_enabled: market.borrow_enabled,
     })
 }
 
