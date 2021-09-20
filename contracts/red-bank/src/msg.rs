@@ -209,18 +209,21 @@ pub struct ConfigResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MarketResponse {
     pub ma_token_address: Addr,
-    pub borrow_index: Decimal,
-    pub liquidity_index: Decimal,
-    pub borrow_rate: Decimal,
-    pub liquidity_rate: Decimal,
-    pub max_loan_to_value: Decimal,
-    pub interests_last_updated: u64,
-    pub debt_total_scaled: Uint128,
     pub asset_type: AssetType,
+    pub max_loan_to_value: Decimal,
     pub maintenance_margin: Decimal,
     pub liquidation_bonus: Decimal,
     pub reserve_factor: Decimal,
     pub interest_rate_strategy: InterestRateStrategy,
+    pub borrow_index: Decimal,
+    pub liquidity_index: Decimal,
+    pub borrow_rate: Decimal,
+    pub liquidity_rate: Decimal,
+    pub interests_last_updated: u64,
+    pub debt_total_scaled: Uint128,
+    pub active: bool,
+    pub deposit_enabled: bool,
+    pub borrow_enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
