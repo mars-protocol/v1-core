@@ -195,7 +195,6 @@ pub fn execute_stake(
         return Err(ContractError::StakeAmountZero {});
     }
 
-
     let total_mars_in_staking_contract =
         cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
 
@@ -231,9 +230,9 @@ pub fn execute_stake(
         }))
         .add_attribute("action", "stake")
         .add_attribute("staker", staker)
-        .add_attribute("recipient", recipient)
         .add_attribute("mars_staked", stake_amount)
         .add_attribute("xmars_minted", mint_amount);
+        .add_attribute("recipient", recipient)
 
     Ok(res)
 }
@@ -311,15 +310,42 @@ pub fn execute_claim(
     info: MessageInfo,
     option_recipient: Option<String>,
 ) -> Result<Response, ContractError> {
+    let claim = CLAIMS.load(&info.sender)?;
+
+    if claim.cooldown_end > env.block.time.seconds() {
+        return Err(ContractError::ClaimCooldownNotEnded));
+    }
+    
+    let mut claim_amount = claim.amount;
+
+    let mut global_state = GLOBAL_STATE.load(deps.storage)?;
+    global_state.total_mars_for_claimers -= claim_amount;
+
+    CLAIMS.delete(deps.storage, &info.sender);
+    GLOBAL_STATE.save(deps.storage, &global_state);
+
+    let config = CONFIG.load(deps.storage)?;
+    let mars_token_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::MarsToken,
+    )?;
+
+    let recipient = option_recipient.unwrap_or_else(|| info.sender.clone());
+
     let res = Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: mars_token_address.to_string(),
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: recipient.clone(),
-                amount: unstake_amount,
+                amount: claim_amount,
             })?,
         }))
+        .add_attribute("action", "claim")
+        .add_attribute("claimer", info.sender)
+        .add_attribute("mars_claimed", unstake_amount)
+        .add_attribute("recipient", recipient)
     Ok(res)
 }
 

@@ -26,9 +26,9 @@ pub struct GlobalState {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Claim {
     /// Timestamp where the claim was activated
-    pub timestamp_start: u64,
+    pub cooldown_start: u64,
     /// Timestamp after which the claim is unlocked
-    pub timestamp_unlocked: u64,
+    pub cooldown_end: u64,
     /// Amount of Mars that the user is allowed to claim
     pub amount: Uint128,
 }
