@@ -16,8 +16,8 @@ pub struct Config {
     pub council_address: Addr,
     /// Incentives contract address
     pub incentives_address: Addr,
-    /// Insurance fund contract address
-    pub insurance_fund_address: Addr,
+    /// Safety fund contract address
+    pub safety_fund_address: Addr,
     /// Mars token address
     pub mars_token_address: Addr,
     /// Oracle address

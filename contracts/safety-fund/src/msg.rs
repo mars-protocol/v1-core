@@ -40,6 +40,8 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub owner: Addr,
+    pub terraswap_factory_address: String,
+    pub terraswap_max_spread: Decimal,
 }
 
 /// We currently take no arguments for migrations

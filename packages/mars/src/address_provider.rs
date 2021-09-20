@@ -28,9 +28,9 @@ pub mod msg {
         pub council_address: Option<String>,
         /// Incentives contract handles incentives to depositors on the red bank
         pub incentives_address: Option<String>,
-        /// Insurance fund contract accumulates UST to protect the protocol from shortfall
+        /// Safety fund contract accumulates UST to protect the protocol from shortfall
         /// events
-        pub insurance_fund_address: Option<String>,
+        pub safety_fund_address: Option<String>,
         /// Mars token cw20 contract
         pub mars_token_address: Option<String>,
         /// Oracle contract provides prices in uusd for assets used in the protocol
@@ -57,7 +57,7 @@ pub mod msg {
     pub enum MarsContract {
         Council,
         Incentives,
-        InsuranceFund,
+        SafetyFund,
         MarsToken,
         Oracle,
         ProtocolAdmin,
@@ -84,7 +84,7 @@ pub mod msg {
         pub owner: Addr,
         pub council_address: Addr,
         pub incentives_address: Addr,
-        pub insurance_fund_address: Addr,
+        pub safety_fund_address: Addr,
         pub mars_token_address: Addr,
         pub oracle_address: Addr,
         pub protocol_admin_address: Addr,

@@ -5,12 +5,13 @@
   "required": [
     "council_address",
     "incentives_address",
-    "insurance_fund_address",
     "mars_token_address",
     "oracle_address",
     "owner",
-    "protocol_admin",
+    "protocol_admin_address",
+    "protocol_rewards_collector_address",
     "red_bank_address",
+    "safety_fund_address",
     "staking_address",
     "treasury_address",
     "xmars_token_address"
@@ -22,9 +23,6 @@
     "incentives_address": {
       "$ref": "#/definitions/Addr"
     },
-    "insurance_fund_address": {
-      "$ref": "#/definitions/Addr"
-    },
     "mars_token_address": {
       "$ref": "#/definitions/Addr"
     },
@@ -34,10 +32,16 @@
     "owner": {
       "$ref": "#/definitions/Addr"
     },
-    "protocol_admin": {
+    "protocol_admin_address": {
+      "$ref": "#/definitions/Addr"
+    },
+    "protocol_rewards_collector_address": {
       "$ref": "#/definitions/Addr"
     },
     "red_bank_address": {
+      "$ref": "#/definitions/Addr"
+    },
+    "safety_fund_address": {
       "$ref": "#/definitions/Addr"
     },
     "staking_address": {

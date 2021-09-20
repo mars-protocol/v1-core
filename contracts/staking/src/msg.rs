@@ -76,6 +76,7 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub owner: String,
     pub address_provider_address: String,
+    pub terraswap_factory_address: String,
     pub terraswap_max_spread: Decimal,
     pub cooldown_duration: u64,
     pub unstake_window: u64,

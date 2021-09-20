@@ -155,7 +155,7 @@ async function main() {
       config: {
         owner: council,
         address_provider_address: addressProvider,
-        insurance_fund_fee_share: "0.1",
+        safety_fund_fee_share: "0.1",
         treasury_fee_share: "0.2",
         ma_token_code_id: maTokenCodeId,
         close_factor: "0.5",

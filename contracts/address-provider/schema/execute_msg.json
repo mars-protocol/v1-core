@@ -42,13 +42,6 @@
             "null"
           ]
         },
-        "insurance_fund_address": {
-          "description": "Insurance fund contract accumulates UST to protect the protocol from shortfall events",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "mars_token_address": {
           "description": "Mars token cw20 contract",
           "type": [
@@ -77,8 +70,22 @@
             "null"
           ]
         },
+        "protocol_rewards_collector_address": {
+          "description": "Protocol Rewards Collector receives and distributes protocl rewards",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "red_bank_address": {
           "description": "Red Bank contract handles user's depositing/borrowing and holds the protocol's liquidity",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "safety_fund_address": {
+          "description": "Safety fund contract accumulates UST to protect the protocol from shortfall events",
           "type": [
             "string",
             "null"

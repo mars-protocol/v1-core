@@ -21,7 +21,7 @@ interface StakingInitMsg {
   }
 }
 
-interface InsuranceFundInitMsg {
+interface SafetyFundInitMsg {
   owner?: string
   terraswap_factory_address?: string
   terraswap_max_spread: string
@@ -89,7 +89,7 @@ interface Asset {
 interface Config {
   councilInitMsg: CouncilInitMsg
   stakingInitMsg: StakingInitMsg
-  insuranceFundInitMsg: InsuranceFundInitMsg
+  safetyFundInitMsg: SafetyFundInitMsg
   protocolRewardsCollectorInitMsg: ProtocolRewardsCollectorInitMsg
   redBankInitMsg: RedBankInitMsg
   initialAssets: Asset[]
