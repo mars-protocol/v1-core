@@ -17,10 +17,10 @@ pub struct Config {
     pub owner: Addr,
     /// Address provider address
     pub address_provider_address: Addr,
-    /// Terraswap factory contract address
-    pub terraswap_factory_address: Addr,
-    /// Terraswap max spread
-    pub terraswap_max_spread: Decimal,
+    /// Astroport factory contract address
+    pub astroport_factory_address: Addr,
+    /// Astroport max spread
+    pub astroport_max_spread: Decimal,
     /// Cooldown duration in seconds
     pub cooldown_duration: u64,
     /// Time in seconds after the cooldown ends during which the unstaking of

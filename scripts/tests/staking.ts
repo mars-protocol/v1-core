@@ -112,8 +112,8 @@ async function main() {
       config: {
         owner: deployer.key.accAddress,
         address_provider_address: addressProvider,
-        terraswap_factory_address: terraswapFactory,
-        terraswap_max_spread: "0.05",
+        astroport_factory_address: terraswapFactory,
+        astroport_max_spread: "0.05",
         cooldown_duration: COOLDOWN_DURATION_SECONDS,
         unstake_window: UNSTAKE_WINDOW_DURATION_SECONDS,
       }

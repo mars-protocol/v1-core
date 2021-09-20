@@ -11,8 +11,8 @@ pub const CONFIG: Item<Config> = Item::new("config");
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
     pub owner: Addr,
-    /// Terraswap factory contract address
-    pub terraswap_factory_address: Addr,
-    /// Terraswap max spread
-    pub terraswap_max_spread: Decimal,
+    /// Astroport factory contract address
+    pub astroport_factory_address: Addr,
+    /// Astroport max spread
+    pub astroport_max_spread: Decimal,
 }

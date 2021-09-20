@@ -4,17 +4,17 @@
   "type": "object",
   "required": [
     "owner",
-    "terraswap_factory_address",
-    "terraswap_max_spread"
+    "astroport_factory_address",
+    "astroport_max_spread"
   ],
   "properties": {
     "owner": {
       "type": "string"
     },
-    "terraswap_factory_address": {
+    "astroport_factory_address": {
       "type": "string"
     },
-    "terraswap_max_spread": {
+    "astroport_max_spread": {
       "$ref": "#/definitions/Decimal"
     }
   },

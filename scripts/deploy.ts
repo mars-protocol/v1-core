@@ -71,8 +71,8 @@ async function main() {
     return
   }
 
-  if (!deployConfig.stakingInitMsg.config.terraswap_factory_address ||
-    !deployConfig.insuranceFundInitMsg.terraswap_factory_address ||
+  if (!deployConfig.stakingInitMsg.config.astroport_factory_address ||
+    !deployConfig.insuranceFundInitMsg.astroport_factory_address ||
     !deployConfig.protocolRewardsCollectorInitMsg.config.astroport_factory_address) {
     console.log(
       "Please specify the TerraSwap/Astroport factory addresses in the deploy config before running this script..."
@@ -118,7 +118,7 @@ async function main() {
 
   /**************************************** Deploy Staking Contract *****************************************/
   console.log("Deploying Staking...")
-  // TODO fix `terraswap_factory_address` in LocalTerra
+  // TODO fix `astroport_factory_address` in LocalTerra
   deployConfig.stakingInitMsg.config.owner = councilContractAddress
   deployConfig.stakingInitMsg.config.address_provider_address = addressProviderContractAddress
   const stakingContractAddress = await deployContract(

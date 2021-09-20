@@ -34,8 +34,8 @@ pub fn instantiate(
     let CreateOrUpdateConfig {
         owner,
         address_provider_address,
-        terraswap_factory_address,
-        terraswap_max_spread,
+        astroport_factory_address,
+        astroport_max_spread,
         cooldown_duration,
         unstake_window,
     } = msg.config;
@@ -43,8 +43,8 @@ pub fn instantiate(
     // All fields should be available
     let available = owner.is_some()
         && address_provider_address.is_some()
-        && terraswap_factory_address.is_some()
-        && terraswap_max_spread.is_some()
+        && astroport_factory_address.is_some()
+        && astroport_max_spread.is_some()
         && cooldown_duration.is_some()
         && unstake_window.is_some();
 
@@ -60,12 +60,12 @@ pub fn instantiate(
             address_provider_address,
             zero_address(),
         )?,
-        terraswap_factory_address: option_string_to_addr(
+        astroport_factory_address: option_string_to_addr(
             deps.api,
-            terraswap_factory_address,
+            astroport_factory_address,
             zero_address(),
         )?,
-        terraswap_max_spread: terraswap_max_spread.unwrap(),
+        astroport_max_spread: astroport_max_spread.unwrap(),
         cooldown_duration: cooldown_duration.unwrap(),
         unstake_window: unstake_window.unwrap(),
     };
@@ -121,8 +121,8 @@ pub fn execute_update_config(
     let CreateOrUpdateConfig {
         owner,
         address_provider_address,
-        terraswap_factory_address,
-        terraswap_max_spread,
+        astroport_factory_address,
+        astroport_max_spread,
         cooldown_duration,
         unstake_window,
     } = new_config;
@@ -134,12 +134,12 @@ pub fn execute_update_config(
         address_provider_address,
         config.address_provider_address,
     )?;
-    config.terraswap_factory_address = option_string_to_addr(
+    config.astroport_factory_address = option_string_to_addr(
         deps.api,
-        terraswap_factory_address,
-        config.terraswap_factory_address,
+        astroport_factory_address,
+        config.astroport_factory_address,
     )?;
-    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
+    config.astroport_max_spread = astroport_max_spread.unwrap_or(config.astroport_max_spread);
     config.cooldown_duration = cooldown_duration.unwrap_or(config.cooldown_duration);
     config.unstake_window = unstake_window.unwrap_or(config.unstake_window);
 
@@ -415,7 +415,7 @@ pub fn execute_swap_asset_to_uusd(
         denom: "uusd".to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     Ok(execute_swap(
         deps,
@@ -423,8 +423,8 @@ pub fn execute_swap_asset_to_uusd(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )?)
 }
 
@@ -450,7 +450,7 @@ pub fn execute_swap_uusd_to_mars(
         contract_addr: mars_token_address.to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     execute_swap(
         deps,
@@ -458,8 +458,8 @@ pub fn execute_swap_uusd_to_mars(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )
 }
 
@@ -478,8 +478,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner.to_string(),
         address_provider_address: config.address_provider_address.to_string(),
-        terraswap_factory_address: config.terraswap_factory_address.to_string(),
-        terraswap_max_spread: config.terraswap_max_spread,
+        astroport_factory_address: config.astroport_factory_address.to_string(),
+        astroport_max_spread: config.astroport_max_spread,
         cooldown_duration: config.cooldown_duration,
         unstake_window: config.unstake_window,
     })
@@ -540,8 +540,8 @@ mod tests {
         let empty_config = CreateOrUpdateConfig {
             owner: None,
             address_provider_address: None,
-            terraswap_factory_address: None,
-            terraswap_max_spread: None,
+            astroport_factory_address: None,
+            astroport_max_spread: None,
             cooldown_duration: None,
             unstake_window: None,
         };
@@ -558,8 +558,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -586,8 +586,8 @@ mod tests {
         let init_config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
             unstake_window: Some(10),
         };
@@ -613,8 +613,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("new_owner")),
             address_provider_address: Some(String::from("new_address_provider")),
-            terraswap_factory_address: Some(String::from("new_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
+            astroport_factory_address: Some(String::from("new_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
             cooldown_duration: Some(200),
             unstake_window: Some(100),
         };
@@ -631,7 +631,7 @@ mod tests {
 
         assert_eq!(new_config.owner, "new_owner");
         assert_eq!(new_config.address_provider_address, "new_address_provider");
-        assert_eq!(new_config.terraswap_factory_address, "new_factory");
+        assert_eq!(new_config.astroport_factory_address, "new_factory");
         assert_eq!(
             new_config.cooldown_duration,
             config.cooldown_duration.unwrap()
@@ -1118,8 +1118,8 @@ mod tests {
         let config = CreateOrUpdateConfig {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
-            terraswap_factory_address: Some(String::from("terraswap_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_factory_address: Some(String::from("astroport_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(TEST_COOLDOWN_DURATION),
             unstake_window: Some(TEST_UNSTAKE_WINDOW),
         };

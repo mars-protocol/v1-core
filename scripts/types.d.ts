@@ -14,8 +14,8 @@ interface StakingInitMsg {
   config: {
     owner?: string
     address_provider_address?: string
-    terraswap_factory_address?: string
-    terraswap_max_spread: string
+    astroport_factory_address?: string
+    astroport_max_spread: string
     cooldown_duration: number
     unstake_window: number
   }
@@ -23,8 +23,8 @@ interface StakingInitMsg {
 
 interface SafetyFundInitMsg {
   owner?: string
-  terraswap_factory_address?: string
-  terraswap_max_spread: string
+  astroport_factory_address?: string
+  astroport_max_spread: string
 }
 
 interface ProtocolRewardsCollectorInitMsg {

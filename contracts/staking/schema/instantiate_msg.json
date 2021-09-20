@@ -34,13 +34,13 @@
             "null"
           ]
         },
-        "terraswap_factory_address": {
+        "astroport_factory_address": {
           "type": [
             "string",
             "null"
           ]
         },
-        "terraswap_max_spread": {
+        "astroport_max_spread": {
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"

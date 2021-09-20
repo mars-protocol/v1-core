@@ -23,8 +23,8 @@ pub fn instantiate(
     // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
-        terraswap_factory_address: deps.api.addr_validate(&msg.terraswap_factory_address)?,
-        terraswap_max_spread: msg.terraswap_max_spread,
+        astroport_factory_address: deps.api.addr_validate(&msg.astroport_factory_address)?,
+        astroport_max_spread: msg.astroport_max_spread,
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -48,15 +48,15 @@ pub fn execute(
 
         ExecuteMsg::UpdateConfig {
             owner,
-            terraswap_factory_address,
-            terraswap_max_spread,
+            astroport_factory_address,
+            astroport_max_spread,
         } => execute_update_config(
             deps,
             env,
             info,
             owner,
-            terraswap_factory_address,
-            terraswap_max_spread,
+            astroport_factory_address,
+            astroport_max_spread,
         ),
 
         ExecuteMsg::SwapAssetToUusd {
@@ -95,8 +95,8 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
-    terraswap_factory_address: Option<String>,
-    terraswap_max_spread: Option<Decimal>,
+    astroport_factory_address: Option<String>,
+    astroport_max_spread: Option<Decimal>,
 ) -> Result<Response, MarsError> {
     let mut config = CONFIG.load(deps.storage)?;
 
@@ -105,12 +105,12 @@ pub fn execute_update_config(
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
-    config.terraswap_factory_address = option_string_to_addr(
+    config.astroport_factory_address = option_string_to_addr(
         deps.api,
-        terraswap_factory_address,
-        config.terraswap_factory_address,
+        astroport_factory_address,
+        config.astroport_factory_address,
     )?;
-    config.terraswap_max_spread = terraswap_max_spread.unwrap_or(config.terraswap_max_spread);
+    config.astroport_max_spread = astroport_max_spread.unwrap_or(config.astroport_max_spread);
 
     CONFIG.save(deps.storage, &config)?;
 
@@ -132,7 +132,7 @@ pub fn execute_swap_asset_to_uusd(
         denom: "uusd".to_string(),
     };
 
-    let terraswap_max_spread = Some(config.terraswap_max_spread);
+    let astroport_max_spread = Some(config.astroport_max_spread);
 
     execute_swap(
         deps,
@@ -140,8 +140,8 @@ pub fn execute_swap_asset_to_uusd(
         offer_asset_info,
         ask_asset_info,
         amount,
-        config.terraswap_factory_address,
-        terraswap_max_spread,
+        config.astroport_factory_address,
+        astroport_max_spread,
     )
 }
 
@@ -158,8 +158,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
         owner: config.owner,
-        terraswap_factory_address: config.terraswap_factory_address.to_string(),
-        terraswap_max_spread: config.terraswap_max_spread,
+        astroport_factory_address: config.astroport_factory_address.to_string(),
+        astroport_max_spread: config.astroport_max_spread,
     })
 }
 
@@ -178,8 +178,8 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner: String::from("owner"),
-            terraswap_factory_address: String::from("terraswap_factory"),
-            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
 
@@ -201,8 +201,8 @@ mod tests {
         // *
         let msg = InstantiateMsg {
             owner: String::from("owner"),
-            terraswap_factory_address: String::from("terraswap_factory"),
-            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res =
@@ -213,8 +213,8 @@ mod tests {
         // *
         let msg = ExecuteMsg::UpdateConfig {
             owner: None,
-            terraswap_factory_address: None,
-            terraswap_max_spread: None,
+            astroport_factory_address: None,
+            astroport_max_spread: None,
         };
         let info = mock_info("somebody", &[]);
         let error_res =
@@ -226,8 +226,8 @@ mod tests {
         // *
         let msg = ExecuteMsg::UpdateConfig {
             owner: Some(String::from("new_owner")),
-            terraswap_factory_address: Some(String::from("new_factory")),
-            terraswap_max_spread: Some(Decimal::from_ratio(12u128, 100u128)),
+            astroport_factory_address: Some(String::from("new_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(12u128, 100u128)),
         };
         let info = mock_info("owner", &[]);
         // we can just call .unwrap() to assert this was a success
@@ -239,11 +239,11 @@ mod tests {
 
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
         assert_eq!(
-            new_config.terraswap_factory_address,
+            new_config.astroport_factory_address,
             Addr::unchecked("new_factory")
         );
         assert_eq!(
-            new_config.terraswap_max_spread,
+            new_config.astroport_max_spread,
             Decimal::from_ratio(12u128, 100u128)
         );
     }
@@ -254,8 +254,8 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner: String::from("owner"),
-            terraswap_factory_address: String::from("terraswap_factory"),
-            terraswap_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res =

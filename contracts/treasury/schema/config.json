@@ -5,23 +5,23 @@
   "type": "object",
   "required": [
     "owner",
-    "terraswap_factory_address",
-    "terraswap_max_spread"
+    "astroport_factory_address",
+    "astroport_max_spread"
   ],
   "properties": {
     "owner": {
       "$ref": "#/definitions/Addr"
     },
-    "terraswap_factory_address": {
-      "description": "Terraswap factory contract address",
+    "astroport_factory_address": {
+      "description": "Astroport factory contract address",
       "allOf": [
         {
           "$ref": "#/definitions/Addr"
         }
       ]
     },
-    "terraswap_max_spread": {
-      "description": "Terraswap max spread",
+    "astroport_max_spread": {
+      "description": "Astroport max spread",
       "allOf": [
         {
           "$ref": "#/definitions/Decimal"
