@@ -4,11 +4,11 @@ use cosmwasm_std::{to_binary, Binary, ContractResult, QuerierResult, SystemError
 use terraswap::{asset::PairInfo, factory::QueryMsg};
 
 #[derive(Clone, Default)]
-pub struct TerraswapPairQuerier {
+pub struct AstroportPairQuerier {
     pub pairs: HashMap<String, PairInfo>,
 }
 
-impl TerraswapPairQuerier {
+impl AstroportPairQuerier {
     pub fn handle_query(&self, request: &terraswap::factory::QueryMsg) -> QuerierResult {
         let ret: ContractResult<Binary> = match &request {
             QueryMsg::Pair { asset_infos } => {
@@ -22,7 +22,7 @@ impl TerraswapPairQuerier {
                     .into(),
                 }
             }
-            _ => panic!("[mock]: Unsupported Terraswap Pair query"),
+            _ => panic!("[mock]: Unsupported Astroport Pair query"),
         };
 
         Ok(ret).into()

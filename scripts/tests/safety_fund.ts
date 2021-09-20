@@ -1,5 +1,5 @@
 /*
-Integration test for the safety fund contract swapping assets to UST via Terraswap.
+Integration test for the safety fund contract swapping assets to UST via Astroport.
 
 Required directory structure:
 ```
@@ -108,7 +108,7 @@ async function getBalance(env: Env, address: string, denom: string): Promise<Num
 async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   const NATIVE_TOKEN = { "native_token": { "denom": denom } }
 
-  // instantiate a native token/USD Terraswap pair
+  // instantiate a native token/USD Astroport pair
   const pairAddress = await instantiateUsdPair(env, NATIVE_TOKEN)
 
   await provideLiquidity(env, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
@@ -143,7 +143,7 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   const tokenBalance = await getBalance(env, env.safetyFundAddress, denom)
   strictEqual(tokenBalance, ZERO)
 
-  // check the Terraswap pair balances
+  // check the Astroport pair balances
   const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
   strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
   assert(parseInt(pool.assets[1].amount) < USD_LP)
@@ -152,7 +152,7 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
 async function testSwapTokenToUsd(env: Env, address: string) {
   const TOKEN = { "token": { "contract_addr": address } }
 
-  // instantiate a token/USD Terraswap pair
+  // instantiate a token/USD Astroport pair
   const pairAddress = await instantiateUsdPair(env, TOKEN)
   // approve the pair contract to transfer the token
   await executeContract(env.terra, env.wallet, address,
@@ -194,7 +194,7 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   const tokenBalance = await queryContract(env.terra, address, { "balance": { "address": env.safetyFundAddress } })
   strictEqual(tokenBalance.balance, "0")
 
-  // check the Terraswap pair balances
+  // check the Astroport pair balances
   const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
   strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
   assert(parseInt(pool.assets[1].amount) < USD_LP)
@@ -208,7 +208,7 @@ async function main() {
   const terra = new LocalTerra()
   const wallet = terra.wallets.test1
 
-  console.log("deploying Terraswap contracts")
+  console.log("deploying Astroport contracts")
   const tokenCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
   const pairCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
   const factoryCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
@@ -224,8 +224,8 @@ async function main() {
   const safetyFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "safety_fund.wasm"),
     {
       "owner": wallet.key.accAddress,
-      "terraswap_factory_address": factoryAddress,
-      "terraswap_max_spread": "0.01",
+      "astroport_factory_address": factoryAddress,
+      "astroport_max_spread": "0.01",
     }
   )
 

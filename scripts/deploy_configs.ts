@@ -15,16 +15,16 @@ export const testnet: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
-      "terraswap_max_spread": "0.05",
+      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_max_spread": "0.05",
       "cooldown_duration": 90, // Seconds (for internal testing) // 864000 Seconds = 10 days
       "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
     }
   },
   safetyFundInitMsg: {
     "owner": undefined,
-    "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
-    "terraswap_max_spread": "0.05",
+    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_max_spread": "0.05",
   },
   protocolRewardsCollectorInitMsg: {
     "config": {
@@ -189,16 +189,16 @@ export const bombay: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
-      "terraswap_max_spread": "0.05",
+      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_max_spread": "0.05",
       "cooldown_duration": 90, // Seconds (for internal testing) // 864000 Seconds = 10 days
       "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
     }
   },
   safetyFundInitMsg: {
     "owner": undefined,
-    "terraswap_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
-    "terraswap_max_spread": "0.05",
+    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_max_spread": "0.05",
   },
   protocolRewardsCollectorInitMsg: {
     "config": {
@@ -363,16 +363,16 @@ export const local: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "terraswap_factory_address": undefined,
-      "terraswap_max_spread": "0.05",
+      "astroport_factory_address": undefined,
+      "astroport_max_spread": "0.05",
       "cooldown_duration": 10,
       "unstake_window": 300,
     }
   },
   safetyFundInitMsg: {
     "owner": undefined,
-    "terraswap_factory_address": undefined,
-    "terraswap_max_spread": "0.05",
+    "astroport_factory_address": undefined,
+    "astroport_max_spread": "0.05",
   },
   protocolRewardsCollectorInitMsg: {
     "config": {

@@ -13,11 +13,11 @@ use crate::{
 };
 
 use super::{
+    astroport_pair_querier::AstroportPairQuerier,
     cw20_querier::{mock_token_info_response, Cw20Querier},
     incentives_querier::IncentivesQuerier,
     native_querier::NativeQuerier,
     oracle_querier::OracleQuerier,
-    terraswap_pair_querier::TerraswapPairQuerier,
     xmars_querier::XMarsQuerier,
 };
 
@@ -26,7 +26,7 @@ pub struct MarsMockQuerier {
     native_querier: NativeQuerier,
     cw20_querier: Cw20Querier,
     xmars_querier: XMarsQuerier,
-    terraswap_pair_querier: TerraswapPairQuerier,
+    astroport_pair_querier: AstroportPairQuerier,
     oracle_querier: OracleQuerier,
     incentives_querier: IncentivesQuerier,
 }
@@ -56,7 +56,7 @@ impl MarsMockQuerier {
             cw20_querier: Cw20Querier::default(),
             oracle_querier: OracleQuerier::default(),
             xmars_querier: XMarsQuerier::default(),
-            terraswap_pair_querier: TerraswapPairQuerier::default(),
+            astroport_pair_querier: AstroportPairQuerier::default(),
             incentives_querier: IncentivesQuerier::default(),
         }
     }
@@ -135,10 +135,10 @@ impl MarsMockQuerier {
         self.xmars_querier.total_supplies_at.insert(block, balance);
     }
 
-    pub fn set_terraswap_pair(&mut self, pair_info: PairInfo) {
+    pub fn set_astroport_pair(&mut self, pair_info: PairInfo) {
         let asset_infos = &pair_info.asset_infos;
         let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
-        self.terraswap_pair_querier.pairs.insert(key, pair_info);
+        self.astroport_pair_querier.pairs.insert(key, pair_info);
     }
 
     pub fn set_incentives_address(&mut self, address: Addr) {
@@ -199,11 +199,11 @@ impl MarsMockQuerier {
                         .handle_query(&contract_addr, oracle_query);
                 }
 
-                // Terraswap Queries
-                let terraswap_pair_query: StdResult<terraswap::factory::QueryMsg> =
+                // Astroport Queries
+                let astroport_pair_query: StdResult<terraswap::factory::QueryMsg> =
                     from_binary(msg);
-                if let Ok(pair_query) = terraswap_pair_query {
-                    return self.terraswap_pair_querier.handle_query(&pair_query);
+                if let Ok(pair_query) = astroport_pair_query {
+                    return self.astroport_pair_querier.handle_query(&pair_query);
                 }
 
                 // Incentives Queries
