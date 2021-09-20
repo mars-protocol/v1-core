@@ -1,5 +1,4 @@
 use crate::error::ContractError;
-use crate::error::ContractError::{InvalidMinMaxBorrowRate, InvalidOptimalUtilizationRate};
 use cosmwasm_std::Decimal;
 use mars::math::{decimal_division, decimal_multiplication};
 use schemars::JsonSchema;
@@ -131,14 +130,14 @@ impl InterestRateModel for DynamicInterestRate {
 
     fn validate(&self) -> Result<(), ContractError> {
         if self.min_borrow_rate > self.max_borrow_rate {
-            return Err(InvalidMinMaxBorrowRate {
+            return Err(ContractError::InvalidMinMaxBorrowRate {
                 min_borrow_rate: self.min_borrow_rate,
                 max_borrow_rate: self.max_borrow_rate,
             });
         }
 
         if self.optimal_utilization_rate > Decimal::one() {
-            return Err(InvalidOptimalUtilizationRate {});
+            return Err(ContractError::InvalidOptimalUtilizationRate {});
         }
 
         Ok(())
@@ -196,7 +195,7 @@ impl InterestRateModel for LinearInterestRate {
 
     fn validate(&self) -> Result<(), ContractError> {
         if self.optimal_utilization_rate > Decimal::one() {
-            return Err(InvalidOptimalUtilizationRate {});
+            return Err(ContractError::InvalidOptimalUtilizationRate {});
         }
 
         Ok(())

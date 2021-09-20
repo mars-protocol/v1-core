@@ -6,8 +6,8 @@ use terraswap::asset::AssetInfo;
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
     pub owner: String,
-    pub terraswap_factory_address: String,
-    pub terraswap_max_spread: Decimal,
+    pub astroport_factory_address: String,
+    pub astroport_max_spread: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -19,8 +19,8 @@ pub enum ExecuteMsg {
     /// Update contract config (only callable by owner)
     UpdateConfig {
         owner: Option<String>,
-        terraswap_factory_address: Option<String>,
-        terraswap_max_spread: Option<Decimal>,
+        astroport_factory_address: Option<String>,
+        astroport_max_spread: Option<Decimal>,
     },
 
     /// Swap any asset on the contract to uusd
@@ -40,6 +40,8 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub owner: Addr,
+    pub astroport_factory_address: String,
+    pub astroport_max_spread: Decimal,
 }
 
 /// We currently take no arguments for migrations

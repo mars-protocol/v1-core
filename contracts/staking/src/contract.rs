@@ -457,9 +457,9 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     Ok(ConfigResponse {
         owner: config.owner.to_string(),
         address_provider_address: config.address_provider_address.to_string(),
+        astroport_factory_address: config.astroport_factory_address.to_string(),
         astroport_max_spread: config.astroport_max_spread,
         cooldown_duration: config.cooldown_duration,
-        unstake_window: config.unstake_window,
     })
 }
 

@@ -134,6 +134,9 @@ pub enum ContractError {
 
     #[error("Cannot liquidate. Debt asset {asset:?}")]
     LiquidationNotAllowedWhenDebtMarketInactive { asset: String },
+
+    #[error("User's health factor can't be less than 1 after disabling collateral")]
+    InvalidHealthFactorAfterDisablingCollateral {},
 }
 
 impl ContractError {

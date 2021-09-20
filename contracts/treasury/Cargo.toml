@@ -22,6 +22,8 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
 
+terraswap = "2.4.0"
+
 cosmwasm-std = "0.16.0"
 cw-storage-plus = "0.8.0"
 

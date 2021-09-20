@@ -4,19 +4,19 @@ use cosmwasm_std::{
     StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
-use terraswap::asset::{Asset as TerraswapAsset, AssetInfo, PairInfo};
-use terraswap::pair::ExecuteMsg as TerraswapPairExecuteMsg;
+use terraswap::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
+use terraswap::pair::ExecuteMsg as AstroportPairExecuteMsg;
 use terraswap::querier::query_pair_info;
 
-/// Swap assets via terraswap
+/// Swap assets via Astroport
 pub fn execute_swap(
     deps: DepsMut,
     env: Env,
     offer_asset_info: AssetInfo,
     ask_asset_info: AssetInfo,
     amount: Option<Uint128>,
-    terraswap_factory_addr: Addr,
-    terraswap_max_spread: Option<Decimal>,
+    astroport_factory_addr: Addr,
+    astroport_max_spread: Option<Decimal>,
 ) -> StdResult<Response> {
     // Having the same asset as offer and ask asset doesn't make any sense
     if offer_asset_info == ask_asset_info {
@@ -66,18 +66,18 @@ pub fn execute_swap(
 
     let pair_info: PairInfo = query_pair_info(
         &deps.querier,
-        terraswap_factory_addr,
+        astroport_factory_addr,
         &[offer_asset_info.clone(), ask_asset_info],
     )?;
 
-    let offer_asset = TerraswapAsset {
+    let offer_asset = AstroportAsset {
         info: offer_asset_info,
         amount: amount_to_swap,
     };
     let send_msg = asset_into_swap_msg(
         deps.api.addr_validate(&pair_info.contract_addr)?,
         offer_asset,
-        terraswap_max_spread,
+        astroport_max_spread,
     )?;
 
     let response = Response::new()
@@ -87,16 +87,16 @@ pub fn execute_swap(
     Ok(response)
 }
 
-/// Construct terraswap message in order to swap assets
+/// Construct Astroport message in order to swap assets
 fn asset_into_swap_msg(
     pair_contract: Addr,
-    offer_asset: TerraswapAsset,
+    offer_asset: AstroportAsset,
     max_spread: Option<Decimal>,
 ) -> StdResult<CosmosMsg<Empty>> {
     let message = match offer_asset.info.clone() {
         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: pair_contract.to_string(),
-            msg: to_binary(&TerraswapPairExecuteMsg::Swap {
+            msg: to_binary(&AstroportPairExecuteMsg::Swap {
                 offer_asset: offer_asset.clone(),
                 belief_price: None,
                 max_spread,
@@ -112,7 +112,7 @@ fn asset_into_swap_msg(
             msg: to_binary(&Cw20ExecuteMsg::Send {
                 contract: pair_contract.to_string(),
                 amount: offer_asset.amount,
-                msg: to_binary(&TerraswapPairExecuteMsg::Swap {
+                msg: to_binary(&AstroportPairExecuteMsg::Swap {
                     offer_asset,
                     belief_price: None,
                     max_spread,
@@ -160,7 +160,7 @@ mod tests {
                 asset_info.clone(),
                 asset_info,
                 None,
-                Addr::unchecked("terraswap_factory"),
+                Addr::unchecked("astroport_factory"),
                 None,
             );
             assert_generic_error_message(
@@ -194,7 +194,7 @@ mod tests {
             offer_asset_info,
             ask_asset_info,
             None,
-            Addr::unchecked("terraswap_factory"),
+            Addr::unchecked("astroport_factory"),
             None,
         );
         assert_generic_error_message(response, "Contract has no balance for the asset cw20_zero")
@@ -221,7 +221,7 @@ mod tests {
             offer_asset_info,
             ask_asset_info,
             Some(Uint128::new(1_000_001)),
-            Addr::unchecked("terraswap_factory"),
+            Addr::unchecked("astroport_factory"),
             None,
         );
         assert_generic_error_message(
@@ -249,7 +249,7 @@ mod tests {
             contract_addr: String::from("mars"),
         };
 
-        deps.querier.set_terraswap_pair(PairInfo {
+        deps.querier.set_astroport_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
             contract_addr: String::from("pair_cw20_mars"),
             liquidity_token: String::from("lp_cw20_mars"),
@@ -261,7 +261,7 @@ mod tests {
             offer_asset_info,
             ask_asset_info,
             Some(Uint128::new(999)),
-            Addr::unchecked("terraswap_factory"),
+            Addr::unchecked("astroport_factory"),
             None,
         )
         .unwrap();
@@ -273,8 +273,8 @@ mod tests {
                 msg: to_binary(&Cw20ExecuteMsg::Send {
                     contract: String::from("pair_cw20_mars"),
                     amount: Uint128::new(999),
-                    msg: to_binary(&TerraswapPairExecuteMsg::Swap {
-                        offer_asset: TerraswapAsset {
+                    msg: to_binary(&AstroportPairExecuteMsg::Swap {
+                        offer_asset: AstroportAsset {
                             info: AssetInfo::Token {
                                 contract_addr: cw20_contract_address.to_string(),
                             },
@@ -316,7 +316,7 @@ mod tests {
             contract_addr: String::from("mars"),
         };
 
-        deps.querier.set_terraswap_pair(PairInfo {
+        deps.querier.set_astroport_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
             contract_addr: String::from("pair_uusd_mars"),
             liquidity_token: String::from("lp_uusd_mars"),
@@ -328,7 +328,7 @@ mod tests {
             offer_asset_info,
             ask_asset_info,
             None,
-            Addr::unchecked("terraswap_factory"),
+            Addr::unchecked("astroport_factory"),
             Some(Decimal::from_ratio(1u128, 100u128)),
         )
         .unwrap();
@@ -337,8 +337,8 @@ mod tests {
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("pair_uusd_mars"),
-                msg: to_binary(&TerraswapPairExecuteMsg::Swap {
-                    offer_asset: TerraswapAsset {
+                msg: to_binary(&AstroportPairExecuteMsg::Swap {
+                    offer_asset: AstroportAsset {
                         info: AssetInfo::NativeToken {
                             denom: "uusd".to_string(),
                         },

@@ -4,13 +4,35 @@
   "description": "Treasury global configuration",
   "type": "object",
   "required": [
+    "address_provider_address",
+    "cooldown_duration",
     "owner",
     "astroport_factory_address",
-    "astroport_max_spread"
+    "astroport_max_spread",
+    "unstake_window"
   ],
   "properties": {
+    "address_provider_address": {
+      "description": "Address provider address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
+    },
+    "cooldown_duration": {
+      "description": "Cooldown duration in seconds",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "owner": {
-      "$ref": "#/definitions/Addr"
+      "description": "Contract owner",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
     },
     "astroport_factory_address": {
       "description": "Astroport factory contract address",
@@ -27,6 +49,12 @@
           "$ref": "#/definitions/Decimal"
         }
       ]
+    },
+    "unstake_window": {
+      "description": "Time in seconds after the cooldown ends during which the unstaking of the associated amount is allowed",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     }
   },
   "definitions": {

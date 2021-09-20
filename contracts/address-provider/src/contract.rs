@@ -25,7 +25,7 @@ pub fn instantiate(
         owner: deps.api.addr_validate(&msg.owner)?,
         council_address: Addr::unchecked(""),
         incentives_address: Addr::unchecked(""),
-        insurance_fund_address: Addr::unchecked(""),
+        safety_fund_address: Addr::unchecked(""),
         mars_token_address: Addr::unchecked(""),
         oracle_address: Addr::unchecked(""),
         protocol_admin_address: Addr::unchecked(""),
@@ -74,7 +74,7 @@ pub fn execute_update_config(
         owner,
         council_address,
         incentives_address,
-        insurance_fund_address,
+        safety_fund_address,
         mars_token_address,
         oracle_address,
         protocol_admin_address,
@@ -91,11 +91,8 @@ pub fn execute_update_config(
         option_string_to_addr(deps.api, council_address, config.council_address)?;
     config.incentives_address =
         option_string_to_addr(deps.api, incentives_address, config.incentives_address)?;
-    config.insurance_fund_address = option_string_to_addr(
-        deps.api,
-        insurance_fund_address,
-        config.insurance_fund_address,
-    )?;
+    config.safety_fund_address =
+        option_string_to_addr(deps.api, safety_fund_address, config.safety_fund_address)?;
     config.mars_token_address =
         option_string_to_addr(deps.api, mars_token_address, config.mars_token_address)?;
     config.oracle_address = option_string_to_addr(deps.api, oracle_address, config.oracle_address)?;
@@ -140,7 +137,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         owner: config.owner,
         council_address: config.council_address,
         incentives_address: config.incentives_address,
-        insurance_fund_address: config.insurance_fund_address,
+        safety_fund_address: config.safety_fund_address,
         mars_token_address: config.mars_token_address,
         oracle_address: config.oracle_address,
         protocol_admin_address: config.protocol_admin_address,
@@ -171,7 +168,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
     match address {
         MarsContract::Council => config.council_address.clone(),
         MarsContract::Incentives => config.incentives_address.clone(),
-        MarsContract::InsuranceFund => config.insurance_fund_address.clone(),
+        MarsContract::SafetyFund => config.safety_fund_address.clone(),
         MarsContract::MarsToken => config.mars_token_address.clone(),
         MarsContract::Oracle => config.oracle_address.clone(),
         MarsContract::ProtocolAdmin => config.protocol_admin_address.clone(),

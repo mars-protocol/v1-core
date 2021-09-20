@@ -136,7 +136,7 @@ async function main() {
       config: {
         owner: deployer.key.accAddress,
         address_provider_address: addressProvider,
-        insurance_fund_fee_share: "0.1",
+        safety_fund_fee_share: "0.1",
         treasury_fee_share: "0.2",
         ma_token_code_id: maTokenCodeId,
         close_factor: "0.5",
@@ -158,8 +158,8 @@ async function main() {
       config: {
         owner: deployer.key.accAddress,
         address_provider_address: addressProvider,
-        terraswap_factory_address: terraswapFactory,
-        terraswap_max_spread: "0.05",
+        astroport_factory_address: terraswapFactory,
+        astroport_max_spread: "0.05",
         cooldown_duration: 10,
         unstake_window: 300,
       }

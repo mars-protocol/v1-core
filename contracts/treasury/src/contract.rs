@@ -1,12 +1,15 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
+    entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response,
+    StdResult, Uint128,
 };
+use terraswap::asset::AssetInfo;
 
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
 
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
+use mars::swapping::execute_swap;
 
 // INIT
 
@@ -20,6 +23,8 @@ pub fn instantiate(
     // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
+        astroport_factory_address: deps.api.addr_validate(&msg.astroport_factory_address)?,
+        astroport_max_spread: msg.astroport_max_spread,
     };
 
     CONFIG.save(deps.storage, &config)?;
@@ -41,7 +46,28 @@ pub fn execute(
             handle_execute_cosmos_msg(deps, env, info, cosmos_msg)
         }
 
-        ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
+        ExecuteMsg::UpdateConfig {
+            owner,
+            astroport_factory_address,
+            astroport_max_spread,
+        } => execute_update_config(
+            deps,
+            env,
+            info,
+            owner,
+            astroport_factory_address,
+            astroport_max_spread,
+        ),
+
+        ExecuteMsg::SwapAssetToUusd {
+            offer_asset_info,
+            amount,
+        } => Ok(execute_swap_asset_to_uusd(
+            deps,
+            env,
+            offer_asset_info,
+            amount,
+        )?),
     }
 }
 
@@ -69,6 +95,8 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
+    astroport_factory_address: Option<String>,
+    astroport_max_spread: Option<Decimal>,
 ) -> Result<Response, MarsError> {
     let mut config = CONFIG.load(deps.storage)?;
 
@@ -77,12 +105,44 @@ pub fn execute_update_config(
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
+    config.astroport_factory_address = option_string_to_addr(
+        deps.api,
+        astroport_factory_address,
+        config.astroport_factory_address,
+    )?;
+    config.astroport_max_spread = astroport_max_spread.unwrap_or(config.astroport_max_spread);
 
     CONFIG.save(deps.storage, &config)?;
 
     let response = Response::new().add_attribute("action", "update_config");
 
     Ok(response)
+}
+
+/// Swap any asset on the contract to uusd
+pub fn execute_swap_asset_to_uusd(
+    deps: DepsMut,
+    env: Env,
+    offer_asset_info: AssetInfo,
+    amount: Option<Uint128>,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+
+    let ask_asset_info = AssetInfo::NativeToken {
+        denom: "uusd".to_string(),
+    };
+
+    let astroport_max_spread = Some(config.astroport_max_spread);
+
+    execute_swap(
+        deps,
+        env,
+        offer_asset_info,
+        ask_asset_info,
+        amount,
+        config.astroport_factory_address,
+        astroport_max_spread,
+    )
 }
 
 // QUERIES
@@ -98,6 +158,8 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     Ok(ConfigResponse {
         owner: config.owner,
+        astroport_factory_address: config.astroport_factory_address.to_string(),
+        astroport_max_spread: config.astroport_max_spread,
     })
 }
 
@@ -116,6 +178,8 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner: String::from("owner"),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
 
@@ -137,6 +201,8 @@ mod tests {
         // *
         let msg = InstantiateMsg {
             owner: String::from("owner"),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res =
@@ -145,7 +211,11 @@ mod tests {
         // *
         // non owner is not authorized
         // *
-        let msg = ExecuteMsg::UpdateConfig { owner: None };
+        let msg = ExecuteMsg::UpdateConfig {
+            owner: None,
+            astroport_factory_address: None,
+            astroport_max_spread: None,
+        };
         let info = mock_info("somebody", &[]);
         let error_res =
             execute(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap_err();
@@ -156,6 +226,8 @@ mod tests {
         // *
         let msg = ExecuteMsg::UpdateConfig {
             owner: Some(String::from("new_owner")),
+            astroport_factory_address: Some(String::from("new_factory")),
+            astroport_max_spread: Some(Decimal::from_ratio(12u128, 100u128)),
         };
         let info = mock_info("owner", &[]);
         // we can just call .unwrap() to assert this was a success
@@ -166,6 +238,14 @@ mod tests {
         let new_config = CONFIG.load(&deps.storage).unwrap();
 
         assert_eq!(new_config.owner, Addr::unchecked("new_owner"));
+        assert_eq!(
+            new_config.astroport_factory_address,
+            Addr::unchecked("new_factory")
+        );
+        assert_eq!(
+            new_config.astroport_max_spread,
+            Decimal::from_ratio(12u128, 100u128)
+        );
     }
 
     #[test]
@@ -174,6 +254,8 @@ mod tests {
 
         let msg = InstantiateMsg {
             owner: String::from("owner"),
+            astroport_factory_address: String::from("astroport_factory"),
+            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res =

@@ -30,17 +30,6 @@ use mars::math::reverse_decimal;
 
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
-use crate::error::ContractError::{
-    AssetAlreadyInitialized, AssetNotInitialized, BorrowAmountExceedsGivenCollateral,
-    BorrowAmountExceedsUncollateralizedLoanLimit, BorrowMarketNotExists, BorrowNotAllowed,
-    CannotLiquidateWhenNoCollateralBalance, CannotLiquidateWhenNoDebtBalance,
-    CannotLiquidateWhenNotEnoughCollateral, CannotLiquidateWhenPositiveUncollateralizedLoanLimit,
-    CannotRepayMoreThanDebt, CannotRepayZeroDebt, CannotTransferTokenWhenInvalidHealthFactor,
-    DepositNotAllowed, InvalidBorrowAmount, InvalidDepositAmount, InvalidHealthFactorAfterWithdraw,
-    InvalidLiquidateAmount, InvalidLiquidityIndex, InvalidRepayAmount, InvalidWithdrawAmount,
-    LiquidationNotAllowedWhenCollateralMarketInactive, LiquidationNotAllowedWhenDebtMarketInactive,
-    RepayNotAllowed, UserNoBalance, UserNoCollateral, UserNoCollateralBalance, WithdrawNotAllowed,
-};
 use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
@@ -330,7 +319,7 @@ pub fn execute_withdraw(
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     if !market.allow_withdraw() {
-        return Err(WithdrawNotAllowed { asset: asset_label });
+        return Err(ContractError::WithdrawNotAllowed { asset: asset_label });
     }
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -338,7 +327,7 @@ pub fn execute_withdraw(
         cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
 
     if withdrawer_balance_scaled.is_zero() {
-        return Err(UserNoBalance { asset: asset_label });
+        return Err(ContractError::UserNoBalance { asset: asset_label });
     }
 
     // Check user has sufficient balance to send back
@@ -349,7 +338,7 @@ pub fn execute_withdraw(
                 get_updated_liquidity_index(&market, env.block.time.seconds()),
             );
             if amount_scaled.is_zero() || amount_scaled > withdrawer_balance_scaled {
-                return Err(InvalidWithdrawAmount { asset: asset_label });
+                return Err(ContractError::InvalidWithdrawAmount { asset: asset_label });
             };
             (amount, amount_scaled)
         }
@@ -417,7 +406,7 @@ pub fn execute_withdraw(
             user_position.total_collateralized_debt_in_uusd,
         );
         if health_factor_after_withdraw < Decimal::one() {
-            return Err(InvalidHealthFactorAfterWithdraw {});
+            return Err(ContractError::InvalidHealthFactorAfterWithdraw {});
         }
     }
 
@@ -576,7 +565,7 @@ pub fn execute_init_asset(
                 }));
             Ok(res)
         }
-        Some(_) => Err(AssetAlreadyInitialized {}),
+        Some(_) => Err(ContractError::AssetAlreadyInitialized {}),
     }
 }
 
@@ -645,7 +634,7 @@ pub fn execute_update_asset(
 
             Ok(response)
         }
-        None => Err(AssetNotInitialized {}),
+        None => Err(ContractError::AssetNotInitialized {}),
     }
 }
 
@@ -662,14 +651,14 @@ pub fn execute_deposit(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_deposit() {
-        return Err(DepositNotAllowed {
+        return Err(ContractError::DepositNotAllowed {
             asset: asset_label.to_string(),
         });
     }
 
     // Cannot deposit zero amount
     if deposit_amount.is_zero() {
-        return Err(InvalidDepositAmount {
+        return Err(ContractError::InvalidDepositAmount {
             asset: asset_label.to_string(),
         });
     }
@@ -716,7 +705,7 @@ pub fn execute_deposit(
     MARKETS.save(deps.storage, asset_reference, &market)?;
 
     if market.liquidity_index.is_zero() {
-        return Err(InvalidLiquidityIndex {});
+        return Err(ContractError::InvalidLiquidityIndex {});
     }
     let mint_amount = get_scaled_amount(
         deposit_amount,
@@ -753,7 +742,7 @@ pub fn execute_borrow(
 
     // Cannot borrow zero amount
     if borrow_amount.is_zero() {
-        return Err(InvalidBorrowAmount { asset: asset_label });
+        return Err(ContractError::InvalidBorrowAmount { asset: asset_label });
     }
 
     // Load market and user state
@@ -761,10 +750,10 @@ pub fn execute_borrow(
     let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
         Ok(borrow_market) if borrow_market.allow_borrow() => borrow_market,
         Ok(_) => {
-            return Err(BorrowNotAllowed { asset: asset_label });
+            return Err(ContractError::BorrowNotAllowed { asset: asset_label });
         }
         Err(_) => {
-            return Err(BorrowMarketNotExists { asset: asset_label });
+            return Err(ContractError::BorrowMarketNotExists { asset: asset_label });
         }
     };
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
@@ -777,7 +766,7 @@ pub fn execute_borrow(
         Some(user) => user,
         None => {
             if uncollateralized_loan_limit.is_zero() {
-                return Err(UserNoCollateral {});
+                return Err(ContractError::UserNoCollateral {});
             }
             // If User has some uncollateralized_loan_limit, then we don't require an existing debt position and initialize a new one.
             User::default()
@@ -828,7 +817,7 @@ pub fn execute_borrow(
             .total_debt_in_uusd
             .checked_add(borrow_amount_in_uusd)?;
         if total_debt_in_uusd_after_borrow > user_position.max_debt_in_uusd {
-            return Err(BorrowAmountExceedsGivenCollateral {});
+            return Err(ContractError::BorrowAmountExceedsGivenCollateral {});
         }
     } else {
         // Uncollateralized loan: check borrow amount plus debt does not exceed uncollateralized loan limit
@@ -852,7 +841,7 @@ pub fn execute_borrow(
 
         let debt_after_borrow = debt_amount.checked_add(borrow_amount)?;
         if debt_after_borrow > uncollateralized_loan_limit {
-            return Err(BorrowAmountExceedsUncollateralizedLoanLimit {});
+            return Err(ContractError::BorrowAmountExceedsUncollateralizedLoanLimit {});
         }
     }
 
@@ -941,14 +930,14 @@ pub fn execute_repay(
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.allow_repay() {
-        return Err(RepayNotAllowed {
+        return Err(ContractError::RepayNotAllowed {
             asset: asset_label.to_string(),
         });
     }
 
     // Cannot repay zero amount
     if repay_amount.is_zero() {
-        return Err(InvalidRepayAmount {
+        return Err(ContractError::InvalidRepayAmount {
             asset: asset_label.to_string(),
         });
     }
@@ -957,7 +946,7 @@ pub fn execute_repay(
     let mut debt = DEBTS.load(deps.storage, (asset_reference, &repayer_address))?;
 
     if debt.amount_scaled.is_zero() {
-        return Err(CannotRepayZeroDebt {});
+        return Err(ContractError::CannotRepayZeroDebt {});
     }
 
     let config = CONFIG.load(deps.storage)?;
@@ -1014,7 +1003,7 @@ pub fn execute_repay(
     DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
-        return Err(CannotRepayMoreThanDebt {});
+        return Err(ContractError::CannotRepayMoreThanDebt {});
     }
     market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
 
@@ -1072,13 +1061,13 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )? {
         if !limit.is_zero() {
-            return Err(CannotLiquidateWhenPositiveUncollateralizedLoanLimit {});
+            return Err(ContractError::CannotLiquidateWhenPositiveUncollateralizedLoanLimit {});
         }
     };
 
     // liquidator must send positive amount of funds in the debt asset
     if sent_debt_asset_amount.is_zero() {
-        return Err(InvalidLiquidateAmount {
+        return Err(ContractError::InvalidLiquidateAmount {
             asset: debt_asset_label,
         });
     }
@@ -1089,9 +1078,11 @@ pub fn execute_liquidate(
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
     if !collateral_market.allow_liquidate() {
-        return Err(LiquidationNotAllowedWhenCollateralMarketInactive {
-            asset: collateral_asset_label,
-        });
+        return Err(
+            ContractError::LiquidationNotAllowedWhenCollateralMarketInactive {
+                asset: collateral_asset_label,
+            },
+        );
     }
 
     // check if user has available collateral in specified collateral asset to be liquidated
@@ -1105,7 +1096,7 @@ pub fn execute_liquidate(
         get_updated_liquidity_index(&collateral_market, block_time),
     );
     if user_collateral_balance.is_zero() {
-        return Err(CannotLiquidateWhenNoCollateralBalance {});
+        return Err(ContractError::CannotLiquidateWhenNoCollateralBalance {});
     }
 
     // check if user has outstanding debt in the deposited asset that needs to be repayed
@@ -1114,7 +1105,7 @@ pub fn execute_liquidate(
         (debt_asset_reference.as_slice(), &user_address),
     )?;
     if user_debt.amount_scaled.is_zero() {
-        return Err(CannotLiquidateWhenNoDebtBalance {});
+        return Err(ContractError::CannotLiquidateWhenNoDebtBalance {});
     }
 
     // 2. Compute health factor
@@ -1141,7 +1132,9 @@ pub fn execute_liquidate(
 
     let health_factor = match user_position.health_status {
         // NOTE: Should not get in practice as it would fail on the debt asset check
-        UserHealthStatus::NotBorrowing => return Err(CannotLiquidateWhenNoDebtBalance {}),
+        UserHealthStatus::NotBorrowing => {
+            return Err(ContractError::CannotLiquidateWhenNoDebtBalance {})
+        }
         UserHealthStatus::Borrowing(hf) => hf,
     };
 
@@ -1153,7 +1146,7 @@ pub fn execute_liquidate(
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
 
     if !debt_market.allow_liquidate() {
-        return Err(LiquidationNotAllowedWhenDebtMarketInactive {
+        return Err(ContractError::LiquidationNotAllowedWhenDebtMarketInactive {
             asset: debt_asset_label,
         });
     }
@@ -1383,7 +1376,7 @@ fn process_underlying_asset_transfer_to_liquidator(
     };
 
     if contract_collateral_balance < collateral_amount_to_liquidate {
-        return Err(CannotLiquidateWhenNotEnoughCollateral {});
+        return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
     }
 
     // Apply update collateral interest as liquidity is reduced
@@ -1512,7 +1505,7 @@ pub fn execute_finalize_liquidity_token_transfer(
     )?;
     if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
         if health_factor < Decimal::one() {
-            return Err(CannotTransferTokenWhenInvalidHealthFactor {});
+            return Err(ContractError::CannotTransferTokenWhenInvalidHealthFactor {});
         }
     }
 
@@ -1601,7 +1594,7 @@ pub fn execute_update_uncollateralized_loan_limit(
 /// Update (enable / disable) collateral asset for specific user
 pub fn execute_update_user_collateral_asset_status(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     asset: Asset,
     enable: bool,
@@ -1630,7 +1623,7 @@ pub fn execute_update_user_collateral_asset_status(
                 user_address.to_string(),
             ));
         } else {
-            return Err(UserNoCollateralBalance {
+            return Err(ContractError::UserNoCollateralBalance {
                 user_address: user_address.to_string(),
                 asset: collateral_asset_label,
             });
@@ -1638,6 +1631,30 @@ pub fn execute_update_user_collateral_asset_status(
     } else if has_collateral_asset && !enable {
         // disable collateral asset
         unset_bit(&mut user.collateral_assets, collateral_market.index)?;
+
+        // check health factor after disabling collateral
+        let global_state = GLOBAL_STATE.load(deps.storage)?;
+        let config = CONFIG.load(deps.storage)?;
+        let oracle_address = address_provider::helpers::query_address(
+            &deps.querier,
+            config.address_provider_address,
+            MarsContract::Oracle,
+        )?;
+        let user_position = get_user_position(
+            deps.as_ref(),
+            env.block.time.seconds(),
+            &user_address,
+            oracle_address,
+            &user,
+            global_state.market_count,
+        )?;
+        // if health factor is less than one after disabling collateral we can't process further
+        if let UserHealthStatus::Borrowing(health_factor) = user_position.health_status {
+            if health_factor < Decimal::one() {
+                return Err(ContractError::InvalidHealthFactorAfterDisablingCollateral {});
+            }
+        }
+
         USERS.save(deps.storage, &user_address, &user)?;
         events.push(build_collateral_position_changed_event(
             collateral_asset_label.as_str(),
@@ -1744,6 +1761,9 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         liquidation_bonus: market.liquidation_bonus,
         reserve_factor: market.reserve_factor,
         interest_rate_strategy: market.interest_rate_strategy,
+        active: market.active,
+        deposit_enabled: market.deposit_enabled,
+        borrow_enabled: market.borrow_enabled,
     })
 }
 
@@ -2026,7 +2046,6 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::ContractError::OperationExceedsAvailableLiquidity;
     use crate::interest_rate_models::{
         DynamicInterestRate, InterestRateModel, InterestRateStrategy, LinearInterestRate,
     };
@@ -4929,7 +4948,10 @@ mod tests {
                 amount: 100u128.into(),
             };
             let error_res = execute(deps.as_mut(), env, info.clone(), msg).unwrap_err();
-            assert_eq!(error_res, OperationExceedsAvailableLiquidity {});
+            assert_eq!(
+                error_res,
+                ContractError::OperationExceedsAvailableLiquidity {}
+            );
         }
 
         // Repay part of the debt
@@ -6882,85 +6904,211 @@ mod tests {
 
         let user_addr = Addr::unchecked(String::from("user"));
 
-        let ma_token_address_1 = Addr::unchecked("matoken1");
+        let token_addr_1 = Addr::unchecked("depositedcoin1");
+        let ma_token_addr_1 = Addr::unchecked("matoken1");
         let mock_market_1 = Market {
-            ma_token_address: ma_token_address_1.clone(),
+            ma_token_address: ma_token_addr_1.clone(),
             asset_type: AssetType::Cw20,
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(60u128, 100u128),
             ..Default::default()
         };
+        let token_addr_2 = Addr::unchecked("depositedcoin2");
+        let ma_token_addr_2 = Addr::unchecked("matoken2");
         let mock_market_2 = Market {
-            ma_token_address: Addr::unchecked("matoken2"),
+            ma_token_address: ma_token_addr_2.clone(),
+            asset_type: AssetType::Native,
+            liquidity_index: Decimal::from_ratio(1u128, 2u128),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(80u128, 100u128),
             ..Default::default()
         };
-        let cw20_contract_addr = Addr::unchecked("depositedcoin1");
+        let token_addr_3 = Addr::unchecked("depositedcoin3");
+        let ma_token_addr_3 = Addr::unchecked("matoken3");
+        let mock_market_3 = Market {
+            ma_token_address: ma_token_addr_3.clone(),
+            asset_type: AssetType::Native,
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::from_ratio(2u128, 1u128),
+            max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
+            maintenance_margin: Decimal::from_ratio(40u128, 100u128),
+            ..Default::default()
+        };
 
-        // Should get index 0
         let market_1_initial =
-            th_init_market(deps.as_mut(), cw20_contract_addr.as_bytes(), &mock_market_1);
-        // Should get index 1
-        let market_2_initial = th_init_market(deps.as_mut(), b"depositedcoin2", &mock_market_2);
+            th_init_market(deps.as_mut(), token_addr_1.as_bytes(), &mock_market_1);
+        let market_2_initial =
+            th_init_market(deps.as_mut(), token_addr_2.as_bytes(), &mock_market_2);
+        let market_3_initial =
+            th_init_market(deps.as_mut(), token_addr_3.as_bytes(), &mock_market_3);
 
-        // Set second asset as collateral
-        let mut user = User::default();
-        set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
-        USERS
-            .save(deps.as_mut().storage, &user_addr, &user)
-            .unwrap();
+        // Set the querier to return exchange rates
+        let token_1_exchange_rate = Decimal::from_ratio(2u128, 1u128);
+        let token_2_exchange_rate = Decimal::from_ratio(3u128, 1u128);
+        let token_3_exchange_rate = Decimal::from_ratio(4u128, 1u128);
+        deps.querier
+            .set_oracle_price(token_addr_1.as_bytes().to_vec(), token_1_exchange_rate);
+        deps.querier
+            .set_oracle_price(token_addr_2.as_bytes().to_vec(), token_2_exchange_rate);
+        deps.querier
+            .set_oracle_price(token_addr_3.as_bytes().to_vec(), token_3_exchange_rate);
 
-        // Set the querier to return zero for the first asset
-        deps.querier.set_cw20_balances(
-            ma_token_address_1.clone(),
-            &[(user_addr.clone(), Uint128::zero())],
-        );
-
-        // Enable first market index which is currently disabled as collateral and ma-token balance is 0
-        let update_msg = ExecuteMsg::UpdateUserCollateralAssetStatus {
-            asset: Asset::Cw20 {
-                contract_addr: cw20_contract_addr.to_string(),
-            },
-            enable: true,
-        };
         let env = mock_env(MockEnvParams::default());
-        let info = mock_info("user");
-        let error_res =
-            execute(deps.as_mut(), env.clone(), info.clone(), update_msg.clone()).unwrap_err();
-        assert_eq!(
-            error_res,
-            UserNoCollateralBalance {
-                user_address: user_addr.to_string(),
-                asset: String::from(cw20_contract_addr.as_str())
-            }
-        );
+        let info = mock_info(user_addr.as_str());
 
-        let user = USERS.load(&deps.storage, &user_addr).unwrap();
-        let market_1_collateral = get_bit(user.collateral_assets, market_1_initial.index).unwrap();
-        // Balance for first asset is zero so don't update bit
-        assert!(!market_1_collateral);
+        {
+            // Set second asset as collateral
+            let mut user = User::default();
+            set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
+            USERS
+                .save(deps.as_mut().storage, &user_addr, &user)
+                .unwrap();
 
-        // Set the querier to return balance more than zero for the first asset
-        deps.querier.set_cw20_balances(
-            ma_token_address_1,
-            &[(user_addr.clone(), Uint128::new(100_000))],
-        );
+            // Set the querier to return zero for the first asset
+            deps.querier.set_cw20_balances(
+                ma_token_addr_1.clone(),
+                &[(user_addr.clone(), Uint128::zero())],
+            );
 
-        // Enable first market index which is currently disabled as collateral and ma-token balance is more than 0
-        let _res = execute(deps.as_mut(), env.clone(), info.clone(), update_msg).unwrap();
-        let user = USERS.load(&deps.storage, &user_addr).unwrap();
-        let market_1_collateral = get_bit(user.collateral_assets, market_1_initial.index).unwrap();
-        // Balance for first asset is more than zero so update bit
-        assert!(market_1_collateral);
+            // Enable first market index which is currently disabled as collateral and ma-token balance is 0
+            let update_msg = ExecuteMsg::UpdateUserCollateralAssetStatus {
+                asset: Asset::Cw20 {
+                    contract_addr: token_addr_1.to_string(),
+                },
+                enable: true,
+            };
+            let error_res =
+                execute(deps.as_mut(), env.clone(), info.clone(), update_msg.clone()).unwrap_err();
+            assert_eq!(
+                error_res,
+                ContractError::UserNoCollateralBalance {
+                    user_address: user_addr.to_string(),
+                    asset: String::from(token_addr_1.as_str())
+                }
+            );
 
-        // Disable second market index
-        let update_msg = ExecuteMsg::UpdateUserCollateralAssetStatus {
-            asset: Asset::Native {
-                denom: "depositedcoin2".to_string(),
-            },
-            enable: false,
-        };
-        let _res = execute(deps.as_mut(), env, info, update_msg).unwrap();
-        let user = USERS.load(&deps.storage, &user_addr).unwrap();
-        let market_2_collateral = get_bit(user.collateral_assets, market_2_initial.index).unwrap();
-        assert!(!market_2_collateral);
+            let user = USERS.load(&deps.storage, &user_addr).unwrap();
+            let market_1_collateral =
+                get_bit(user.collateral_assets, market_1_initial.index).unwrap();
+            // Balance for first asset is zero so don't update bit
+            assert!(!market_1_collateral);
+
+            // Set the querier to return balance more than zero for the first asset
+            deps.querier.set_cw20_balances(
+                ma_token_addr_1.clone(),
+                &[(user_addr.clone(), Uint128::new(100_000))],
+            );
+
+            // Enable first market index which is currently disabled as collateral and ma-token balance is more than 0
+            let _res = execute(deps.as_mut(), env.clone(), info.clone(), update_msg).unwrap();
+            let user = USERS.load(&deps.storage, &user_addr).unwrap();
+            let market_1_collateral =
+                get_bit(user.collateral_assets, market_1_initial.index).unwrap();
+            // Balance for first asset is more than zero so update bit
+            assert!(market_1_collateral);
+
+            // Disable second market index
+            let update_msg = ExecuteMsg::UpdateUserCollateralAssetStatus {
+                asset: Asset::Native {
+                    denom: token_addr_2.to_string(),
+                },
+                enable: false,
+            };
+            let _res = execute(deps.as_mut(), env.clone(), info.clone(), update_msg).unwrap();
+            let user = USERS.load(&deps.storage, &user_addr).unwrap();
+            let market_2_collateral =
+                get_bit(user.collateral_assets, market_2_initial.index).unwrap();
+            assert!(!market_2_collateral);
+        }
+
+        // User's health factor can't be less than 1 after disabling collateral
+        {
+            // Initialize user with market_1 and market_2 as collaterals
+            // User borrows market_3
+            let mut user = User::default();
+            set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+            set_bit(&mut user.collateral_assets, market_2_initial.index).unwrap();
+            set_bit(&mut user.borrowed_assets, market_3_initial.index).unwrap();
+            USERS
+                .save(deps.as_mut().storage, &user_addr, &user)
+                .unwrap();
+
+            // Set the querier to return collateral balances (ma_token_1 and ma_token_2)
+            let ma_token_1_balance_scaled = Uint128::new(150_000 * SCALING_FACTOR);
+            deps.querier.set_cw20_balances(
+                ma_token_addr_1.clone(),
+                &[(user_addr.clone(), ma_token_1_balance_scaled.into())],
+            );
+            let ma_token_2_balance_scaled = Uint128::new(220_000 * SCALING_FACTOR);
+            deps.querier.set_cw20_balances(
+                ma_token_addr_2.clone(),
+                &[(user_addr.clone(), ma_token_2_balance_scaled.into())],
+            );
+
+            // Calculate maximum debt for the user to have valid health factor
+            let token_1_weighted_lt_in_uusd = get_descaled_amount(
+                ma_token_1_balance_scaled,
+                get_updated_liquidity_index(&market_1_initial, env.block.time.seconds()),
+            ) * market_1_initial.maintenance_margin
+                * token_1_exchange_rate;
+            let token_2_weighted_lt_in_uusd = get_descaled_amount(
+                ma_token_2_balance_scaled,
+                get_updated_liquidity_index(&market_2_initial, env.block.time.seconds()),
+            ) * market_2_initial.maintenance_margin
+                * token_2_exchange_rate;
+            let weighted_maintenance_margin_in_uusd =
+                token_1_weighted_lt_in_uusd + token_2_weighted_lt_in_uusd;
+            let max_debt_for_valid_hf =
+                weighted_maintenance_margin_in_uusd * reverse_decimal(token_3_exchange_rate);
+            let token_3_debt_scaled = get_scaled_amount(
+                max_debt_for_valid_hf,
+                get_updated_borrow_index(&market_3_initial, env.block.time.seconds()),
+            );
+
+            // Set user to have max debt for valid health factor
+            let debt = Debt {
+                amount_scaled: token_3_debt_scaled,
+                uncollateralized: false,
+            };
+            DEBTS
+                .save(
+                    deps.as_mut().storage,
+                    (token_addr_3.as_bytes(), &user_addr),
+                    &debt,
+                )
+                .unwrap();
+
+            let user_position = get_user_position(
+                deps.as_ref(),
+                env.block.time.seconds(),
+                &user_addr,
+                Addr::unchecked("oracle"),
+                &user,
+                3,
+            )
+            .unwrap();
+            // Should have valid health factor
+            assert_eq!(
+                user_position.health_status,
+                UserHealthStatus::Borrowing(Decimal::one())
+            );
+
+            // Disable second market index
+            let update_msg = ExecuteMsg::UpdateUserCollateralAssetStatus {
+                asset: Asset::Native {
+                    denom: token_addr_2.to_string(),
+                },
+                enable: false,
+            };
+            let res_error = execute(deps.as_mut(), env.clone(), info, update_msg).unwrap_err();
+            assert_eq!(
+                res_error,
+                ContractError::InvalidHealthFactorAfterDisablingCollateral {}
+            )
+        }
     }
 
     #[test]

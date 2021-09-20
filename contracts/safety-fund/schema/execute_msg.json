@@ -3,7 +3,7 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
-      "description": "Execute Cosmos msg",
+      "description": "Execute Cosmos msg (only callable by owner)",
       "type": "object",
       "required": [
         "execute_cosmos_msg"

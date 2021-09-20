@@ -73,8 +73,9 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ConfigResponse {
     pub owner: String,
-    pub cooldown_duration: u64,
     pub address_provider_address: String,
+    pub cooldown_duration: u64,
+    pub astroport_factory_address: String,
     pub astroport_max_spread: Decimal,
 }
 
