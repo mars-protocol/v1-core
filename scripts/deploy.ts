@@ -37,7 +37,7 @@ async function main() {
   } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
-      chainID: 'bombay-10'
+      chainID: 'bombay-11'
     })
     wallet = recover(terra, process.env.TEST_MAIN!)
     deployConfig = bombay
@@ -72,7 +72,7 @@ async function main() {
   }
 
   if (!deployConfig.stakingInitMsg.config.astroport_factory_address ||
-    !deployConfig.insuranceFundInitMsg.astroport_factory_address ||
+    !deployConfig.safetyFundInitMsg.astroport_factory_address ||
     !deployConfig.protocolRewardsCollectorInitMsg.config.astroport_factory_address) {
     console.log(
       "Please specify the TerraSwap/Astroport factory addresses in the deploy config before running this script..."
@@ -142,11 +142,12 @@ async function main() {
 
   /**************************************** Deploy Treasury Contract ****************************************/
   console.log("Deploying Treasury...")
+  deployConfig.treasuryInitMsg.owner = councilContractAddress
   const treasuryContractAddress = await deployContract(
     terra,
     wallet,
     join(MARS_ARTIFACTS_PATH, 'treasury.wasm'),
-    { "owner": councilContractAddress },
+    deployConfig.treasuryInitMsg,
   )
   console.log("Treasury Contract Address: " + treasuryContractAddress)
 
@@ -321,6 +322,23 @@ async function main() {
     })
     console.log(`Uncollateralized loan limit for contract ${deployConfig.ancFarmingStratContractAddress} (Fields ANC-UST):`,
       await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.ancFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
+  }
+
+  if (deployConfig.marsFarmingStratContractAddress) {
+    await executeContract(terra, wallet, redBankContractAddress, {
+      "update_uncollateralized_loan_limit": {
+        "user_address": deployConfig.marsFarmingStratContractAddress,
+        "asset": {
+          "native": {
+            "denom": "uusd"
+          }
+        },
+        // TODO should we do this in the production deploy? What initial limit should we give this strategy
+        "new_limit": "1000000000000000" // one billion UST
+      }
+    })
+    console.log(`Uncollateralized loan limit for contract ${deployConfig.marsFarmingStratContractAddress} (Fields ANC-UST):`,
+      await queryContract(terra, redBankContractAddress, { "uncollateralized_loan_limit": { user_address: deployConfig.marsFarmingStratContractAddress, asset: { native: { denom: "uusd" } } } }))
   }
 
   // Once initial assets initialized, set the owner of Red Bank to be Council rather than EOA
