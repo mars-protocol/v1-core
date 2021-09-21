@@ -139,7 +139,7 @@ pub mod msg {
         /// Simulate how many MARS and xMARS will be released if a withdrawal is attempted
         SimulateWithdraw { account: String },
         /// Total amount of xMARS owned by an account that's under custody by this contract
-        // Used by Martian Council to determine the account's vested voting power
+        /// Used by Martian Council to determine the account's vested voting power
         VotingPowerAt { account: String, block: u64 },
     }
 
