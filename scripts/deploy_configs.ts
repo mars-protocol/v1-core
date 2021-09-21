@@ -26,6 +26,11 @@ export const testnet: Config = {
     "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "astroport_max_spread": "0.05",
   },
+  treasuryInitMsg: {
+    "owner": undefined,
+    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_max_spread": "0.05",
+  },
   protocolRewardsCollectorInitMsg: {
     "config": {
       "owner": undefined,
@@ -167,6 +172,7 @@ export const testnet: Config = {
   ],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
+  marsFarmingStratContractAddress: undefined,
   minterProxyContractAddress: undefined,
   marsTokenContractAddress: undefined,
   oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
@@ -196,6 +202,11 @@ export const bombay: Config = {
     }
   },
   safetyFundInitMsg: {
+    "owner": undefined,
+    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_max_spread": "0.05",
+  },
+  treasuryInitMsg: {
     "owner": undefined,
     "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
     "astroport_max_spread": "0.05",
@@ -316,7 +327,7 @@ export const bombay: Config = {
     // },
     {
       symbol: "MARS",
-      contract_addr: "terra1s5x50t9vgjnt6vctezwlzyyr7z2my8utuctx49",
+      contract_addr: "terra15d6rtqchvf60lrzxukdf7v48xemtvx48sgerm7",
       init_params: {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
@@ -339,10 +350,11 @@ export const bombay: Config = {
       }
     },
   ],
-  mirFarmingStratContractAddress: "terra13k39jclh7shutznrh8qce50u6mzpm7s7klycrz",
-  ancFarmingStratContractAddress: "terra1aaazdd0qkh2p4gscs53a0vupq793yfsum9qgpw",
-  minterProxyContractAddress: "terra14x8y92htsz0qf7h0zlqgj93xvjewjvxcvj5kl9",
-  marsTokenContractAddress: "terra1s5x50t9vgjnt6vctezwlzyyr7z2my8utuctx49",
+  mirFarmingStratContractAddress: "terra1a0z4ke67kuv5uk0naj8eg79fkwvu6xnek9d478",
+  ancFarmingStratContractAddress: "terra160zt2964cra2re79j620nua65qhk5s9s4d5yje",
+  marsFarmingStratContractAddress: "terra1pz2skvknansxvnvse7wmlxjw7p8ssu5k5x60qr",
+  minterProxyContractAddress: "terra17vr44azerz4vlg9fawp3sp5a8phg6kdv3000e9",
+  marsTokenContractAddress: "terra15d6rtqchvf60lrzxukdf7v48xemtvx48sgerm7",
   oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
 }
 
@@ -374,6 +386,11 @@ export const local: Config = {
     "astroport_factory_address": undefined,
     "astroport_max_spread": "0.05",
   },
+  treasuryInitMsg: {
+    "owner": undefined,
+    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_max_spread": "0.05",
+  },
   protocolRewardsCollectorInitMsg: {
     "config": {
       "owner": undefined,
@@ -395,6 +412,7 @@ export const local: Config = {
   initialAssets: [],
   mirFarmingStratContractAddress: undefined,
   ancFarmingStratContractAddress: undefined,
+  marsFarmingStratContractAddress: undefined,
   minterProxyContractAddress: undefined,
   marsTokenContractAddress: undefined,
   oracleFactoryAddress: undefined,

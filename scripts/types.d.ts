@@ -27,6 +27,12 @@ interface SafetyFundInitMsg {
   astroport_max_spread: string
 }
 
+interface TreasuryInitMsg {
+  owner?: string
+  astroport_factory_address?: string
+  astroport_max_spread: string
+}
+
 interface ProtocolRewardsCollectorInitMsg {
   config: {
     owner?: string,
@@ -90,11 +96,13 @@ interface Config {
   councilInitMsg: CouncilInitMsg
   stakingInitMsg: StakingInitMsg
   safetyFundInitMsg: SafetyFundInitMsg
+  treasuryInitMsg: TreasuryInitMsg
   protocolRewardsCollectorInitMsg: ProtocolRewardsCollectorInitMsg
   redBankInitMsg: RedBankInitMsg
   initialAssets: Asset[]
   mirFarmingStratContractAddress: string | undefined
   ancFarmingStratContractAddress: string | undefined
+  marsFarmingStratContractAddress: string | undefined
   minterProxyContractAddress: string | undefined
   marsTokenContractAddress: string | undefined
   oracleFactoryAddress: string | undefined
