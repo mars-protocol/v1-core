@@ -136,7 +136,7 @@ pub mod msg {
         Config {},
         /// Parameters and current status of an allocation
         Allocation { account: String },
-        // Simulate how many MARS and xMARS will be released if a withdrawal is attempted
+        /// Simulate how many MARS and xMARS will be released if a withdrawal is attempted
         SimulateWithdraw { account: String },
         // Total amount of xMARS owned by an account that's under custody by this contract
         // Used by Martian Council to determine the account's vested voting power
