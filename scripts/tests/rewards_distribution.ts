@@ -331,10 +331,8 @@ async function testNative(env: Env) {
     const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
     const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
 
-    // TODO why is `protocolRewardsCollectorUusdBalanceAfter == 3`? rounding errors from integer arithmetic?
-    // strictEqual(protocolRewardsCollectorUusdBalanceAfter, 0)
-    // Check a tight interval instead of equality
-    assert(protocolRewardsCollectorUusdBalanceAfter < 4)
+    // Check a tight interval instead of equality for safety fund, treasury and staking transfer errors
+    approximateEqual(protocolRewardsCollectorUusdBalanceAfter, 0, 3)
 
     const protocolRewardsCollectorUusdBalanceDifference =
       protocolRewardsCollectorUusdBalanceBefore - protocolRewardsCollectorUusdBalanceAfter
@@ -359,19 +357,12 @@ async function testNative(env: Env) {
         new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
       )).toNumber()
 
-    // TODO why is treasuryUusdBalanceDifference 2 uusd different from expected?
-    // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
-    // Check a tight interval instead of equality
+    // Check a tight interval instead of equality for calculating the split + transfer error
     approximateEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference, 2)
-
-    // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
-    // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
-    // Check a tight interval instead of equality
-    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 1)
-
-    // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
-    // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
-    // Check a tight interval instead of equality
+    // Check a tight interval instead of equality for calculating the split + transfer error
+    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 2)
+    // Check a tight interval instead of equality for calculating the safety fund and treasury splits
+    // + transfer error
     approximateEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference, 4)
   }
 }
@@ -546,10 +537,8 @@ async function testCw20(env: Env) {
     const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
     const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
 
-    // TODO why is `protocolRewardsCollectorUusdBalanceAfter == 3`? rounding errors from integer arithmetic?
-    // strictEqual(protocolRewardsCollectorUusdBalanceAfter, 0)
-    // Check a tight interval instead of equality
-    assert(protocolRewardsCollectorUusdBalanceAfter < 4)
+    // Check a tight interval instead of equality for safety fund, treasury and staking transfer errors
+    approximateEqual(protocolRewardsCollectorUusdBalanceAfter, 0, 3)
 
     const protocolRewardsCollectorUusdBalanceDifference =
       protocolRewardsCollectorUusdBalanceBefore - protocolRewardsCollectorUusdBalanceAfter
@@ -574,19 +563,12 @@ async function testCw20(env: Env) {
         new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
       )).toNumber()
 
-    // TODO why is treasuryUusdBalanceDifference 2 uusd different from expected?
-    // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
-    // Check a tight interval instead of equality
+    // Check a tight interval instead of equality for calculating the split + transfer error
     approximateEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference, 2)
-
-    // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
-    // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
-    // Check a tight interval instead of equality
-    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 1)
-
-    // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
-    // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
-    // Check a tight interval instead of equality
+    // Check a tight interval instead of equality for calculating the split + transfer error
+    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 2)
+    // Check a tight interval instead of equality for calculating the safety fund and treasury splits
+    // + transfer error
     approximateEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference, 4)
   }
 }
