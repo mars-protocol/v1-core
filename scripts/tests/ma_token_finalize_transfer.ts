@@ -7,15 +7,21 @@ import {
   uploadContract
 } from "../helpers.js"
 import { strict as assert } from "assert"
+import {
+  borrowNative,
+  depositNative,
+  queryMaAssetAddress,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
-// consts
+// CONSTS
 
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
 const USD_BORROW = 100_000_000_000000
 const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
-// helpers
+// HELPERS
 
 async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, enabled: boolean) {
   const collateral = await queryContract(terra, redBank,
@@ -30,54 +36,35 @@ async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string
   return false
 }
 
-// tests
+// TESTS
 
-async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna: string) {
+async function testHealthFactorChecks(
+  terra: LocalTerra,
+  redBank: string,
+  maLuna: string,
+) {
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
   const recipient = terra.wallets.test4
 
   console.log("provider provides USD")
 
-  await executeContract(terra, provider, redBank,
-    {
-      deposit_native: {
-        denom: "uusd"
-      }
-    },
-    `${USD_COLLATERAL}uusd`
-  )
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
 
   console.log("borrower provides Luna")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      deposit_native: {
-        denom: "uluna"
-      }
-    },
-    `${LUNA_COLLATERAL}uluna`
-  )
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
 
   console.log("borrower borrows USD")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      borrow: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
-        amount: String(USD_BORROW)
-      }
-    }
-  )
+  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
 
   console.log("transferring the entire maToken balance should fail")
 
+  // TODO fix this test
   await assert.rejects(
-    executeContract(terra, recipient, maLuna,
+    // TODO make a transferCw20 helper
+    executeContract(terra, borrower, maLuna,
       {
         transfer: {
           amount: String(LUNA_COLLATERAL),
@@ -86,6 +73,7 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
       }
     ),
     (error: any) => {
+      console.log(error.response.data)
       assert(error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`))
       return true
     }
@@ -107,20 +95,17 @@ async function testHealthFactorChecks(terra: LocalTerra, redBank: string, maLuna
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
 }
 
-async function testCollateralStatusChanges(terra: LocalTerra, redBank: string, maLuna: string) {
+async function testCollateralStatusChanges(
+  terra: LocalTerra,
+  redBank: string,
+  maLuna: string,
+) {
   const provider = terra.wallets.test5
   const recipient = terra.wallets.test6
 
   console.log("provider provides Luna")
 
-  await executeContract(terra, provider, redBank,
-    {
-      deposit_native: {
-        denom: "uluna"
-      }
-    },
-    `${LUNA_COLLATERAL}uluna`
-  )
+  await depositNative(terra, provider, redBank, "uluna", LUNA_COLLATERAL)
 
   assert(await checkCollateral(terra, provider, redBank, "uluna", true))
   assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
@@ -147,28 +132,15 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   console.log("provider provides USD")
 
-  await executeContract(terra, provider, redBank,
-    { deposit_native: { denom: "uusd" } },
-    `${USD_COLLATERAL}uusd`
-  )
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
 
   console.log("borrower provides Luna")
 
-  await executeContract(terra, borrower, redBank,
-    { deposit_native: { denom: "uluna" } },
-    `${LUNA_COLLATERAL}uluna`
-  )
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
 
   console.log("borrower borrows USD")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      borrow: {
-        asset: { native: { denom: "uusd" } },
-        amount: String(USD_COLLATERAL / 100)
-      }
-    }
-  )
+  await borrowNative(terra, borrower, redBank, "uusd", USD_COLLATERAL / 100)
 
   console.log("disabling Luna as collateral should make transferring maLuna fail")
 
@@ -225,7 +197,7 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
   )
 }
 
-// main
+// MAIN
 
 async function main() {
   setTimeoutDuration(0)
@@ -318,14 +290,7 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: "uluna" } },
-        price_source: { fixed: { price: "25" } }
-      }
-    }
-  )
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -360,29 +325,9 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: "uusd" } },
-        price_source: { fixed: { price: "1" } }
-      }
-    }
-  )
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
 
-  // maLuna token address
-  const maLunaMarket = await queryContract(terra, redBank,
-    {
-      market: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        }
-      }
-    }
-  )
-
-  const maLuna = maLunaMarket.ma_token_address
+  const maLuna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // tests
 

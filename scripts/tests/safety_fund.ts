@@ -10,7 +10,7 @@ $ tree -L 1 $(git rev-parse --show-toplevel)/..
 ├── terraswap
 ```
 */
-import { Int, LocalTerra, MsgSend, Numeric, Wallet } from "@terra-money/terra.js"
+import { Int, LocalTerra, MsgSend, Numeric, Wallet, LCDClient } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
@@ -22,6 +22,7 @@ import {
 } from "../helpers.js"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
+import { queryNativeBalance } from "./test_helpers.js"
 
 // CONSTS
 
@@ -35,34 +36,31 @@ const SAFETY_FUND_TOKEN_BALANCE = 100_000_000000
 
 // TYPES
 
-interface NativeToken {
-  native_token: {
-    denom: string
-  }
-}
+interface TerraSwapNativeToken { native_token: { denom: string } }
 
-interface CW20 {
-  token: {
-    contract_addr: string
-  }
-}
+interface TerraSwapToken { token: { contract_addr: string } }
 
-type Token = NativeToken | CW20
+type TerraSwapAsset = TerraSwapNativeToken | TerraSwapToken
 
 interface Env {
   terra: LocalTerra,
-  wallet: Wallet,
+  deployer: Wallet,
   tokenCodeID: number,
   pairCodeID: number,
   factoryCodeID: number,
-  factoryAddress: string,
-  safetyFundAddress: string,
+  terraswapFactory: string,
+  safetyFund: string,
 }
 
 // HELPERS
 
-async function instantiateUsdPair(env: Env, bid: Token) {
-  const result = await executeContract(env.terra, env.wallet, env.factoryAddress,
+async function instantiateUsdPair(
+  terra: LCDClient,
+  wallet: Wallet,
+  terraswapFactory: string,
+  bid: TerraSwapAsset,
+) {
+  const result = await executeContract(terra, wallet, terraswapFactory,
     {
       create_pair: {
         asset_infos: [
@@ -75,8 +73,14 @@ async function instantiateUsdPair(env: Env, bid: Token) {
   return result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 }
 
-async function provideLiquidity(env: Env, address: string, token: Token, coins: string) {
-  await executeContract(env.terra, env.wallet, address,
+async function provideLiquidity(
+  terra: LCDClient,
+  wallet: Wallet,
+  address: string,
+  token: TerraSwapAsset,
+  coins: string,
+) {
+  await executeContract(terra, wallet, address,
     {
       "provide_liquidity": {
         "assets": [
@@ -94,30 +98,23 @@ async function provideLiquidity(env: Env, address: string, token: Token, coins: 
   )
 }
 
-async function getBalance(env: Env, address: string, denom: string): Promise<Numeric.Output> {
-  const balances = await env.terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return ZERO
-  }
-  return balance.amount
-}
-
 // TESTS
 
 async function testSwapNativeTokenToUsd(env: Env, denom: string) {
+  const { terra, safetyFund, deployer, terraswapFactory } = env
+
   const NATIVE_TOKEN = { "native_token": { "denom": denom } }
 
   // instantiate a native token/USD Astroport pair
-  const pairAddress = await instantiateUsdPair(env, NATIVE_TOKEN)
+  const pairAddress = await instantiateUsdPair(terra, deployer, terraswapFactory, NATIVE_TOKEN)
 
-  await provideLiquidity(env, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
+  await provideLiquidity(terra, deployer, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
 
   // transfer some native token to the safety fund
-  await performTransaction(env.terra, env.wallet,
+  await performTransaction(terra, deployer,
     new MsgSend(
-      env.wallet.key.accAddress,
-      env.safetyFundAddress,
+      deployer.key.accAddress,
+      safetyFund,
       {
         [denom]: SAFETY_FUND_TOKEN_BALANCE
       }
@@ -125,10 +122,10 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
+  const prevUsdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
 
   // swap the native token balance in the safety fund to USD
-  await executeContract(env.terra, env.wallet, env.safetyFundAddress,
+  await executeContract(terra, deployer, safetyFund,
     {
       "swap_asset_to_uusd": {
         "offer_asset_info": NATIVE_TOKEN,
@@ -138,24 +135,26 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   )
 
   // check the safety fund balances
-  const usdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
-  assert(usdBalance.gt(prevUsdBalance))
-  const tokenBalance = await getBalance(env, env.safetyFundAddress, denom)
-  strictEqual(tokenBalance, ZERO)
+  const usdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  assert(usdBalance > prevUsdBalance)
+  const tokenBalance = await queryNativeBalance(terra, safetyFund, denom)
+  strictEqual(tokenBalance, 0)
 
   // check the Astroport pair balances
-  const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
-  strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
+  const pool = await queryContract(terra, pairAddress, { pool: {} })
+  strictEqual(parseInt(pool.assets[0].amount), TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE)
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
 async function testSwapTokenToUsd(env: Env, address: string) {
+  const { terra, safetyFund, deployer, terraswapFactory } = env
+
   const TOKEN = { "token": { "contract_addr": address } }
 
   // instantiate a token/USD Astroport pair
-  const pairAddress = await instantiateUsdPair(env, TOKEN)
+  const pairAddress = await instantiateUsdPair(terra, deployer, terraswapFactory, TOKEN)
   // approve the pair contract to transfer the token
-  await executeContract(env.terra, env.wallet, address,
+  await executeContract(terra, deployer, address,
     {
       "increase_allowance": {
         "spender": pairAddress,
@@ -163,23 +162,23 @@ async function testSwapTokenToUsd(env: Env, address: string) {
       }
     }
   )
-  await provideLiquidity(env, pairAddress, TOKEN, `${USD_LP}uusd`)
+  await provideLiquidity(terra, deployer, pairAddress, TOKEN, `${USD_LP}uusd`)
 
   // transfer some tokens to the safety fund
-  await executeContract(env.terra, env.wallet, address,
+  await executeContract(terra, deployer, address,
     {
       "transfer": {
         "amount": String(SAFETY_FUND_TOKEN_BALANCE),
-        "recipient": env.safetyFundAddress
+        "recipient": safetyFund
       }
     }
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
+  const prevUsdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
 
   // swap the token balance in the safety fund to USD
-  await executeContract(env.terra, env.wallet, env.safetyFundAddress,
+  await executeContract(terra, deployer, safetyFund,
     {
       "swap_asset_to_uusd": {
         "offer_asset_info": TOKEN,
@@ -189,14 +188,14 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   )
 
   // check the safety fund balances
-  const usdBalance = await getBalance(env, env.safetyFundAddress, "uusd")
-  assert(usdBalance.gt(prevUsdBalance))
-  const tokenBalance = await queryContract(env.terra, address, { "balance": { "address": env.safetyFundAddress } })
-  strictEqual(tokenBalance.balance, "0")
+  const usdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  assert(usdBalance > prevUsdBalance)
+  const tokenBalance = await queryContract(terra, address, { "balance": { "address": safetyFund } })
+  strictEqual(parseInt(tokenBalance.balance), 0)
 
   // check the Astroport pair balances
-  const pool = await queryContract(env.terra, pairAddress, { "pool": {} })
-  strictEqual(pool.assets[0].amount, String(TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE))
+  const pool = await queryContract(terra, pairAddress, { "pool": {} })
+  strictEqual(parseInt(pool.assets[0].amount), TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE)
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
 
@@ -206,14 +205,14 @@ async function main() {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
-  const wallet = terra.wallets.test1
+  const deployer = terra.wallets.test1
 
   console.log("deploying Astroport contracts")
-  const tokenCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
-  const pairCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
-  const factoryCodeID = await uploadContract(terra, wallet, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
+  const tokenCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
+  const pairCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
+  const factoryCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
   // instantiate the factory contract without `init_hook`, so that it can be a directory of pairs
-  const factoryAddress = await instantiateContract(terra, wallet, factoryCodeID,
+  const terraswapFactory = await instantiateContract(terra, deployer, factoryCodeID,
     {
       "pair_code_id": pairCodeID,
       "token_code_id": tokenCodeID
@@ -221,23 +220,23 @@ async function main() {
   )
 
   console.log("deploying Mars safety fund")
-  const safetyFundAddress = await deployContract(terra, wallet, join(MARS_ARTIFACTS_PATH, "safety_fund.wasm"),
+  const safetyFund = await deployContract(terra, deployer, join(MARS_ARTIFACTS_PATH, "safety_fund.wasm"),
     {
-      "owner": wallet.key.accAddress,
-      "astroport_factory_address": factoryAddress,
+      "owner": deployer.key.accAddress,
+      "astroport_factory_address": terraswapFactory,
       "astroport_max_spread": "0.01",
     }
   )
 
   console.log("deploying a token contract")
-  const tokenAddress = await instantiateContract(terra, wallet, tokenCodeID,
+  const tokenAddress = await instantiateContract(terra, deployer, tokenCodeID,
     {
       "name": "Mars",
       "symbol": "MARS",
       "decimals": 6,
       "initial_balances": [
         {
-          "address": wallet.key.accAddress,
+          "address": deployer.key.accAddress,
           "amount": String(TOKEN_SUPPLY)
         }
       ]
@@ -246,12 +245,12 @@ async function main() {
 
   const env = {
     terra,
-    wallet,
+    deployer,
     tokenCodeID,
     pairCodeID,
     factoryCodeID,
-    factoryAddress,
-    safetyFundAddress,
+    terraswapFactory,
+    safetyFund,
   }
 
   console.log("testSwapNativeTokenToUsd")

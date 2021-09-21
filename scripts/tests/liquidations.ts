@@ -1,5 +1,6 @@
-import { Coin, Int, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { Coin, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
+import { join } from "path"
 import 'dotenv/config.js'
 import {
   deployContract,
@@ -11,11 +12,24 @@ import {
   toEncodedBinary,
   uploadContract,
 } from "../helpers.js"
+import {
+  borrowCw20,
+  borrowNative,
+  computeTax,
+  deductTax,
+  depositCw20,
+  depositNative,
+  mintCw20,
+  queryCw20Balance,
+  queryMaAssetAddress,
+  queryNativeBalance,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
 // CONSTS
 
 // required environment variables
-const CW20_BINARY_PATH = process.env.CW20_BINARY_PATH!
+const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 
 // red-bank
 const CLOSE_FACTOR = 0.5
@@ -38,13 +52,6 @@ const CW20_TOKEN_2_COLLATERAL_AMOUNT = 1_000_000000
 const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
 
 // TYPES
-
-interface Native { native: { denom: string } }
-
-interface CW20 { cw20: { contract_addr: string } }
-
-type Asset = Native | CW20
-
 interface Env {
   terra: LocalTerra,
   redBank: string,
@@ -55,110 +62,14 @@ interface Env {
   maCw20Token2: string,
 }
 
-// HELPERS
-
-async function queryMaAssetAddress(terra: LCDClient, redBank: string, asset: Asset): Promise<string> {
-  const market = await queryContract(terra, redBank, { market: { asset: asset } })
-  return market.ma_token_address
-}
-
-async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracle: string, asset: Asset, price: number) {
-  await executeContract(terra, wallet, oracle,
-    {
-      set_asset: {
-        asset: asset,
-        price_source: { fixed: { price: String(price) } }
-      }
-    }
-  )
-}
-
-async function depositNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    { deposit_native: { denom: denom } },
-    `${amount}${denom}`
-  )
-}
-
-async function depositCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      send: {
-        contract: redBank,
-        amount: String(amount),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
-}
-
-async function borrowNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { native: { denom: denom } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function borrowCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { cw20: { contract_addr: contract } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      mint: {
-        recipient: recipient,
-        amount: String(amount),
-      }
-    }
-  )
-}
-
-async function computeTax(terra: LCDClient, coin: Coin) {
-  const DECIMAL_FRACTION = new Int("1000000000000000000") // 10^18
-  const taxRate = await terra.treasury.taxRate()
-  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount
-  const amount = coin.amount
-  const tax = amount.sub(
-    amount
-      .mul(DECIMAL_FRACTION)
-      .div(DECIMAL_FRACTION.mul(taxRate).add(DECIMAL_FRACTION))
-  )
-  return tax.gt(taxCap) ? taxCap : tax
-}
-
-async function deductTax(terra: LCDClient, coin: Coin) {
-  return coin.amount.sub(await computeTax(terra, coin)).floor()
-}
-
-async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
-  const balances = await terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return 0
-  }
-  return balance.amount.toNumber()
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
 // TESTS
 
-async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
+async function testCollateralizedNativeLoan(
+  env: Env,
+  borrower: Wallet,
+  borrowFraction: number,
+  receiveMaToken: Boolean,
+) {
   console.log("testCollateralizedNativeLoan: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
 
   const { terra, redBank, deployer, maUluna } = env
@@ -356,7 +267,12 @@ async function testCollateralizedNativeLoan(env: Env, borrower: Wallet, borrowFr
   }
 }
 
-async function testCollateralizedCw20Loan(env: Env, borrower: Wallet, borrowFraction: number, receiveMaToken: Boolean) {
+async function testCollateralizedCw20Loan(
+  env: Env,
+  borrower: Wallet,
+  borrowFraction: number,
+  receiveMaToken: Boolean,
+) {
   console.log("testCollateralizedCw20Loan: borrowFraction:", borrowFraction, "receiveMaToken:", receiveMaToken)
 
   const { terra, redBank, deployer, cw20Token1, cw20Token2, maCw20Token2 } = env
@@ -541,7 +457,10 @@ async function testCollateralizedCw20Loan(env: Env, borrower: Wallet, borrowFrac
   }
 }
 
-async function testUncollateralizedNativeLoan(env: Env, borrower: Wallet) {
+async function testUncollateralizedNativeLoan(
+  env: Env,
+  borrower: Wallet,
+) {
   console.log("testUncollateralizedNativeLoan")
 
   const { terra, redBank, deployer } = env
@@ -674,7 +593,7 @@ async function main() {
   )
 
   // cw20 tokens
-  const cw20CodeId = await uploadContract(terra, deployer, CW20_BINARY_PATH)
+  const cw20CodeId = await uploadContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
 
   const cw20Token1 = await instantiateContract(terra, deployer, cw20CodeId,
     {

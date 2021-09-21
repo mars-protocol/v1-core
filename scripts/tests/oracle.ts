@@ -1,5 +1,11 @@
 import { Dec, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { deployContract, executeContract, queryContract, setTimeoutDuration, sleep } from "../helpers.js"
+import {
+  deployContract,
+  executeContract,
+  queryContract,
+  setTimeoutDuration,
+  sleep
+} from "../helpers.js"
 import { strictEqual } from "assert"
 
 // HELPERS
@@ -29,7 +35,11 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
 // TESTS
 
-async function testLunaPrice(terra: LCDClient, deployer: Wallet, oracle: string) {
+async function testLunaPrice(
+  terra: LCDClient,
+  deployer: Wallet,
+  oracle: string,
+) {
   console.log("testLunaPrice")
 
   await executeContract(terra, deployer, oracle,
@@ -47,7 +57,12 @@ async function testLunaPrice(terra: LCDClient, deployer: Wallet, oracle: string)
   strictEqual(new Dec(marsOraclePrice).toString(), terraOraclePrice?.amount.toString())
 }
 
-async function testNativeTokenPrice(terra: LCDClient, deployer: Wallet, oracle: string, denom: string) {
+async function testNativeTokenPrice(
+  terra: LCDClient,
+  deployer: Wallet,
+  oracle: string,
+  denom: string,
+) {
   console.log("testNativeTokenPrice:", denom)
 
   await executeContract(terra, deployer, oracle,

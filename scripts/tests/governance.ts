@@ -1,4 +1,4 @@
-import { BlockTxBroadcastResult, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual } from "assert"
 import fetch from "node-fetch"
@@ -12,6 +12,7 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import { getBlockHeight, mintCw20, queryCw20Balance } from "./test_helpers.js"
 
 // CONSTS
 
@@ -38,12 +39,6 @@ const LUNA_USD_PRICE = 25
 
 // HELPERS
 
-async function getBlockHeight(terra: LCDClient, txResult: BlockTxBroadcastResult) {
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(txResult.txhash)
-  return txInfo.height
-}
-
 async function getLatestBlockHeight() {
   const response = await fetch(`${LOCAL_TERRA_LCD_URL}/blocks/latest`)
   const obj: any = await response.json()
@@ -53,22 +48,6 @@ async function getLatestBlockHeight() {
 async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: string, block: number, expectedBalance: number) {
   const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      mint: {
-        recipient,
-        amount: String(amount)
-      }
-    }
-  )
 }
 
 async function castVote(terra: LCDClient, wallet: Wallet, council: string, proposalId: number, vote: string) {
@@ -384,10 +363,10 @@ async function main() {
   strictEqual(marketsList.markets_list[0].denom, "uluna")
 
   // check that the asset has been initialised in the oracle contract
-  const assetPriceConfig = await queryContract(terra, oracle,
-    { asset_price_config: { asset: { native: { denom: "uluna" } } } }
+  const assetConfig = await queryContract(terra, oracle,
+    { asset_config: { asset: { native: { denom: "uluna" } } } }
   )
-  strictEqual(parseInt(assetPriceConfig.price_source.fixed.price), LUNA_USD_PRICE)
+  strictEqual(parseInt(assetConfig.price_source.fixed.price), LUNA_USD_PRICE)
 
   console.log("OK")
 }

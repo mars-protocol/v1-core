@@ -1,9 +1,4 @@
-import {
-  BlockTxBroadcastResult,
-  LCDClient,
-  LocalTerra,
-  MsgSend,
-} from "@terra-money/terra.js"
+import { LCDClient, LocalTerra, MsgSend } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
@@ -17,6 +12,7 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import { getBlockHeight, mintCw20, queryCw20Balance, queryNativeBalance } from "./test_helpers.js"
 
 // CONSTS
 
@@ -57,31 +53,9 @@ async function assertXmarsTotalSupplyAt(terra: LCDClient, xMars: string, block: 
   strictEqual(parseInt(expectedXmarsTotalSupply.total_supply), expectedTotalSupply)
 }
 
-async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
-  const balances = await terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return 0
-  }
-  return balance.amount.toNumber()
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function getBlockHeight(terra: LCDClient, txResult: BlockTxBroadcastResult) {
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(txResult.txhash)
-  return txInfo.height
-}
-
 // MAIN
 
 async function main() {
-  // SETUP
-
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -139,7 +113,6 @@ async function main() {
       mint: { minter: staking },
     }
   )
-
 
   // update address provider
   await executeContract(terra, deployer, addressProvider,
@@ -199,14 +172,7 @@ async function main() {
     `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   )
 
-  await executeContract(terra, deployer, mars,
-    {
-      mint: {
-        recipient: deployer.key.accAddress,
-        amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT)
-      }
-    }
-  )
+  await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT)
 
   await executeContract(terra, deployer, mars,
     {
@@ -234,7 +200,6 @@ async function main() {
     `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   )
 
-
   // TESTS
 
   let expectedXmarsTotalSupply = 0
@@ -242,14 +207,7 @@ async function main() {
   {
     console.log("alice stakes Mars and receives the same amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: alice.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, alice.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, alice, mars,
       {
@@ -276,14 +234,7 @@ async function main() {
   {
     console.log("bob stakes Mars and receives the same amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: bob.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, bob.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, bob, mars,
       {
@@ -368,11 +319,7 @@ async function main() {
     const uusdSwapAmount = uusdBalanceAfterSwapToUusd - 10_000000
 
     await executeContract(terra, deployer, staking,
-      {
-        swap_uusd_to_mars: {
-          amount: String(uusdSwapAmount)
-        }
-      }
+      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } }
     )
 
     const marsBalanceAfterSwapToMars = await queryCw20Balance(terra, staking, mars)
@@ -385,14 +332,7 @@ async function main() {
   {
     console.log("carol stakes Mars and receives a smaller amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: carol.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, carol.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, carol, mars,
       {

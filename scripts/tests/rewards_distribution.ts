@@ -1,4 +1,4 @@
-import { Coin, Int, LCDClient, LocalTerra, MnemonicKey, Wallet } from "@terra-money/terra.js"
+import { Coin, LocalTerra, MnemonicKey, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
@@ -12,6 +12,18 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import {
+  borrowCw20,
+  borrowNative,
+  deductTax,
+  depositCw20,
+  depositNative,
+  mintCw20,
+  queryCw20Balance,
+  queryMaAssetAddress,
+  queryNativeBalance,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
 // CONSTS
 
@@ -45,122 +57,7 @@ const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
 const CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT = 1_000_000_000000
 const CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT = CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT * CW20_TOKEN_USD_PRICE
 
-// HELPERS
-
-async function queryMaAssetAddress(terra: LCDClient, redBank: string, asset: Asset): Promise<string> {
-  const market = await queryContract(terra, redBank, { market: { asset: asset } })
-  return market.ma_token_address
-}
-
-async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracle: string, asset: Asset, price: number) {
-  await executeContract(terra, wallet, oracle,
-    {
-      set_asset: {
-        asset: asset,
-        price_source: { fixed: { price: String(price) } }
-      }
-    }
-  )
-}
-
-async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      mint: {
-        recipient: recipient,
-        amount: String(amount),
-      }
-    }
-  )
-}
-
-async function depositNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    { deposit_native: { denom: denom } },
-    `${amount}${denom}`
-  )
-}
-
-async function depositCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      send: {
-        contract: redBank,
-        amount: String(amount),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
-}
-
-async function borrowNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { native: { denom: denom } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function borrowCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { cw20: { contract_addr: contract } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
-  const balances = await terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return 0
-  }
-  return balance.amount.toNumber()
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function computeTax(terra: LCDClient, coin: Coin) {
-  const DECIMAL_FRACTION = new Int("1000000000000000000") // 10^18
-  const taxRate = await terra.treasury.taxRate()
-  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount
-  const amount = coin.amount
-  const tax = amount.sub(
-    amount
-      .mul(DECIMAL_FRACTION)
-      .div(DECIMAL_FRACTION.mul(taxRate).add(DECIMAL_FRACTION))
-  )
-  return tax.gt(taxCap) ? taxCap : tax
-}
-
-async function deductTax(terra: LCDClient, coin: Coin) {
-  return coin.amount.sub(await computeTax(terra, coin)).floor()
-}
-
-function approximateEqual(actual: number, expected: number, tol: number) {
-  try {
-    assert(actual >= expected - tol && actual <= expected + tol)
-  } catch (error) {
-    strictEqual(actual, expected)
-  }
-}
-
 // TYPES
-
-interface Native { native: { denom: string } }
-
-interface CW20 { cw20: { contract_addr: string } }
-
-type Asset = Native | CW20
 
 interface Env {
   terra: LocalTerra
@@ -1072,3 +969,7 @@ async function main() {
 }
 
 main().catch(err => console.log(err))
+function approximateEqual(protocolRewardsCollectorUusdBalanceAfter: number, arg1: number, arg2: number) {
+  throw new Error("Function not implemented.")
+}
+
