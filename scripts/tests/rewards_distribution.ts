@@ -1,12 +1,14 @@
-import { Coin, Int, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import { Coin, Int, LCDClient, LocalTerra, MnemonicKey, Wallet } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
   deployContract,
   executeContract,
+  instantiateContract,
   queryContract,
   setTimeoutDuration,
+  sleep,
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
@@ -40,6 +42,8 @@ const CW20_TOKEN_USD_PRICE = 10
 const CW20_TOKEN_1_COLLATERAL_AMOUNT = 100_000_000_000000
 const CW20_TOKEN_2_COLLATERAL_AMOUNT = 1_000_000000
 const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
+const CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT = 1_000_000_000000
+const CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT = CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT * CW20_TOKEN_USD_PRICE
 
 // HELPERS
 
@@ -54,6 +58,17 @@ async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracl
       set_asset: {
         asset: asset,
         price_source: { fixed: { price: String(price) } }
+      }
+    }
+  )
+}
+
+async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
+  return await executeContract(terra, wallet, contract,
+    {
+      mint: {
+        recipient: recipient,
+        amount: String(amount),
       }
     }
   )
@@ -131,6 +146,14 @@ async function deductTax(terra: LCDClient, coin: Coin) {
   return coin.amount.sub(await computeTax(terra, coin)).floor()
 }
 
+function approximateEqual(actual: number, expected: number, tol: number) {
+  try {
+    assert(actual >= expected - tol && actual <= expected + tol)
+  } catch (error) {
+    strictEqual(actual, expected)
+  }
+}
+
 // TYPES
 
 interface Native { native: { denom: string } }
@@ -140,16 +163,22 @@ interface CW20 { cw20: { contract_addr: string } }
 type Asset = Native | CW20
 
 interface Env {
-  terra: LCDClient
+  terra: LocalTerra
   deployer: Wallet
   provider: Wallet
   borrower: Wallet
+  cw20Token1: string
+  cw20Token2: string
+  maUluna: string
   maUusd: string
+  maCw20Token1: string
+  maCw20Token2: string
   redBank: string
   protocolRewardsCollector: string
   treasury: string
   safetyFund: string
   staking: string
+  cw20Token1UusdPair: string
 }
 
 // TESTS
@@ -333,20 +362,20 @@ async function testNative(env: Env) {
         new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
       )).toNumber()
 
-    // TODO why is treasuryUusdBalanceDifference 1 uusd different from expected?
+    // TODO why is treasuryUusdBalanceDifference 2 uusd different from expected?
     // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(treasuryUusdBalanceDifference - expectedTreasuryUusdBalanceDifference) < 2)
+    approximateEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference, 2)
 
     // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
     // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(safetyFundUusdBalanceDifference - expectedSafetyFundUusdBalanceDifference) < 2)
+    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 1)
 
     // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
     // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(stakingUusdBalanceDifference - expectedStakingUusdBalanceDifference) < 5)
+    approximateEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference, 4)
   }
 }
 
@@ -356,65 +385,75 @@ async function testCw20(env: Env) {
     deployer,
     provider,
     borrower,
-    maUusd,
+    cw20Token1,
+    cw20Token2,
+    maCw20Token1,
     redBank,
     protocolRewardsCollector,
     treasury,
     safetyFund,
-    staking
+    staking,
   } = env
 
+  // mint some tokens
+  await mintCw20(terra, deployer, cw20Token1, provider.key.accAddress, CW20_TOKEN_1_COLLATERAL_AMOUNT)
+  await mintCw20(terra, deployer, cw20Token2, borrower.key.accAddress, CW20_TOKEN_2_COLLATERAL_AMOUNT)
+
   {
-    console.log("provider provides uusd")
+    console.log("provider provides cw20 token 1")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    strictEqual(maUusdBalanceBefore, 0)
+    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    strictEqual(maCwToken1BalanceBefore, 0)
 
-    await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
+    await depositCw20(terra, provider, redBank, cw20Token1, CW20_TOKEN_1_COLLATERAL_AMOUNT)
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    strictEqual(maUusdBalanceAfter, 0)
+    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    strictEqual(maCwToken1BalanceAfter, 0)
   }
 
+  console.log("borrower provides cw20 token 2")
 
-  console.log("borrower provides uluna")
+  await depositCw20(terra, borrower, redBank, cw20Token2, CW20_TOKEN_2_COLLATERAL_AMOUNT)
 
-  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
+  console.log("borrower borrows cw20 token 1 up to the borrow limit of their cw20 token 2 collateral")
 
-  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
-
-  await borrowNative(terra, borrower, redBank, "uusd", Math.floor(USD_BORROW_AMOUNT))
+  await borrowCw20(terra, borrower, redBank, cw20Token1, CW20_TOKEN_1_BORROW_AMOUNT)
 
   {
     console.log("repay")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
 
-    await executeContract(terra, borrower, redBank,
-      { repay_native: { denom: "uusd" } },
-      `${Math.floor(USD_BORROW_AMOUNT)}uusd`
+    await executeContract(terra, borrower, cw20Token1,
+      {
+        send: {
+          contract: redBank,
+          amount: String(CW20_TOKEN_1_BORROW_AMOUNT),
+          msg: toEncodedBinary({ repay_cw20: {} })
+        }
+      }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
   }
 
   {
     console.log("withdraw")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
 
     await executeContract(terra, provider, redBank,
       {
         withdraw: {
-          asset: { native: { denom: "uusd" } },
-          amount: String(Math.floor(USD_COLLATERAL_AMOUNT / 2))
+          asset: { cw20: { contract_addr: cw20Token1 } },
+          amount: String(Math.floor(CW20_TOKEN_1_BORROW_AMOUNT / 2))
         }
       }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    assert(maUusdBalanceAfter > maUusdBalanceBefore)
+    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
   }
 
   console.log("protocol rewards collector withdraws from the red bank")
@@ -422,54 +461,63 @@ async function testCw20(env: Env) {
   {
     console.log("- specify an amount")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw half
     await executeContract(terra, deployer, protocolRewardsCollector,
       {
         withdraw_from_red_bank: {
-          asset: { native: { denom: "uusd" } },
-          amount: String(Math.floor(maUusdBalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
+          asset: { cw20: { contract_addr: cw20Token1 } },
+          amount: String(Math.floor(maCwToken1BalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
         }
       }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    assert(maUusdBalanceAfter < maUusdBalanceBefore)
-    assert(uusdBalanceAfter > uusdBalanceBefore)
+    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    assert(maCwToken1BalanceAfter < maCwToken1BalanceBefore)
+    assert(cwToken1BalanceAfter > cwToken1BalanceBefore)
   }
 
   {
     console.log("- don't specify an amount")
 
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const cwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw remaining balance
-    let result = await executeContract(terra, deployer, protocolRewardsCollector,
-      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
+    const result = await executeContract(terra, deployer, protocolRewardsCollector,
+      { withdraw_from_red_bank: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    assert(uusdBalanceAfter > uusdBalanceBefore)
+    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    assert(cwToken1BalanceAfter > cwToken1BalanceBefore)
 
     // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
-    // collector, so the maUusd balance will not be zero after this call
-    const maUusdMintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
-    strictEqual(maUusdBalanceAfter, maUusdMintAmount)
+    // collector, so the maCw20Token1 balance will not be zero after this call
+    const maCw20Token1MintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
+    strictEqual(maCwToken1BalanceAfter, maCw20Token1MintAmount)
   }
 
-
-  console.log("try to distribute uusd rewards")
+  console.log("try to distribute cw20 token 1 rewards")
 
   await assert.rejects(
     executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
+      { distribute_protocol_rewards: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     ),
     (error: any) => {
-      return error.response.data.error.includes("Asset is not enabled for distribution: \"uusd\"")
+      return error.response.data.error.includes(`Asset is not enabled for distribution: \"${cw20Token1}\"`)
+    }
+  )
+
+  console.log("swap cw20 token 1 to uusd")
+
+  await executeContract(terra, deployer, protocolRewardsCollector,
+    {
+      swap_asset_to_uusd: {
+        offer_asset_info: { token: { contract_addr: cw20Token1 } }
+      }
     }
   )
 
@@ -529,28 +577,199 @@ async function testCw20(env: Env) {
         new Coin("uusd", protocolRewardsCollectorUusdBalanceDifference * (1 - (TREASURY_FEE_SHARE + SAFETY_FUND_FEE_SHARE)))
       )).toNumber()
 
-    // TODO why is treasuryUusdBalanceDifference 1 uusd different from expected?
+    // TODO why is treasuryUusdBalanceDifference 2 uusd different from expected?
     // strictEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(treasuryUusdBalanceDifference - expectedTreasuryUusdBalanceDifference) < 2)
+    approximateEqual(treasuryUusdBalanceDifference, expectedTreasuryUusdBalanceDifference, 2)
 
     // TODO why is safetyFundUusdBalanceDifference 1 uusd different from expected?
     // strictEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(safetyFundUusdBalanceDifference - expectedSafetyFundUusdBalanceDifference) < 2)
+    approximateEqual(safetyFundUusdBalanceDifference, expectedSafetyFundUusdBalanceDifference, 1)
 
     // TODO why is stakingUusdBalanceDifference 4 uusd different from expected?
     // strictEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference)
     // Check a tight interval instead of equality
-    assert(Math.abs(stakingUusdBalanceDifference - expectedStakingUusdBalanceDifference) < 5)
+    approximateEqual(stakingUusdBalanceDifference, expectedStakingUusdBalanceDifference, 4)
   }
+}
+
+async function testLiquidateNative(env: Env) {
+  const {
+    terra,
+    deployer,
+    provider,
+    borrower,
+    maUluna,
+    maUusd,
+    redBank,
+    protocolRewardsCollector,
+  } = env
+
+  const liquidator = deployer
+
+  console.log("provider provides uusd")
+
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
+
+  console.log("borrower provides uluna")
+
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
+
+  console.log("borrower borrows uusd up to the borrow limit of their uluna collateral")
+
+  await borrowNative(terra, borrower, redBank, "uusd", Math.floor(USD_BORROW_AMOUNT))
+
+  console.log("someone borrows uluna in order for rewards to start accruing")
+
+  await borrowNative(terra, provider, redBank, "uluna", Math.floor(LUNA_COLLATERAL_AMOUNT / 10))
+
+  console.log("liquidator waits until the borrower's health factor is < 1, then liquidates")
+
+  // wait until the borrower can be liquidated
+  let tries = 0
+  let maxTries = 10
+  let backoff = 1
+
+  while (true) {
+    const userPosition = await queryContract(terra, redBank,
+      { user_position: { user_address: borrower.key.accAddress } }
+    )
+    const healthFactor = parseFloat(userPosition.health_status.borrowing)
+    if (healthFactor < 1.0) {
+      break
+    }
+
+    // timeout
+    tries++
+    if (tries == maxTries) {
+      throw new Error(`timed out waiting ${maxTries} times for the borrower to be liquidated`)
+    }
+
+    // exponential backoff
+    console.log("health factor:", healthFactor, `backing off: ${backoff} s`)
+    await sleep(backoff * 1000)
+    backoff *= 2
+  }
+
+  // get the protocol rewards collector balances before the borrower is liquidated
+  const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+  const maUlunaBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUluna)
+
+  await executeContract(terra, liquidator, redBank,
+    {
+      liquidate_native: {
+        collateral_asset: { native: { denom: "uluna" } },
+        debt_asset_denom: "uusd",
+        user_address: borrower.key.accAddress,
+        receive_ma_token: false,
+      }
+    },
+    `${Math.floor(USD_BORROW_AMOUNT * CLOSE_FACTOR)}uusd`
+  )
+
+  // get the protocol rewards collector balances after the borrower is liquidated
+  const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+  const maUlunaBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUluna)
+  assert(maUusdBalanceAfter > maUusdBalanceBefore)
+  assert(maUlunaBalanceAfter > maUlunaBalanceBefore)
+}
+
+async function testLiquidateCw20(env: Env) {
+  const {
+    terra,
+    deployer,
+    provider,
+    borrower,
+    maCw20Token1,
+    maCw20Token2,
+    cw20Token1,
+    cw20Token2,
+    redBank,
+    protocolRewardsCollector
+  } = env
+
+  const liquidator = deployer
+
+  // mint some tokens
+  await mintCw20(terra, deployer, cw20Token1, provider.key.accAddress, CW20_TOKEN_1_COLLATERAL_AMOUNT)
+  await mintCw20(terra, deployer, cw20Token1, liquidator.key.accAddress, CW20_TOKEN_1_COLLATERAL_AMOUNT)
+  await mintCw20(terra, deployer, cw20Token2, borrower.key.accAddress, CW20_TOKEN_2_COLLATERAL_AMOUNT)
+
+  console.log("provider provides cw20 token 1")
+
+  await depositCw20(terra, provider, redBank, cw20Token1, CW20_TOKEN_1_COLLATERAL_AMOUNT)
+
+  console.log("borrower provides cw20 token 2")
+
+  await depositCw20(terra, borrower, redBank, cw20Token2, CW20_TOKEN_2_COLLATERAL_AMOUNT)
+
+  console.log("borrower borrows cw20 token 1 up to the borrow limit of their cw20 token 2 collateral")
+
+  await borrowCw20(terra, borrower, redBank, cw20Token1, CW20_TOKEN_1_BORROW_AMOUNT)
+
+  console.log("someone borrows cw20 token 2 in order for rewards to start accruing")
+
+  await borrowCw20(terra, provider, redBank, cw20Token2, Math.floor(CW20_TOKEN_1_BORROW_AMOUNT / 10))
+
+  console.log("liquidator waits until the borrower's health factor is < 1, then liquidates")
+
+  // wait until the borrower can be liquidated
+  let tries = 0
+  let maxTries = 10
+  let backoff = 1
+
+  while (true) {
+    const userPosition = await queryContract(terra, redBank,
+      { user_position: { user_address: borrower.key.accAddress } }
+    )
+    const healthFactor = parseFloat(userPosition.health_status.borrowing)
+    if (healthFactor < 1.0) {
+      break
+    }
+
+    // timeout
+    tries++
+    if (tries == maxTries) {
+      throw new Error(`timed out waiting ${maxTries} times for the borrower to be liquidated`)
+    }
+
+    // exponential backoff
+    console.log("health factor:", healthFactor, `backing off: ${backoff} s`)
+    await sleep(backoff * 1000)
+    backoff *= 2
+  }
+
+  // get the protocol rewards collector balances before the borrower is liquidated
+  const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+  const maCwToken2BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token2)
+
+  await executeContract(terra, liquidator, cw20Token1,
+    {
+      send: {
+        contract: redBank,
+        amount: String(Math.floor(CW20_TOKEN_1_BORROW_AMOUNT * CLOSE_FACTOR)),
+        msg: toEncodedBinary({
+          liquidate_cw20: {
+            collateral_asset: { cw20: { contract_addr: cw20Token2 } },
+            user_address: borrower.key.accAddress,
+            receive_ma_token: false,
+          }
+        })
+      }
+    }
+  )
+
+  // get the protocol rewards collector balances after the borrower is liquidated
+  const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+  const maCwToken2BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token2)
+  assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
+  assert(maCwToken2BalanceAfter > maCwToken2BalanceBefore)
 }
 
 // MAIN
 
 async function main() {
-  // SETUP
-
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -560,9 +779,9 @@ async function main() {
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
   // mock contract addresses
-  const staking = terra.wallets.test8.key.accAddress
-  const safetyFund = terra.wallets.test9.key.accAddress
-  const treasury = terra.wallets.test10.key.accAddress
+  const staking = new MnemonicKey().accAddress
+  const safetyFund = new MnemonicKey().accAddress
+  const treasury = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 
@@ -617,13 +836,11 @@ async function main() {
   )
 
   // update address provider
-  console.log("update address provider")
   await executeContract(terra, deployer, addressProvider,
     {
       update_config: {
         config: {
           owner: deployer.key.accAddress,
-          // mars_token_address: mars,
           protocol_rewards_collector_address: protocolRewardsCollector,
           staking_address: staking,
           treasury_address: treasury,
@@ -634,6 +851,29 @@ async function main() {
           protocol_admin_address: deployer.key.accAddress,
         }
       }
+    }
+  )
+
+  // cw20 tokens
+  const cw20CodeId = await uploadContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
+
+  const cw20Token1 = await instantiateContract(terra, deployer, cw20CodeId,
+    {
+      name: "cw20 Token 1",
+      symbol: "ONE",
+      decimals: 6,
+      initial_balances: [],
+      mint: { minter: deployer.key.accAddress }
+    }
+  )
+
+  const cw20Token2 = await instantiateContract(terra, deployer, cw20CodeId,
+    {
+      name: "cw20 Token 2",
+      symbol: "TWO",
+      decimals: 6,
+      initial_balances: [],
+      mint: { minter: deployer.key.accAddress }
     }
   )
 
@@ -684,7 +924,7 @@ async function main() {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1",
+              optimal_utilization_rate: "0.1", // TODO panics with 0
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
@@ -703,106 +943,150 @@ async function main() {
   )
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 
-  // terraswap pairs
+  // cw20token1
+  await executeContract(terra, deployer, redBank,
+    {
+      init_asset: {
+        asset: { cw20: { contract_addr: cw20Token1 } },
+        asset_params: {
+          initial_borrow_rate: "0.1",
+          max_loan_to_value: String(MAX_LTV),
+          reserve_factor: "0.2",
+          maintenance_margin: String(MAX_LTV + 0.001),
+          liquidation_bonus: String(LIQUIDATION_BONUS),
+          interest_rate_strategy: {
+            linear: {
+              optimal_utilization_rate: "0.1",  // TODO panics with 0
+              base: String(INTEREST_RATE),
+              slope_1: "0",
+              slope_2: "0",
+            }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
+        }
+      }
+    }
+  )
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: cw20Token1 } },
+    CW20_TOKEN_USD_PRICE
+  )
+  const maCw20Token1 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token1 } })
 
-  // let result = await executeContract(terra, deployer, terraswapFactory,
-  //   {
-  //     create_pair: {
-  //       asset_infos: [
-  //         { token: { contract_addr: mars } },
-  //         { native_token: { denom: "uusd" } }
-  //       ]
-  //     }
-  //   }
-  // )
-  // const marsUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
+  // cw20token2
+  await executeContract(terra, deployer, redBank,
+    {
+      init_asset: {
+        asset: { cw20: { contract_addr: cw20Token2 } },
+        asset_params: {
+          initial_borrow_rate: "0.1",
+          max_loan_to_value: String(MAX_LTV),
+          reserve_factor: "0.2",
+          maintenance_margin: String(MAX_LTV + 0.001),
+          liquidation_bonus: String(LIQUIDATION_BONUS),
+          interest_rate_strategy: {
+            linear: {
+              optimal_utilization_rate: "0.1", // TODO panics with 0
+              base: String(INTEREST_RATE),
+              slope_1: "0",
+              slope_2: "0",
+            }
+          },
+          active: true,
+          deposit_enabled: true,
+          borrow_enabled: true
+        }
+      }
+    }
+  )
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: cw20Token2 } },
+    CW20_TOKEN_USD_PRICE
+  )
+  const maCw20Token2 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token2 } })
 
-  // result = await executeContract(terra, deployer, terraswapFactory,
-  //   {
-  //     create_pair: {
-  //       asset_infos: [
-  //         { native_token: { denom: "uluna" } },
-  //         { native_token: { denom: "uusd" } }
-  //       ]
-  //     }
-  //   }
-  // )
-  // const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
+  // terraswap pair
 
-  // await executeContract(terra, deployer, ulunaUusdPair,
-  //   {
-  //     provide_liquidity: {
-  //       assets: [
-  //         {
-  //           info: { native_token: { denom: "uluna" } },
-  //           amount: String(ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT)
-  //         }, {
-  //           info: { native_token: { denom: "uusd" } },
-  //           amount: String(ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT)
-  //         }
-  //       ]
-  //     }
-  //   },
-  //   `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
-  // )
+  let result = await executeContract(terra, deployer, terraswapFactory,
+    {
+      create_pair: {
+        asset_infos: [
+          { token: { contract_addr: cw20Token1 } },
+          { native_token: { denom: "uusd" } }
+        ]
+      }
+    }
+  )
+  const cw20Token1UusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
-  // await executeContract(terra, deployer, mars,
-  //   {
-  //     mint: {
-  //       recipient: deployer.key.accAddress,
-  //       amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT)
-  //     }
-  //   }
-  // )
+  await mintCw20(terra, deployer, cw20Token1, deployer.key.accAddress, CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT)
 
-  // await executeContract(terra, deployer, mars,
-  //   {
-  //     increase_allowance: {
-  //       spender: marsUusdPair,
-  //       amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT),
-  //     }
-  //   }
-  // )
+  await executeContract(terra, deployer, cw20Token1,
+    {
+      increase_allowance: {
+        spender: cw20Token1UusdPair,
+        amount: String(CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT),
+      }
+    }
+  )
 
-  // await executeContract(terra, deployer, marsUusdPair,
-  //   {
-  //     provide_liquidity: {
-  //       assets: [
-  //         {
-  //           info: { token: { contract_addr: mars } },
-  //           amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT)
-  //         }, {
-  //           info: { native_token: { denom: "uusd" } },
-  //           amount: String(MARS_UUSD_PAIR_UUSD_LP_AMOUNT)
-  //         }
-  //       ]
-  //     }
-  //   },
-  //   `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
-  // )
+  await executeContract(terra, deployer, cw20Token1UusdPair,
+    {
+      provide_liquidity: {
+        assets: [
+          {
+            info: { token: { contract_addr: cw20Token1 } },
+            amount: String(CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT)
+          }, {
+            info: { native_token: { denom: "uusd" } },
+            amount: String(CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT)
+          }
+        ]
+      }
+    },
+    `${CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
+  )
 
-  const env = {
+  const env: Env = {
     terra,
     deployer,
     provider,
     borrower,
+    cw20Token1,
+    cw20Token2,
+    maUluna,
     maUusd,
+    maCw20Token1,
+    maCw20Token2,
     redBank,
     protocolRewardsCollector,
     treasury,
     safetyFund,
-    staking
+    staking,
+    cw20Token1UusdPair
   }
 
-  // TESTS
-
   console.log("testNative")
+  env.provider = terra.wallets.test2
+  env.borrower = terra.wallets.test3
   await testNative(env)
 
   console.log("testCw20")
+  env.provider = terra.wallets.test4
+  env.borrower = terra.wallets.test5
   await testCw20(env)
 
+  console.log("testLiquidateNative")
+  env.provider = terra.wallets.test6
+  env.borrower = terra.wallets.test7
+  await testLiquidateNative(env)
 
+  console.log("testLiquidateCw20")
+  env.provider = terra.wallets.test8
+  env.borrower = terra.wallets.test9
+  await testLiquidateCw20(env)
 
   console.log("OK")
 }
