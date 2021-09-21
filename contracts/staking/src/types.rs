@@ -1,3 +1,8 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::{Addr, Decimal, Uint128};
+
 /// Protocol configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
@@ -19,14 +24,12 @@ pub struct Config {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct GlobalState {
     /// Total amount of Mars belonging to open claims
-    total_mars_for_claimers: Uint128,
+    pub total_mars_for_claimers: Uint128,
 }
 
 /// Unstaking cooldown data
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Claim {
-    /// Timestamp where the claim was activated
-    pub cooldown_start: u64,
     /// Timestamp after which the claim is unlocked
     pub cooldown_end: u64,
     /// Amount of Mars that the user is allowed to claim

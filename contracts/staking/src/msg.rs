@@ -65,22 +65,8 @@ pub enum ReceiveMsg {
 pub enum QueryMsg {
     /// Get contract config
     Config {},
-    /// Get open claim for given user 
-    Claim { user_address: String }
-}
-
-// QUERY RESPONSES
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ConfigResponse {
-    pub owner: String,
-    pub address_provider_address: String,
-    pub cooldown_duration: u64,
-    pub astroport_factory_address: String,
-    pub astroport_max_spread: Decimal,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct ClaimResponse {
-    /// Open claim for user 
-    pub claim: Option<Claim>,
+    /// Get contract global state
+    GlobalState {},
+    /// Get open claim for given user
+    Claim { user_address: String },
 }

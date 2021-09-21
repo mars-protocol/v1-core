@@ -19,6 +19,9 @@ pub enum ContractError {
     #[error("Unstake amount must be greater than 0")]
     UnstakeAmountZero {},
 
+    #[error("Cannot unstake if address has an active claim")]
+    UnstakeActiveClaim {},
+
     #[error("Cooldown has not ended")]
     ClaimCooldownNotEnded {},
 
