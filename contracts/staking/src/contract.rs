@@ -1,14 +1,16 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
-    StdError, StdResult, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
+    Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw_storage_plus::U64Key;
+
 use terraswap::asset::AssetInfo;
 
 use crate::error::ContractError;
-use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE};
+use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE, SLASH_EVENTS};
 use crate::types::{Claim, Config, GlobalState, SlashEvent};
 
 use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
@@ -94,6 +96,10 @@ pub fn execute(
 
         ExecuteMsg::Claim { recipient } => Ok(execute_claim(deps, env, info, recipient)?),
 
+        ExecuteMsg::TransferMars { recipient, amount } => {
+            Ok(execute_transfer_mars(deps, env, info, recipient, amount)?)
+        }
+
         ExecuteMsg::SwapAssetToUusd {
             offer_asset_info,
             amount,
@@ -105,14 +111,9 @@ pub fn execute(
         )?),
 
         ExecuteMsg::SwapUusdToMars { amount } => Ok(execute_swap_uusd_to_mars(deps, env, amount)?),
-
-        ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
-            Ok(execute_execute_cosmos_msg(deps, info, cosmos_msg)?)
-        }
     }
 }
 
-/// cw20 receive implementation
 pub fn execute_receive_cw20(
     deps: DepsMut,
     env: Env,
@@ -130,7 +131,6 @@ pub fn execute_receive_cw20(
     }
 }
 
-/// Update config
 pub fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
@@ -172,7 +172,6 @@ pub fn execute_update_config(
     Ok(Response::default())
 }
 
-/// Mint xMars tokens to staker
 pub fn execute_stake(
     deps: DepsMut,
     env: Env,
@@ -272,8 +271,10 @@ pub fn execute_unstake(
 
     let claimable_amount = burn_amount.multiply_ratio(total_mars_for_stakers, total_xmars_supply);
 
+    let cooldown_start = env.block.time.seconds();
     let claim = Claim {
-        cooldown_end: env.block.time.seconds() + config.cooldown_duration,
+        cooldown_start: cooldown_start,
+        cooldown_end: cooldown_start + config.cooldown_duration,
         amount: claimable_amount,
     };
 
@@ -347,25 +348,68 @@ pub fn execute_claim(
     Ok(res)
 }
 
-/// Execute Cosmos message
-pub fn execute_execute_cosmos_msg(
+pub fn execute_transfer_mars(
     deps: DepsMut,
+    env: Env,
     info: MessageInfo,
-    msg: CosmosMsg,
-) -> Result<Response, MarsError> {
+    recipient_unchecked: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.owner {
-        return Err(MarsError::Unauthorized {});
+        return Err(MarsError::Unauthorized {}.into());
     }
 
+    let mars_token_address = address_provider::helpers::query_address(
+        &deps.querier,
+        config.address_provider_address,
+        MarsContract::MarsToken,
+    )?;
+
+    let total_mars_in_staking_contract = cw20_get_balance(
+        &deps.querier,
+        mars_token_address.clone(),
+        env.contract.address,
+    )?;
+
+    if amount > total_mars_in_staking_contract {
+        return Err(ContractError::TransferMarsAmountTooLarge {});
+    }
+
+    let slash_percentage = Decimal::from_ratio(amount, total_mars_in_staking_contract);
+
+    SLASH_EVENTS.save(
+        deps.storage,
+        U64Key::new(env.block.height),
+        &SlashEvent { slash_percentage },
+    )?;
+
+    let mut global_state = GLOBAL_STATE.load(deps.storage)?;
+    global_state.total_mars_for_claimers = global_state.total_mars_for_claimers * slash_percentage;
+    GLOBAL_STATE.save(deps.storage, &global_state)?;
+
     let res = Response::new()
-        .add_message(msg)
-        .add_attribute("action", "execute_cosmos_msg");
+        .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: mars_token_address.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: recipient_unchecked.clone(),
+                amount: amount,
+            })?,
+        }))
+        .add_attribute("action", "transfer_mars")
+        .add_attribute("recipient", recipient_unchecked)
+        .add_attribute("amount", amount)
+        .add_attribute("slash_percentage", slash_percentage.to_string())
+        .add_attribute(
+            "new_total_mars_for_claimers",
+            global_state.total_mars_for_claimers,
+        );
+
     Ok(res)
 }
 
-/// Swap any asset on the contract to uusd
 pub fn execute_swap_asset_to_uusd(
     deps: DepsMut,
     env: Env,
@@ -404,7 +448,6 @@ pub fn execute_swap_asset_to_uusd(
     )?)
 }
 
-/// Swap uusd on the contract to Mars
 pub fn execute_swap_uusd_to_mars(
     deps: DepsMut,
     env: Env,
@@ -486,9 +529,10 @@ fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), 
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, Addr, BankMsg, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg};
+    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg};
     use mars::testing::{
-        mock_dependencies, mock_env, mock_env_at_block_time, MarsMockQuerier, MockEnvParams,
+        mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
+        MarsMockQuerier, MockEnvParams,
     };
 
     const TEST_COOLDOWN_DURATION: u64 = 1000;
@@ -833,6 +877,7 @@ mod tests {
             assert_eq!(
                 claim,
                 Claim {
+                    cooldown_start: unstake_block_timestamp,
                     cooldown_end: unstake_block_timestamp + TEST_COOLDOWN_DURATION,
                     amount: expected_claimable_mars,
                 }
@@ -868,6 +913,7 @@ mod tests {
         let claimer_address = Addr::unchecked("claimer");
         let claim = Claim {
             amount: Uint128::new(5_000_000000),
+            cooldown_start: 500_000_u64,
             cooldown_end: 1_000_000_u64,
         };
 
@@ -948,45 +994,111 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_cosmos_msg() {
+    fn test_transfer_mars() {
         let mut deps = th_setup(&[]);
+        let initial_mars_for_claimers = Uint128::new(4_000_000_000000);
+        let initial_mars_in_contract = Uint128::new(10_000_000_000000);
+        let transfer_amount = Uint128::new(5_000_000_000000);
+        let transfer_block = 123456_u64;
 
-        let bank = BankMsg::Send {
-            to_address: "destination".to_string(),
-            amount: vec![Coin {
-                denom: "uluna".to_string(),
-                amount: Uint128::new(123456),
-            }],
-        };
-        let cosmos_msg = CosmosMsg::Bank(bank);
-        let msg = ExecuteMsg::ExecuteCosmosMsg(cosmos_msg.clone());
+        deps.querier.set_cw20_balances(
+            Addr::unchecked("mars_token"),
+            &[(
+                Addr::unchecked(MOCK_CONTRACT_ADDR),
+                initial_mars_in_contract,
+            )],
+        );
 
-        // *
-        // non owner is not authorized
-        // *
-        let info = mock_info("somebody", &[]);
-        let error_res = execute(
-            deps.as_mut(),
-            mock_env(MockEnvParams::default()),
-            info,
-            msg.clone(),
-        )
-        .unwrap_err();
-        assert_eq!(error_res, ContractError::Mars(MarsError::Unauthorized {}));
+        GLOBAL_STATE
+            .save(
+                &mut deps.storage,
+                &GlobalState {
+                    total_mars_for_claimers: initial_mars_for_claimers,
+                },
+            )
+            .unwrap();
 
-        // *
-        // can execute Cosmos msg
-        // *
-        let info = mock_info("owner", &[]);
-        let res = execute(
-            deps.as_mut(),
-            mock_env(MockEnvParams::default()),
-            info,
-            msg.clone(),
-        )
-        .unwrap();
-        assert_eq!(res.messages, vec![SubMsg::new(cosmos_msg)]);
-        assert_eq!(res.attributes, vec![attr("action", "execute_cosmos_msg")]);
+        // Transfer by non owner fails
+        {
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("anyone", &[]);
+            let msg = ExecuteMsg::TransferMars {
+                recipient: "recipient".to_string(),
+                amount: transfer_amount,
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::Mars(MarsError::Unauthorized {}));
+        }
+
+        // Transfer big amount fails
+        {
+            let env = mock_env(MockEnvParams::default());
+            let info = mock_info("owner", &[]);
+            let msg = ExecuteMsg::TransferMars {
+                recipient: "recipient".to_string(),
+                amount: initial_mars_in_contract + Uint128::new(10),
+            };
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(err, ContractError::TransferMarsAmountTooLarge {});
+        }
+
+        // Successful transfer
+        {
+            let env = mock_env_at_block_height(transfer_block);
+            let info = mock_info("owner", &[]);
+            let msg = ExecuteMsg::TransferMars {
+                recipient: "recipient".to_string(),
+                amount: transfer_amount,
+            };
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
+            assert_eq!(
+                res.messages,
+                vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("mars_token"),
+                    funds: vec![],
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "recipient".to_string(),
+                        amount: transfer_amount,
+                    })
+                    .unwrap(),
+                })),]
+            );
+
+            let expected_slash_percentage =
+                Decimal::from_ratio(transfer_amount, initial_mars_in_contract);
+            let expected_total_mars_for_claimers =
+                initial_mars_for_claimers * expected_slash_percentage;
+
+            assert_eq!(
+                res.attributes,
+                vec![
+                    attr("action", "transfer_mars"),
+                    attr("recipient", "recipient"),
+                    attr("amount", transfer_amount),
+                    attr("slash_percentage", expected_slash_percentage.to_string()),
+                    attr(
+                        "new_total_mars_for_claimers",
+                        expected_total_mars_for_claimers
+                    ),
+                ]
+            );
+
+            let slash_event = SLASH_EVENTS
+                .load(&deps.storage, U64Key::new(transfer_block))
+                .unwrap();
+            assert_eq!(
+                slash_event,
+                SlashEvent {
+                    slash_percentage: expected_slash_percentage
+                }
+            );
+
+            let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+            assert_eq!(
+                global_state.total_mars_for_claimers,
+                expected_total_mars_for_claimers
+            );
+        }
     }
 
     #[test]

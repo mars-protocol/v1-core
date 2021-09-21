@@ -1,4 +1,4 @@
-use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{Decimal, Uint128};
 
 use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
@@ -28,11 +28,12 @@ pub enum ExecuteMsg {
     /// Implementation for cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
-    /// Close Claim sending the claimable Mars to the specified address (sender is the default)
+    /// Close claim sending the claimable Mars to the specified address (sender is the default)
     Claim { recipient: Option<String> },
 
-    /// Execute Cosmos msg. Only callable by owner.
-    ExecuteCosmosMsg(CosmosMsg),
+    /// Transfer Mars, deducting it proportionally from both xMars holders and addresses
+    /// with an open claim
+    TransferMars { amount: Uint128, recipient: String },
 
     /// Swap any asset on the contract to uusd. Meant for received protocol rewards
     /// as a middle step to be converted to Mars.
@@ -56,7 +57,7 @@ pub enum ReceiveMsg {
     },
 
     /// Burn xMars and initiate a cooldown period on which the underlying Mars
-    /// will be claimable
+    /// will be claimable. Only one open claim per address is allowed.
     Unstake {},
 }
 

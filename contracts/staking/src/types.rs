@@ -9,15 +9,16 @@ pub struct Config {
     /// Contract owner
     pub owner: Addr,
 
-    /// Cooldown duration in seconds
-    pub cooldown_duration: u64,
-
     /// Address provider address
     pub address_provider_address: Addr,
-    /// Terraswap factory contract address
+
+    /// Astroport factory contract address
     pub astroport_factory_address: Addr,
-    /// Terraswap max spread
+    /// Astroport max spread
     pub astroport_max_spread: Decimal,
+
+    /// Cooldown duration in seconds
+    pub cooldown_duration: u64,
 }
 
 /// Global State
@@ -30,6 +31,8 @@ pub struct GlobalState {
 /// Unstaking cooldown data
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Claim {
+    /// Timestamp when the claim was created
+    pub cooldown_start: u64,
     /// Timestamp after which the claim is unlocked
     pub cooldown_end: u64,
     /// Amount of Mars that the user is allowed to claim

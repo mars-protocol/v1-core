@@ -25,6 +25,9 @@ pub enum ContractError {
     #[error("Cooldown has not ended")]
     ClaimCooldownNotEnded {},
 
+    #[error("Mars amount to transfer is greater than total balance")]
+    TransferMarsAmountTooLarge {},
+
     #[error("Cannot swap Mars")]
     MarsCannotSwap {},
 }
