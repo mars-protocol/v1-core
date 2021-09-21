@@ -209,7 +209,6 @@ async function testNative(env: Env) {
     strictEqual(maUusdBalanceAfter, 0)
   }
 
-
   console.log("borrower provides uluna")
 
   await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL_AMOUNT)
@@ -258,7 +257,7 @@ async function testNative(env: Env) {
     const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
     const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
 
-    // withdraw half
+    // withdraw half of the deposited balance
     await executeContract(terra, deployer, protocolRewardsCollector,
       {
         withdraw_from_red_bank: {
@@ -293,7 +292,6 @@ async function testNative(env: Env) {
     const maUusdMintAmount = parseInt(result.logs[0].eventsByType.wasm.amount[0])
     strictEqual(maUusdBalanceAfter, maUusdMintAmount)
   }
-
 
   console.log("try to distribute uusd rewards")
 
@@ -464,7 +462,7 @@ async function testCw20(env: Env) {
     const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
     const cwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
 
-    // withdraw half
+    // withdraw half of the deposited balance
     await executeContract(terra, deployer, protocolRewardsCollector,
       {
         withdraw_from_red_bank: {
@@ -956,7 +954,7 @@ async function main() {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1",  // TODO panics with 0
+              optimal_utilization_rate: "0.1", // TODO panics with 0
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
@@ -1048,6 +1046,8 @@ async function main() {
     },
     `${CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   )
+
+  // tests
 
   const env: Env = {
     terra,
