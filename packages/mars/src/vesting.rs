@@ -134,7 +134,7 @@ pub mod msg {
     pub enum QueryMsg {
         /// Config of this contract
         Config {},
-        // Parameters and current status of an allocation
+        /// Parameters and current status of an allocation
         Allocation { account: String },
         // Simulate how many MARS and xMARS will be released if a withdrawal is attempted
         SimulateWithdraw { account: String },
