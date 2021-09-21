@@ -144,6 +144,7 @@ pub mod msg {
     }
 
     pub type ConfigResponse = Config<Addr>;
+
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct AllocationResponse {
         pub params: AllocationParams,
