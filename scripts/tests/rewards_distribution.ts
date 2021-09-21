@@ -178,7 +178,6 @@ interface Env {
   treasury: string
   safetyFund: string
   staking: string
-  cw20Token1UusdPair: string
 }
 
 // TESTS
@@ -1065,7 +1064,6 @@ async function main() {
     treasury,
     safetyFund,
     staking,
-    cw20Token1UusdPair
   }
 
   console.log("testNative")
