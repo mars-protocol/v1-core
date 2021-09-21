@@ -301,30 +301,30 @@ export const bombay: Config = {
         borrow_enabled: true
       }
     },
-    {
-      symbol: "ANC",
-      contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-      init_params: {
-        initial_borrow_rate: "0.07",
-        max_loan_to_value: "0.35",
-        reserve_factor: "0.2",
-        maintenance_margin: "0.45",
-        liquidation_bonus: "0.15",
-        interest_rate_strategy: {
-          "dynamic": {
-            min_borrow_rate: "0.0",
-            max_borrow_rate: "2.0",
-            kp_1: "0.02",
-            optimal_utilization_rate: "0.5",
-            kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
-          }
-        },
-        active: true,
-        deposit_enabled: true,
-        borrow_enabled: true
-      }
-    },
+    // {
+    //   symbol: "ANC",
+    //   contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
+    //   init_params: {
+    //     initial_borrow_rate: "0.07",
+    //     max_loan_to_value: "0.35",
+    //     reserve_factor: "0.2",
+    //     maintenance_margin: "0.45",
+    //     liquidation_bonus: "0.15",
+    //     interest_rate_strategy: {
+    //       "dynamic": {
+    //         min_borrow_rate: "0.0",
+    //         max_borrow_rate: "2.0",
+    //         kp_1: "0.02",
+    //         optimal_utilization_rate: "0.5",
+    //         kp_augmentation_threshold: "0.15",
+    //         kp_2: "0.05"
+    //       }
+    //     },
+    //     active: true,
+    //     deposit_enabled: true,
+    //     borrow_enabled: true
+    //   }
+    // },
     {
       symbol: "MARS",
       contract_addr: "terra15d6rtqchvf60lrzxukdf7v48xemtvx48sgerm7",
