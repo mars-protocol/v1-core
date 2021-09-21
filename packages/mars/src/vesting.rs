@@ -132,7 +132,7 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
-        // Config of this contract
+        /// Config of this contract
         Config {},
         // Parameters and current status of an allocation
         Allocation { account: String },
