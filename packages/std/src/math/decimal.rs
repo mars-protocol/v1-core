@@ -229,6 +229,20 @@ impl ops::Mul<Uint128> for Decimal {
     }
 }
 
+impl ops::Mul for Decimal {
+    type Output = Self;
+
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn mul(self, other: Self) -> Self {
+        let a_numerator: Uint128 = self.numerator().into();
+        let b_numerator: Uint128 = other.numerator().into();
+
+        // (a_numerator * b_numerator) / DECIMAL_FRACTIONAL
+        let numerator: Uint128 = a_numerator.multiply_ratio(b_numerator, Self::DECIMAL_FRACTIONAL);
+        Decimal(numerator)
+    }
+}
+
 impl ops::Div<Uint128> for Decimal {
     type Output = Self;
 

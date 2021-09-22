@@ -1,19 +1,11 @@
-use cosmwasm_std::{Decimal, Fraction, Uint128};
-use std::ops::Mul;
-
-const DECIMAL_FRACTIONAL: Uint128 = Uint128::new(1_000_000_000u128);
+use cosmwasm_std::{Decimal, Fraction};
 
 pub fn decimal_division(a: Decimal, b: Decimal) -> Decimal {
     Decimal::from_ratio(a.numerator(), b.numerator())
 }
 
 pub fn decimal_multiplication(a: Decimal, b: Decimal) -> Decimal {
-    let a_numerator: Uint128 = a.numerator().into();
-    let b_numerator: Uint128 = b.numerator().into();
-
-    // (a_numerator * b_numerator) / DECIMAL_FRACTIONAL
-    let numerator: Uint128 = a_numerator.multiply_ratio(b_numerator, DECIMAL_FRACTIONAL);
-    Decimal(numerator)
+    a * b
 }
 
 pub fn reverse_decimal(decimal: Decimal) -> Decimal {
