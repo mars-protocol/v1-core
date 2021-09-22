@@ -3,8 +3,8 @@ use cosmwasm_std::{
     Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
     WasmQuery,
 };
-use cw_storage_plus::{Bound, U64Key};
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw_storage_plus::{Bound, U64Key};
 
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;

@@ -10,10 +10,10 @@ use cw_storage_plus::{Bound, U64Key};
 use terraswap::asset::AssetInfo;
 
 use crate::error::ContractError;
-use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE, SLASH_EVENTS};
-use crate::types::{Claim, Config, GlobalState, SlashEvent};
-
 use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
+use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE, SLASH_EVENTS};
+use crate::{Claim, Config, GlobalState, SlashEvent};
+
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
@@ -256,11 +256,8 @@ pub fn execute_unstake(
         return Err(ContractError::UnstakeActiveClaim {});
     }
 
-    let total_mars_in_staking_contract = cw20_get_balance(
-        &deps.querier,
-        mars_token_address,
-        env.contract.address,
-    )?;
+    let total_mars_in_staking_contract =
+        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
 
     let mut global_state = GLOBAL_STATE.load(deps.storage)?;
 
@@ -553,7 +550,9 @@ fn apply_slash_events_to_claim(storage: &dyn Storage, claim: &mut Claim) -> StdR
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg, Timestamp};
+    use cosmwasm_std::{
+        attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, StdError, SubMsg, Timestamp,
+    };
     use mars::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
         MarsMockQuerier, MockEnvParams,
