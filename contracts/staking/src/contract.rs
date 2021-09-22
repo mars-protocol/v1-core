@@ -2,10 +2,10 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Response, StdError, StdResult, Uint128, WasmMsg,
+    Order, Response, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
-use cw_storage_plus::U64Key;
+use cw_storage_plus::{Bound, U64Key};
 
 use terraswap::asset::AssetInfo;
 
@@ -258,7 +258,7 @@ pub fn execute_unstake(
 
     let total_mars_in_staking_contract = cw20_get_balance(
         &deps.querier,
-        mars_token_address.clone(),
+        mars_token_address,
         env.contract.address,
     )?;
 
@@ -271,10 +271,9 @@ pub fn execute_unstake(
 
     let claimable_amount = burn_amount.multiply_ratio(total_mars_for_stakers, total_xmars_supply);
 
-    let cooldown_start = env.block.time.seconds();
     let claim = Claim {
-        cooldown_start: cooldown_start,
-        cooldown_end: cooldown_start + config.cooldown_duration,
+        created_at_block: env.block.height,
+        cooldown_end_timestamp: env.block.time.seconds() + config.cooldown_duration,
         amount: claimable_amount,
     };
 
@@ -283,6 +282,12 @@ pub fn execute_unstake(
     global_state.total_mars_for_claimers = global_state
         .total_mars_for_claimers
         .checked_add(claimable_amount)?;
+
+    // Total Mars for claimers should never be higher than total Mars, if it is
+    // there's some logical inconsistency in the contract
+    if global_state.total_mars_for_claimers > total_mars_in_staking_contract {
+        return Err(ContractError::MarsForClaimersOverflow {});
+    }
 
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
@@ -307,18 +312,18 @@ pub fn execute_claim(
     info: MessageInfo,
     option_recipient: Option<String>,
 ) -> Result<Response, ContractError> {
-    let claim = CLAIMS.load(deps.storage, &info.sender)?;
+    let mut claim = CLAIMS.load(deps.storage, &info.sender)?;
 
-    if claim.cooldown_end > env.block.time.seconds() {
+    if claim.cooldown_end_timestamp > env.block.time.seconds() {
         return Err(ContractError::ClaimCooldownNotEnded {});
     }
 
-    let mut claim_amount = claim.amount;
+    apply_slash_events_to_claim(deps.storage, &mut claim)?;
 
     let mut global_state = GLOBAL_STATE.load(deps.storage)?;
     global_state.total_mars_for_claimers = global_state
         .total_mars_for_claimers
-        .checked_sub(claim_amount)?;
+        .checked_sub(claim.amount)?;
 
     CLAIMS.remove(deps.storage, &info.sender);
     GLOBAL_STATE.save(deps.storage, &global_state)?;
@@ -338,12 +343,12 @@ pub fn execute_claim(
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: recipient.clone(),
-                amount: claim_amount,
+                amount: claim.amount,
             })?,
         }))
         .add_attribute("action", "claim")
         .add_attribute("claimer", info.sender)
-        .add_attribute("mars_claimed", claim_amount)
+        .add_attribute("mars_claimed", claim.amount)
         .add_attribute("recipient", recipient);
     Ok(res)
 }
@@ -395,7 +400,7 @@ pub fn execute_transfer_mars(
             funds: vec![],
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: recipient_unchecked.clone(),
-                amount: amount,
+                amount,
             })?,
         }))
         .add_attribute("action", "transfer_mars")
@@ -485,11 +490,11 @@ pub fn execute_swap_uusd_to_mars(
 // QUERY
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::GlobalState {} => to_binary(&query_global_state(deps)?),
-        QueryMsg::Claim { user_address } => to_binary(&query_claim(deps, user_address)?),
+        QueryMsg::Claim { user_address } => to_binary(&query_claim(deps, env, user_address)?),
     }
 }
 
@@ -503,9 +508,16 @@ fn query_global_state(deps: Deps) -> StdResult<GlobalState> {
     Ok(global_state)
 }
 
-fn query_claim(deps: Deps, user_address_unchecked: String) -> StdResult<Option<Claim>> {
+fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResult<Option<Claim>> {
     let user_address = deps.api.addr_validate(&user_address_unchecked)?;
-    Ok(CLAIMS.may_load(deps.storage, &user_address)?)
+    let option_claim = CLAIMS.may_load(deps.storage, &user_address)?;
+
+    if let Some(mut claim) = option_claim {
+        apply_slash_events_to_claim(deps.storage, &mut claim)?;
+        Ok(Some(claim))
+    } else {
+        Ok(option_claim)
+    }
 }
 
 // HELPERS
@@ -523,13 +535,25 @@ fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), 
     Ok((mars_token_address, xmars_token_address))
 }
 
+fn apply_slash_events_to_claim(storage: &dyn Storage, claim: &mut Claim) -> StdResult<()> {
+    let start = Some(Bound::inclusive(U64Key::new(claim.created_at_block)));
+
+    // Slash events are applied in chronological order
+    for kv in SLASH_EVENTS.range(storage, start, None, Order::Ascending) {
+        let (_, slash_event) = kv?;
+
+        claim.amount = claim.amount * (Decimal::one() - slash_event.slash_percentage);
+    }
+    Ok(())
+}
+
 // TESTS
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg};
+    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, SubMsg, Timestamp};
     use mars::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
         MarsMockQuerier, MockEnvParams,
@@ -797,7 +821,12 @@ mod tests {
         let unstake_amount = Uint128::new(1_000_000);
         let unstake_mars_in_contract = Uint128::new(4_000_000);
         let unstake_xmars_supply = Uint128::new(3_000_000);
-        let unstake_block_timestamp = 1_000_000_000;
+        let unstake_height = 123456;
+        let unstake_time = 1_000_000_000;
+        let env = mock_env(MockEnvParams {
+            block_height: unstake_height,
+            block_time: Timestamp::from_seconds(unstake_time),
+        });
         let initial_mars_for_claimers = Uint128::new(700_000);
 
         deps.querier.set_cw20_balances(
@@ -826,8 +855,6 @@ mod tests {
                 amount: unstake_amount,
             });
             let info = mock_info("other_token", &[]);
-            let env = mock_env_at_block_time(unstake_block_timestamp);
-
             let res_error = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap_err();
             assert_eq!(res_error, ContractError::Mars(MarsError::Unauthorized {}));
         }
@@ -840,7 +867,6 @@ mod tests {
                 amount: unstake_amount,
             });
             let info = mock_info("xmars_token", &[]);
-            let env = mock_env_at_block_time(unstake_block_timestamp);
 
             let res = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap();
 
@@ -877,8 +903,8 @@ mod tests {
             assert_eq!(
                 claim,
                 Claim {
-                    cooldown_start: unstake_block_timestamp,
-                    cooldown_end: unstake_block_timestamp + TEST_COOLDOWN_DURATION,
+                    created_at_block: unstake_height,
+                    cooldown_end_timestamp: unstake_time + TEST_COOLDOWN_DURATION,
                     amount: expected_claimable_mars,
                 }
             );
@@ -898,9 +924,8 @@ mod tests {
                 amount: unstake_amount,
             });
             let info = mock_info("xmars_token", &[]);
-            let env = mock_env(MockEnvParams::default());
 
-            let err = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap_err();
+            let err = execute(deps.as_mut(), env, info, msg.clone()).unwrap_err();
 
             assert_eq!(err, ContractError::UnstakeActiveClaim {});
         }
@@ -913,8 +938,8 @@ mod tests {
         let claimer_address = Addr::unchecked("claimer");
         let claim = Claim {
             amount: Uint128::new(5_000_000000),
-            cooldown_start: 500_000_u64,
-            cooldown_end: 1_000_000_u64,
+            created_at_block: 123456_u64,
+            cooldown_end_timestamp: 1_000_000_u64,
         };
 
         CLAIMS
@@ -934,8 +959,19 @@ mod tests {
             let info = mock_info("claimer", &[]);
             let env = mock_env_at_block_time(999_999);
             let msg = ExecuteMsg::Claim { recipient: None };
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(err, ContractError::ClaimCooldownNotEnded {});
+        }
+
+        // Query claim gives correct claim
+        {
+            let queried_claim = query_claim(
+                deps.as_ref(),
+                mock_env_at_block_time(1_233_000),
+                "claimer".to_string(),
+            )
+            .unwrap();
+            assert_eq!(claim.amount, queried_claim.unwrap().amount);
         }
 
         // Successful claim
@@ -943,7 +979,7 @@ mod tests {
             let info = mock_info("claimer", &[]);
             let env = mock_env_at_block_time(1_233_000);
             let msg = ExecuteMsg::Claim { recipient: None };
-            let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+            let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
             assert_eq!(
                 res.messages,
@@ -968,6 +1004,14 @@ mod tests {
                 ]
             );
 
+            let queried_claim = query_claim(
+                deps.as_ref(),
+                mock_env_at_block_time(1_233_000),
+                "claimer".to_string(),
+            )
+            .unwrap();
+            assert_eq!(None, queried_claim);
+
             let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
             assert_eq!(
                 global_state.total_mars_for_claimers,
@@ -984,11 +1028,192 @@ mod tests {
             let info = mock_info("claimer", &[]);
             let env = mock_env_at_block_time(1_233_000);
             let msg = ExecuteMsg::Claim { recipient: None };
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
+            let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert!(
                 matches!(err, ContractError::Std(StdError::NotFound { .. })),
                 "Expected StdError::NotFound, received {}",
                 err
+            );
+        }
+    }
+
+    #[test]
+    fn test_claim_with_slash() {
+        let mut deps = th_setup(&[]);
+        let claimer_address = Addr::unchecked("claimer");
+
+        let initial_mars_for_claimers = Uint128::new(100_000_000_00000);
+        let initial_claim_amount = Uint128::new(5_000_000000);
+        let claim = Claim {
+            amount: initial_claim_amount,
+            created_at_block: 100_000_u64,
+            cooldown_end_timestamp: 1_000_000_u64,
+        };
+
+        let claim_height = 150_000_u64;
+        let claim_time = 1_000_000_u64;
+        let env = mock_env(MockEnvParams {
+            block_height: claim_height,
+            block_time: Timestamp::from_seconds(claim_time),
+        });
+
+        let slash_percentage_one = Decimal::from_ratio(1_u128, 2_u128);
+        let slash_percentage_two = Decimal::from_ratio(1_u128, 3_u128);
+
+        CLAIMS
+            .save(&mut deps.storage, &claimer_address, &claim)
+            .unwrap();
+        GLOBAL_STATE
+            .save(
+                &mut deps.storage,
+                &GlobalState {
+                    total_mars_for_claimers: initial_mars_for_claimers,
+                },
+            )
+            .unwrap();
+
+        SLASH_EVENTS
+            .save(
+                &mut deps.storage,
+                U64Key::new(claim.created_at_block - 1),
+                &SlashEvent {
+                    slash_percentage: Decimal::from_ratio(80_u128, 100_u128),
+                },
+            )
+            .unwrap();
+        SLASH_EVENTS
+            .save(
+                &mut deps.storage,
+                U64Key::new(claim.created_at_block),
+                &SlashEvent {
+                    slash_percentage: slash_percentage_one,
+                },
+            )
+            .unwrap();
+
+        // one slash (slashes previous to claim don't count)
+        // set other as recipient
+        {
+            let expected_claim_amount =
+                initial_claim_amount * (Decimal::one() - slash_percentage_one);
+            let queried_claim = query_claim(
+                deps.as_ref(),
+                mock_env_at_block_time(1_233_000),
+                "claimer".to_string(),
+            )
+            .unwrap();
+            assert_eq!(expected_claim_amount, queried_claim.unwrap().amount);
+
+            let info = mock_info("claimer", &[]);
+            let msg = ExecuteMsg::Claim {
+                recipient: Some("recipient".to_string()),
+            };
+            let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+            assert_eq!(
+                res.messages,
+                vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("mars_token"),
+                    funds: vec![],
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "recipient".to_string(),
+                        amount: expected_claim_amount,
+                    })
+                    .unwrap(),
+                })),]
+            );
+
+            assert_eq!(
+                res.attributes,
+                vec![
+                    attr("action", "claim"),
+                    attr("claimer", "claimer"),
+                    attr("mars_claimed", expected_claim_amount),
+                    attr("recipient", "recipient"),
+                ]
+            );
+
+            let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+            assert_eq!(
+                global_state.total_mars_for_claimers,
+                initial_mars_for_claimers - expected_claim_amount
+            );
+            assert_eq!(
+                CLAIMS.may_load(&deps.storage, &claimer_address).unwrap(),
+                None
+            );
+        }
+
+        // create claim again as previous was deleted
+        CLAIMS
+            .save(&mut deps.storage, &claimer_address, &claim)
+            .unwrap();
+        GLOBAL_STATE
+            .save(
+                &mut deps.storage,
+                &GlobalState {
+                    total_mars_for_claimers: initial_mars_for_claimers,
+                },
+            )
+            .unwrap();
+        SLASH_EVENTS
+            .save(
+                &mut deps.storage,
+                U64Key::new(claim.created_at_block + 200),
+                &SlashEvent {
+                    slash_percentage: slash_percentage_two,
+                },
+            )
+            .unwrap();
+
+        // two slashes
+        {
+            let expected_claim_amount = (initial_claim_amount
+                * (Decimal::one() - slash_percentage_one))
+                * (Decimal::one() - slash_percentage_two);
+            let queried_claim = query_claim(
+                deps.as_ref(),
+                mock_env_at_block_time(1_233_000),
+                "claimer".to_string(),
+            )
+            .unwrap();
+            assert_eq!(expected_claim_amount, queried_claim.unwrap().amount);
+
+            let info = mock_info("claimer", &[]);
+            let msg = ExecuteMsg::Claim { recipient: None };
+            let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+            assert_eq!(
+                res.messages,
+                vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: String::from("mars_token"),
+                    funds: vec![],
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: "claimer".to_string(),
+                        amount: expected_claim_amount,
+                    })
+                    .unwrap(),
+                })),]
+            );
+
+            assert_eq!(
+                res.attributes,
+                vec![
+                    attr("action", "claim"),
+                    attr("claimer", "claimer"),
+                    attr("mars_claimed", expected_claim_amount),
+                    attr("recipient", "claimer"),
+                ]
+            );
+
+            let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+            assert_eq!(
+                global_state.total_mars_for_claimers,
+                initial_mars_for_claimers - expected_claim_amount
+            );
+            assert_eq!(
+                CLAIMS.may_load(&deps.storage, &claimer_address).unwrap(),
+                None
             );
         }
     }

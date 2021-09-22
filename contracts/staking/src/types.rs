@@ -31,10 +31,10 @@ pub struct GlobalState {
 /// Unstaking cooldown data
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Claim {
-    /// Timestamp when the claim was created
-    pub cooldown_start: u64,
-    /// Timestamp after which the claim is unlocked
-    pub cooldown_end: u64,
+    /// Block when the claim was created (Used to apply slash events when claiming)
+    pub created_at_block: u64,
+    /// Timestamp (in seconds) after which the claim is unlocked
+    pub cooldown_end_timestamp: u64,
     /// Amount of Mars that the user is allowed to claim
     pub amount: Uint128,
 }

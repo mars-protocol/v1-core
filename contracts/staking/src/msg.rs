@@ -68,6 +68,7 @@ pub enum QueryMsg {
     Config {},
     /// Get contract global state
     GlobalState {},
-    /// Get open claim for given user
+    /// Get open claim for given user. If claim exists, slash events are applied to the amount
+    /// so actual amount of Mars received is given.
     Claim { user_address: String },
 }

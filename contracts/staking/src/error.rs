@@ -22,12 +22,15 @@ pub enum ContractError {
     #[error("Cannot unstake if address has an active claim")]
     UnstakeActiveClaim {},
 
+    #[error("Total MARS being claimed cannot be greater than staking contract's balance")]
+    MarsForClaimersOverflow {},
+
     #[error("Cooldown has not ended")]
     ClaimCooldownNotEnded {},
 
     #[error("Mars amount to transfer is greater than total balance")]
     TransferMarsAmountTooLarge {},
 
-    #[error("Cannot swap Mars")]
+    #[error("Cannot swap MARS")]
     MarsCannotSwap {},
 }
