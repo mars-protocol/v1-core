@@ -26,7 +26,7 @@ cw2 = "0.8"
 cw20 = "0.8"
 cw20-base = { version = "0.8", features = ["library"] }
 
-cosmwasm-std = { version = "0.16.2" }
+cosmwasm-std = { path = "../../packages/std", version = "0.16.2" }
 cw-storage-plus = { version = "0.8.0" }
 
 schemars = "0.8.1"
@@ -34,4 +34,4 @@ serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = { version = "0.16.0" }
+cosmwasm-schema = { path = "../../packages/schema", version = "0.16.2" }
