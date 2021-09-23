@@ -29,17 +29,14 @@ impl VestingQuerier {
         if contract_addr != &self.vesting_address {
             panic!(
                 "[mock]: made an vesting query but incentive contract address is incorrect, was: {}, should be {}",  
-                contract_addr, 
+                contract_addr,
                 self.vesting_address
             );
         }
 
         match query {
             vesting::msg::QueryMsg::VotingPowerAt { account, block } => {
-                match self
-                    .voting_power_at
-                    .get(&(Addr::unchecked(account), block))
-                {
+                match self.voting_power_at.get(&(Addr::unchecked(account), block)) {
                     Some(voting_power) => Ok(to_binary(voting_power).into()).into(),
                     // If voting power is not set, return zero
                     None => Ok(to_binary(&Uint128::zero()).into()).into(),
