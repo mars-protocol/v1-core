@@ -407,10 +407,14 @@ fn query_simulate_withdraw(
 }
 
 fn query_voting_power(deps: Deps, _env: Env, account: String, block: u64) -> StdResult<Uint128> {
-    let account_checked = deps.api.addr_validate(&account)?;
-    let snapshots = VOTING_POWER_SNAPSHOTS.load(deps.storage, &account_checked)?;
-
-    Ok(helpers::binary_search(&snapshots, block))
+    match VOTING_POWER_SNAPSHOTS.may_load(deps.storage, &deps.api.addr_validate(&account)?) {
+        // An allocation exists for the account and is loaded successfully
+        Ok(Some(snapshots)) => Ok(helpers::binary_search(&snapshots, block)),
+        // No allocation exists for this account, return zero
+        Ok(None) => Ok(Uint128::zero()),
+        // An allocation exists for this account, but failed to parse. Throw error in this case
+        Err(err) => Err(err),
+    }
 }
 
 //----------------------------------------------------------------------------------------
