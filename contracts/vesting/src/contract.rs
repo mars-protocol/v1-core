@@ -131,36 +131,36 @@ fn execute_create_allocations(
 
         let user = deps.api.addr_validate(&user_unchecked)?;
 
-        match PARAMS.load(deps.storage, &user) {
-            Ok(..) => {
-                return Err(StdError::generic_err("Allocation already exists for user"));
-            }
-            Err(..) => {
+        match PARAMS.may_load(deps.storage, &user) {
+            Ok(None) => {
                 PARAMS.save(deps.storage, &user, &params)?;
             }
-        }
-
-        match STATUS.load(deps.storage, &user) {
-            Ok(..) => {
+            _ => {
                 return Err(StdError::generic_err("Allocation already exists for user"));
             }
-            Err(..) => {
+        }
+
+        match STATUS.may_load(deps.storage, &user) {
+            Ok(None) => {
                 STATUS.save(deps.storage, &user, &AllocationStatus::new())?;
+            }
+            _ => {
+                return Err(StdError::generic_err("Allocation already exists for user"));
             }
         }
 
-        match VOTING_POWER_SNAPSHOTS.load(deps.storage, &user) {
-            Ok(..) => {
-                return Err(StdError::generic_err(
-                    "Voting power history exists for user",
-                ));
-            }
-            Err(..) => {
+        match VOTING_POWER_SNAPSHOTS.may_load(deps.storage, &user) {
+            Ok(None) => {
                 VOTING_POWER_SNAPSHOTS.save(
                     deps.storage,
                     &user,
                     &vec![(env.block.height, Uint128::zero())],
                 )?;
+            }
+            _ => {
+                return Err(StdError::generic_err(
+                    "Voting power history exists for user",
+                ));
             }
         }
     }
