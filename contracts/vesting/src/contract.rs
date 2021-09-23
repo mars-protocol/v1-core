@@ -2,20 +2,20 @@
 use cosmwasm_std::entry_point;
 
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError,
-    StdResult, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
+    StdError, StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
-use mars::helpers::{cw20_get_balance, cw20_get_total_supply};
+use mars::staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
 use mars::vesting::msg::{
     AllocationResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, SimulateWithdrawResponse,
 };
 use mars::vesting::{AllocationParams, AllocationStatus, Config, Stake};
 
-use staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
+use crate::state::{CONFIG, CURRENT_STAKER, PARAMS, STATUS, VOTING_POWER_SNAPSHOTS};
 
-use crate::state::{CONFIG, PARAMS, STATUS, VOTING_POWER_SNAPSHOTS};
+use std::str::FromStr;
 
 //----------------------------------------------------------------------------------------
 // Entry Points
@@ -72,6 +72,16 @@ fn execute_receive_cw20(
             cw20_msg.amount,
             allocations,
         ),
+    }
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn reply(deps: DepsMut, env: Env, reply: Reply) -> StdResult<Response> {
+    match reply.id {
+        // ID 0 - record available stakes for user after a staking transaction
+        0 => reply_record_stake(deps, env, reply.result.unwrap().events),
+        // We don't have other reply IDs implemented
+        _ => Err(StdError::generic_err("Invalid reply ID")),
     }
 }
 
@@ -161,8 +171,7 @@ fn execute_create_allocations(
 fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     let params = PARAMS.load(deps.storage, &info.sender)?;
-    let mut status = STATUS.load(deps.storage, &info.sender)?;
-    let mut snapshots = VOTING_POWER_SNAPSHOTS.load(deps.storage, &info.sender)?;
+    let status = STATUS.load(deps.storage, &info.sender)?;
 
     // The amount available to be staked is: the amount of MARS vested so far, minus the amount
     // of MARS that have already been staked or withdrawan
@@ -173,44 +182,77 @@ fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Respon
     );
     let mars_to_stake = mars_vested - status.mars_staked - status.mars_withdrawn_as_mars;
 
-    // Calculate how many xMARS will be minted
-    // https://github.com/mars-protocol/protocol/blob/master/contracts/staking/src/contract.rs#L187
-    let mars_total_staked = cw20_get_balance(
-        &deps.querier,
-        config.mars_token.clone(),
-        config.mars_staking.clone(),
+    // Save the address of the user in storage so that it can be accessed when handling the reply
+    CURRENT_STAKER.save(deps.storage, &info.sender)?;
+
+    Ok(Response::new().add_submessage(SubMsg::reply_on_success(
+        WasmMsg::Execute {
+            contract_addr: config.mars_token.to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: config.mars_staking.to_string(),
+                amount: mars_to_stake,
+                msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None })?,
+            })?,
+            funds: vec![],
+        },
+        0,
+    )))
+}
+
+fn reply_record_stake(deps: DepsMut, env: Env, events: Vec<Event>) -> StdResult<Response> {
+    // Find the event corresponding to the staking message
+    let event = events
+        .iter()
+        .find(|event| {
+            event
+                .attributes
+                .iter()
+                .any(|attr| attr.key == "action" && attr.value == "stake")
+        })
+        .ok_or_else(|| StdError::generic_err("Cannot find stake event"))?;
+
+    // Find the amount of MARS staked
+    let mars_staked = Uint128::from_str(
+        &event
+            .attributes
+            .iter()
+            .find(|attr| attr.key == "mars_staked")
+            .ok_or_else(|| StdError::generic_err("Cannot find mars_staked attribute"))?
+            .value,
     )?;
-    let xmars_total_supply = cw20_get_total_supply(&deps.querier, config.xmars_token.clone())?;
 
-    let xmars_to_mint =
-        if mars_total_staked == Uint128::zero() || xmars_total_supply == Uint128::zero() {
-            mars_to_stake
-        } else {
-            mars_to_stake.multiply_ratio(xmars_total_supply, mars_total_staked)
-        };
+    // Find the amount of xMARS minted
+    let xmars_minted = Uint128::from_str(
+        &event
+            .attributes
+            .iter()
+            .find(|attr| attr.key == "xmars_minted")
+            .ok_or_else(|| StdError::generic_err("Cannot find xmars_minted attribute"))?
+            .value,
+    )?;
 
-    // Update status
-    status.mars_staked += mars_to_stake;
+    // Update storage
+    let staker = CURRENT_STAKER.load(deps.storage)?;
+    let mut status = STATUS.load(deps.storage, &staker)?;
+    let mut snapshots = VOTING_POWER_SNAPSHOTS.load(deps.storage, &staker)?;
+
+    status.mars_staked += mars_staked;
+
     status.stakes.push(Stake {
-        mars_staked: mars_to_stake,
-        xmars_minted: xmars_to_mint,
+        mars_staked,
+        xmars_minted,
     });
-    STATUS.save(deps.storage, &info.sender, &status)?;
 
-    // Update voting power snapshots
-    let last_voting_power = snapshots[snapshots.len() - 1].1;
-    snapshots.push((env.block.height, last_voting_power + xmars_to_mint));
-    VOTING_POWER_SNAPSHOTS.save(deps.storage, &info.sender, &snapshots)?;
+    snapshots.push((
+        env.block.height,
+        snapshots[snapshots.len() - 1].1 + xmars_minted,
+    ));
 
-    Ok(Response::new().add_message(WasmMsg::Execute {
-        contract_addr: config.mars_token.to_string(),
-        msg: to_binary(&Cw20ExecuteMsg::Send {
-            contract: config.mars_staking.to_string(),
-            amount: mars_to_stake,
-            msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None })?,
-        })?,
-        funds: vec![],
-    }))
+    CURRENT_STAKER.remove(deps.storage);
+    STATUS.save(deps.storage, &staker, &status)?;
+    VOTING_POWER_SNAPSHOTS.save(deps.storage, &staker, &snapshots)?;
+
+    Ok(Response::new())
 }
 
 fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Response> {
@@ -504,7 +546,9 @@ mod helpers {
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::{CosmosMsg, SubMsg, Timestamp, WasmMsg};
+    use cosmwasm_std::{
+        ContractResult, CosmosMsg, SubMsg, SubMsgExecutionResponse, Timestamp, WasmMsg,
+    };
 
     use mars::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_height,
@@ -752,18 +796,17 @@ mod tests {
         assert_generic_error_message(res, "Allocation already exists for user");
     }
 
-    // Some simple tests without considering stakes and withdrawls. For more complex tests
-    // see `stake_and_withdraw_and_voting_power` function.
     #[test]
-    fn test_simple_vesting() {
+    fn test_handle_reply() {
         let mut deps = mock_dependencies(&[]);
-        let env = mock_env(MockEnvParams::default());
+        let env = mock_env_at_block_height(10000);
+        let info = mock_info("owner");
 
         // Instantiate contract
         instantiate(
             deps.as_mut(),
             env.clone(),
-            mock_info("owner"),
+            info,
             InstantiateMsg {
                 owner: "owner".to_string(),
                 refund_recipient: "refund_recipient".to_string(),
@@ -775,128 +818,132 @@ mod tests {
         )
         .unwrap();
 
-        // Create Allocations
-        execute(
+        // Prepare storage
+        CURRENT_STAKER
+            .save(deps.as_mut().storage, &Addr::unchecked("user_1"))
+            .unwrap();
+
+        STATUS
+            .save(
+                deps.as_mut().storage,
+                &Addr::unchecked("user_1"),
+                &AllocationStatus::new(),
+            )
+            .unwrap();
+
+        VOTING_POWER_SNAPSHOTS
+            .save(
+                deps.as_mut().storage,
+                &Addr::unchecked("user_1"),
+                &vec![(env.block.height, Uint128::zero())],
+            )
+            .unwrap();
+
+        let env = mock_env_at_block_height(12345);
+
+        // Wrong ID
+        let res = reply(
             deps.as_mut(),
-            env,
-            mock_info("mars_token"),
-            ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: "owner".to_string(),
-                amount: Uint128::new(200_000_000_000),
-                msg: to_binary(&ReceiveMsg::CreateAllocations {
-                    allocations: vec![
-                        ("user_1".to_string(), PARAMS_1),
-                        ("user_2".to_string(), PARAMS_2),
-                    ],
-                })
+            env.clone(),
+            Reply {
+                id: 1,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![],
+                    data: None,
+                }),
+            },
+        );
+
+        assert_generic_error_message(res, "Invalid reply ID");
+
+        // No `action: stake` event
+        let res = reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("").add_attribute("ngmi", "hfsp")],
+                    data: None,
+                }),
+            },
+        );
+
+        assert_generic_error_message(res, "Cannot find stake event");
+
+        // No `mars_staked` attribute
+        let res = reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("").add_attribute("action", "stake")],
+                    data: None,
+                }),
+            },
+        );
+
+        assert_generic_error_message(res, "Cannot find mars_staked attribute");
+
+        // No `xmars_minted` attribute
+        let res = reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "88888")],
+                    data: None,
+                }),
+            },
+        );
+
+        assert_generic_error_message(res, "Cannot find xmars_minted attribute");
+
+        // Valid reply
+        let res = reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "88888")
+                        .add_attribute("xmars_minted", "69420")],
+                    data: None,
+                }),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(res.messages.len(), 0);
+        assert_eq!(res.attributes.len(), 0);
+
+        assert_eq!(CURRENT_STAKER.may_load(deps.as_ref().storage), Ok(None));
+        assert_eq!(
+            STATUS
+                .load(deps.as_ref().storage, &Addr::unchecked("user_1"))
                 .unwrap(),
-            }),
+            AllocationStatus {
+                mars_withdrawn_as_mars: Uint128::zero(),
+                mars_withdrawn_as_xmars: Uint128::zero(),
+                mars_staked: Uint128::new(88888),
+                stakes: vec![Stake {
+                    mars_staked: Uint128::new(88888),
+                    xmars_minted: Uint128::new(69420)
+                }],
+            }
+        );
+        assert_eq!(
+            VOTING_POWER_SNAPSHOTS
+                .load(deps.as_ref().storage, &Addr::unchecked("user_1"))
+                .unwrap(),
+            vec![(10000u64, Uint128::zero()), (12345u64, Uint128::new(69420))]
         )
-        .unwrap();
-
-        //--------------------------------------------------------------------------------
-        // 2021-08-01
-        // Zero should have been vested for user 1 (still under cliff)
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                mock_env_at_block_time(1627776000),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_1".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value.mars_to_withdraw, Uint128::zero());
-
-        //--------------------------------------------------------------------------------
-        // 2022-03-01
-        // 1/3 should have been vested, but non withdrawable because unlocking still under cliff
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                mock_env_at_block_time(1646092800),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_1".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value.mars_to_withdraw, Uint128::zero());
-
-        //--------------------------------------------------------------------------------
-        // 2022-11-01
-        // Ending of unlocking cliff
-        // For user 1, unlocking is slower than vesting; withdrawable amount is unlocked amount
-        // For user 2, vesting is slower than unlocking; withdrawable amount is vested amount
-        let env = mock_env_at_block_time(1667260800);
-
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_1".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        // 100000000000 * (1667260800 - 1635724800) / 94608000 = 33333333333
-        assert_eq!(value.mars_to_withdraw, Uint128::new(33333333333));
-
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_2".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        // 100000000000 * (1667260800 - 1638316800) / 94608000 = 30593607305
-        assert_eq!(value.mars_to_withdraw, Uint128::new(30593607305));
-
-        //--------------------------------------------------------------------------------
-        // 2024-12-01
-        // Completely vested & unlocked for both users
-        let env = mock_env_at_block_time(1733011200);
-
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_1".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value.mars_to_withdraw, PARAMS_1.amount);
-
-        let value: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_2".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value.mars_to_withdraw, PARAMS_2.amount);
     }
 
     #[test]
@@ -904,11 +951,6 @@ mod tests {
         let mut deps = mock_dependencies(&[]);
         let env = mock_env_at_block_height(10000);
         let info = mock_info("owner");
-
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("mars_token"), "MARS".to_string());
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("xmars_token"), "xMARS".to_string());
 
         // Instantiate contract
         instantiate(
@@ -952,15 +994,10 @@ mod tests {
             block_time: Timestamp::from_seconds(1638316800),
         });
 
-        // Assume the staking contract has 120,000 MARS staked and 100,000 xMARS circulating (1 xMARS = 1.2 MARS)
-        deps.querier.set_cw20_balances(
-            Addr::unchecked("mars_token"),
-            &[(Addr::unchecked("mars_staking"), Uint128::new(120000000000))],
-        );
-        deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(100000000000));
-
-        let res = execute(
+        // MARS staked = 100000000000 * (1638316800 - 1614556800) / 94608000 = 25114155251
+        // We mint xMARS at the rate of 1 xMARS = 1.2 MARS
+        // xMARS minted = 25114155251 * 100 / 120 = 20928462709
+        execute(
             deps.as_mut(),
             env.clone(),
             mock_info("user_1"),
@@ -968,22 +1005,21 @@ mod tests {
         )
         .unwrap();
 
-        // Expected amount of MARS to be staked at thie time
-        // MARS staked = 100000000000 * (1638316800 - 1614556800) / 94608000 = 25114155251
-        // xMARS minted = 25114155251 * 100000000000 / 120000000000 = 20928462709
-        assert_eq!(
-            res.messages,
-            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: "mars_token".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Send {
-                    contract: "mars_staking".to_string(),
-                    amount: Uint128::new(25114155251),
-                    msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None }).unwrap(),
-                })
-                .unwrap(),
-                funds: vec![],
-            }))]
-        );
+        reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "25114155251")
+                        .add_attribute("xmars_minted", "20928462709")],
+                    data: None,
+                }),
+            },
+        )
+        .unwrap();
 
         let res: AllocationResponse = from_binary(
             &query(
@@ -1017,15 +1053,12 @@ mod tests {
             block_time: Timestamp::from_seconds(1661990400),
         });
 
-        // Assume now there're 300,000 MARS staked, 200,000 xMARS supply (1 xMARS = 1.5 MARS)
-        deps.querier.set_cw20_balances(
-            Addr::unchecked("mars_token"),
-            &[(Addr::unchecked("mars_staking"), Uint128::new(300000000000))],
-        );
-        deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(200000000000));
-
-        let res = execute(
+        // Vested amount = 100000000000 * (1661990400 - 1614556800) / 94608000 = 50136986301
+        // Mars to stake = 50136986301 - 25114155251 = 25022831050
+        //
+        // We mint xMARS at the rate of 1 xMARS = 1.5 MARS
+        // xMars to mint: 25022831050 * 2 / 3 = 16681887366
+        execute(
             deps.as_mut(),
             env.clone(),
             mock_info("user_1"),
@@ -1033,22 +1066,21 @@ mod tests {
         )
         .unwrap();
 
-        // Vested amount = 100000000000 * (1661990400 - 1614556800) / 94608000 = 50136986301
-        // Mars to stake = 50136986301 - 25114155251 = 25022831050
-        // xMars to mint: 25022831050 * 2 / 3 = 16681887366
-        assert_eq!(
-            res.messages,
-            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: "mars_token".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Send {
-                    contract: "mars_staking".to_string(),
-                    amount: Uint128::new(25022831050),
-                    msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None }).unwrap(),
-                })
-                .unwrap(),
-                funds: vec![],
-            }))]
-        );
+        reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "25022831050")
+                        .add_attribute("xmars_minted", "16681887366")],
+                    data: None,
+                }),
+            },
+        )
+        .unwrap();
 
         let res: AllocationResponse = from_binary(
             &query(
@@ -1088,23 +1120,8 @@ mod tests {
             block_time: Timestamp::from_seconds(1669852800),
         });
 
-        // Assume now there're 525,000 MARS staked, 300,000 xMARS supply (1 xMARS = 1.75 MARS)
-        deps.querier.set_cw20_balances(
-            Addr::unchecked("mars_token"),
-            &[(Addr::unchecked("mars_staking"), Uint128::new(525000000000))],
-        );
-        deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(300000000000));
-
-        // Attempt a withdrawal
-        let res = execute(
-            deps.as_mut(),
-            env.clone(),
-            mock_info("user_1"),
-            ExecuteMsg::Withdraw {},
-        )
-        .unwrap();
-
+        // Part 1. Withdrawal
+        //
         // Since unlocked percentage (~33%) is lower than staked percentage (~50%), only xMARS
         // (no MARS) should be withdrawn here
         //
@@ -1122,6 +1139,14 @@ mod tests {
         // Available stakes after withdrawal:
         // 1) 25022831050 - (36073059360 - 25114155251) = 14063926941 uMARS
         // in the form of 16681887366 - 7305936072 = 9375951294 xMARS
+        let res = execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("user_1"),
+            ExecuteMsg::Withdraw {},
+        )
+        .unwrap();
+
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1152,7 +1177,7 @@ mod tests {
             AllocationStatus {
                 mars_withdrawn_as_mars: Uint128::zero(),
                 mars_withdrawn_as_xmars: Uint128::new(36073059360),
-                mars_staked: Uint128::new(50136986301), // mars_staked_1 + mars_staked_2,
+                mars_staked: Uint128::new(50136986301),
                 stakes: vec![Stake {
                     mars_staked: Uint128::new(14063926941),
                     xmars_minted: Uint128::new(9375951294)
@@ -1160,8 +1185,16 @@ mod tests {
             }
         );
 
-        // We attempt to stake immediately after the withdrawal
-        let res = execute(
+        // Part 2. Stake
+        //
+        // Vested amount = 100000000000 * (1669852800 - 1614556800) / 94608000 = 58447488584
+        // Stakable amount = vested amount - MARS already staked - MARS withdrawn as naked MARS
+        // = 58447488584 - 50136986301 - 0
+        // = 8310502283
+        // We mint xMARS at the rate of 1 xMARS = 1.75 MARS
+        // xMARS to be minted: 8310502283 * 100 / 175 = 4748858447
+        // Total MARS staked = 50136986301 + 8310502283 = 58447488584
+        execute(
             deps.as_mut(),
             env.clone(),
             mock_info("user_1"),
@@ -1169,23 +1202,51 @@ mod tests {
         )
         .unwrap();
 
-        // Vested amount = 100000000000 * (1669852800 - 1614556800) / 94608000 = 58447488584
-        // Stakable amount = vested amount - MARS already staked - MARS withdrawn as naked MARS
-        // = 58447488584 - 50136986301 - 0
-        // = 8310502283
-        // xMARS to be minted: 8310502283 * 300000000000 / 525000000000 = 4748858447
+        reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "8310502283")
+                        .add_attribute("xmars_minted", "4748858447")],
+                    data: None,
+                }),
+            },
+        )
+        .unwrap();
+
+        let res: AllocationResponse = from_binary(
+            &query(
+                deps.as_ref(),
+                env.clone(),
+                QueryMsg::Allocation {
+                    account: "user_1".to_string(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
         assert_eq!(
-            res.messages,
-            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: "mars_token".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Send {
-                    contract: "mars_staking".to_string(),
-                    amount: Uint128::new(8310502283),
-                    msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None }).unwrap(),
-                })
-                .unwrap(),
-                funds: vec![],
-            }))]
+            res.status,
+            AllocationStatus {
+                mars_withdrawn_as_mars: Uint128::zero(),
+                mars_withdrawn_as_xmars: Uint128::new(36073059360),
+                mars_staked: Uint128::new(58447488584),
+                stakes: vec![
+                    Stake {
+                        mars_staked: Uint128::new(14063926941),
+                        xmars_minted: Uint128::new(9375951294)
+                    },
+                    Stake {
+                        mars_staked: Uint128::new(8310502283),
+                        xmars_minted: Uint128::new(4748858447)
+                    }
+                ]
+            }
         );
 
         //--------------------------------------------------------------------------------
@@ -1195,15 +1256,7 @@ mod tests {
             block_time: Timestamp::from_seconds(1709251200),
         });
 
-        // Assume now there're 740,000 MARS staked, 400,000 xMARS supply (1 xMARS = 1.85 MARS)
-        deps.querier.set_cw20_balances(
-            Addr::unchecked("mars_token"),
-            &[(Addr::unchecked("mars_staking"), Uint128::new(740000000000))],
-        );
-        deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(400000000000));
-
-        // First let's make sure QueryMsg::SimulateWithdraw returns correct result
+        // Part 1. Withdrawal
         //
         // Unlocked amount = 100000000000 * (1709251200 - 1635724800) / 94608000
         // = 77716894977 uMARS
@@ -1220,28 +1273,10 @@ mod tests {
         // xMARS withdraw amount = 9375951294 + 4748858447 = 14124809741 uxMARS
         //
         // Then, 41643835617 - 22374429224 = 19269406393 uMARS will be withdrawn
-        let res: SimulateWithdrawResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::SimulateWithdraw {
-                    account: "user_1".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            res,
-            SimulateWithdrawResponse {
-                mars_to_withdraw: Uint128::new(19269406393),
-                mars_to_withdraw_as_xmars: Uint128::new(22374429224),
-                xmars_to_withdraw: Uint128::new(14124809741)
-            }
-        );
-
-        // Not let's attempt the actual withdrawal
+        //
+        // Total amount of MARS withdrawn in the form of xMARS so far: 36073059360 + 22374429224 = 58447488584
+        // Total amount of MARS staked so far: 50136986301 + 8310502283 = 58447488584
+        // There should be no available stakes as they have all been withdrawn
         let res = execute(
             deps.as_mut(),
             env.clone(),
@@ -1286,9 +1321,6 @@ mod tests {
         )
         .unwrap();
 
-        // Total amount of MARS withdrawn in the form of xMARS so far: 36073059360 + 22374429224 = 58447488584
-        // Total amount of MARS staked so far: 50136986301 + 8310502283 = 58447488584
-        // There should be no available stakes as they have all been withdrawn
         assert_eq!(
             res.status,
             AllocationStatus {
@@ -1299,8 +1331,18 @@ mod tests {
             }
         );
 
-        // We attempt to stake immediately after the withdrawal
-        let res = execute(
+        // Part 2. Stake
+        //
+        // Vested amount = 100000000000 (completely vested)
+        // Stakable amount = vested amount - MARS already staked - MARS withdrawn as naked MARS
+        // = 100000000000 - 58447488584 - 19269406393
+        // = 22283105023 uMARS
+        //
+        // We mint xMARS at the rate of 1 xMARS = 1.85 MARS
+        // xMARS to be minted: 22283105023 * 100 / 185 = 12044921634 uxMARS
+        //
+        // Total MARS staked = 58447488584 + 22283105023
+        execute(
             deps.as_mut(),
             env.clone(),
             mock_info("user_1"),
@@ -1308,23 +1350,45 @@ mod tests {
         )
         .unwrap();
 
-        // Vested amount = 100000000000 (completely vested)
-        // Stakable amount = vested amount - MARS already staked - MARS withdrawn as naked MARS
-        // = 100000000000 - 58447488584 - 19269406393
-        // = 22283105023 uMARS
-        // xMARS to be minted: 22283105023 * 400000000000 / 740000000000 = 12044921634 uxMARS
+        reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "22283105023")
+                        .add_attribute("xmars_minted", "12044921634")],
+                    data: None,
+                }),
+            },
+        )
+        .unwrap();
+
+        let res: AllocationResponse = from_binary(
+            &query(
+                deps.as_ref(),
+                env.clone(),
+                QueryMsg::Allocation {
+                    account: "user_1".to_string(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
         assert_eq!(
-            res.messages,
-            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: "mars_token".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::Send {
-                    contract: "mars_staking".to_string(),
-                    amount: Uint128::new(22283105023),
-                    msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None }).unwrap(),
-                })
-                .unwrap(),
-                funds: vec![],
-            }))]
+            res.status,
+            AllocationStatus {
+                mars_withdrawn_as_mars: Uint128::new(19269406393),
+                mars_withdrawn_as_xmars: Uint128::new(58447488584),
+                mars_staked: Uint128::new(80730593607),
+                stakes: vec![Stake {
+                    mars_staked: Uint128::new(22283105023),
+                    xmars_minted: Uint128::new(12044921634)
+                }]
+            }
         );
 
         //--------------------------------------------------------------------------------
@@ -1334,6 +1398,11 @@ mod tests {
             block_time: Timestamp::from_seconds(3376684800),
         });
 
+        // All xMARS should be withdrawn
+        // There's no MARS left to be withdrawn
+        //
+        // MARS withdrawn as xMARS = 58447488584 + 22283105023 = 80730593607
+        // Total amount of MARS withdrawn = 19269406393 + 80730593607 = 100000000000 (equals the total amount, good)
         let res = execute(
             deps.as_mut(),
             env.clone(),
@@ -1342,8 +1411,6 @@ mod tests {
         )
         .unwrap();
 
-        // All xMARS should be withdrawn
-        // There's no MARS left to be withdrawn
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1369,8 +1436,6 @@ mod tests {
         )
         .unwrap();
 
-        // MARS withdrawn as xMARS = 58447488584 + 22283105023 = 80730593607
-        // Total amount of MARS withdrawn = 19269406393 + 80730593607 = 100000000000 (equals the total amount, good)
         assert_eq!(
             res.status,
             AllocationStatus {
@@ -1432,11 +1497,6 @@ mod tests {
         let env = mock_env(MockEnvParams::default());
         let info = mock_info("owner");
 
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("mars_token"), "MARS".to_string());
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("xmars_token"), "xMARS".to_string());
-
         // Instantiate contract
         instantiate(
             deps.as_mut(),
@@ -1475,14 +1535,6 @@ mod tests {
         // 2022-09-01
         let env = mock_env_at_block_time(1661990400);
 
-        // Assume now there're 300,000 MARS staked, 200,000 xMARS supply (1 xMARS = 1.5 MARS)
-        deps.querier.set_cw20_balances(
-            Addr::unchecked("mars_token"),
-            &[(Addr::unchecked("mars_staking"), Uint128::new(300000000000))],
-        );
-        deps.querier
-            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(200000000000));
-
         // Vested amount = 100000000000 * (1661990400 - 1614556800) / 94608000 = 50136986301
         // Will stake 50136986301 uMARS, and get back 50136986301 * 2 / 3 = 33424657534 uxMARS
         execute(
@@ -1490,6 +1542,22 @@ mod tests {
             env.clone(),
             mock_info("user_1"),
             ExecuteMsg::Stake {},
+        )
+        .unwrap();
+
+        reply(
+            deps.as_mut(),
+            env.clone(),
+            Reply {
+                id: 0,
+                result: ContractResult::Ok(SubMsgExecutionResponse {
+                    events: vec![Event::new("")
+                        .add_attribute("action", "stake")
+                        .add_attribute("mars_staked", "50136986301")
+                        .add_attribute("xmars_minted", "33424657534")],
+                    data: None,
+                }),
+            },
         )
         .unwrap();
 
@@ -1541,6 +1609,10 @@ mod tests {
         );
 
         // Attempt to terminate the allocation
+        //
+        // Vested amount = 100000000000 * (1677628800 - 1614556800) / 94608000 = 66666666666
+        // Unvested amount = 100000000000 - 66666666666 = 33333333334
+        // Unvested tokens should be refunded to `refund_recipient`
         let res = execute(
             deps.as_mut(),
             env.clone(),
@@ -1549,9 +1621,6 @@ mod tests {
         )
         .unwrap();
 
-        // Vested amount = 100000000000 * (1677628800 - 1614556800) / 94608000 = 66666666666
-        // Unvested amount = 100000000000 - 66666666666 = 33333333334
-        // Unvested tokens should be refunded to `refund_recipient`
         assert_eq!(
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1565,7 +1634,6 @@ mod tests {
             }))]
         );
 
-        // Verify the status after termination
         let res: AllocationResponse = from_binary(
             &query(
                 deps.as_ref(),
@@ -1578,7 +1646,6 @@ mod tests {
         )
         .unwrap();
 
-        // Parameters should have been adjusted
         assert_eq!(
             res.params,
             AllocationParams {
@@ -1592,7 +1659,6 @@ mod tests {
             }
         );
 
-        // Status should be unchanged
         assert_eq!(
             res.status,
             AllocationStatus {

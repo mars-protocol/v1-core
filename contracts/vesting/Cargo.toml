@@ -21,7 +21,6 @@ backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 mars = { path = "../../packages/mars", version = "0.1.0" }
-staking = { path = "../staking", version = "0.1.0" }
 
 terra-cosmwasm = "2.2.0"
 

@@ -803,7 +803,6 @@ dependencies = [
  "mars",
  "schemars",
  "serde",
- "staking",
  "terra-cosmwasm",
  "thiserror",
 ]
