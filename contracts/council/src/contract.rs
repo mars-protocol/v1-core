@@ -3,9 +3,9 @@ use cosmwasm_std::{
     Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
     WasmQuery,
 };
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
 
-use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
@@ -31,7 +31,7 @@ const MAX_DESC_LENGTH: usize = 1024;
 const MIN_LINK_LENGTH: usize = 12;
 const MAX_LINK_LENGTH: usize = 128;
 
-// INIT
+// INSTANTIATE
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -92,7 +92,7 @@ pub fn instantiate(
     Ok(Response::default())
 }
 
-// HANDLERS
+// EXECUTE
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
@@ -107,6 +107,7 @@ pub fn execute(
         ExecuteMsg::CastVote { proposal_id, vote } => {
             execute_cast_vote(deps, env, info, proposal_id, vote)
         }
+
         ExecuteMsg::EndProposal { proposal_id } => {
             execute_end_proposal(deps, env, info, proposal_id)
         }
