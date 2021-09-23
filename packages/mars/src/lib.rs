@@ -4,6 +4,7 @@ pub mod cw20_core;
 pub mod incentives;
 pub mod ma_token;
 pub mod oracle;
+pub mod staking;
 pub mod vesting;
 pub mod xmars_token;
 

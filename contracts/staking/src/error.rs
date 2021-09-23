@@ -19,18 +19,18 @@ pub enum ContractError {
     #[error("Unstake amount must be greater than 0")]
     UnstakeAmountZero {},
 
-    #[error("Address must have a valid cooldown to unstake")]
-    UnstakeNoCooldown {},
+    #[error("Cannot unstake if address has an active claim")]
+    UnstakeActiveClaim {},
 
-    #[error("Cooldown has expired")]
-    UnstakeCooldownExpired {},
+    #[error("Total MARS being claimed cannot be greater than staking contract's balance")]
+    MarsForClaimersOverflow {},
 
-    #[error("Cooldown has not finished")]
-    UnstakeCooldownNotFinished {},
+    #[error("Cooldown has not ended")]
+    ClaimCooldownNotEnded {},
 
-    #[error("Unstake amount must not be greater than cooldown amount")]
-    UnstakeAmountTooLarge {},
+    #[error("Mars amount to transfer is greater than total balance")]
+    TransferMarsAmountTooLarge {},
 
-    #[error("Cannot swap Mars")]
+    #[error("Cannot swap MARS")]
     MarsCannotSwap {},
 }

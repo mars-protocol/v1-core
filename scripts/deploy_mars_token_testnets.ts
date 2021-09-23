@@ -29,7 +29,7 @@ async function main() {
   } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
-      chainID: 'bombay-10'
+      chainID: 'bombay-11'
     })
     wallet = recover(terra, process.env.TEST_MAIN!)
   } else {
