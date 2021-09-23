@@ -1,23 +1,36 @@
-use cosmwasm_std::{Decimal, Fraction, Uint128};
+mod decimal;
+pub use decimal::Decimal;
 
-const DECIMAL_FRACTIONAL: Uint128 = Uint128::new(1_000_000_000u128);
+use cosmwasm_std::{Fraction, Uint128};
 
+// TODO: If some of these could overflow we need to make this return StdResult<Decimal> instead
+// and call them checked_decimal_division, checked_decimal_multiplication, etc
 pub fn decimal_division(a: Decimal, b: Decimal) -> Decimal {
-    Decimal::from_ratio(DECIMAL_FRACTIONAL * a, b * DECIMAL_FRACTIONAL)
+    Decimal::from_ratio(a.numerator(), b.numerator())
 }
 
 pub fn decimal_multiplication(a: Decimal, b: Decimal) -> Decimal {
-    Decimal::from_ratio(a * DECIMAL_FRACTIONAL * b, DECIMAL_FRACTIONAL)
+    let a_numerator: Uint128 = a.numerator().into();
+    let b_numerator: Uint128 = b.numerator().into();
+
+    //(a_numerator * b_numerator) / Decimal::DECIMAL_FRACTIONAL;
+    let numerator: Uint128 = a_numerator.multiply_ratio(b_numerator, Decimal::DECIMAL_FRACTIONAL);
+    Decimal(numerator)
 }
 
 pub fn reverse_decimal(decimal: Decimal) -> Decimal {
     decimal.inv().unwrap_or_default()
 }
 
+// NOTE: replace * reverse_decimal with this (or the checked version)
+pub fn divide_uint128_by_decimal(a: Uint128, b: Decimal) -> Uint128 {
+    a.multiply_ratio(b.denominator(), b.numerator())
+}
+
 #[cfg(test)]
 mod tests {
     use crate::math::{decimal_division, decimal_multiplication, reverse_decimal};
-    use cosmwasm_std::Decimal;
+    use crate::math::Decimal;
     use std::str::FromStr;
 
     #[test]

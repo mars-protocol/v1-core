@@ -27,7 +27,7 @@ cw20 = "0.8"
 terra-cosmwasm = "2.2.0"
 terraswap = "2.3.0"
 
-cosmwasm-std = "0.16.0"
+cosmwasm-std = "0.16.2"
 cw-storage-plus = "0.8.0"
 
 schemars = "0.8.1"

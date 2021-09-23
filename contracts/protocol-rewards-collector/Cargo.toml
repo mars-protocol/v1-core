@@ -26,7 +26,7 @@ red-bank = { path = "../../contracts/red-bank", version = "0.1.0", features = ["
 cw20 = "0.8"
 cw20-base = { version = "0.8", features = ["library"] }
 
-cosmwasm-std = "0.16.0"
+cosmwasm-std = "0.16.2"
 cw-storage-plus = "0.8.0"
 
 terraswap = "2.4.0"
@@ -36,4 +36,4 @@ serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = { version = "0.16.0" }
+cosmwasm-schema = { version = "0.16.2" }

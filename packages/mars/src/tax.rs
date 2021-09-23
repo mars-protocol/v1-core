@@ -1,5 +1,6 @@
-use crate::math::reverse_decimal;
-use cosmwasm_std::{Coin, Decimal, Deps, StdResult, Uint128};
+use crate::math::{Decimal, reverse_decimal};
+
+use cosmwasm_std::{Coin, Deps, StdResult, Uint128};
 use terra_cosmwasm::TerraQuerier;
 
 pub fn deduct_tax(deps: Deps, coin: Coin) -> StdResult<Coin> {
@@ -12,7 +13,7 @@ pub fn deduct_tax(deps: Deps, coin: Coin) -> StdResult<Coin> {
 
 pub fn compute_tax(deps: Deps, coin: &Coin) -> StdResult<Uint128> {
     let terra_querier = TerraQuerier::new(&deps.querier);
-    let tax_rate = (terra_querier.query_tax_rate()?).rate;
+    let tax_rate: Decimal = (terra_querier.query_tax_rate()?).rate.into();
     let tax_cap = (terra_querier.query_tax_cap(coin.denom.to_string())?).cap;
     let amount = coin.amount;
     Ok(std::cmp::min(
