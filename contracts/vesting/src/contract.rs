@@ -7,6 +7,9 @@ use cosmwasm_std::{
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
+use mars::address_provider;
+use mars::address_provider::msg::MarsContract;
+use mars::error::MarsError;
 use mars::staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
 use mars::vesting::msg::{
     AllocationResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, SimulateWithdrawResponse,
@@ -27,15 +30,11 @@ pub fn instantiate(
     _env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
-) -> StdResult<Response> {
+) -> Result<Response, MarsError> {
     CONFIG.save(
         deps.storage,
         &Config {
-            owner: deps.api.addr_validate(&msg.owner)?,
-            refund_recipient: deps.api.addr_validate(&msg.refund_recipient)?,
-            mars_token: deps.api.addr_validate(&msg.mars_token)?,
-            xmars_token: deps.api.addr_validate(&msg.xmars_token)?,
-            mars_staking: deps.api.addr_validate(&msg.mars_staking)?,
+            address_provider_address: deps.api.addr_validate(&msg.address_provider_address)?,
             default_unlock_schedule: msg.default_unlock_schedule,
         },
     )?;
@@ -43,16 +42,17 @@ pub fn instantiate(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, MarsError> {
     match msg {
         ExecuteMsg::Receive(cw20_msg) => execute_receive_cw20(deps, env, info, cw20_msg),
         ExecuteMsg::Stake {} => execute_stake(deps, env, info),
         ExecuteMsg::Withdraw {} => execute_withdraw(deps, env, info),
         ExecuteMsg::Terminate {} => execute_terminate(deps, env, info),
-        ExecuteMsg::TransferOwnership {
-            new_owner,
-            new_refund_recipient,
-        } => execute_transfer_ownership(deps, env, info, new_owner, new_refund_recipient),
     }
 }
 
@@ -61,7 +61,7 @@ fn execute_receive_cw20(
     env: Env,
     info: MessageInfo,
     cw20_msg: Cw20ReceiveMsg,
-) -> StdResult<Response> {
+) -> Result<Response, MarsError> {
     match from_binary(&cw20_msg.msg)? {
         ReceiveMsg::CreateAllocations { allocations } => execute_create_allocations(
             deps,
@@ -76,12 +76,12 @@ fn execute_receive_cw20(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn reply(deps: DepsMut, env: Env, reply: Reply) -> StdResult<Response> {
+pub fn reply(deps: DepsMut, env: Env, reply: Reply) -> Result<Response, MarsError> {
     match reply.id {
         // ID 0 - record available stakes for user after a staking transaction
         0 => reply_record_stake(deps, env, reply.result.unwrap().events),
         // We don't have other reply IDs implemented
-        _ => Err(StdError::generic_err("Invalid reply ID")),
+        _ => Err(StdError::generic_err("Invalid reply ID").into()),
     }
 }
 
@@ -111,19 +111,27 @@ fn execute_create_allocations(
     deposit_token: Addr,
     deposit_amount: Uint128,
     allocations: Vec<(String, AllocationParams)>,
-) -> StdResult<Response> {
+) -> Result<Response, MarsError> {
     let config = CONFIG.load(deps.storage)?;
 
-    if deps.api.addr_validate(&creator)? != config.owner {
-        return Err(StdError::generic_err("Only owner can create allocations"));
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::ProtocolAdmin, MarsContract::MarsToken],
+    )?;
+    let mars_token_address = addresses_query.pop().unwrap();
+    let protocol_admin_address = addresses_query.pop().unwrap();
+
+    if deps.api.addr_validate(&creator)? != protocol_admin_address {
+        return Err(StdError::generic_err("Only protocol admin can create allocations").into());
     }
 
-    if deposit_token != config.mars_token {
-        return Err(StdError::generic_err("Only Mars token can be deposited"));
+    if deposit_token != mars_token_address {
+        return Err(StdError::generic_err("Only Mars token can be deposited").into());
     }
 
     if deposit_amount != allocations.iter().map(|params| params.1.amount).sum() {
-        return Err(StdError::generic_err("Deposit amount mismatch"));
+        return Err(StdError::generic_err("Deposit amount mismatch").into());
     }
 
     for allocation in allocations {
@@ -136,7 +144,7 @@ fn execute_create_allocations(
                 PARAMS.save(deps.storage, &user, &params)?;
             }
             _ => {
-                return Err(StdError::generic_err("Allocation already exists for user"));
+                return Err(StdError::generic_err("Allocation already exists for user").into());
             }
         }
 
@@ -145,7 +153,7 @@ fn execute_create_allocations(
                 STATUS.save(deps.storage, &user, &AllocationStatus::new())?;
             }
             _ => {
-                return Err(StdError::generic_err("Allocation already exists for user"));
+                return Err(StdError::generic_err("Allocation already exists for user").into());
             }
         }
 
@@ -158,9 +166,7 @@ fn execute_create_allocations(
                 )?;
             }
             _ => {
-                return Err(StdError::generic_err(
-                    "Voting power history exists for user",
-                ));
+                return Err(StdError::generic_err("Voting power history exists for user").into());
             }
         }
     }
@@ -168,10 +174,18 @@ fn execute_create_allocations(
     Ok(Response::default())
 }
 
-fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Response> {
+fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, MarsError> {
     let config = CONFIG.load(deps.storage)?;
     let params = PARAMS.load(deps.storage, &info.sender)?;
     let status = STATUS.load(deps.storage, &info.sender)?;
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::MarsToken, MarsContract::Staking],
+    )?;
+    let staking_address = addresses_query.pop().unwrap();
+    let mars_token_address = addresses_query.pop().unwrap();
 
     // The amount available to be staked is: the amount of MARS vested so far, minus the amount
     // of MARS that have already been staked or withdrawan
@@ -187,9 +201,9 @@ fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Respon
 
     Ok(Response::new().add_submessage(SubMsg::reply_on_success(
         WasmMsg::Execute {
-            contract_addr: config.mars_token.to_string(),
+            contract_addr: mars_token_address.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Send {
-                contract: config.mars_staking.to_string(),
+                contract: staking_address.to_string(),
                 amount: mars_to_stake,
                 msg: to_binary(&MarsStakingReceiveMsg::Stake { recipient: None })?,
             })?,
@@ -199,7 +213,7 @@ fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Respon
     )))
 }
 
-fn reply_record_stake(deps: DepsMut, env: Env, events: Vec<Event>) -> StdResult<Response> {
+fn reply_record_stake(deps: DepsMut, env: Env, events: Vec<Event>) -> Result<Response, MarsError> {
     // Find the event corresponding to the staking message
     let event = events
         .iter()
@@ -255,11 +269,19 @@ fn reply_record_stake(deps: DepsMut, env: Env, events: Vec<Event>) -> StdResult<
     Ok(Response::new())
 }
 
-fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Response> {
+fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, MarsError> {
     let config = CONFIG.load(deps.storage)?;
     let params = PARAMS.load(deps.storage, &info.sender)?;
     let mut status = STATUS.load(deps.storage, &info.sender)?;
     let mut snapshots = VOTING_POWER_SNAPSHOTS.load(deps.storage, &info.sender)?;
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::MarsToken, MarsContract::XMarsToken],
+    )?;
+    let xmars_token_address = addresses_query.pop().unwrap();
+    let mars_token_address = addresses_query.pop().unwrap();
 
     let SimulateWithdrawResponse {
         mars_to_withdraw,
@@ -284,7 +306,7 @@ fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Res
 
     if !mars_to_withdraw.is_zero() {
         msgs.push(WasmMsg::Execute {
-            contract_addr: config.mars_token.to_string(),
+            contract_addr: mars_token_address.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: info.sender.to_string(),
                 amount: mars_to_withdraw,
@@ -295,7 +317,7 @@ fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Res
 
     if !xmars_to_withdraw.is_zero() {
         msgs.push(WasmMsg::Execute {
-            contract_addr: config.xmars_token.to_string(),
+            contract_addr: xmars_token_address.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: info.sender.to_string(),
                 amount: xmars_to_withdraw,
@@ -311,15 +333,23 @@ fn execute_withdraw(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Res
         .add_attribute("xmars_withdrawn", xmars_to_withdraw))
 }
 
-fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Response> {
+fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, MarsError> {
     let config = CONFIG.load(deps.storage)?;
     let mut params = PARAMS.load(deps.storage, &info.sender)?;
+
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address,
+        vec![MarsContract::ProtocolAdmin, MarsContract::MarsToken],
+    )?;
+    let mars_token_address = addresses_query.pop().unwrap();
+    let protocol_admin_address = addresses_query.pop().unwrap();
 
     let timestamp = env.block.time.seconds();
     let mars_vested =
         helpers::compute_vested_or_unlocked_amount(timestamp, params.amount, &params.vest_schedule);
 
-    // Refund the unvested MARS tokens to owner
+    // Refund the unvested MARS tokens to protocol admin
     let mars_to_refund = params.amount - mars_vested;
 
     // Set the total allocation amount to the current vested amount, and vesting end time
@@ -330,9 +360,9 @@ fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Re
     PARAMS.save(deps.storage, &info.sender, &params)?;
 
     let msg = WasmMsg::Execute {
-        contract_addr: config.mars_token.to_string(),
+        contract_addr: mars_token_address.to_string(),
         msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: config.refund_recipient.to_string(),
+            recipient: protocol_admin_address.to_string(),
             amount: mars_to_refund,
         })?,
         funds: vec![],
@@ -346,27 +376,6 @@ fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> StdResult<Re
             "new_vest_duration",
             format!("{}", params.vest_schedule.duration),
         ))
-}
-
-fn execute_transfer_ownership(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    new_owner: String,
-    new_refund_recipient: String,
-) -> StdResult<Response> {
-    let mut config = CONFIG.load(deps.storage)?;
-
-    if info.sender != config.owner {
-        return Err(StdError::generic_err("Only owner can transfer ownership"));
-    }
-
-    config.owner = deps.api.addr_validate(&new_owner)?;
-    config.refund_recipient = deps.api.addr_validate(&new_refund_recipient)?;
-
-    CONFIG.save(deps.storage, &config)?;
-
-    Ok(Response::new())
 }
 
 //----------------------------------------------------------------------------------------
@@ -550,13 +559,14 @@ mod helpers {
 
 #[cfg(test)]
 mod tests {
+    use cosmwasm_std::testing::{MockApi, MockStorage};
     use cosmwasm_std::{
-        ContractResult, CosmosMsg, SubMsg, SubMsgExecutionResponse, Timestamp, WasmMsg,
+        ContractResult, CosmosMsg, OwnedDeps, SubMsg, SubMsgExecutionResponse, Timestamp, WasmMsg,
     };
 
     use mars::testing::{
-        assert_generic_error_message, mock_dependencies, mock_env, mock_env_at_block_height,
-        mock_env_at_block_time, mock_info, MockEnvParams,
+        mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time, mock_info,
+        MarsMockQuerier, MockEnvParams,
     };
     use mars::vesting::msg::InstantiateMsg;
     use mars::vesting::Schedule;
@@ -569,19 +579,10 @@ mod tests {
         duration: 94608000,     // 3 years (3 * 365 days)
     };
 
-    const PARAMS_1: AllocationParams = AllocationParams {
+    const PARAMS: AllocationParams = AllocationParams {
         amount: Uint128::new(100_000_000_000),
         vest_schedule: Schedule {
             start_time: 1614556800, // 2021-03-01
-            cliff: 15552000,        // 180 days
-            duration: 94608000,     // 3 years
-        },
-        unlock_schedule: None,
-    };
-    const PARAMS_2: AllocationParams = AllocationParams {
-        amount: Uint128::new(100_000_000_000),
-        vest_schedule: Schedule {
-            start_time: 1638316800, // 2021-12-01
             cliff: 15552000,        // 180 days
             duration: 94608000,     // 3 years
         },
@@ -633,26 +634,8 @@ mod tests {
 
     #[test]
     fn test_proper_initialization() {
-        let mut deps = mock_dependencies(&[]);
+        let deps = th_setup();
         let env = mock_env(MockEnvParams::default());
-        let info = mock_info("owner");
-
-        let res = instantiate(
-            deps.as_mut(),
-            env.clone(),
-            info,
-            InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(res.messages.len(), 0);
 
         let res = query(deps.as_ref(), env, QueryMsg::Config {}).unwrap();
         let value: Config<Addr> = from_binary(&res).unwrap();
@@ -660,11 +643,7 @@ mod tests {
         assert_eq!(
             value,
             Config {
-                owner: Addr::unchecked("owner"),
-                refund_recipient: Addr::unchecked("refund_recipient"),
-                mars_token: Addr::unchecked("mars_token"),
-                xmars_token: Addr::unchecked("xmars_token"),
-                mars_staking: Addr::unchecked("mars_staking"),
+                address_provider_address: Addr::unchecked("address_provider"),
                 default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
             }
         )
@@ -672,48 +651,33 @@ mod tests {
 
     #[test]
     fn test_create_allocations() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = th_setup();
         let env = mock_env(MockEnvParams::default());
-        let info = mock_info("owner");
-
-        // Instantiate contract
-        instantiate(
-            deps.as_mut(),
-            env.clone(),
-            info,
-            InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
-            },
-        )
-        .unwrap();
 
         // Prepare messages to be used in creating allocations
         let receive_msg = ReceiveMsg::CreateAllocations {
-            allocations: vec![
-                ("user_1".to_string(), PARAMS_1.clone()),
-                ("user_2".to_string(), PARAMS_2.clone()),
-            ],
+            allocations: vec![("user_1".to_string(), PARAMS.clone())],
         };
 
-        // Try create allocations with a non-owner address; should fail
+        // Try create allocations with a non-admin address; should fail
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "not_owner".to_string(), // !!!
-            amount: Uint128::new(200_000_000_000),
+            sender: "not_admin".to_string(), // !!!
+            amount: Uint128::new(100_000_000_000),
             msg: to_binary(&receive_msg).unwrap(),
         });
         let res = execute(deps.as_mut(), env.clone(), mock_info("mars_token"), msg);
 
-        assert_generic_error_message(res, "Only owner can create allocations");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Only protocol admin can create allocations"
+            )))
+        );
 
         // Try create allocations with a deposit token other than MARS; should fail
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "owner".to_string(),
-            amount: Uint128::new(200_000_000_000),
+            sender: "protocol_admin".to_string(),
+            amount: Uint128::new(100_000_000_000),
             msg: to_binary(&receive_msg).unwrap(),
         });
         let res = execute(
@@ -723,17 +687,27 @@ mod tests {
             msg,
         );
 
-        assert_generic_error_message(res, "Only Mars token can be deposited");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Only Mars token can be deposited"
+            )))
+        );
 
         // Try create allocations whose total amount does not match deposit; should fail
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-            sender: "owner".to_string(),
-            amount: Uint128::new(199_000_000_000), // !!!
+            sender: "protocol_admin".to_string(),
+            amount: Uint128::new(123456), // !!!
             msg: to_binary(&receive_msg).unwrap(),
         });
         let res = execute(deps.as_mut(), env.clone(), mock_info("mars_token"), msg);
 
-        assert_generic_error_message(res, "Deposit amount mismatch");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Deposit amount mismatch"
+            )))
+        );
 
         // Create allocations properly
         let res = execute(
@@ -741,8 +715,8 @@ mod tests {
             env.clone(),
             mock_info("mars_token"),
             ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: "owner".to_string(),
-                amount: Uint128::new(200_000_000_000),
+                sender: "protocol_admin".to_string(),
+                amount: Uint128::new(100_000_000_000),
                 msg: to_binary(&receive_msg).unwrap(),
             }),
         )
@@ -763,23 +737,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(value.params, PARAMS_1);
-        assert_eq!(value.status, AllocationStatus::new());
-
-        // Verify allocation response is correct for user 2
-        let value: AllocationResponse = from_binary(
-            &query(
-                deps.as_ref(),
-                env.clone(),
-                QueryMsg::Allocation {
-                    account: "user_2".to_string(),
-                },
-            )
-            .unwrap(),
-        )
-        .unwrap();
-
-        assert_eq!(value.params, PARAMS_2);
+        assert_eq!(value.params, PARAMS);
         assert_eq!(value.status, AllocationStatus::new());
 
         // Try create a second allocation for the same user; should fail
@@ -788,39 +746,27 @@ mod tests {
             env,
             mock_info("mars_token"),
             ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: "owner".to_string(),
+                sender: "protocol_admin".to_string(),
                 amount: Uint128::new(100_000_000_000),
                 msg: to_binary(&ReceiveMsg::CreateAllocations {
-                    allocations: vec![("user_1".to_string(), PARAMS_1)],
+                    allocations: vec![("user_1".to_string(), PARAMS)],
                 })
                 .unwrap(),
             }),
         );
 
-        assert_generic_error_message(res, "Allocation already exists for user");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Allocation already exists for user"
+            )))
+        );
     }
 
     #[test]
     fn test_handle_reply() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = th_setup();
         let env = mock_env_at_block_height(10000);
-        let info = mock_info("owner");
-
-        // Instantiate contract
-        instantiate(
-            deps.as_mut(),
-            env.clone(),
-            info,
-            InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
-            },
-        )
-        .unwrap();
 
         // Prepare storage
         CURRENT_STAKER
@@ -858,7 +804,10 @@ mod tests {
             },
         );
 
-        assert_generic_error_message(res, "Invalid reply ID");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err("Invalid reply ID")))
+        );
 
         // No `action: stake` event
         let res = reply(
@@ -873,7 +822,12 @@ mod tests {
             },
         );
 
-        assert_generic_error_message(res, "Cannot find stake event");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Cannot find stake event"
+            )))
+        );
 
         // No `mars_staked` attribute
         let res = reply(
@@ -888,7 +842,12 @@ mod tests {
             },
         );
 
-        assert_generic_error_message(res, "Cannot find mars_staked attribute");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Cannot find mars_staked attribute"
+            )))
+        );
 
         // No `xmars_minted` attribute
         let res = reply(
@@ -905,7 +864,12 @@ mod tests {
             },
         );
 
-        assert_generic_error_message(res, "Cannot find xmars_minted attribute");
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "Cannot find xmars_minted attribute"
+            )))
+        );
 
         // Valid reply
         let res = reply(
@@ -952,25 +916,8 @@ mod tests {
 
     #[test]
     fn test_complex_vesting() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = th_setup();
         let env = mock_env_at_block_height(10000);
-        let info = mock_info("owner");
-
-        // Instantiate contract
-        instantiate(
-            deps.as_mut(),
-            env.clone(),
-            info,
-            InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
-            },
-        )
-        .unwrap();
 
         // Create allocation
         execute(
@@ -978,13 +925,10 @@ mod tests {
             env.clone(),
             mock_info("mars_token"),
             ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: "owner".to_string(),
-                amount: Uint128::new(200_000_000_000),
+                sender: "protocol_admin".to_string(),
+                amount: Uint128::new(100_000_000_000),
                 msg: to_binary(&ReceiveMsg::CreateAllocations {
-                    allocations: vec![
-                        ("user_1".to_string(), PARAMS_1.clone()),
-                        ("user_2".to_string(), PARAMS_2.clone()),
-                    ],
+                    allocations: vec![("user_1".to_string(), PARAMS.clone())],
                 })
                 .unwrap(),
             }),
@@ -1497,25 +1441,8 @@ mod tests {
 
     #[test]
     fn test_terminate() {
-        let mut deps = mock_dependencies(&[]);
+        let mut deps = th_setup();
         let env = mock_env(MockEnvParams::default());
-        let info = mock_info("owner");
-
-        // Instantiate contract
-        instantiate(
-            deps.as_mut(),
-            env.clone(),
-            info,
-            InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
-            },
-        )
-        .unwrap();
 
         // Create allocation
         execute(
@@ -1523,10 +1450,10 @@ mod tests {
             env.clone(),
             mock_info("mars_token"),
             ExecuteMsg::Receive(Cw20ReceiveMsg {
-                sender: "owner".to_string(),
+                sender: "protocol_admin".to_string(),
                 amount: Uint128::new(100_000_000_000),
                 msg: to_binary(&ReceiveMsg::CreateAllocations {
-                    allocations: vec![("user_1".to_string(), PARAMS_1.clone())],
+                    allocations: vec![("user_1".to_string(), PARAMS.clone())],
                 })
                 .unwrap(),
             }),
@@ -1630,7 +1557,7 @@ mod tests {
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: "mars_token".to_string(),
                 msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                    recipient: "refund_recipient".to_string(),
+                    recipient: "protocol_admin".to_string(),
                     amount: Uint128::new(33333333334),
                 })
                 .unwrap(),
@@ -1713,16 +1640,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_transfer_ownership() {
+    // TEST HELPERS
+    fn th_setup() -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(&[]);
         let env = mock_env(MockEnvParams::default());
-        let info = mock_info("owner");
-
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("mars_token"), "MARS".to_string());
-        deps.querier
-            .set_cw20_symbol(Addr::unchecked("xmars_token"), "xMARS".to_string());
+        let info = mock_info("deployer");
 
         // Instantiate contract
         instantiate(
@@ -1730,27 +1652,12 @@ mod tests {
             env.clone(),
             info,
             InstantiateMsg {
-                owner: "owner".to_string(),
-                refund_recipient: "refund_recipient".to_string(),
-                mars_token: "mars_token".to_string(),
-                xmars_token: "xmars_token".to_string(),
-                mars_staking: "mars_staking".to_string(),
+                address_provider_address: "address_provider".to_string(),
                 default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
             },
         )
         .unwrap();
 
-        // Try to transfer ownership as an unauthorized person; should fail
-        let res = execute(
-            deps.as_mut(),
-            env.clone(),
-            mock_info("random_person"),
-            ExecuteMsg::TransferOwnership {
-                new_owner: "ngmi".to_string(),
-                new_refund_recipient: "hfsp".to_string(),
-            },
-        );
-
-        assert_generic_error_message(res, "Only owner can transfer ownership");
+        deps
     }
 }

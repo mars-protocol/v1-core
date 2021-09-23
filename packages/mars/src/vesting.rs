@@ -5,16 +5,8 @@ use serde::{Deserialize, Serialize};
 // T = String (unchecked) or Addr (checked)
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config<T> {
-    /// Account who can create new allocations
-    pub owner: T,
-    /// Account to receive the refund of unvested tokens if a user terminates allocation
-    pub refund_recipient: T,
-    /// Address of MARS token
-    pub mars_token: T,
-    /// Address of xMARS token
-    pub xmars_token: T,
-    /// Address of Mars staking contract
-    pub mars_staking: T,
+    /// Address provider address
+    pub address_provider_address: T,
     /// By default, unlocking starts at Mars launch, with a cliff of 6 months and a duration of 36 months.
     /// If not specified, all allocations use this default schedule
     pub default_unlock_schedule: Schedule,
@@ -113,11 +105,6 @@ pub mod msg {
         Withdraw {},
         /// Give up allocation, refund all unvested tokens to `config.fallback_recipient`
         Terminate {},
-        /// Update addresses of owner and fallback_recipient
-        TransferOwnership {
-            new_owner: String,
-            new_refund_recipient: String,
-        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

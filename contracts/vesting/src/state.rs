@@ -1,8 +1,7 @@
 use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::{Item, Map};
 
-use mars::vesting::Config;
-use mars::vesting::{AllocationParams, AllocationStatus};
+use mars::vesting::{AllocationParams, AllocationStatus, Config};
 
 pub const CONFIG: Item<Config<Addr>> = Item::new("config");
 pub const PARAMS: Map<&Addr, AllocationParams> = Map::new("params");
