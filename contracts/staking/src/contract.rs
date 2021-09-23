@@ -195,7 +195,7 @@ pub fn execute_stake(
     let total_mars_in_staking_contract =
         cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
 
-    // the math need to be done with the Mars amount before the stake transaction.
+    // The math needs to be done with MARS amount before the stake transaction.
     // The staked mars are already in the contract's balance as part of the send call.
     // That amount needs to be deducted
     let net_total_mars_in_staking_contract =
@@ -252,7 +252,7 @@ pub fn execute_unstake(
 
     let staker_addr = deps.api.addr_validate(&staker)?;
 
-    if let Some(_claim) = CLAIMS.may_load(deps.storage, &staker_addr)? {
+    if CLAIMS.may_load(deps.storage, &staker_addr)?.is_some() {
         return Err(ContractError::UnstakeActiveClaim {});
     }
 
@@ -332,7 +332,7 @@ pub fn execute_claim(
         MarsContract::MarsToken,
     )?;
 
-    let recipient = option_recipient.unwrap_or_else(|| info.sender.clone().to_string());
+    let recipient = option_recipient.unwrap_or_else(|| info.sender.to_string());
 
     let res = Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
