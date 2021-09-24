@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128,
 };
 use terraswap::asset::AssetInfo;
@@ -9,6 +9,7 @@ use mars::helpers::option_string_to_addr;
 
 use crate::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, CONFIG};
+use mars::math::decimal::Decimal;
 use mars::swapping::execute_swap;
 
 // INIT

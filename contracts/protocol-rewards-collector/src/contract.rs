@@ -400,9 +400,10 @@ mod tests {
     use cosmwasm_std::{
         attr, coin, from_binary,
         testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR},
-        Addr, BankMsg, Coin, Decimal, OwnedDeps, StdError, SubMsg,
+        Addr, BankMsg, Coin, OwnedDeps, StdError, SubMsg,
     };
     use cw20::Cw20ExecuteMsg;
+    use mars::math::decimal::Decimal;
     use mars::{
         tax::deduct_tax,
         testing::{mock_dependencies, mock_info, MarsMockQuerier},

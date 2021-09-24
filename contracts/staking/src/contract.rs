@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo,
-    Order, Response, StdResult, Storage, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
+    Response, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
@@ -18,6 +18,7 @@ use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
 use mars::helpers::{cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address};
+use mars::math::decimal::Decimal;
 use mars::swapping::execute_swap;
 
 // INSTANTIATE
@@ -550,9 +551,7 @@ fn apply_slash_events_to_claim(storage: &dyn Storage, claim: &mut Claim) -> StdR
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{
-        attr, Addr, Coin, CosmosMsg, Decimal, OwnedDeps, StdError, SubMsg, Timestamp,
-    };
+    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, OwnedDeps, StdError, SubMsg, Timestamp};
     use mars::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
         MarsMockQuerier, MockEnvParams,

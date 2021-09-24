@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, Uint128};
+use crate::math::decimal::Decimal;
+use cosmwasm_std::{Addr, Uint128};
 
 /// Protocol configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -48,8 +49,9 @@ pub struct SlashEvent {
 }
 
 pub mod msg {
-    use cosmwasm_std::{Decimal, Uint128};
+    use cosmwasm_std::Uint128;
 
+    use crate::math::decimal::Decimal;
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};

@@ -1,7 +1,8 @@
 use crate::helpers::cw20_get_balance;
+use crate::math::decimal::Decimal;
 use cosmwasm_std::{
-    attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response, StdError,
-    StdResult, Uint128, WasmMsg,
+    attr, to_binary, Addr, Coin, CosmosMsg, DepsMut, Empty, Env, Response, StdError, StdResult,
+    Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
 use terraswap::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
@@ -99,7 +100,7 @@ fn asset_into_swap_msg(
             msg: to_binary(&AstroportPairExecuteMsg::Swap {
                 offer_asset: offer_asset.clone(),
                 belief_price: None,
-                max_spread,
+                max_spread: max_spread.map(|ms| ms.to_std_decimal()),
                 to: None,
             })?,
             funds: vec![Coin {
@@ -115,7 +116,7 @@ fn asset_into_swap_msg(
                 msg: to_binary(&AstroportPairExecuteMsg::Swap {
                     offer_asset,
                     belief_price: None,
-                    max_spread,
+                    max_spread: max_spread.map(|ms| ms.to_std_decimal()),
                     to: None,
                 })?,
             })?,
@@ -345,7 +346,7 @@ mod tests {
                         amount: contract_asset_balance,
                     },
                     belief_price: None,
-                    max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+                    max_spread: Some(Decimal::from_ratio(1u128, 100u128).to_std_decimal()),
                     to: None,
                 })
                 .unwrap(),

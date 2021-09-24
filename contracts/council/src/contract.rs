@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
+    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
+    MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
     WasmQuery,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -22,6 +22,7 @@ use crate::state::{
     GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
 };
 use crate::types::ProposalMessage;
+use mars::math::decimal::Decimal;
 
 // Proposal validation attributes
 const MIN_TITLE_LENGTH: usize = 4;
@@ -674,6 +675,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{Coin, OwnedDeps, StdError, SubMsg};
+    use mars::math::decimal::Decimal;
     use mars::testing::{mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams};
 
     use crate::msg::ExecuteMsg::UpdateConfig;

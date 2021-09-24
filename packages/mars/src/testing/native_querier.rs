@@ -1,4 +1,5 @@
-use cosmwasm_std::{to_binary, Binary, ContractResult, Decimal, QuerierResult, Uint128};
+use crate::math::decimal::Decimal;
+use cosmwasm_std::{to_binary, Binary, ContractResult, QuerierResult, Uint128};
 use std::collections::HashMap;
 use terra_cosmwasm::{
     ExchangeRateItem, ExchangeRatesResponse, TaxCapResponse, TaxRateResponse, TerraQuery,
@@ -47,7 +48,7 @@ impl NativeQuerier {
                 let ret: ContractResult<Binary> = match query_data {
                     TerraQuery::TaxRate {} => {
                         let res = TaxRateResponse {
-                            rate: self.tax_rate,
+                            rate: self.tax_rate.to_std_decimal(),
                         };
                         to_binary(&res).into()
                     }
@@ -109,7 +110,7 @@ impl NativeQuerier {
 
                 Ok(ExchangeRateItem {
                     quote_denom: denom.into(),
-                    exchange_rate: *exchange_rate,
+                    exchange_rate: exchange_rate.to_std_decimal(),
                 })
             })
             .collect();

@@ -1,5 +1,6 @@
-use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{CosmosMsg, Uint128};
 use mars::asset::Asset;
+use mars::math::decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;

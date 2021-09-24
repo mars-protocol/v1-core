@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
 use crate::error::ContractError::InvalidMaintenanceMargin;
-use cosmwasm_std::{Addr, Decimal, DepsMut, Env, Response, Timestamp, Uint128};
+use cosmwasm_std::{Addr, DepsMut, Env, Response, Timestamp, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 use mars::asset::AssetType;
 use mars::error::MarsError;
@@ -12,6 +12,7 @@ use mars::helpers::all_conditions_valid;
 use crate::interest_rate_models::{InterestRateModel, InterestRateStrategy};
 use crate::interest_rates::{apply_accumulated_interests, update_interest_rates};
 use crate::msg::InitOrUpdateAssetParams;
+use mars::math::decimal::Decimal;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const GLOBAL_STATE: Item<GlobalState> = Item::new("GLOBAL_STATE");

@@ -1,5 +1,5 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128,
 };
 use terraswap::asset::AssetInfo;
@@ -9,6 +9,7 @@ use crate::state::{Config, CONFIG};
 
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
+use mars::math::decimal::Decimal;
 use mars::swapping::execute_swap;
 
 // INIT
@@ -172,7 +173,7 @@ mod tests {
     use cosmwasm_std::{
         attr,
         testing::{mock_dependencies, mock_env, mock_info},
-        Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
+        Addr, BankMsg, Coin, SubMsg, Uint128,
     };
 
     #[test]

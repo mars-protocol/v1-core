@@ -1,4 +1,5 @@
-use cosmwasm_std::{Addr, CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{Addr, CosmosMsg, Uint128};
+use mars::math::decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;

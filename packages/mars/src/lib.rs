@@ -9,12 +9,11 @@ pub mod xmars_token;
 
 // Types
 pub mod asset;
-mod decimal;
+pub mod math;
 
 // Helpers
 pub mod error;
 pub mod helpers;
-pub mod math;
 pub mod swapping;
 pub mod tax;
 

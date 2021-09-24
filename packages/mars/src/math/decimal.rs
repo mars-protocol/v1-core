@@ -4,6 +4,7 @@ use std::fmt::{self, Write};
 use std::ops;
 use std::str::FromStr;
 
+use cosmwasm_std::Decimal as StdDecimal;
 use cosmwasm_std::{Fraction, StdError, Uint128, Uint256};
 use std::convert::TryInto;
 
@@ -59,27 +60,27 @@ impl Decimal {
         self.0.is_zero()
     }
 
-    /// Multiply a by b.
+    /// Multiply 'self' by 'other'.
     /// Function can return errors such as:
     /// - OverflowError from multiplication,
     /// - ConversionOverflowError during Uint256 to Uint128 conversion.
-    pub fn checked_multiplication(a: Decimal, b: Decimal) -> Result<Decimal, StdError> {
-        let a_numerator: u128 = a.numerator().into();
-        let b_numerator: u128 = b.numerator().into();
+    pub fn checked_mul(self, other: Self) -> Result<Self, StdError> {
+        let a_numerator = self.numerator();
+        let b_numerator = other.numerator();
 
         let mul_result = Uint256::from(a_numerator).checked_mul(Uint256::from(b_numerator))?;
         let result = (mul_result / Uint256::from(Self::DECIMAL_FRACTIONAL)).try_into()?;
         Ok(Decimal(result))
     }
 
-    /// Divide a by b.
+    /// Divide 'self' by 'other'.
     /// Function can return errors such as:
     /// - OverflowError from multiplication,
-    /// - DivideByZeroError if b is equal to 0,
+    /// - DivideByZeroError if 'other' is equal to 0,
     /// - ConversionOverflowError during Uint256 to Uint128 conversion.
-    pub fn checked_division(a: Decimal, b: Decimal) -> Result<Decimal, StdError> {
-        let a_numerator: u128 = a.numerator().into();
-        let b_numerator: u128 = b.numerator().into();
+    pub fn checked_div(self, other: Self) -> Result<Self, StdError> {
+        let a_numerator = self.numerator();
+        let b_numerator = other.numerator();
 
         let mul_result =
             Uint256::from(a_numerator).checked_mul(Uint256::from(Self::DECIMAL_FRACTIONAL))?;
@@ -91,6 +92,11 @@ impl Decimal {
     /// (Uint128 / numerator / denominator) is equal to (Uint128 * denominator / numerator).
     pub fn divide_uint128_by_decimal(a: Uint128, b: Decimal) -> Uint128 {
         a.multiply_ratio(b.denominator(), b.numerator())
+    }
+
+    pub fn to_std_decimal(&self) -> StdDecimal {
+        let string = format!("{}", self);
+        StdDecimal::from_str(string.as_str()).unwrap()
     }
 }
 
@@ -117,6 +123,12 @@ impl Fraction<u128> for Decimal {
             // `a = DECIMAL_FRACTIONAL*DECIMAL_FRACTIONAL / self.0`.
             Some(Decimal(Self::DECIMAL_FRACTIONAL_SQUARED / self.0))
         }
+    }
+}
+
+impl From<StdDecimal> for Decimal {
+    fn from(std_decimal: StdDecimal) -> Decimal {
+        Decimal(Uint128::new(std_decimal.numerator()))
     }
 }
 
@@ -788,12 +800,12 @@ mod tests {
     fn checked_decimal_division() {
         let a = Decimal::from_ratio(99988u128, 100u128);
         let b = Decimal::from_ratio(24997u128, 100u128);
-        let c = Decimal::checked_division(a, b).unwrap();
+        let c = Decimal::checked_div(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("4.0").unwrap());
 
         let a = Decimal::from_ratio(123456789u128, 1000000u128);
         let b = Decimal::from_ratio(33u128, 1u128);
-        let c = Decimal::checked_division(a, b).unwrap();
+        let c = Decimal::checked_div(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("3.741114818181818181").unwrap());
     }
 
@@ -801,13 +813,13 @@ mod tests {
     fn checked_decimal_multiplication() {
         let a = Decimal::from_ratio(33u128, 10u128);
         let b = Decimal::from_ratio(45u128, 10u128);
-        let c = Decimal::checked_multiplication(a, b).unwrap();
+        let c = Decimal::checked_mul(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("14.85").unwrap());
 
         // max allowed number for numerator to avoid overflow
         let a = Decimal::from_ratio(340282366920u128, 1u128);
         let b = Decimal::from_ratio(12345678u128, 100000000u128);
-        let c = Decimal::checked_multiplication(a, b).unwrap();
+        let c = Decimal::checked_mul(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("42010165310.7217176").unwrap());
     }
 
