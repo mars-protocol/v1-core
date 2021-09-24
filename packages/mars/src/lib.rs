@@ -9,6 +9,7 @@ pub mod xmars_token;
 
 // Types
 pub mod asset;
+mod decimal;
 
 // Helpers
 pub mod error;
