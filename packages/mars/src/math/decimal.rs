@@ -95,8 +95,7 @@ impl Decimal {
     }
 
     pub fn to_std_decimal(&self) -> StdDecimal {
-        let string = format!("{}", self);
-        StdDecimal::from_str(string.as_str()).unwrap()
+        StdDecimal::from_str(self.to_string().as_str()).unwrap()
     }
 }
 
@@ -829,5 +828,16 @@ mod tests {
         let b = Decimal::from_ratio(120u128, 15u128);
         let c = Decimal::divide_uint128_by_decimal(a, b);
         assert_eq!(c, Uint128::new(15u128));
+    }
+
+    #[test]
+    fn decimal_to_std_decimal() {
+        let custom_decimal_1 = Decimal::from_ratio(240u128, 500u128);
+        let std_decimal_1_expected = StdDecimal::from_ratio(240u128, 500u128);
+        assert_eq!(custom_decimal_1.to_std_decimal(), std_decimal_1_expected);
+
+        let custom_decimal_2 = Decimal::from_ratio(333u128, 1000u128);
+        let std_decimal_2_expected = StdDecimal::from_ratio(333u128, 1000u128);
+        assert_eq!(custom_decimal_2.to_std_decimal(), std_decimal_2_expected);
     }
 }
