@@ -1,6 +1,6 @@
 [package]
-name = "address-provider"
-version = "0.1.0"
+name = "terra-mars-red-bank"
+version = "1.0.0"
 authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
 edition = "2018"
 
@@ -18,21 +18,21 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # for more explicit tests, cargo test --features=backtraces
 backtraces = ["cosmwasm-std/backtraces"]
+# use library feature to disable all instantiate/execute/query exports
+library = []
 
 [dependencies]
-mars = { path = "../../packages/mars", version = "0.1.0" }
+terra-mars = { path = "../../packages/terra-mars", version = "1.0.0" }
 
 cw20 = "0.8"
+cw20-base = { version = "0.8", features = ["library"] }
 
-terra-cosmwasm = "2.2.0"
-terraswap = "2.3.0"
-
-cosmwasm-std = "0.16.0"
-cw-storage-plus = "0.8.0"
+cosmwasm-std = { version = "0.16.0" }
+cw-storage-plus = { version = "0.8.0" }
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.0"
+cosmwasm-schema = { version = "0.16.0" }

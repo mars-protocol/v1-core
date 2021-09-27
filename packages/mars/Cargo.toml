@@ -1,6 +1,6 @@
 [package]
-name = "mars"
-version = "0.1.0"
+name = "terra-mars"
+version = "1.0.0"
 authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
 edition = "2018"
 

@@ -1,7 +1,7 @@
 [package]
-name = "incentives"
-version = "0.1.0"
-authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
+name = "terra-mars-ma-token"
+version = "1.0.0"
+authors = ["Spike Spiegel  <spikeonmars@protonmail.com>"]
 edition = "2018"
 
 exclude = [
@@ -10,20 +10,21 @@ exclude = [
   "hash.txt",
 ]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# for more explicit tests, cargo test --features=backtraces
 backtraces = ["cosmwasm-std/backtraces"]
+# use library feature to disable all init/handle/query exports
+library = []
 
 [dependencies]
-mars = { path = "../../packages/mars", version = "0.1.0" }
-staking = { path = "../../contracts/staking", version = "0.1.0", features = ["library"] }
+terra-mars = { path = "../../packages/terra-mars", version = "1.0.0" }
 
+cw0 = "0.8"
+cw2 = "0.8"
 cw20 = "0.8"
+cw20-base = { version = "0.8", features = ["library"] }
 
 cosmwasm-std = { version = "0.16.0" }
 cw-storage-plus = { version = "0.8.0" }
@@ -33,4 +34,4 @@ serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.0"
+cosmwasm-schema = { version = "0.16.0" }
