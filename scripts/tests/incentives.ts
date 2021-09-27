@@ -5,6 +5,7 @@ import {
 } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
 import { join } from "path"
+import 'dotenv/config.js'
 import {
   deployContract,
   executeContract,
@@ -17,6 +18,7 @@ import {
   queryBalanceCw20,
   queryMaAssetAddress,
   setAssetOraclePriceSource,
+  transferCw20,
   withdraw
 } from "./test_helpers.js"
 
@@ -27,9 +29,9 @@ const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
 
 const INCENTIVES_UMARS_BALANCE = 1_000_000_000000
-
 const ULUNA_UMARS_EMISSION_RATE = 2_000000
 const UUSD_UMARS_EMISSION_RATE = 4_000000
+const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
 // multiples of coins to deposit and withdraw from the red bank
 const X = 10_000_000000
@@ -270,12 +272,16 @@ async function main() {
 
   let result = await depositNative(terra, alice, redBank, "uluna", X)
   const aliceLunaDepositTime = await getTxTimestamp(terra, result)
+
   result = await depositNative(terra, alice, redBank, "uusd", X)
   const aliceUsdDepositTime = await getTxTimestamp(terra, result)
+
   result = await depositNative(terra, bob, redBank, "uluna", X)
   const bobLunaDepositTime = await getTxTimestamp(terra, result)
+
   result = await depositNative(terra, carol, redBank, "uluna", 2 * X)
   const carolLunaDepositTime = await getTxTimestamp(terra, result)
+
   result = await depositNative(terra, dan, redBank, "uusd", X)
   const danUsdDepositTime = await getTxTimestamp(terra, result)
 
@@ -334,16 +340,9 @@ async function main() {
     computeExpectedRewards(aliceClaimRewardsTime, aliceClaimRewardsTime2, UUSD_UMARS_EMISSION_RATE / 2)
   assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
-  console.log("transfer uusd")
+  console.log("transfer maUusd")
 
-  result = await executeContract(terra, alice, maUusd,
-    {
-      transfer: {
-        recipient: bob.key.accAddress,
-        amount: String(X / 2),
-      }
-    }
-  )
+  result = await transferCw20(terra, alice, maUusd, bob.key.accAddress, X / 2 * MA_TOKEN_SCALING_FACTOR)
   const uusdTransferTime = await getTxTimestamp(terra, result)
 
   // Alice accrues rewards for X uusd until transferring X/2 uusd to Bob,
@@ -353,18 +352,14 @@ async function main() {
   expectedAliceXmarsBalance +=
     computeExpectedRewards(aliceClaimRewardsTime2, uusdTransferTime, UUSD_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(uusdTransferTime, aliceClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  // TODO fix
-  // assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
-  strictEqual(aliceXmarsBalance, Math.floor(expectedAliceXmarsBalance))
+  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
   const bobClaimRewardsTime3 = await claimRewards(terra, bob, incentives)
   bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   expectedBobXmarsBalance +=
     computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  // TODO fix
-  // assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
-  strictEqual(bobXmarsBalance, Math.floor(expectedBobXmarsBalance))
+  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("withdraw uusd")
 

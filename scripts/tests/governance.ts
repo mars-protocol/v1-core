@@ -12,7 +12,7 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { getBlockHeight, mintCw20, queryBalanceCw20 } from "./test_helpers.js"
+import { getBlockHeight, mintCw20, queryBalanceCw20, transferCw20 } from "./test_helpers.js"
 
 // CONSTS
 
@@ -301,14 +301,7 @@ async function main() {
 
   console.log("alice sends entire xMars balance to bob")
 
-  await executeContract(terra, alice, xMars,
-    {
-      transfer: {
-        recipient: bob.key.accAddress,
-        amount: String(ALICE_XMARS_BALANCE)
-      }
-    }
-  )
+  await transferCw20(terra, alice, xMars, bob.key.accAddress, ALICE_XMARS_BALANCE)
 
   await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, blockHeight - 1, ALICE_XMARS_BALANCE)
   await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, blockHeight - 1, BOB_XMARS_BALANCE)

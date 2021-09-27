@@ -11,7 +11,8 @@ import {
   borrowNative,
   depositNative,
   queryMaAssetAddress,
-  setAssetOraclePriceSource
+  setAssetOraclePriceSource,
+  transferCw20
 } from "./test_helpers.js"
 
 // CONSTS
@@ -67,20 +68,12 @@ async function testHealthFactorChecks(
 
   console.log("transferring the entire maToken balance should fail")
 
-  // TODO fix this test
   await assert.rejects(
-    // TODO make a transferCw20 helper
-    executeContract(terra, borrower, maLuna,
-      {
-        transfer: {
-          amount: String(LUNA_COLLATERAL),
-          recipient: recipient.key.accAddress
-        }
-      }
-    ),
+    transferCw20(terra, borrower, maLuna, recipient.key.accAddress, LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR),
     (error: any) => {
-      console.log(error.response.data)
-      return error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`)
+      return error.response.data.error.includes(
+        "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
+      )
     }
   )
 
@@ -88,13 +81,8 @@ async function testHealthFactorChecks(
 
   assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
 
-  await executeContract(terra, borrower, maLuna,
-    {
-      transfer: {
-        amount: String(Math.floor(LUNA_COLLATERAL / 100)),
-        recipient: recipient.key.accAddress
-      }
-    }
+  await transferCw20(terra, borrower, maLuna, recipient.key.accAddress,
+    Math.floor(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR / 100)
   )
 
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
@@ -117,27 +105,28 @@ async function testCollateralStatusChanges(
 
   console.log("transferring all maTokens to recipient should enable that asset as collateral")
 
-  await executeContract(terra, provider, maLuna,
-    {
-      transfer: {
-        amount: String(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR),
-        recipient: recipient.key.accAddress
-      }
-    }
-  )
+  await transferCw20(terra, provider, maLuna, recipient.key.accAddress, LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR)
 
   assert(await checkCollateral(terra, provider, redBank, "uluna", false))
   assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
 }
 
-async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna: string) {
+async function testTransferCollateral(
+  terra: LocalTerra,
+  redBank: string,
+  maLuna: string,
+) {
   const provider = terra.wallets.test7
   const borrower = terra.wallets.test8
   const recipient = terra.wallets.test9
 
   console.log("provider provides USD")
 
+  // try {
   await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
+  // } catch (e) {
+  //   console.log(e.response.data.error)
+  // }
 
   console.log("borrower provides Luna")
 
@@ -147,57 +136,30 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
 
   await borrowNative(terra, borrower, redBank, "uusd", USD_COLLATERAL / 100)
 
-  console.log("disabling Luna as collateral should make transferring maLuna fail")
+  console.log("disabling Luna as collateral should fail")
 
   assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
 
-  await executeContract(terra, borrower, redBank,
-    {
-      update_user_collateral_asset_status: {
-        asset: { native: { denom: "uluna" } },
-        enable: false,
-      }
-    }
-  )
-
-  assert(await checkCollateral(terra, borrower, redBank, "uluna", false))
-
   await assert.rejects(
-    executeContract(terra, borrower, maLuna,
+    executeContract(terra, borrower, redBank,
       {
-        transfer: {
-          amount: String(LUNA_COLLATERAL / 100),
-          recipient: recipient.key.accAddress
+        update_user_collateral_asset_status: {
+          asset: { native: { denom: "uluna" } },
+          enable: false,
         }
       }
     ),
     (error: any) => {
       return error.response.data.error.includes(
-        "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
+        "User's health factor can't be less than 1 after disabling collateral"
       )
     }
   )
 
-  console.log("enabling Luna as collateral should make transferring maLuna succeed")
+  console.log("transfer maLuna")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      update_user_collateral_asset_status: {
-        asset: { native: { denom: "uluna" } },
-        enable: true,
-      }
-    }
-  )
-
-  assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
-
-  await executeContract(terra, borrower, maLuna,
-    {
-      transfer: {
-        amount: String(LUNA_COLLATERAL / 100),
-        recipient: recipient.key.accAddress
-      }
-    }
+  await transferCw20(terra, borrower, maLuna, recipient.key.accAddress,
+    Math.floor(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR / 100)
   )
 }
 
@@ -208,6 +170,8 @@ async function main() {
 
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
+
+  const protocolRewardsCollector = terra.wallets.test10.key.accAddress
 
   console.log("upload contracts")
 
@@ -249,6 +213,7 @@ async function main() {
           incentives_address: incentives,
           oracle_address: oracle,
           red_bank_address: redBank,
+          protocol_rewards_collector: protocolRewardsCollector,
           protocol_admin_address: deployer.key.accAddress,
         }
       }
@@ -286,7 +251,10 @@ async function main() {
     }
   )
 
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uluna" } },
+    25
+  )
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -317,7 +285,10 @@ async function main() {
     }
   )
 
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
+  )
 
   const maLuna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 

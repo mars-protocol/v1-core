@@ -88,9 +88,13 @@ cd scripts
 node --loader ts-node/esm tests/<test>.ts
 ```
 
-Env variables:
-- `DEBUG`: when set to 1, more verbose logs are printed.
-- `CACHE`: use a cache source to store and reuse references to local terra. (Only `redis` is supported)
+Required environment variables (can be set in `scripts/.env`):
+
+```sh
+CW_PLUS_ARTIFACTS_PATH # path to cw-plus artifacts
+TERRASWAP_ARTIFACTS_PATH # path to terraswap artifacts
+BLOCK_TIME_MILLISECONDS # targetted block time in ms, which is set in `LocalTerra/config/config.toml`
+```
 
 ### Generating a whitelist.json
 

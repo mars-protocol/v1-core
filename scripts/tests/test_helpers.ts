@@ -38,6 +38,23 @@ export async function mintCw20(
   )
 }
 
+export async function transferCw20(
+  terra: LCDClient,
+  wallet: Wallet,
+  contract: string,
+  recipient: string,
+  amount: number,
+) {
+  return await executeContract(terra, wallet, contract,
+    {
+      transfer: {
+        amount: String(amount),
+        recipient
+      }
+    }
+  )
+}
+
 // terra native coins
 
 export async function queryBalanceNative(
@@ -100,7 +117,7 @@ export async function queryMaAssetAddress(
   redBank: string,
   asset: Asset,
 ): Promise<string> {
-  const market = await queryContract(terra, redBank, { market: { asset: asset } })
+  const market = await queryContract(terra, redBank, { market: { asset } })
   return market.ma_token_address
 }
 
@@ -112,7 +129,7 @@ export async function depositNative(
   amount: number,
 ) {
   return await executeContract(terra, wallet, redBank,
-    { deposit_native: { denom: denom } },
+    { deposit_native: { denom } },
     `${amount}${denom}`
   )
 }

@@ -12,7 +12,7 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { getBlockHeight, mintCw20, queryBalanceCw20, queryBalanceNative } from "./test_helpers.js"
+import { getBlockHeight, mintCw20, queryBalanceCw20, queryBalanceNative, transferCw20 } from "./test_helpers.js"
 
 // CONSTS
 
@@ -278,14 +278,7 @@ async function main() {
   {
     console.log("bob transfers half of his xMars to alice")
 
-    const txResult = await executeContract(terra, bob, xMars,
-      {
-        transfer: {
-          recipient: alice.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT / 2)
-        }
-      }
-    )
+    const txResult = await transferCw20(terra, bob, xMars, alice.key.accAddress, MARS_STAKE_AMOUNT / 2)
     const block = await getBlockHeight(terra, txResult)
 
     // before staking
@@ -424,14 +417,7 @@ async function main() {
 
     console.log("- alice transfers some xMars to bob")
 
-    await executeContract(terra, alice, xMars,
-      {
-        transfer: {
-          recipient: bob.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT / 2)
-        }
-      }
-    )
+    await transferCw20(terra, alice, xMars, bob.key.accAddress, MARS_STAKE_AMOUNT / 2)
 
     cooldown = await queryContract(terra, staking, { cooldown: { user_address: bob.key.accAddress } })
     strictEqual(parseInt(cooldown.amount), cooldownAmount)
