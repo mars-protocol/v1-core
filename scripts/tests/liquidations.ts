@@ -20,9 +20,9 @@ import {
   depositCw20,
   depositNative,
   mintCw20,
-  queryCw20Balance,
+  queryBalanceCw20,
   queryMaAssetAddress,
-  queryNativeBalance,
+  queryBalanceNative,
   setAssetOraclePriceSource
 } from "./test_helpers.js"
 
@@ -165,9 +165,9 @@ async function testCollateralizedNativeLoan(
   }
 
   // get the liquidator's balances before they liquidate the borrower
-  const uusdBalanceBefore = await queryNativeBalance(terra, liquidator.key.accAddress, "uusd")
-  const ulunaBalanceBefore = await queryNativeBalance(terra, liquidator.key.accAddress, "uluna")
-  const maUlunaBalanceBefore = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
+  const uusdBalanceBefore = await queryBalanceNative(terra, liquidator.key.accAddress, "uusd")
+  const ulunaBalanceBefore = await queryBalanceNative(terra, liquidator.key.accAddress, "uluna")
+  const maUlunaBalanceBefore = await queryBalanceCw20(terra, liquidator.key.accAddress, maUluna)
 
   // liquidate the borrower
   uusdAmountLiquidated = Math.floor(totalUusdAmountBorrowed * borrowFraction)
@@ -187,9 +187,9 @@ async function testCollateralizedNativeLoan(
   const txInfo = await terra.tx.txInfo(txResult.txhash)
 
   // get the liquidator's balances after they have liquidated the borrower
-  const uusdBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uusd")
-  const ulunaBalanceAfter = await queryNativeBalance(terra, liquidator.key.accAddress, "uluna")
-  const maUlunaBalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, maUluna)
+  const uusdBalanceAfter = await queryBalanceNative(terra, liquidator.key.accAddress, "uusd")
+  const ulunaBalanceAfter = await queryBalanceNative(terra, liquidator.key.accAddress, "uluna")
+  const maUlunaBalanceAfter = await queryBalanceCw20(terra, liquidator.key.accAddress, maUluna)
 
   // the maximum fraction of debt that can be liquidated is `CLOSE_FACTOR`
   // Debt will be greater than amount borrowed at the time of liquidation
@@ -376,9 +376,9 @@ async function testCollateralizedCw20Loan(
   }
 
   // get the liquidator's balances before they liquidate the borrower
-  const cw20Token1BalanceBefore = await queryCw20Balance(terra, liquidator.key.accAddress, cw20Token1)
-  const cw20Token2BalanceBefore = await queryCw20Balance(terra, liquidator.key.accAddress, cw20Token2)
-  const maCw20Token2BalanceBefore = await queryCw20Balance(terra, liquidator.key.accAddress, maCw20Token2)
+  const cw20Token1BalanceBefore = await queryBalanceCw20(terra, liquidator.key.accAddress, cw20Token1)
+  const cw20Token2BalanceBefore = await queryBalanceCw20(terra, liquidator.key.accAddress, cw20Token2)
+  const maCw20Token2BalanceBefore = await queryBalanceCw20(terra, liquidator.key.accAddress, maCw20Token2)
 
   // liquidate the borrower
   cw20Token1AmountLiquidated = Math.floor(totalCw20Token1AmountBorrowed * borrowFraction)
@@ -400,9 +400,9 @@ async function testCollateralizedCw20Loan(
   txEvents = txResult.logs[0].eventsByType
 
   // get the liquidator's balances after they have liquidated the borrower
-  const cw20Token1BalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, cw20Token1)
-  const cw20Token2BalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, cw20Token2)
-  const maCw20Token2BalanceAfter = await queryCw20Balance(terra, liquidator.key.accAddress, maCw20Token2)
+  const cw20Token1BalanceAfter = await queryBalanceCw20(terra, liquidator.key.accAddress, cw20Token1)
+  const cw20Token2BalanceAfter = await queryBalanceCw20(terra, liquidator.key.accAddress, cw20Token2)
+  const maCw20Token2BalanceAfter = await queryBalanceCw20(terra, liquidator.key.accAddress, maCw20Token2)
 
   // the maximum fraction of debt that can be liquidated is `CLOSE_FACTOR`
   const expectedLiquidatedDebtFraction = borrowFraction > CLOSE_FACTOR ? CLOSE_FACTOR : borrowFraction
@@ -485,7 +485,7 @@ async function testUncollateralizedNativeLoan(
 
   console.log("borrower borrows uusd")
 
-  const uusdBalanceBefore = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
+  const uusdBalanceBefore = await queryBalanceNative(terra, borrower.key.accAddress, "uusd")
 
   const uusdAmountBorrowed = USD_COLLATERAL_AMOUNT
   let txResult = await borrowNative(terra, borrower, redBank, "uusd", uusdAmountBorrowed)
@@ -493,7 +493,7 @@ async function testUncollateralizedNativeLoan(
   const loggedUusdAmountBorrowed = parseInt(txEvents.wasm.amount[0])
   strictEqual(loggedUusdAmountBorrowed, uusdAmountBorrowed)
 
-  const uusdBalanceAfter = await queryNativeBalance(terra, borrower.key.accAddress, "uusd")
+  const uusdBalanceAfter = await queryBalanceNative(terra, borrower.key.accAddress, "uusd")
   const uusdBalanceDifference = uusdBalanceAfter - uusdBalanceBefore
   const uusdAmountBorrowedTax = (await computeTax(terra, new Coin("uusd", uusdAmountBorrowed))).toNumber()
   strictEqual(uusdBalanceDifference, uusdAmountBorrowed - uusdAmountBorrowedTax)

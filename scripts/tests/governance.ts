@@ -12,7 +12,7 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { getBlockHeight, mintCw20, queryCw20Balance } from "./test_helpers.js"
+import { getBlockHeight, mintCw20, queryBalanceCw20 } from "./test_helpers.js"
 
 // CONSTS
 
@@ -325,28 +325,28 @@ async function main() {
 
   console.log("- alice's proposal passes, so her Mars deposit is returned")
 
-  const aliceMarsBalanceBefore = await queryCw20Balance(terra, alice.key.accAddress, mars)
+  const aliceMarsBalanceBefore = await queryBalanceCw20(terra, alice.key.accAddress, mars)
 
   await executeContract(terra, deployer, council, { end_proposal: { proposal_id: aliceProposalId } })
 
   const aliceProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: aliceProposalId } })
   strictEqual(aliceProposalStatus.status, "passed")
 
-  const aliceMarsBalanceAfter = await queryCw20Balance(terra, alice.key.accAddress, mars)
+  const aliceMarsBalanceAfter = await queryBalanceCw20(terra, alice.key.accAddress, mars)
   strictEqual(aliceMarsBalanceAfter, aliceMarsBalanceBefore + ALICE_PROPOSAL_DEPOSIT)
 
   console.log("- bob's proposal was rejected, so his Mars deposit is sent to the staking contract")
 
-  const bobMarsBalanceBefore = await queryCw20Balance(terra, bob.key.accAddress, mars)
-  const stakingContractMarsBalanceBefore = await queryCw20Balance(terra, staking, mars)
+  const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+  const stakingContractMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
 
   await executeContract(terra, deployer, council, { end_proposal: { proposal_id: bobProposalId } })
 
   const bobProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: bobProposalId } })
   strictEqual(bobProposalStatus.status, "rejected")
 
-  const bobMarsBalanceAfter = await queryCw20Balance(terra, bob.key.accAddress, mars)
-  const stakingContractMarsBalanceAfter = await queryCw20Balance(terra, staking, mars)
+  const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+  const stakingContractMarsBalanceAfter = await queryBalanceCw20(terra, staking, mars)
   strictEqual(bobMarsBalanceAfter, bobMarsBalanceBefore)
   strictEqual(stakingContractMarsBalanceAfter, stakingContractMarsBalanceBefore + BOB_PROPOSAL_DEPOSIT)
 

@@ -22,7 +22,7 @@ import {
 } from "../helpers.js"
 import { strict as assert, strictEqual } from "assert"
 import { join } from "path"
-import { queryNativeBalance } from "./test_helpers.js"
+import { queryBalanceNative } from "./test_helpers.js"
 
 // CONSTS
 
@@ -122,7 +122,7 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  const prevUsdBalance = await queryBalanceNative(terra, safetyFund, "uusd")
 
   // swap the native token balance in the safety fund to USD
   await executeContract(terra, deployer, safetyFund,
@@ -135,9 +135,9 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
   )
 
   // check the safety fund balances
-  const usdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  const usdBalance = await queryBalanceNative(terra, safetyFund, "uusd")
   assert(usdBalance > prevUsdBalance)
-  const tokenBalance = await queryNativeBalance(terra, safetyFund, denom)
+  const tokenBalance = await queryBalanceNative(terra, safetyFund, denom)
   strictEqual(tokenBalance, 0)
 
   // check the Astroport pair balances
@@ -175,7 +175,7 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   )
 
   // cache the USD balance before swapping
-  const prevUsdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  const prevUsdBalance = await queryBalanceNative(terra, safetyFund, "uusd")
 
   // swap the token balance in the safety fund to USD
   await executeContract(terra, deployer, safetyFund,
@@ -188,7 +188,7 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   )
 
   // check the safety fund balances
-  const usdBalance = await queryNativeBalance(terra, safetyFund, "uusd")
+  const usdBalance = await queryBalanceNative(terra, safetyFund, "uusd")
   assert(usdBalance > prevUsdBalance)
   const tokenBalance = await queryContract(terra, address, { "balance": { "address": safetyFund } })
   strictEqual(parseInt(tokenBalance.balance), 0)

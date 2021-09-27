@@ -15,7 +15,7 @@ import {
 import {
   depositNative,
   getTxTimestamp,
-  queryCw20Balance,
+  queryBalanceCw20,
   queryMaAssetAddress,
   setAssetOraclePriceSource,
   withdraw
@@ -254,7 +254,7 @@ async function main() {
   const danUsdDepositTime = await getTxTimestamp(terra, result)
 
   const aliceClaimRewardsTime = await claimRewards(terra, alice, incentives)
-  let aliceXmarsBalance = await queryCw20Balance(terra, alice.key.accAddress, xMars)
+  let aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   let expectedAliceXmarsBalance =
     computeExpectedRewards(aliceLunaDepositTime, bobLunaDepositTime, ULUNA_UMARS_EMISSION_RATE) +
     computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
@@ -264,19 +264,19 @@ async function main() {
   assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   const bobClaimRewardsTime = await claimRewards(terra, bob, incentives)
-  let bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+  let bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   let expectedBobXmarsBalance =
     computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(carolLunaDepositTime, bobClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4)
   assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   const carolClaimRewardsTime = await claimRewards(terra, carol, incentives)
-  const carolXmarsBalance = await queryCw20Balance(terra, carol.key.accAddress, xMars)
+  const carolXmarsBalance = await queryBalanceCw20(terra, carol.key.accAddress, xMars)
   const expectedCarolXmarsBalance = computeExpectedRewards(carolLunaDepositTime, carolClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 2)
   assertBalance(carolXmarsBalance, expectedCarolXmarsBalance)
 
   const danClaimRewardsTime = await claimRewards(terra, dan, incentives)
-  const danXmarsBalance = await queryCw20Balance(terra, dan.key.accAddress, xMars)
+  const danXmarsBalance = await queryBalanceCw20(terra, dan.key.accAddress, xMars)
   const expectedDanXmarsBalance = computeExpectedRewards(danUsdDepositTime, danClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
   assertBalance(danXmarsBalance, expectedDanXmarsBalance)
 
@@ -294,14 +294,14 @@ async function main() {
 
   // Bob accrues rewards for uluna until the rewards were turned off
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   expectedBobXmarsBalance += computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
   assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   // Alice accrues rewards for uluna until the rewards were turned off,
   // and continues to accrue rewards for uusd
   const aliceClaimRewardsTime2 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryCw20Balance(terra, alice.key.accAddress, xMars)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   expectedAliceXmarsBalance +=
     computeExpectedRewards(aliceClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4) +
     computeExpectedRewards(aliceClaimRewardsTime, aliceClaimRewardsTime2, UUSD_UMARS_EMISSION_RATE / 2)
@@ -322,7 +322,7 @@ async function main() {
   // Alice accrues rewards for X uusd until transferring X/2 uusd to Bob,
   // then accrues rewards for X/2 uusd
   const aliceClaimRewardsTime3 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryCw20Balance(terra, alice.key.accAddress, xMars)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   expectedAliceXmarsBalance +=
     computeExpectedRewards(aliceClaimRewardsTime2, uusdTransferTime, UUSD_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(uusdTransferTime, aliceClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
@@ -332,7 +332,7 @@ async function main() {
 
   // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
   const bobClaimRewardsTime3 = await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   expectedBobXmarsBalance += computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
   // TODO fix
   // assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
@@ -347,13 +347,13 @@ async function main() {
 
   // Alice accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryCw20Balance(terra, alice.key.accAddress, xMars)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   expectedAliceXmarsBalance += computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
   assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   expectedBobXmarsBalance +=
     computeExpectedRewards(bobClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4) +
     computeExpectedRewards(aliceWithdrawUusdTime, bobWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 3)

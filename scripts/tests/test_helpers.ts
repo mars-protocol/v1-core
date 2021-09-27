@@ -12,8 +12,7 @@ export type Asset = Native | CW20
 
 // cw20
 
-// TODO rename to queryBalanceCw20
-export async function queryCw20Balance(
+export async function queryBalanceCw20(
   terra: LCDClient,
   userAddress: string,
   contractAddress: string,
@@ -41,8 +40,7 @@ export async function mintCw20(
 
 // terra native coins
 
-// TODO rename to queryBalanceNative
-export async function queryNativeBalance(
+export async function queryBalanceNative(
   terra: LCDClient,
   address: string,
   denom: string,
