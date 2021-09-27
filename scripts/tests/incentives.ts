@@ -1,5 +1,4 @@
 import {
-  BlockTxBroadcastResult,
   LCDClient,
   LocalTerra,
   Wallet
@@ -37,7 +36,13 @@ const X = 10_000_000000
 
 // HELPERS
 
-async function setAssetIncentive(terra: LCDClient, wallet: Wallet, incentives: string, maTokenAddress: string, umarsEmissionRate: number) {
+async function setAssetIncentive(
+  terra: LCDClient,
+  wallet: Wallet,
+  incentives: string,
+  maTokenAddress: string,
+  umarsEmissionRate: number,
+) {
   await executeContract(terra, wallet, incentives,
     {
       set_asset_incentive: {
@@ -48,16 +53,27 @@ async function setAssetIncentive(terra: LCDClient, wallet: Wallet, incentives: s
   )
 }
 
-async function claimRewards(terra: LCDClient, wallet: Wallet, incentives: string) {
+async function claimRewards(
+  terra: LCDClient,
+  wallet: Wallet,
+  incentives: string,
+) {
   const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} })
   return await getTxTimestamp(terra, result)
 }
 
-function computeExpectedRewards(startTime: number, endTime: number, umarsRate: number) {
+function computeExpectedRewards(
+  startTime: number,
+  endTime: number,
+  umarsRate: number,
+) {
   return (endTime - startTime) * umarsRate
 }
 
-function assertBalance(balance: number, expectedBalance: number) {
+function assertBalance(
+  balance: number,
+  expectedBalance: number,
+) {
   return strictEqual(balance, Math.floor(expectedBalance))
 }
 
@@ -199,7 +215,12 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
+
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uluna" } },
+    25
+  )
+
   const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
@@ -230,7 +251,12 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
+  )
+
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 
   console.log("set incentives")
@@ -295,7 +321,8 @@ async function main() {
   // Bob accrues rewards for uluna until the rewards were turned off
   await claimRewards(terra, bob, incentives)
   bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
-  expectedBobXmarsBalance += computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
+  expectedBobXmarsBalance +=
+    computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
   assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   // Alice accrues rewards for uluna until the rewards were turned off,
@@ -333,7 +360,8 @@ async function main() {
   // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
   const bobClaimRewardsTime3 = await claimRewards(terra, bob, incentives)
   bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
-  expectedBobXmarsBalance += computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
+  expectedBobXmarsBalance +=
+    computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
   // TODO fix
   // assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
   strictEqual(bobXmarsBalance, Math.floor(expectedBobXmarsBalance))
@@ -348,7 +376,8 @@ async function main() {
   // Alice accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, alice, incentives)
   aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
-  expectedAliceXmarsBalance += computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
+  expectedAliceXmarsBalance +=
+    computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
   assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for X/2 uusd until withdrawing

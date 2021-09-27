@@ -23,7 +23,13 @@ const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
 // HELPERS
 
-async function checkCollateral(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, enabled: boolean) {
+async function checkCollateral(
+  terra: LCDClient,
+  wallet: Wallet,
+  redBank: string,
+  denom: string,
+  enabled: boolean,
+) {
   const collateral = await queryContract(terra, redBank,
     { user_collateral: { user_address: wallet.key.accAddress } }
   )
@@ -74,8 +80,7 @@ async function testHealthFactorChecks(
     ),
     (error: any) => {
       console.log(error.response.data)
-      assert(error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`))
-      return true
+      return error.response.data.error.includes(`Cannot Sub with 0 and ${LUNA_COLLATERAL}`)
     }
   )
 
@@ -167,10 +172,9 @@ async function testTransferCollateral(terra: LocalTerra, redBank: string, maLuna
       }
     ),
     (error: any) => {
-      assert(error.response.data.error.includes(
+      return error.response.data.error.includes(
         "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
-      ))
-      return true
+      )
     }
   )
 
@@ -208,9 +212,7 @@ async function main() {
   console.log("upload contracts")
 
   const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const incentives = await deployContract(terra, deployer, "../artifacts/incentives.wasm",
@@ -221,9 +223,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
@@ -261,11 +261,7 @@ async function main() {
   await executeContract(terra, deployer, redBank,
     {
       init_asset: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        },
+        asset: { native: { denom: "uluna" } },
         asset_params: {
           initial_borrow_rate: "0.1",
           max_loan_to_value: "0.55",
@@ -296,11 +292,7 @@ async function main() {
   await executeContract(terra, deployer, redBank,
     {
       init_asset: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
+        asset: { native: { denom: "uusd" } },
         asset_params: {
           initial_borrow_rate: "0.2",
           max_loan_to_value: "0.75",

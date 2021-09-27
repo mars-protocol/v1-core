@@ -116,7 +116,11 @@ async function main() {
       }
     }
   )
-  await setAssetOraclePriceSource(terra, deployer, oracle, { cw20: { contract_addr: mars } }, 2)
+
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: mars } },
+    2
+  )
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -145,7 +149,10 @@ async function main() {
     }
   )
 
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
+  )
 
   // TESTS
 

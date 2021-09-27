@@ -51,7 +51,9 @@ async function testLunaPrice(
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom: "uluna" } } } })
+  const marsOraclePrice = await queryContract(terra, oracle,
+    { asset_price: { asset: { native: { denom: "uluna" } } } }
+  )
   const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
 
   strictEqual(new Dec(marsOraclePrice).toString(), terraOraclePrice?.amount.toString())
@@ -74,7 +76,9 @@ async function testNativeTokenPrice(
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom } } } })
+  const marsOraclePrice = await queryContract(terra, oracle,
+    { asset_price: { asset: { native: { denom } } } }
+  )
   const terraOraclePrice = await terra.oracle.exchangeRate(denom)
   const terraOracleLunaUsdPrice = await terra.oracle.exchangeRate("uusd")
 
@@ -97,9 +101,7 @@ async function main() {
   console.log("upload contracts")
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   await testLunaPrice(terra, deployer, oracle)

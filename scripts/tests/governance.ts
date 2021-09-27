@@ -45,12 +45,24 @@ async function getLatestBlockHeight() {
   return parseInt(obj.block.header.height)
 }
 
-async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: string, block: number, expectedBalance: number) {
+async function assertXmarsBalanceAt(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  block: number,
+  expectedBalance: number,
+) {
   const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
-async function castVote(terra: LCDClient, wallet: Wallet, council: string, proposalId: number, vote: string) {
+async function castVote(
+  terra: LCDClient,
+  wallet: Wallet,
+  council: string,
+  proposalId: number,
+  vote: string,
+) {
   return await executeContract(terra, wallet, council,
     {
       cast_vote: {
@@ -122,9 +134,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: council
-    }
+    { owner: council }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")

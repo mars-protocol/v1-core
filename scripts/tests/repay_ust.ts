@@ -44,9 +44,7 @@ async function main() {
   console.log("upload contracts")
 
   const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const incentives = await deployContract(terra, deployer, "../artifacts/incentives.wasm",
@@ -57,9 +55,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")

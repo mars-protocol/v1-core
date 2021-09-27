@@ -117,10 +117,9 @@ async function testCollateralizedNativeLoan(
       `${uusdAmountLiquidated}uusd`
     ),
     (error: any) => {
-      assert(error.response.data.error.includes(
+      return error.response.data.error.includes(
         "User's health factor is not less than 1 and thus cannot be liquidated"
-      ))
-      return true
+      )
     }
   )
 
@@ -328,10 +327,9 @@ async function testCollateralizedCw20Loan(
       }
     ),
     (error: any) => {
-      assert(error.response.data.error.includes(
+      return error.response.data.error.includes(
         "User's health factor is not less than 1 and thus cannot be liquidated"
-      ))
-      return true
+      )
     }
   )
 
@@ -523,10 +521,9 @@ async function testUncollateralizedNativeLoan(
       `${uusdAmountBorrowed}uusd`
     ),
     (error: any) => {
-      assert(error.response.data.error.includes(
+      return error.response.data.error.includes(
         "user has a positive uncollateralized loan limit and thus cannot be liquidated"
-      ))
-      return true
+      )
     }
   )
 
@@ -643,10 +640,12 @@ async function main() {
       }
     }
   )
+
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { native: { denom: "uluna" } },
     LUNA_USD_PRICE
   )
+
   const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
@@ -675,6 +674,7 @@ async function main() {
       }
     }
   )
+
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { native: { denom: "uusd" } },
     1
@@ -706,6 +706,7 @@ async function main() {
       }
     }
   )
+
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { cw20: { contract_addr: cw20Token1 } },
     CW20_TOKEN_USD_PRICE
@@ -737,10 +738,12 @@ async function main() {
       }
     }
   )
+
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { cw20: { contract_addr: cw20Token2 } },
     CW20_TOKEN_USD_PRICE
   )
+
   const maCw20Token2 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token2 } })
 
   const env: Env = { terra, redBank, deployer, maUluna, cw20Token1, cw20Token2, maCw20Token2 }

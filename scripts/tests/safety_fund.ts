@@ -1,16 +1,4 @@
-/*
-Integration test for the safety fund contract swapping assets to UST via Astroport.
-
-Required directory structure:
-```
-$ tree -L 1 $(git rev-parse --show-toplevel)/..
-.
-├── LocalTerra
-├── protocol
-├── terraswap
-```
-*/
-import { Int, LocalTerra, MsgSend, Numeric, Wallet, LCDClient } from "@terra-money/terra.js"
+import { LocalTerra, MsgSend, Wallet, LCDClient } from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,
@@ -21,14 +9,15 @@ import {
   uploadContract
 } from "../helpers.js"
 import { strict as assert, strictEqual } from "assert"
+import 'dotenv/config.js'
 import { join } from "path"
 import { queryBalanceNative } from "./test_helpers.js"
 
 // CONSTS
 
-const ZERO = new Int(0)
-const MARS_ARTIFACTS_PATH = "../artifacts"
-const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
+// required environment variables
+const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
+
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
 const USD_LP = 1_000_000_000000
@@ -220,7 +209,7 @@ async function main() {
   )
 
   console.log("deploying Mars safety fund")
-  const safetyFund = await deployContract(terra, deployer, join(MARS_ARTIFACTS_PATH, "safety_fund.wasm"),
+  const safetyFund = await deployContract(terra, deployer, "../artifacts/safety_fund.wasm",
     {
       "owner": deployer.key.accAddress,
       "astroport_factory_address": terraswapFactory,

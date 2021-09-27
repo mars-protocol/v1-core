@@ -19,9 +19,10 @@ import { getBlockHeight, mintCw20, queryBalanceCw20, queryBalanceNative } from "
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
-// targetted block time in ms, which is set in LocalTerra/config/config.toml.
+// targetted block time in ms, which is set in `LocalTerra/config/config.toml`.
 // used to correct for LocalTerra's clock not being accurate
 const BLOCK_TIME_MILLISECONDS = parseInt(process.env.BLOCK_TIME_MILLISECONDS!)
+
 const BLOCK_TIME_SECONDS = BLOCK_TIME_MILLISECONDS / 1000
 
 const COOLDOWN_DURATION_SECONDS = 2
@@ -38,17 +39,33 @@ const MARS_UUSD_PAIR_UUSD_LP_AMOUNT = MARS_UUSD_PAIR_MARS_LP_AMOUNT * MARS_USD_P
 
 // HELPERS
 
-async function assertXmarsBalance(terra: LCDClient, xMars: string, address: string, expectedBalance: number) {
+async function assertXmarsBalance(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  expectedBalance: number,
+) {
   const balance = await queryBalanceCw20(terra, address, xMars)
   strictEqual(balance, expectedBalance)
 }
 
-async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: string, block: number, expectedBalance: number) {
+async function assertXmarsBalanceAt(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  block: number,
+  expectedBalance: number,
+) {
   const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
-async function assertXmarsTotalSupplyAt(terra: LCDClient, xMars: string, block: number, expectedTotalSupply: number) {
+async function assertXmarsTotalSupplyAt(
+  terra: LCDClient,
+  xMars: string,
+  block: number,
+  expectedTotalSupply: number,
+) {
   const expectedXmarsTotalSupply = await queryContract(terra, xMars, { total_supply_at: { block } })
   strictEqual(parseInt(expectedXmarsTotalSupply.total_supply), expectedTotalSupply)
 }
