@@ -20,6 +20,7 @@ import {
   uploadContract
 } from "../helpers.js"
 import {
+  approximateEqual,
   getBlockHeight,
   mintCw20,
   queryBalanceCw20,
@@ -32,14 +33,8 @@ import {
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
-// targetted block time in ms, which is set in `LocalTerra/config/config.toml`.
-// used to correct for LocalTerra's clock not being accurate
-const BLOCK_TIME_MILLISECONDS = parseInt(process.env.BLOCK_TIME_MILLISECONDS!)
-
-const BLOCK_TIME_SECONDS = BLOCK_TIME_MILLISECONDS / 1000
 
 const COOLDOWN_DURATION_SECONDS = 2
-const UNSTAKE_WINDOW_DURATION_SECONDS = 3
 const MARS_STAKE_AMOUNT = 1_000_000000
 const ULUNA_SWAP_AMOUNT = 100_000000
 
@@ -95,6 +90,7 @@ async function main() {
   const alice = terra.wallets.test2
   const bob = terra.wallets.test3
   const carol = terra.wallets.test4
+  const dan = terra.wallets.test5
 
   console.log("upload contracts")
 
@@ -119,7 +115,6 @@ async function main() {
         astroport_factory_address: terraswapFactory,
         astroport_max_spread: "0.05",
         cooldown_duration: COOLDOWN_DURATION_SECONDS,
-        unstake_window: UNSTAKE_WINDOW_DURATION_SECONDS,
       }
     }
   )
@@ -380,145 +375,191 @@ async function main() {
     await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
   }
 
+  let bobCooldownEnd: number
+
   {
     console.log("bob unstakes xMars")
 
-    let bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
-    const cooldownAmount = bobXmarsBalance
-
-    await assert.rejects(
-      executeContract(terra, bob, xMars,
-        {
-          send: {
-            contract: staking,
-            amount: String(cooldownAmount),
-            msg: toEncodedBinary({ unstake: {} })
-          }
-        }
-      ),
-      (error: any) => {
-        return error.response.data.error.includes("Address must have a valid cooldown to unstake")
-      }
-    )
-
-    console.log("- activates cooldown")
-
-    await executeContract(terra, bob, staking, { cooldown: {} })
+    const bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
+    const unstakeAmount = bobXmarsBalance
 
     const cooldownStart = Date.now()
-    const cooldownEnd = cooldownStart + COOLDOWN_DURATION_SECONDS * 1000 // ms
-
-    let cooldown = await queryContract(terra, staking, { cooldown: { user_address: bob.key.accAddress } })
-    strictEqual(parseInt(cooldown.amount), cooldownAmount)
-
-    console.log("- unstaking before cooldown has ended fails")
-
-    await assert.rejects(
-      executeContract(terra, bob, xMars,
-        {
-          send: {
-            contract: staking,
-            amount: String(cooldownAmount),
-            msg: toEncodedBinary({ unstake: {} })
-          }
-        }
-      ),
-      (error: any) => {
-        return error.response.data.error.includes("Cooldown has not finished")
-      }
-    )
-
-    console.log("- alice transfers some xMars to bob")
-
-    await transferCw20(terra, alice, xMars, bob.key.accAddress, MARS_STAKE_AMOUNT / 2)
-
-    cooldown = await queryContract(terra, staking, { cooldown: { user_address: bob.key.accAddress } })
-    strictEqual(parseInt(cooldown.amount), cooldownAmount)
-
-    console.log("- bob tries to unstake all xMars")
-
-    bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
-
-    await assert.rejects(
-      executeContract(terra, bob, xMars,
-        {
-          send: {
-            contract: staking,
-            amount: String(bobXmarsBalance),
-            msg: toEncodedBinary({ unstake: {} })
-          }
-        }
-      ),
-      (error: any) => {
-        return error.response.data.error.includes("Unstake amount must not be greater than cooldown amount")
-      }
-    )
-
-    console.log("- bob unstakes the amount of xMars he requested in the cooldown")
-
-    const cooldownRemaining = Math.max(cooldownEnd - Date.now(), 0)
-    await sleep(
-      cooldownRemaining
-      // account for LocalTerra's clock running at 1/t the speed of realworld time,
-      // where t is the targetted block time in seconds
-      * BLOCK_TIME_SECONDS
-    )
+    bobCooldownEnd = cooldownStart + COOLDOWN_DURATION_SECONDS * 1000 // ms
 
     const txResult = await executeContract(terra, bob, xMars,
       {
         send: {
           contract: staking,
-          amount: String(cooldownAmount),
+          amount: String(unstakeAmount),
           msg: toEncodedBinary({ unstake: {} })
         }
       }
     )
     const block = await getBlockHeight(terra, txResult)
 
-    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, MARS_STAKE_AMOUNT)
+    const claim = await queryContract(terra, staking, { claim: { user_address: bob.key.accAddress } })
+    assert(parseInt(claim.amount) > 0)
+
+    // before unstaking
+    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, MARS_STAKE_AMOUNT / 2)
     await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
-    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, MARS_STAKE_AMOUNT / 2)
-    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply - MARS_STAKE_AMOUNT / 2)
+    // after unstaking
+    expectedXmarsTotalSupply -= MARS_STAKE_AMOUNT / 2
+    // check xMars is burnt
+    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, 0)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
+
+    console.log("claiming before cooldown has ended fails")
+
+    await assert.rejects(
+      executeContract(terra, bob, staking, { claim: {} }),
+      (error: any) => {
+        return error.response.data.error.includes("Cooldown has not ended")
+      }
+    )
   }
 
   {
-    console.log("alice unstakes xMars")
+    console.log("check that claimed Mars is not used in the Mars/xMars exchange rate when dan stakes Mars")
 
-    console.log("- activates cooldown")
+    await mintCw20(terra, deployer, mars, dan.key.accAddress, MARS_STAKE_AMOUNT)
 
-    await executeContract(terra, alice, staking, { cooldown: {} })
+    const stakingMarsBalance = await queryBalanceCw20(terra, staking, mars)
+    const globalState = await queryContract(terra, staking, { global_state: {} })
+    const totalMarsForClaimers = parseInt(globalState.total_mars_for_claimers)
+    const totalMarsForStakers = stakingMarsBalance - totalMarsForClaimers
 
-    console.log("- tries to unstake after the unstake window has ended")
-
-    await sleep(
-      ((
-        // wait until the unstake window ends
-        COOLDOWN_DURATION_SECONDS + UNSTAKE_WINDOW_DURATION_SECONDS
-        // then a bit more to ensure the unstake window has ended
-        + 1
-      ) * 1000)
-      // account for LocalTerra's clock running at 1/t the speed of realworld time,
-      // where t is the targetted block time in seconds
-      * BLOCK_TIME_SECONDS
-    )
-
-    const aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
-
-    await assert.rejects(
-      executeContract(terra, alice, xMars,
-        {
-          send: {
-            contract: staking,
-            amount: String(aliceXmarsBalance),
-            msg: toEncodedBinary({ unstake: {} })
-          }
+    const txResult = await executeContract(terra, dan, mars,
+      {
+        send: {
+          contract: staking,
+          amount: String(MARS_STAKE_AMOUNT),
+          msg: toEncodedBinary({ stake: {} })
         }
-      ),
-      (error: any) => {
-        return error.rawLog.includes("Cooldown has expired")
       }
     )
+    const block = await getBlockHeight(terra, txResult)
+
+    const expectedDanXmarsBalance = Math.floor(MARS_STAKE_AMOUNT * (expectedXmarsTotalSupply / totalMarsForStakers))
+    const danXmarsBalance = await queryBalanceCw20(terra, dan.key.accAddress, xMars)
+    strictEqual(danXmarsBalance, expectedDanXmarsBalance)
+    assert(danXmarsBalance < MARS_STAKE_AMOUNT)
+
+    // before staking
+    await assertXmarsBalanceAt(terra, xMars, dan.key.accAddress, block - 1, 0)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
+
+    // after staking
+    expectedXmarsTotalSupply += danXmarsBalance
+    await assertXmarsBalanceAt(terra, xMars, dan.key.accAddress, block + 1, danXmarsBalance)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
+  }
+
+  {
+    console.log("bob claims the amount of Mars he unstaked")
+
+    const cooldownRemaining = Math.max(bobCooldownEnd - Date.now(), 0)
+    await sleep(cooldownRemaining)
+
+    const claim = await queryContract(terra, staking, { claim: { user_address: bob.key.accAddress } })
+
+    const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+
+    const txResult = await executeContract(terra, bob, staking, { claim: {} })
+    const block = await getBlockHeight(terra, txResult)
+
+    const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+    strictEqual(parseInt(claim.amount), bobMarsBalanceAfter - bobMarsBalanceBefore)
+
+    // before and after claiming are the same
+    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, 0)
+    await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
+    await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block + 1, 0)
+    await assertXmarsTotalSupplyAt(terra, xMars, block + 1, expectedXmarsTotalSupply)
+  }
+
+  {
+    console.log("carol unstakes xMars")
+
+    const carolXmarsBalance = await queryBalanceCw20(terra, carol.key.accAddress, xMars)
+    const unstakeAmount = carolXmarsBalance
+
+    await executeContract(terra, carol, xMars,
+      {
+        send: {
+          contract: staking,
+          amount: String(unstakeAmount),
+          msg: toEncodedBinary({ unstake: {} })
+        }
+      }
+    )
+
+    expectedXmarsTotalSupply -= unstakeAmount
+  }
+
+  let danClaimAmount: number
+
+  {
+    console.log("check that claimed Mars is not used in the Mars/xMars exchange rate when dan unstakes xMars")
+
+    const stakingMarsBalance = await queryBalanceCw20(terra, staking, mars)
+    const globalState = await queryContract(terra, staking, { global_state: {} })
+    const totalMarsForClaimers = parseInt(globalState.total_mars_for_claimers)
+    const totalMarsForStakers = stakingMarsBalance - totalMarsForClaimers
+
+    const danXmarsBalance = await queryBalanceCw20(terra, dan.key.accAddress, xMars)
+    const unstakeAmount = danXmarsBalance
+
+    await executeContract(terra, dan, xMars,
+      {
+        send: {
+          contract: staking,
+          amount: String(unstakeAmount),
+          msg: toEncodedBinary({ unstake: {} })
+        }
+      }
+    )
+
+    const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
+    danClaimAmount = parseInt(claim.amount)
+    const expectedDanMarsBalance = Math.floor(unstakeAmount * (totalMarsForStakers / expectedXmarsTotalSupply))
+    strictEqual(danClaimAmount, expectedDanMarsBalance)
+  }
+
+  {
+    console.log("slash stakers by transferring Mars from the staking contract")
+
+    const stakingMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
+    const deployerMarsBalanceBefore = await queryBalanceCw20(terra, deployer.key.accAddress, mars)
+
+    // slash 10% of the Mars balance
+    const transferMarsAmount = Math.floor(stakingMarsBalanceBefore / 10)
+
+    const txResult = await executeContract(terra, deployer, staking,
+      {
+        transfer_mars: {
+          recipient: deployer.key.accAddress,
+          amount: String(transferMarsAmount)
+        }
+      }
+    )
+
+    const slashPercentage = parseFloat(txResult.logs[0].eventsByType.wasm.slash_percentage[0])
+    approximateEqual(slashPercentage, 0.1, 0.0001)
+
+    const stakingMarsBalanceAfter = await queryBalanceCw20(terra, staking, mars)
+    const deployerMarsBalanceAfter = await queryBalanceCw20(terra, deployer.key.accAddress, mars)
+    strictEqual(stakingMarsBalanceAfter, stakingMarsBalanceBefore - transferMarsAmount)
+    strictEqual(deployerMarsBalanceAfter, deployerMarsBalanceBefore + transferMarsAmount)
+  }
+
+  {
+    console.log("check that dan's claim has been slashed")
+
+    const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
+    const danClaimAmountAfterSlashing = parseInt(claim.amount)
+    approximateEqual(danClaimAmount * 0.9, danClaimAmountAfterSlashing, 1)
   }
 
   console.log("OK")
