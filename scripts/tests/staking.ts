@@ -533,8 +533,8 @@ async function main() {
     const stakingMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
     const deployerMarsBalanceBefore = await queryBalanceCw20(terra, deployer.key.accAddress, mars)
 
-    // slash 1% of the Mars balance
-    const transferMarsAmount = Math.floor(stakingMarsBalanceBefore / 100)
+    // slash 10% of the Mars balance
+    const transferMarsAmount = Math.floor(stakingMarsBalanceBefore / 10)
 
     const txResult = await executeContract(terra, deployer, staking,
       {
@@ -546,7 +546,7 @@ async function main() {
     )
 
     const slashPercentage = parseFloat(txResult.logs[0].eventsByType.wasm.slash_percentage[0])
-    approximateEqual(slashPercentage, 0.01, 0.0001)
+    approximateEqual(slashPercentage, 0.1, 0.0001)
 
     const stakingMarsBalanceAfter = await queryBalanceCw20(terra, staking, mars)
     const deployerMarsBalanceAfter = await queryBalanceCw20(terra, deployer.key.accAddress, mars)
@@ -559,7 +559,7 @@ async function main() {
 
     const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
     const danClaimAmountAfterSlashing = parseInt(claim.amount)
-    approximateEqual(danClaimAmount * 0.99, danClaimAmountAfterSlashing, 1)
+    approximateEqual(danClaimAmount * 0.9, danClaimAmountAfterSlashing, 1)
   }
 
   console.log("OK")
