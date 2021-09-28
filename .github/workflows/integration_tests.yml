@@ -10,8 +10,9 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/terra-money/LocalTerra.git
           sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
-      - name: npm install
+      - name: checkout repo
         uses: actions/checkout@v2
+      - name: npm install
         run: |
           cd $GITHUB_WORKSPACE/scripts
           ls
