@@ -22,7 +22,8 @@ import {
   queryBalanceCw20,
   queryMaAssetAddress,
   queryBalanceNative,
-  setAssetOraclePriceSource
+  setAssetOraclePriceSource,
+  approximateEqual
 } from "./test_helpers.js"
 
 // CONSTS
@@ -399,11 +400,7 @@ async function testCw20(env: Env) {
   console.log("swap cw20 token 1 to uusd")
 
   await executeContract(terra, deployer, protocolRewardsCollector,
-    {
-      swap_asset_to_uusd: {
-        offer_asset_info: { token: { contract_addr: cw20Token1 } }
-      }
-    }
+    { swap_asset_to_uusd: { offer_asset_info: { token: { contract_addr: cw20Token1 } } } }
   )
 
   console.log("enable uusd for distribution")
@@ -720,7 +717,7 @@ async function main() {
           protocol_rewards_collector_address: protocolRewardsCollector,
           staking_address: staking,
           treasury_address: treasury,
-          insurance_fund_address: safetyFund,
+          safety_fund_address: safetyFund,
           incentives_address: incentives,
           oracle_address: oracle,
           red_bank_address: redBank,
@@ -969,7 +966,3 @@ async function main() {
 }
 
 main().catch(err => console.log(err))
-function approximateEqual(protocolRewardsCollectorUusdBalanceAfter: number, arg1: number, arg2: number) {
-  throw new Error("Function not implemented.")
-}
-
