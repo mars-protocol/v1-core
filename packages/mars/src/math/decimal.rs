@@ -752,6 +752,29 @@ mod tests {
         let b = Decimal::from_ratio(120u128, 15u128);
         let c = Decimal::divide_uint128_by_decimal(a, b);
         assert_eq!(c, Uint128::new(15u128));
+
+        let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
+        let b = Decimal::from_ratio(Decimal::DECIMAL_FRACTIONAL.u128(), 1u128);
+        let c = Decimal::divide_uint128_by_decimal(a, b);
+        assert_eq!(c, Uint128::new(1u128));
+
+        let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
+        let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL.u128());
+        let c = Decimal::divide_uint128_by_decimal(a, b);
+        assert_eq!(c, Uint128::new(Decimal::DECIMAL_FRACTIONAL_SQUARED.u128()));
+
+        let a = Uint128::MAX;
+        let b = Decimal::one();
+        let c = Decimal::divide_uint128_by_decimal(a, b);
+        assert_eq!(c, Uint128::MAX);
+
+        let a = Uint128::new(1_000_000_000_000_000_000);
+        let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL);
+        let c = Decimal::divide_uint128_by_decimal(a, b);
+        assert_eq!(
+            c,
+            Uint128::new(1_000_000_000_000_000_000_000_000_000_000_000_000)
+        );
     }
 
     #[test]
