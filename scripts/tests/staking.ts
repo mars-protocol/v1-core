@@ -1,10 +1,12 @@
 import {
-  BlockTxBroadcastResult,
   LCDClient,
   LocalTerra,
-  MsgSend,
+  MsgSend
 } from "@terra-money/terra.js"
-import { strictEqual, strict as assert } from "assert"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
@@ -17,15 +19,23 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import {
+  getBlockHeight,
+  mintCw20,
+  queryBalanceCw20,
+  queryBalanceNative,
+  transferCw20
+} from "./test_helpers.js"
 
 // CONSTS
 
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
-// targetted block time in ms, which is set in LocalTerra/config/config.toml.
+// targetted block time in ms, which is set in `LocalTerra/config/config.toml`.
 // used to correct for LocalTerra's clock not being accurate
 const BLOCK_TIME_MILLISECONDS = parseInt(process.env.BLOCK_TIME_MILLISECONDS!)
+
 const BLOCK_TIME_SECONDS = BLOCK_TIME_MILLISECONDS / 1000
 
 const COOLDOWN_DURATION_SECONDS = 2
@@ -42,46 +52,40 @@ const MARS_UUSD_PAIR_UUSD_LP_AMOUNT = MARS_UUSD_PAIR_MARS_LP_AMOUNT * MARS_USD_P
 
 // HELPERS
 
-async function assertXmarsBalance(terra: LCDClient, xMars: string, address: string, expectedBalance: number) {
-  const balance = await queryCw20Balance(terra, address, xMars)
+async function assertXmarsBalance(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  expectedBalance: number,
+) {
+  const balance = await queryBalanceCw20(terra, address, xMars)
   strictEqual(balance, expectedBalance)
 }
 
-async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: string, block: number, expectedBalance: number) {
+async function assertXmarsBalanceAt(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  block: number,
+  expectedBalance: number,
+) {
   const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
-async function assertXmarsTotalSupplyAt(terra: LCDClient, xMars: string, block: number, expectedTotalSupply: number) {
+async function assertXmarsTotalSupplyAt(
+  terra: LCDClient,
+  xMars: string,
+  block: number,
+  expectedTotalSupply: number,
+) {
   const expectedXmarsTotalSupply = await queryContract(terra, xMars, { total_supply_at: { block } })
   strictEqual(parseInt(expectedXmarsTotalSupply.total_supply), expectedTotalSupply)
-}
-
-async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
-  const balances = await terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return 0
-  }
-  return balance.amount.toNumber()
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function getBlockHeight(terra: LCDClient, txResult: BlockTxBroadcastResult) {
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(txResult.txhash)
-  return txInfo.height
 }
 
 // MAIN
 
 async function main() {
-  // SETUP
-
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -139,7 +143,6 @@ async function main() {
       mint: { minter: staking },
     }
   )
-
 
   // update address provider
   await executeContract(terra, deployer, addressProvider,
@@ -199,14 +202,7 @@ async function main() {
     `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   )
 
-  await executeContract(terra, deployer, mars,
-    {
-      mint: {
-        recipient: deployer.key.accAddress,
-        amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT)
-      }
-    }
-  )
+  await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT)
 
   await executeContract(terra, deployer, mars,
     {
@@ -234,7 +230,6 @@ async function main() {
     `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
   )
 
-
   // TESTS
 
   let expectedXmarsTotalSupply = 0
@@ -242,14 +237,7 @@ async function main() {
   {
     console.log("alice stakes Mars and receives the same amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: alice.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, alice.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, alice, mars,
       {
@@ -276,14 +264,7 @@ async function main() {
   {
     console.log("bob stakes Mars and receives the same amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: bob.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, bob.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, bob, mars,
       {
@@ -310,14 +291,7 @@ async function main() {
   {
     console.log("bob transfers half of his xMars to alice")
 
-    const txResult = await executeContract(terra, bob, xMars,
-      {
-        transfer: {
-          recipient: alice.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT / 2)
-        }
-      }
-    )
+    const txResult = await transferCw20(terra, bob, xMars, alice.key.accAddress, MARS_STAKE_AMOUNT / 2)
     const block = await getBlockHeight(terra, txResult)
 
     // before staking
@@ -343,7 +317,7 @@ async function main() {
     )
 
     // swap luna to usd
-    const uusdBalanceBeforeSwapToUusd = await queryNativeBalance(terra, staking, "uusd")
+    const uusdBalanceBeforeSwapToUusd = await queryBalanceNative(terra, staking, "uusd")
 
     await executeContract(terra, deployer, staking,
       {
@@ -354,29 +328,25 @@ async function main() {
       }
     )
 
-    const ulunaBalanceAfterSwapToUusd = await queryNativeBalance(terra, staking, "uluna")
-    const uusdBalanceAfterSwapToUusd = await queryNativeBalance(terra, staking, "uusd")
+    const ulunaBalanceAfterSwapToUusd = await queryBalanceNative(terra, staking, "uluna")
+    const uusdBalanceAfterSwapToUusd = await queryBalanceNative(terra, staking, "uusd")
 
     strictEqual(ulunaBalanceAfterSwapToUusd, 0)
     assert(uusdBalanceAfterSwapToUusd > uusdBalanceBeforeSwapToUusd)
 
     // swap usd to mars
-    const uusdBalanceBeforeSwapToMars = await queryNativeBalance(terra, staking, "uusd")
-    const marsBalanceBeforeSwapToMars = await queryCw20Balance(terra, staking, mars)
+    const uusdBalanceBeforeSwapToMars = await queryBalanceNative(terra, staking, "uusd")
+    const marsBalanceBeforeSwapToMars = await queryBalanceCw20(terra, staking, mars)
 
     // don't swap the entire uusd balance, otherwise there won't be enough to pay the tx fee
     const uusdSwapAmount = uusdBalanceAfterSwapToUusd - 10_000000
 
     await executeContract(terra, deployer, staking,
-      {
-        swap_uusd_to_mars: {
-          amount: String(uusdSwapAmount)
-        }
-      }
+      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } }
     )
 
-    const marsBalanceAfterSwapToMars = await queryCw20Balance(terra, staking, mars)
-    const uusdBalanceAfterSwapToMars = await queryNativeBalance(terra, staking, "uusd")
+    const marsBalanceAfterSwapToMars = await queryBalanceCw20(terra, staking, mars)
+    const uusdBalanceAfterSwapToMars = await queryBalanceNative(terra, staking, "uusd")
 
     assert(uusdBalanceAfterSwapToMars < uusdBalanceBeforeSwapToMars)
     assert(marsBalanceAfterSwapToMars > marsBalanceBeforeSwapToMars)
@@ -385,14 +355,7 @@ async function main() {
   {
     console.log("carol stakes Mars and receives a smaller amount of xMars")
 
-    await executeContract(terra, deployer, mars,
-      {
-        mint: {
-          recipient: carol.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT)
-        }
-      }
-    )
+    await mintCw20(terra, deployer, mars, carol.key.accAddress, MARS_STAKE_AMOUNT)
 
     const txResult = await executeContract(terra, carol, mars,
       {
@@ -410,7 +373,7 @@ async function main() {
     await assertXmarsTotalSupplyAt(terra, xMars, block - 1, expectedXmarsTotalSupply)
 
     // after staking
-    const carolXmarsBalance = await queryCw20Balance(terra, carol.key.accAddress, xMars)
+    const carolXmarsBalance = await queryBalanceCw20(terra, carol.key.accAddress, xMars)
     assert(carolXmarsBalance < MARS_STAKE_AMOUNT)
     expectedXmarsTotalSupply += carolXmarsBalance
     await assertXmarsBalanceAt(terra, xMars, carol.key.accAddress, block + 1, carolXmarsBalance)
@@ -420,7 +383,7 @@ async function main() {
   {
     console.log("bob unstakes xMars")
 
-    let bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+    let bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
     const cooldownAmount = bobXmarsBalance
 
     await assert.rejects(
@@ -467,21 +430,14 @@ async function main() {
 
     console.log("- alice transfers some xMars to bob")
 
-    await executeContract(terra, alice, xMars,
-      {
-        transfer: {
-          recipient: bob.key.accAddress,
-          amount: String(MARS_STAKE_AMOUNT / 2)
-        }
-      }
-    )
+    await transferCw20(terra, alice, xMars, bob.key.accAddress, MARS_STAKE_AMOUNT / 2)
 
     cooldown = await queryContract(terra, staking, { cooldown: { user_address: bob.key.accAddress } })
     strictEqual(parseInt(cooldown.amount), cooldownAmount)
 
     console.log("- bob tries to unstake all xMars")
 
-    bobXmarsBalance = await queryCw20Balance(terra, bob.key.accAddress, xMars)
+    bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
 
     await assert.rejects(
       executeContract(terra, bob, xMars,
@@ -547,7 +503,7 @@ async function main() {
       * BLOCK_TIME_SECONDS
     )
 
-    const aliceXmarsBalance = await queryCw20Balance(terra, alice.key.accAddress, xMars)
+    const aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
 
     await assert.rejects(
       executeContract(terra, alice, xMars,

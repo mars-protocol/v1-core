@@ -5,14 +5,19 @@ import {
   deployContract,
   executeContract,
   setTimeoutDuration,
-  toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import {
+  borrowNative,
+  depositCw20,
+  depositNative,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
 // CONSTS
 
 // required environment variables:
-const CW_PLUS_ARTIFACTS_PATH = "../../cw-plus/artifacts"
+const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 
 const UUSD_COLLATERAL = 1_000_000_000000
 const MARS_COLLATERAL = 100_000_000_000000
@@ -112,13 +117,9 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { cw20: { contract_addr: mars } },
-        price_source: { fixed: { price: "2" } }
-      }
-    }
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { cw20: { contract_addr: mars } },
+    2
   )
 
   // uusd
@@ -148,46 +149,24 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: "uusd" } },
-        price_source: { fixed: { price: "1" } }
-      }
-    }
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
   )
 
   // TESTS
 
   console.log("provide uusd")
 
-  await executeContract(terra, provider, redBank,
-    { deposit_native: { denom: "uusd" } },
-    `${UUSD_COLLATERAL}uusd`
-  )
+  await depositNative(terra, provider, redBank, "uusd", UUSD_COLLATERAL)
 
   console.log("provide mars")
 
-  await executeContract(terra, borrower, mars,
-    {
-      send: {
-        contract: redBank,
-        amount: String(MARS_COLLATERAL),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
+  await depositCw20(terra, borrower, redBank, mars, MARS_COLLATERAL)
 
   console.log("borrow uusd")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      borrow: {
-        asset: { native: { denom: "uusd" } },
-        amount: String(UUSD_COLLATERAL)
-      }
-    }
-  )
+  await borrowNative(terra, borrower, redBank, "uusd", UUSD_COLLATERAL)
 
   console.log("OK")
 }
