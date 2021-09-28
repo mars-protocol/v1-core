@@ -6,8 +6,10 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
-      - run: git clone https://github.com/terra-money/LocalTerra.git
+      - run: git clone --depth 1 https://github.com/terra-money/LocalTerra.git
       - run: sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
+      - run: pwd
+      - run: ls
       - run: cd scripts
       - run: npm install
   borrow_exact_liquidity:
