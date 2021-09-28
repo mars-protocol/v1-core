@@ -11,6 +11,7 @@ jobs:
       - run: cd scripts
       - run: npm install
   borrow_exact_liquidity:
+    needs: setup
     runs-on: ubuntu-latest
     steps:
       - run: docker compose -f LocalTerra/docker-compose.yml up -d
