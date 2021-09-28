@@ -551,7 +551,9 @@ fn apply_slash_events_to_claim(storage: &dyn Storage, claim: &mut Claim) -> StdR
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage, MOCK_CONTRACT_ADDR};
-    use cosmwasm_std::{attr, Addr, Coin, CosmosMsg, OwnedDeps, StdError, SubMsg, Timestamp};
+    use cosmwasm_std::{
+        attr, Addr, Coin, CosmosMsg, Decimal as StdDecimal, OwnedDeps, StdError, SubMsg, Timestamp,
+    };
     use mars::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
         MarsMockQuerier, MockEnvParams,
@@ -593,7 +595,7 @@ mod tests {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
             astroport_factory_address: Some(String::from("astroport_factory")),
-            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_max_spread: Some(StdDecimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
         };
         let msg = InstantiateMsg { config };
@@ -621,7 +623,7 @@ mod tests {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
             astroport_factory_address: Some(String::from("astroport_factory")),
-            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_max_spread: Some(StdDecimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(20),
         };
         let msg = InstantiateMsg {
@@ -649,7 +651,7 @@ mod tests {
             owner: Some(String::from("new_owner")),
             address_provider_address: Some(String::from("new_address_provider")),
             astroport_factory_address: Some(String::from("new_factory")),
-            astroport_max_spread: Some(Decimal::from_ratio(2u128, 100u128)),
+            astroport_max_spread: Some(StdDecimal::from_ratio(2u128, 100u128)),
             cooldown_duration: Some(200),
         };
         let msg = ExecuteMsg::UpdateConfig {
@@ -1350,7 +1352,7 @@ mod tests {
             owner: Some(String::from("owner")),
             address_provider_address: Some(String::from("address_provider")),
             astroport_factory_address: Some(String::from("astroport_factory")),
-            astroport_max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+            astroport_max_spread: Some(StdDecimal::from_ratio(1u128, 100u128)),
             cooldown_duration: Some(TEST_COOLDOWN_DURATION),
         };
         let msg = InstantiateMsg { config };

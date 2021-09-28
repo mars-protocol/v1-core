@@ -400,7 +400,7 @@ mod tests {
     use cosmwasm_std::{
         attr, coin, from_binary,
         testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR},
-        Addr, BankMsg, Coin, OwnedDeps, StdError, SubMsg,
+        Addr, BankMsg, Coin, Decimal as StdDecimal, OwnedDeps, StdError, SubMsg,
     };
     use cw20::Cw20ExecuteMsg;
     use mars::math::decimal::Decimal;
@@ -414,7 +414,7 @@ mod tests {
         let mut deps = mock_dependencies(&[]);
 
         // Config with base params valid (just update the rest)
-        let astroport_max_spread = Decimal::percent(1);
+        let astroport_max_spread = StdDecimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
@@ -511,7 +511,7 @@ mod tests {
 
         let mut safety_fund_fee_share = Decimal::percent(10);
         let mut treasury_fee_share = Decimal::percent(20);
-        let mut astroport_max_spread = Decimal::percent(1);
+        let mut astroport_max_spread = StdDecimal::percent(1);
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
@@ -574,7 +574,7 @@ mod tests {
         // *
         safety_fund_fee_share = Decimal::from_ratio(5u128, 100u128);
         treasury_fee_share = Decimal::from_ratio(3u128, 100u128);
-        astroport_max_spread = Decimal::percent(2);
+        astroport_max_spread = StdDecimal::percent(2);
         let config = CreateOrUpdateConfig {
             owner: Some("new_owner".to_string()),
             address_provider_address: Some("new_address_provider".to_string()),
@@ -1124,7 +1124,7 @@ mod tests {
             safety_fund_fee_share: Some(Decimal::percent(10)),
             treasury_fee_share: Some(Decimal::percent(20)),
             astroport_factory_address: Some("astroport".to_string()),
-            astroport_max_spread: Some(Decimal::percent(1)),
+            astroport_max_spread: Some(StdDecimal::percent(1)),
         };
         let msg = InstantiateMsg { config };
         instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();

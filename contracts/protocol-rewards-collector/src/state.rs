@@ -1,4 +1,4 @@
-use cosmwasm_std::Addr;
+use cosmwasm_std::{Addr, Decimal as StdDecimal};
 use cw_storage_plus::{Item, Map};
 use mars::helpers::all_conditions_valid;
 use schemars::JsonSchema;
@@ -24,7 +24,7 @@ pub struct Config {
     /// Astroport factory contract address
     pub astroport_factory_address: Addr,
     /// Astroport max spread
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 }
 
 impl Config {

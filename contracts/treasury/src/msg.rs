@@ -1,5 +1,4 @@
-use cosmwasm_std::{Addr, CosmosMsg, Uint128};
-use mars::math::decimal::Decimal;
+use cosmwasm_std::{Addr, CosmosMsg, Decimal as StdDecimal, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;
@@ -8,7 +7,7 @@ use terraswap::asset::AssetInfo;
 pub struct InstantiateMsg {
     pub owner: String,
     pub astroport_factory_address: String,
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -21,7 +20,7 @@ pub enum ExecuteMsg {
     UpdateConfig {
         owner: Option<String>,
         astroport_factory_address: Option<String>,
-        astroport_max_spread: Option<Decimal>,
+        astroport_max_spread: Option<StdDecimal>,
     },
 
     /// Swap any asset on the contract to uusd
@@ -41,7 +40,7 @@ pub enum QueryMsg {
 pub struct ConfigResponse {
     pub owner: Addr,
     pub astroport_factory_address: String,
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 }
 
 /// We currently take no arguments for migrations
