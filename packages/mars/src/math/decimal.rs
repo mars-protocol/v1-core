@@ -298,7 +298,7 @@ impl<'de> de::Visitor<'de> for DecimalVisitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::{from_slice, to_vec};
+    use cosmwasm_std::{from_slice, to_vec, ConversionOverflowError};
 
     #[test]
     fn decimal_one() {
@@ -690,6 +690,24 @@ mod tests {
         let b = Decimal::from_ratio(12345678u128, 100000000u128);
         let c = Decimal::checked_mul(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("42010165310.7217176").unwrap());
+
+        let a = Decimal::MAX;
+        let b = Decimal::one();
+        let c = Decimal::checked_mul(a, b).unwrap();
+        assert_eq!(c, Decimal::MAX);
+
+        let a = Decimal::MAX;
+        let b = Decimal::MAX;
+        let res_error = Decimal::checked_mul(a, b).unwrap_err();
+        assert_eq!(
+            res_error,
+            ConversionOverflowError::new(
+                "Uint256",
+                "Uint128",
+                "115792089237316195423570985008687907852589419931798687112530"
+            )
+            .into()
+        );
     }
 
     #[test]
@@ -703,6 +721,29 @@ mod tests {
         let b = Decimal::from_ratio(33u128, 1u128);
         let c = Decimal::checked_div(a, b).unwrap();
         assert_eq!(c, Decimal::from_str("3.741114818181818181").unwrap());
+
+        let a = Decimal::MAX;
+        let b = Decimal::MAX;
+        let c = Decimal::checked_div(a, b).unwrap();
+        assert_eq!(c, Decimal::one());
+
+        // Note: DivideByZeroError is not public so we just check if dividing by zero returns error
+        let a = Decimal::one();
+        let b = Decimal::zero();
+        Decimal::checked_div(a, b).unwrap_err();
+
+        let a = Decimal::MAX;
+        let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL);
+        let res_error = Decimal::checked_div(a, b).unwrap_err();
+        assert_eq!(
+            res_error,
+            ConversionOverflowError::new(
+                "Uint256",
+                "Uint128",
+                "340282366920938463463374607431768211455000000000000000000"
+            )
+            .into()
+        );
     }
 
     #[test]
