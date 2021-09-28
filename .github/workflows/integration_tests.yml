@@ -8,6 +8,7 @@ jobs:
     steps:
       - name: LocalTerra
         run: |
+          cd $HOME
           git clone --depth 1 https://github.com/terra-money/LocalTerra.git
           sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
       - name: checkout repo
@@ -22,7 +23,15 @@ jobs:
     needs: setup
     runs-on: ubuntu-latest
     steps:
-      - run: docker-compose -f LocalTerra/docker-compose.yml up -d
-      - run: cd scripts
-      - run: node --loader ts-node/esm tests/borrow_exact_liquidity.ts
-      - run: docker-compose -f LocalTerra/docker-compose.yml down
+      - name: start LocalTerra
+        run: |
+          cd $HOME
+          ls
+          pwd
+          docker-compose -f $HOME/LocalTerra/docker-compose.yml up -d
+      - name: run test
+        run: |
+          cd scripts
+          node --loader ts-node/esm tests/borrow_exact_liquidity.ts
+      - name: stop LocalTerra
+        run: docker-compose -f $HOME/LocalTerra/docker-compose.yml down
