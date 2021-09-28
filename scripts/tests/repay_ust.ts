@@ -1,4 +1,9 @@
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
+import { strictEqual } from "assert"
 import {
   deployContract,
   executeContract,
@@ -6,8 +11,11 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strictEqual } from "assert"
-import { borrowNative, depositNative, setAssetOraclePriceSource } from "./test_helpers.js"
+import {
+  borrowNative,
+  depositNative,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
 // CONSTS
 

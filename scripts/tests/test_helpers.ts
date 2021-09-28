@@ -1,6 +1,20 @@
-import { BlockTxBroadcastResult, Coin, Int, LCDClient, Wallet } from "@terra-money/terra.js"
-import { strictEqual, strict as assert } from "assert"
-import { executeContract, queryContract, sleep, toEncodedBinary } from "../helpers.js"
+import {
+  BlockTxBroadcastResult,
+  Coin,
+  Int,
+  LCDClient,
+  Wallet
+} from "@terra-money/terra.js"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
+import {
+  executeContract,
+  queryContract,
+  sleep,
+  toEncodedBinary
+} from "../helpers.js"
 
 // assets
 

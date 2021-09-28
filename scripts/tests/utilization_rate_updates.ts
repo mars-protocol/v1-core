@@ -1,9 +1,16 @@
 /*
 Tests that market utilization rates update when funds are sent to/from the red bank
 */
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import { join } from "path"
-import { strictEqual, strict as assert } from "assert"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
 import 'dotenv/config.js'
 import {
   deployContract,
@@ -13,7 +20,10 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { approximateEqual, queryMaAssetAddress } from "./test_helpers.js"
+import {
+  approximateEqual,
+  queryMaAssetAddress
+} from "./test_helpers.js"
 
 // CONSTS
 

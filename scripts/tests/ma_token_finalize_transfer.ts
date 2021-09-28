@@ -1,4 +1,8 @@
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,

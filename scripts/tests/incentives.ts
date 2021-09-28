@@ -13,7 +13,6 @@ import {
   uploadContract
 } from "../helpers.js"
 import {
-  borrowNative,
   depositNative,
   getTxTimestamp,
   queryBalanceCw20,

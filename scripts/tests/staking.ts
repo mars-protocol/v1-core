@@ -1,5 +1,12 @@
-import { LCDClient, LocalTerra, MsgSend } from "@terra-money/terra.js"
-import { strictEqual, strict as assert } from "assert"
+import {
+  LCDClient,
+  LocalTerra,
+  MsgSend
+} from "@terra-money/terra.js"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
@@ -12,7 +19,13 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { getBlockHeight, mintCw20, queryBalanceCw20, queryBalanceNative, transferCw20 } from "./test_helpers.js"
+import {
+  getBlockHeight,
+  mintCw20,
+  queryBalanceCw20,
+  queryBalanceNative,
+  transferCw20
+} from "./test_helpers.js"
 
 // CONSTS
 

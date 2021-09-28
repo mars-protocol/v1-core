@@ -9,7 +9,11 @@ is empty: execute wasm contract failed
 ```
 */
 
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import {
   deployContract,
   executeContract,

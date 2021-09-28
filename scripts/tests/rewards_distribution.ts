@@ -1,5 +1,13 @@
-import { Coin, LocalTerra, MnemonicKey, Wallet } from "@terra-money/terra.js"
-import { strictEqual, strict as assert } from "assert"
+import {
+  Coin,
+  LocalTerra,
+  MnemonicKey,
+  Wallet
+} from "@terra-money/terra.js"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {

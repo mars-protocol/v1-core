@@ -1,4 +1,8 @@
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual } from "assert"
 import fetch from "node-fetch"
@@ -12,7 +16,12 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
-import { getBlockHeight, mintCw20, queryBalanceCw20, transferCw20 } from "./test_helpers.js"
+import {
+  getBlockHeight,
+  mintCw20,
+  queryBalanceCw20,
+  transferCw20
+} from "./test_helpers.js"
 
 // CONSTS
 

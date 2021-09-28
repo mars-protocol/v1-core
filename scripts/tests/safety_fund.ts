@@ -1,4 +1,15 @@
-import { LocalTerra, MsgSend, Wallet, LCDClient } from "@terra-money/terra.js"
+import {
+  LocalTerra,
+  MsgSend,
+  Wallet,
+  LCDClient
+} from "@terra-money/terra.js"
+import {
+  strict as assert,
+  strictEqual
+} from "assert"
+import 'dotenv/config.js'
+import { join } from "path"
 import {
   deployContract,
   executeContract,
@@ -8,9 +19,6 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert, strictEqual } from "assert"
-import 'dotenv/config.js'
-import { join } from "path"
 import { queryBalanceNative } from "./test_helpers.js"
 
 // CONSTS
