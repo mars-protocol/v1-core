@@ -1,0 +1,19 @@
+on: push
+
+name: Basic
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - run: git clone https://github.com/terra-money/LocalTerra.git
+      - run: sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
+      - run: cd scripts
+      - run: npm install
+  borrow_exact_liquidity:
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker compose -f LocalTerra/docker-compose.yml up -d
+      - run: cd scripts
+      - run: node --loader ts-node/esm tests/borrow_exact_liquidity.ts
+      - run: docker compose -f LocalTerra/docker-compose.yml down
