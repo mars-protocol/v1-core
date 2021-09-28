@@ -3,35 +3,34 @@ on: push
 name: Basic
 
 jobs:
-  setup:
+  borrow_exact_liquidity:
     runs-on: ubuntu-latest
     steps:
-      - name: LocalTerra
-        run: |
-          cd $HOME
-          git clone --depth 1 https://github.com/terra-money/LocalTerra.git
-          sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
-      - name: checkout repo
-        uses: actions/checkout@v2
+      - uses: actions/checkout@v2
+      - name: Cache node modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
       - name: npm install
         run: |
           cd $GITHUB_WORKSPACE/scripts
-          ls
-          pwd
           npm install
-  borrow_exact_liquidity:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: start LocalTerra
+      - name: LocalTerra
         run: |
-          cd $HOME
-          ls
-          pwd
+          cd
+          git clone --depth 1 https://github.com/terra-money/LocalTerra.git
+          sed -E -i '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/200ms/' LocalTerra/config/config.toml
           docker-compose -f $HOME/LocalTerra/docker-compose.yml up -d
       - name: run test
         run: |
-          cd scripts
+          cd $GITHUB_WORKSPACE/scripts
           node --loader ts-node/esm tests/borrow_exact_liquidity.ts
       - name: stop LocalTerra
         run: docker-compose -f $HOME/LocalTerra/docker-compose.yml down
