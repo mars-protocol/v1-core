@@ -1,3 +1,14 @@
+/*
+MWE for a bug in the red bank: depositing an asset after it has been borrowed fails.
+Does not depend on which user makes the deposit, or the interest rate model used for the asset.
+
+Error message:
+```
+failed to execute message; message index: 0: dispatch: Generic error: addr_validate errored: Input
+is empty: execute wasm contract failed
+```
+*/
+
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
 import {
   deployContract,
@@ -6,13 +17,11 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert } from "assert"
 import {
   borrowNative,
   depositNative,
   queryMaAssetAddress,
   setAssetOraclePriceSource,
-  transferCw20
 } from "./test_helpers.js"
 
 // CONSTS
@@ -41,122 +50,6 @@ async function checkCollateral(
     }
   }
   return false
-}
-
-// TESTS
-
-async function testHealthFactorChecks(
-  terra: LocalTerra,
-  redBank: string,
-  maLuna: string,
-) {
-  const provider = terra.wallets.test2
-  const borrower = terra.wallets.test3
-  const recipient = terra.wallets.test4
-
-  console.log("provider provides USD")
-
-  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
-
-  console.log("borrower provides Luna")
-
-  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
-
-  console.log("borrower borrows USD")
-
-  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
-
-  console.log("transferring the entire maToken balance should fail")
-
-  await assert.rejects(
-    transferCw20(terra, borrower, maLuna, recipient.key.accAddress, LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR),
-    (error: any) => {
-      return error.response.data.error.includes(
-        "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
-      )
-    }
-  )
-
-  console.log("transferring a small amount of the maToken balance should work")
-
-  assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
-
-  await transferCw20(terra, borrower, maLuna, recipient.key.accAddress,
-    Math.floor(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR / 100)
-  )
-
-  assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
-}
-
-async function testCollateralStatusChanges(
-  terra: LocalTerra,
-  redBank: string,
-  maLuna: string,
-) {
-  const provider = terra.wallets.test5
-  const recipient = terra.wallets.test6
-
-  console.log("provider provides Luna")
-
-  await depositNative(terra, provider, redBank, "uluna", LUNA_COLLATERAL)
-
-  assert(await checkCollateral(terra, provider, redBank, "uluna", true))
-  assert(await checkCollateral(terra, recipient, redBank, "uluna", false))
-
-  console.log("transferring all maTokens to recipient should enable that asset as collateral")
-
-  await transferCw20(terra, provider, maLuna, recipient.key.accAddress, LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR)
-
-  assert(await checkCollateral(terra, provider, redBank, "uluna", false))
-  assert(await checkCollateral(terra, recipient, redBank, "uluna", true))
-}
-
-async function testTransferCollateral(
-  terra: LocalTerra,
-  redBank: string,
-  maLuna: string,
-) {
-  const provider = terra.wallets.test7
-  const borrower = terra.wallets.test8
-  const recipient = terra.wallets.test9
-
-  console.log("provider provides USD")
-
-  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
-
-  console.log("borrower provides Luna")
-
-  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
-
-  console.log("borrower borrows USD")
-
-  await borrowNative(terra, borrower, redBank, "uusd", USD_COLLATERAL / 100)
-
-  console.log("disabling Luna as collateral should fail")
-
-  assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
-
-  await assert.rejects(
-    executeContract(terra, borrower, redBank,
-      {
-        update_user_collateral_asset_status: {
-          asset: { native: { denom: "uluna" } },
-          enable: false,
-        }
-      }
-    ),
-    (error: any) => {
-      return error.response.data.error.includes(
-        "User's health factor can't be less than 1 after disabling collateral"
-      )
-    }
-  )
-
-  console.log("transfer maLuna")
-
-  await transferCw20(terra, borrower, maLuna, recipient.key.accAddress,
-    Math.floor(LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR / 100)
-  )
 }
 
 // MAIN
@@ -254,6 +147,10 @@ async function main() {
     25
   )
 
+  //   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
+  //   console.log(maUusd)
+
+
   // uusd
   await executeContract(terra, deployer, redBank,
     {
@@ -274,6 +171,12 @@ async function main() {
               kp_augmentation_threshold: "0.15",
               kp_2: "0.07"
             }
+            // linear: {
+            //   base: "1",
+            //   slope_1: "0",
+            //   slope_2: "0",
+            //   optimal_utilization_rate: "1",
+            // }
           },
           active: true,
           deposit_enabled: true,
@@ -290,16 +193,26 @@ async function main() {
 
   const maLuna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
-  // tests
+  const provider = terra.wallets.test2
+  const borrower = terra.wallets.test3
+  const recipient = terra.wallets.test4
+  const someone = terra.wallets.test9
 
-  console.log("testHealthFactorChecks")
-  await testHealthFactorChecks(terra, redBank, maLuna)
+  console.log("provider provides USD")
 
-  console.log("testCollateralStatusChanges")
-  await testCollateralStatusChanges(terra, redBank, maLuna)
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
 
-  console.log("testTransferCollateral")
-  await testTransferCollateral(terra, redBank, maLuna)
+  console.log("borrower provides Luna")
+
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
+
+  console.log("borrower borrows USD")
+
+  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
+
+  console.log("someone deposits USD")
+
+  await depositNative(terra, someone, redBank, "uusd", USD_COLLATERAL)
 
   console.log("OK")
 }
