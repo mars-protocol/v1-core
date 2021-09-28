@@ -1,7 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Decimal, Uint128};
+use crate::math::decimal::Decimal;
+use cosmwasm_std::{Addr, Decimal as StdDecimal, Uint128};
 
 /// Protocol configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -15,7 +16,7 @@ pub struct Config {
     /// Astroport factory contract address
     pub astroport_factory_address: Addr,
     /// Astroport max spread
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 
     /// Cooldown duration in seconds
     pub cooldown_duration: u64,
@@ -48,7 +49,7 @@ pub struct SlashEvent {
 }
 
 pub mod msg {
-    use cosmwasm_std::{Decimal, Uint128};
+    use cosmwasm_std::{Decimal as StdDecimal, Uint128};
 
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
@@ -65,7 +66,7 @@ pub mod msg {
         pub owner: Option<String>,
         pub address_provider_address: Option<String>,
         pub astroport_factory_address: Option<String>,
-        pub astroport_max_spread: Option<Decimal>,
+        pub astroport_max_spread: Option<StdDecimal>,
         pub cooldown_duration: Option<u64>,
     }
 

@@ -1,8 +1,7 @@
 use cosmwasm_std::{
     from_binary, from_slice,
     testing::{MockQuerier, MOCK_CONTRACT_ADDR},
-    Addr, Coin, Decimal, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128,
-    WasmQuery,
+    Addr, Coin, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128, WasmQuery,
 };
 use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
@@ -22,6 +21,7 @@ use super::{
     vesting_querier::VestingQuerier,
     xmars_querier::XMarsQuerier,
 };
+use crate::math::decimal::Decimal;
 
 pub struct MarsMockQuerier {
     base: MockQuerier<TerraQueryWrapper>,

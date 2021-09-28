@@ -1,7 +1,8 @@
 use crate::interest_rate_models::InterestRateStrategy;
-use cosmwasm_std::{Addr, Decimal, Uint128};
+use cosmwasm_std::{Addr, Uint128};
 use cw20::Cw20ReceiveMsg;
 use mars::asset::{Asset, AssetType};
+use mars::math::decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

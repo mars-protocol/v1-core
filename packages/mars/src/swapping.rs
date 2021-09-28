@@ -1,7 +1,7 @@
 use crate::helpers::cw20_get_balance;
 use cosmwasm_std::{
-    attr, to_binary, Addr, Coin, CosmosMsg, Decimal, DepsMut, Empty, Env, Response, StdError,
-    StdResult, Uint128, WasmMsg,
+    attr, to_binary, Addr, Coin, CosmosMsg, Decimal as StdDecimal, DepsMut, Empty, Env, Response,
+    StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
 use terraswap::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
@@ -16,7 +16,7 @@ pub fn execute_swap(
     ask_asset_info: AssetInfo,
     amount: Option<Uint128>,
     astroport_factory_addr: Addr,
-    astroport_max_spread: Option<Decimal>,
+    astroport_max_spread: Option<StdDecimal>,
 ) -> StdResult<Response> {
     // Having the same asset as offer and ask asset doesn't make any sense
     if offer_asset_info == ask_asset_info {
@@ -91,7 +91,7 @@ pub fn execute_swap(
 fn asset_into_swap_msg(
     pair_contract: Addr,
     offer_asset: AstroportAsset,
-    max_spread: Option<Decimal>,
+    max_spread: Option<StdDecimal>,
 ) -> StdResult<CosmosMsg<Empty>> {
     let message = match offer_asset.info.clone() {
         AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
@@ -329,7 +329,7 @@ mod tests {
             ask_asset_info,
             None,
             Addr::unchecked("astroport_factory"),
-            Some(Decimal::from_ratio(1u128, 100u128)),
+            Some(StdDecimal::from_ratio(1u128, 100u128)),
         )
         .unwrap();
 
@@ -345,7 +345,7 @@ mod tests {
                         amount: contract_asset_balance,
                     },
                     belief_price: None,
-                    max_spread: Some(Decimal::from_ratio(1u128, 100u128)),
+                    max_spread: Some(StdDecimal::from_ratio(1u128, 100u128)),
                     to: None,
                 })
                 .unwrap(),

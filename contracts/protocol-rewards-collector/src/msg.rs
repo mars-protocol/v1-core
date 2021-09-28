@@ -1,5 +1,6 @@
-use cosmwasm_std::{CosmosMsg, Decimal, Uint128};
+use cosmwasm_std::{CosmosMsg, Decimal as StdDecimal, Uint128};
 use mars::asset::Asset;
+use mars::math::decimal::Decimal;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use terraswap::asset::AssetInfo;
@@ -16,7 +17,7 @@ pub struct CreateOrUpdateConfig {
     pub safety_fund_fee_share: Option<Decimal>,
     pub treasury_fee_share: Option<Decimal>,
     pub astroport_factory_address: Option<String>,
-    pub astroport_max_spread: Option<Decimal>,
+    pub astroport_max_spread: Option<StdDecimal>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -71,5 +72,5 @@ pub struct ConfigResponse {
     pub safety_fund_fee_share: Decimal,
     pub treasury_fee_share: Decimal,
     pub astroport_factory_address: String,
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 }

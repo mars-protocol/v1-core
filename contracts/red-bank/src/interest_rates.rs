@@ -1,16 +1,16 @@
 use cosmwasm_std::{
-    to_binary, Addr, CosmosMsg, Decimal, DepsMut, Env, Event, Response, StdResult, Uint128, WasmMsg,
+    to_binary, Addr, CosmosMsg, DepsMut, Env, Event, Response, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
 use std::str;
 
 use mars::asset::AssetType;
 use mars::helpers::cw20_get_balance;
-use mars::math::{decimal_multiplication, reverse_decimal};
 
 use crate::error::ContractError;
 use crate::interest_rate_models::InterestRateModel;
 use crate::state::Market;
+use mars::math::decimal::Decimal;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
@@ -42,14 +42,14 @@ pub fn apply_accumulated_interests(
                 market.borrow_index,
                 market.borrow_rate,
                 time_elapsed,
-            );
+            )?;
         }
         if market.liquidity_rate > Decimal::zero() {
             market.liquidity_index = calculate_applied_linear_interest_rate(
                 market.liquidity_index,
                 market.liquidity_rate,
                 time_elapsed,
-            );
+            )?;
         }
         market.interests_last_updated = current_timestamp;
     }
@@ -60,7 +60,7 @@ pub fn apply_accumulated_interests(
 
     let borrow_interest_accrued = if new_debt_total > previous_debt_total {
         // debt stays constant between the application of the interest rate
-        // so the differece between debt at the start and the end is the
+        // so the difference between debt at the start and the end is the
         // total borrow interest accrued
         new_debt_total - previous_debt_total
     } else {
@@ -87,12 +87,12 @@ pub fn calculate_applied_linear_interest_rate(
     index: Decimal,
     rate: Decimal,
     time_elapsed: u64,
-) -> Decimal {
-    let rate_factor = decimal_multiplication(
-        rate,
-        Decimal::from_ratio(Uint128::from(time_elapsed), Uint128::from(SECONDS_PER_YEAR)),
-    );
-    decimal_multiplication(index, Decimal::one() + rate_factor)
+) -> StdResult<Decimal> {
+    let rate_factor = rate.checked_mul(Decimal::from_ratio(
+        Uint128::from(time_elapsed),
+        Uint128::from(SECONDS_PER_YEAR),
+    ))?;
+    index.checked_mul(Decimal::one() + rate_factor)
 }
 
 /// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
@@ -104,8 +104,7 @@ pub fn calculate_applied_linear_interest_rate(
 pub fn get_scaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
     // Scale by SCALING_FACTOR to have better precision
     let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR);
-    // Different form for: scaled_amount / index
-    scaled_amount * reverse_decimal(index)
+    Decimal::divide_uint128_by_decimal(scaled_amount, index)
 }
 
 /// Descales the amount introduced by `get_scaled_amount`. As interest rate is accumulated
@@ -120,7 +119,7 @@ pub fn get_descaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal {
+pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> StdResult<Decimal> {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
@@ -134,13 +133,13 @@ pub fn get_updated_borrow_index(market: &Market, block_time: u64) -> Decimal {
         }
     }
 
-    market.borrow_index
+    Ok(market.borrow_index)
 }
 
 /// Return applied interest rate for liquidity index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
-pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal {
+pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> StdResult<Decimal> {
     if market.interests_last_updated < block_time {
         let time_elapsed = block_time - market.interests_last_updated;
 
@@ -154,7 +153,7 @@ pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> Decimal 
         }
     }
 
-    market.liquidity_index
+    Ok(market.liquidity_index)
 }
 
 /// Update interest rates for current liquidity and debt levels
@@ -198,7 +197,7 @@ pub fn update_interest_rates(
 
     let total_debt = get_descaled_amount(
         market.debt_total_scaled,
-        get_updated_borrow_index(market, env.block.time.seconds()),
+        get_updated_borrow_index(market, env.block.time.seconds())?,
     );
     let current_utilization_rate = if total_debt > Uint128::zero() {
         let liquidity_and_debt = available_liquidity.checked_add(total_debt)?;
@@ -212,7 +211,7 @@ pub fn update_interest_rates(
             current_utilization_rate,
             market.borrow_rate,
             market.reserve_factor,
-        );
+        )?;
     market.borrow_rate = new_borrow_rate;
     market.liquidity_rate = new_liquidity_rate;
 
@@ -232,14 +231,15 @@ pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 #[cfg(test)]
 mod tests {
     use crate::interest_rates::calculate_applied_linear_interest_rate;
-    use cosmwasm_std::Decimal;
+    use mars::math::decimal::Decimal;
 
     #[test]
     fn test_accumulated_index_calculation() {
         let index = Decimal::from_ratio(1u128, 10u128);
         let rate = Decimal::from_ratio(2u128, 10u128);
         let time_elapsed = 15768000; // half a year
-        let accumulated = calculate_applied_linear_interest_rate(index, rate, time_elapsed);
+        let accumulated =
+            calculate_applied_linear_interest_rate(index, rate, time_elapsed).unwrap();
 
         assert_eq!(accumulated, Decimal::from_ratio(11u128, 100u128));
     }
