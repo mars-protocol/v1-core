@@ -3,7 +3,7 @@ on: push
 name: Basic
 
 jobs:
-  borrow_exact_liquidity:
+  npm:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -22,6 +22,49 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/scripts
           npm install
+  build-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cache contracts
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-contracts
+        with:
+          path: $GITHUB_WORKSPACE/artifacts
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('*.wasm') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - run: ./$GITHUB_WORKSPACE/scripts/build_artifacts.sh
+  borrow-exact-liquidity:
+    runs-on: ubuntu-latest
+    needs: [npm, build-contracts]
+    steps:
+      - uses: actions/checkout@v2
+      - name: Cache node modules
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-node-modules
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
+      - name: Cache contracts
+        uses: actions/cache@v2
+        env:
+          cache-name: cache-contracts
+        with:
+          path: $GITHUB_WORKSPACE/artifacts
+          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('*.wasm') }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ env.cache-name }}-
+            ${{ runner.os }}-build-
+            ${{ runner.os }}-
       - name: LocalTerra
         run: |
           cd
