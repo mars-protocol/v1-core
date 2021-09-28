@@ -1,3 +1,5 @@
+/// NOTE: This was copied from the cosmwasm_std package: https://github.com/CosmWasm/cosmwasm/blob/v0.16.2/packages/std/src/math/decimal.rs
+/// but modified to do some custom operations the protocol needed.
 use schemars::JsonSchema;
 use serde::{de, ser, Deserialize, Deserializer, Serialize};
 use std::fmt::{self, Write};
@@ -678,6 +680,51 @@ mod tests {
     }
 
     #[test]
+    fn checked_decimal_multiplication() {
+        let a = Decimal::from_ratio(33u128, 10u128);
+        let b = Decimal::from_ratio(45u128, 10u128);
+        let c = Decimal::checked_mul(a, b).unwrap();
+        assert_eq!(c, Decimal::from_str("14.85").unwrap());
+
+        let a = Decimal::from_ratio(340282366920u128, 1u128);
+        let b = Decimal::from_ratio(12345678u128, 100000000u128);
+        let c = Decimal::checked_mul(a, b).unwrap();
+        assert_eq!(c, Decimal::from_str("42010165310.7217176").unwrap());
+    }
+
+    #[test]
+    fn checked_decimal_division() {
+        let a = Decimal::from_ratio(99988u128, 100u128);
+        let b = Decimal::from_ratio(24997u128, 100u128);
+        let c = Decimal::checked_div(a, b).unwrap();
+        assert_eq!(c, Decimal::from_str("4.0").unwrap());
+
+        let a = Decimal::from_ratio(123456789u128, 1000000u128);
+        let b = Decimal::from_ratio(33u128, 1u128);
+        let c = Decimal::checked_div(a, b).unwrap();
+        assert_eq!(c, Decimal::from_str("3.741114818181818181").unwrap());
+    }
+
+    #[test]
+    fn divide_uint128_by_decimal() {
+        let a = Uint128::new(120u128);
+        let b = Decimal::from_ratio(120u128, 15u128);
+        let c = Decimal::divide_uint128_by_decimal(a, b);
+        assert_eq!(c, Uint128::new(15u128));
+    }
+
+    #[test]
+    fn decimal_to_std_decimal() {
+        let custom_decimal_1 = Decimal::from_ratio(240u128, 500u128);
+        let std_decimal_1_expected = StdDecimal::from_ratio(240u128, 500u128);
+        assert_eq!(custom_decimal_1.to_std_decimal(), std_decimal_1_expected);
+
+        let custom_decimal_2 = Decimal::from_ratio(333u128, 1000u128);
+        let std_decimal_2_expected = StdDecimal::from_ratio(333u128, 1000u128);
+        assert_eq!(custom_decimal_2.to_std_decimal(), std_decimal_2_expected);
+    }
+
+    #[test]
     fn decimal_to_string() {
         // Integers
         assert_eq!(Decimal::zero().to_string(), "0");
@@ -793,51 +840,5 @@ mod tests {
             from_slice::<Decimal>(br#""87.65""#).unwrap(),
             Decimal::percent(8765)
         );
-    }
-
-    #[test]
-    fn checked_decimal_division() {
-        let a = Decimal::from_ratio(99988u128, 100u128);
-        let b = Decimal::from_ratio(24997u128, 100u128);
-        let c = Decimal::checked_div(a, b).unwrap();
-        assert_eq!(c, Decimal::from_str("4.0").unwrap());
-
-        let a = Decimal::from_ratio(123456789u128, 1000000u128);
-        let b = Decimal::from_ratio(33u128, 1u128);
-        let c = Decimal::checked_div(a, b).unwrap();
-        assert_eq!(c, Decimal::from_str("3.741114818181818181").unwrap());
-    }
-
-    #[test]
-    fn checked_decimal_multiplication() {
-        let a = Decimal::from_ratio(33u128, 10u128);
-        let b = Decimal::from_ratio(45u128, 10u128);
-        let c = Decimal::checked_mul(a, b).unwrap();
-        assert_eq!(c, Decimal::from_str("14.85").unwrap());
-
-        // max allowed number for numerator to avoid overflow
-        let a = Decimal::from_ratio(340282366920u128, 1u128);
-        let b = Decimal::from_ratio(12345678u128, 100000000u128);
-        let c = Decimal::checked_mul(a, b).unwrap();
-        assert_eq!(c, Decimal::from_str("42010165310.7217176").unwrap());
-    }
-
-    #[test]
-    fn divide_uint128_by_decimal() {
-        let a = Uint128::new(120u128);
-        let b = Decimal::from_ratio(120u128, 15u128);
-        let c = Decimal::divide_uint128_by_decimal(a, b);
-        assert_eq!(c, Uint128::new(15u128));
-    }
-
-    #[test]
-    fn decimal_to_std_decimal() {
-        let custom_decimal_1 = Decimal::from_ratio(240u128, 500u128);
-        let std_decimal_1_expected = StdDecimal::from_ratio(240u128, 500u128);
-        assert_eq!(custom_decimal_1.to_std_decimal(), std_decimal_1_expected);
-
-        let custom_decimal_2 = Decimal::from_ratio(333u128, 1000u128);
-        let std_decimal_2_expected = StdDecimal::from_ratio(333u128, 1000u128);
-        assert_eq!(custom_decimal_2.to_std_decimal(), std_decimal_2_expected);
     }
 }
