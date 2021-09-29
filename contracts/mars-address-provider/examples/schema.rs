@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 use mars_address_provider::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use mars_address_provider::{Config};
+use mars_address_provider::Config;
 
 fn main() {
     let mut out_dir = current_dir().unwrap();

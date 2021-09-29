@@ -107,7 +107,6 @@ pub mod msg {
         pub xmars_token_address: Option<String>,
     }
 
-
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
@@ -121,8 +120,8 @@ pub mod msg {
 }
 
 pub mod helpers {
-    use super::MarsContract;
     use super::msg::QueryMsg;
+    use super::MarsContract;
     use crate::error::MarsError;
     use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, WasmQuery};
 

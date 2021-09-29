@@ -64,7 +64,7 @@ pub struct Proposal {
     pub status: ProposalStatus,
     /// Number of for votes
     pub for_votes: Uint128,
-    /// Number of against votes 
+    /// Number of against votes
     pub against_votes: Uint128,
     /// Block at which voting for the porposal starts
     pub start_height: u64,
@@ -194,14 +194,10 @@ pub mod msg {
         },
 
         /// End proposal after voting period has passed
-        EndProposal { 
-            proposal_id: u64 
-        },
+        EndProposal { proposal_id: u64 },
 
         /// Execute a successful proposal
-        ExecuteProposal { 
-            proposal_id: u64 
-        },
+        ExecuteProposal { proposal_id: u64 },
 
         /// Update config
         UpdateConfig { config: CreateOrUpdateConfig },
@@ -237,5 +233,4 @@ pub mod msg {
             limit: Option<u32>,
         },
     }
-
 }

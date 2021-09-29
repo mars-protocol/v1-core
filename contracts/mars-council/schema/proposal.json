@@ -1,23 +1,109 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ProposalMessage",
-  "description": "Execute call that will be executed by the DAO if the proposal succeeds",
+  "title": "Proposal",
+  "description": "Proposal metadata stored in state",
   "type": "object",
   "required": [
-    "execution_order",
-    "msg"
+    "against_votes",
+    "deposit_amount",
+    "description",
+    "end_height",
+    "for_votes",
+    "proposal_id",
+    "start_height",
+    "status",
+    "submitter_address",
+    "title"
   ],
   "properties": {
-    "execution_order": {
+    "against_votes": {
+      "description": "Number of against votes",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
+    "deposit_amount": {
+      "description": "MARS tokens deposited on the proposal submission. Will be returned to submitter if proposal passes and sent to xMars stakers otherwise",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
+    "description": {
+      "description": "Description for the proposal",
+      "type": "string"
+    },
+    "end_height": {
+      "description": "Block at which voting for the porposal ends",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
     },
-    "msg": {
-      "$ref": "#/definitions/CosmosMsg_for_Empty"
+    "for_votes": {
+      "description": "Number of for votes",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
+    "link": {
+      "description": "Link provided for cases where the proposal description is too large or some other external resource is intended to be associated with the proposal",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "messages": {
+      "description": "Set of messages available to get executed if the proposal passes",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/definitions/ProposalMessage"
+      }
+    },
+    "proposal_id": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "start_height": {
+      "description": "Block at which voting for the porposal starts",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "status": {
+      "description": "Wether the proposal is Active, Passed, Rejected or Executed",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProposalStatus"
+        }
+      ]
+    },
+    "submitter_address": {
+      "description": "Address submitting the proposal",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
+    },
+    "title": {
+      "description": "Title for the proposal",
+      "type": "string"
     }
   },
   "definitions": {
+    "Addr": {
+      "description": "A human readable address.\n\nIn Cosmos, this is typically bech32 encoded. But for multi-chain smart contracts no assumptions should be made other than being UTF-8 encoded and of reasonable length.\n\nThis type represents a validated address. It can be created in the following ways 1. Use `Addr::unchecked(input)` 2. Use `let checked: Addr = deps.api.addr_validate(input)?` 3. Use `let checked: Addr = deps.api.addr_humanize(canonical_addr)?` 4. Deserialize from JSON. This must only be done from JSON that was validated before such as a contract's state. `Addr` must not be used in messages sent by the user because this would result in unvalidated instances.\n\nThis type is immutable. If you really need to mutate it (Really? Are you sure?), create a mutable copy using `let mut mutable = Addr::to_string()` and operate on that `String` instance.",
+      "type": "string"
+    },
     "BankMsg": {
       "description": "The message types of the bank module.\n\nSee https://github.com/cosmos/cosmos-sdk/blob/v0.40.0/proto/cosmos/bank/v1beta1/tx.proto",
       "anyOf": [
@@ -137,6 +223,40 @@
     "Empty": {
       "description": "An empty struct that serves as a placeholder in different places, such as contracts that don't set a custom message.\n\nIt is designed to be expressable in correct JSON and JSON Schema but contains no meaningful data. Previously we used enums without cases, but those cannot represented as valid JSON Schema (https://github.com/CosmWasm/cosmwasm/issues/451)",
       "type": "object"
+    },
+    "ProposalMessage": {
+      "description": "Execute call that will be executed by the DAO if the proposal succeeds",
+      "type": "object",
+      "required": [
+        "execution_order",
+        "msg"
+      ],
+      "properties": {
+        "execution_order": {
+          "description": "Determines order of execution lower order will be executed first",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "msg": {
+          "description": "CosmosMsg that will be executed by the council",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CosmosMsg_for_Empty"
+            }
+          ]
+        }
+      }
+    },
+    "ProposalStatus": {
+      "description": "Proposal Status",
+      "type": "string",
+      "enum": [
+        "active",
+        "passed",
+        "rejected",
+        "executed"
+      ]
     },
     "Uint128": {
       "description": "A thin wrapper around u128 that is using strings for JSON encoding/decoding, such that the full u128 range can be used for clients that convert JSON numbers to floats, like JavaScript and jq.\n\n# Examples\n\nUse `from` to create instances of this and `u128` to get the value out:\n\n``` # use cosmwasm_std::Uint128; let a = Uint128::from(123u128); assert_eq!(a.u128(), 123);\n\nlet b = Uint128::from(42u64); assert_eq!(b.u128(), 42);\n\nlet c = Uint128::from(70u32); assert_eq!(c.u128(), 70); ```",
