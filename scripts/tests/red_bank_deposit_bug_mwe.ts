@@ -210,6 +210,10 @@ async function main() {
 
   await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
 
+  // TODO: uncommenting these two lines makes the test pass
+  // await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
+  // await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
+
   console.log("borrower borrows USD")
 
   await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
