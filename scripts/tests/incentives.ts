@@ -378,4 +378,7 @@ async function main() {
   console.log("OK")
 }
 
-main().catch(err => console.log(err))
+main().catch(err => {
+  console.log(err)
+  process.exit(1)
+})
