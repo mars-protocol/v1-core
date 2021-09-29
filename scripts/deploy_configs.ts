@@ -327,7 +327,7 @@ export const bombay: Config = {
     // },
     {
       symbol: "MARS",
-      contract_addr: "terra15d6rtqchvf60lrzxukdf7v48xemtvx48sgerm7",
+      contract_addr: "terra1qs7h830ud0a4hj72yr8f7jmlppyx7z524f7gw6",
       init_params: {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
@@ -350,11 +350,11 @@ export const bombay: Config = {
       }
     },
   ],
-  mirFarmingStratContractAddress: "terra1a0z4ke67kuv5uk0naj8eg79fkwvu6xnek9d478",
-  ancFarmingStratContractAddress: "terra160zt2964cra2re79j620nua65qhk5s9s4d5yje",
-  marsFarmingStratContractAddress: "terra1pz2skvknansxvnvse7wmlxjw7p8ssu5k5x60qr",
-  minterProxyContractAddress: "terra17vr44azerz4vlg9fawp3sp5a8phg6kdv3000e9",
-  marsTokenContractAddress: "terra15d6rtqchvf60lrzxukdf7v48xemtvx48sgerm7",
+  mirFarmingStratContractAddress: undefined,
+  ancFarmingStratContractAddress: undefined,
+  marsFarmingStratContractAddress: undefined,
+  minterProxyContractAddress: "terra1hfyg0tvuqd5kk4un4luqng2adc88lgt5skxmve",
+  marsTokenContractAddress: "terra1qs7h830ud0a4hj72yr8f7jmlppyx7z524f7gw6",
   oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
 }
 
