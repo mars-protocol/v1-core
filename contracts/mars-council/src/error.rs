@@ -1,6 +1,7 @@
 use cosmwasm_std::StdError;
-use mars::error::MarsError;
 use thiserror::Error;
+
+use mars_core::error::MarsError;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {

@@ -6,24 +6,22 @@ use cosmwasm_std::{
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
 
-use mars::address_provider;
-use mars::address_provider::msg::MarsContract;
-use mars::error::MarsError;
-use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
-use mars::vesting;
-use mars::xmars_token;
+use mars_core::error::MarsError;
+use mars_core::helpers::{option_string_to_addr, zero_address};
+use mars_core::math::decimal::Decimal;
+
+use mars_core::address_provider;
+use mars_core::address_provider::MarsContract;
+use mars_core::vesting;
+use mars_core::xmars_token;
 
 use crate::error::ContractError;
-use crate::msg::{
-    ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, ProposalInfo,
-    ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse, QueryMsg, ReceiveMsg,
+use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
+use crate::state::{CONFIG, GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES};
+use crate::{
+    Config, GlobalState, Proposal, ProposalMessage, ProposalStatus, ProposalVote,
+    ProposalVoteOption, ProposalVoteResponse, ProposalVotesResponse, ProposalsListResponse,
 };
-use crate::state::{
-    Config, GlobalState, Proposal, ProposalStatus, ProposalVote, ProposalVoteOption, CONFIG,
-    GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
-};
-use crate::types::ProposalMessage;
-use mars::math::decimal::Decimal;
 
 // Proposal validation attributes
 const MIN_TITLE_LENGTH: usize = 4;
@@ -208,6 +206,7 @@ pub fn execute_submit_proposal(
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
     let new_proposal = Proposal {
+        proposal_id: global_state.proposal_count,
         submitter_address: deps.api.addr_validate(&submitter_address_unchecked)?,
         status: ProposalStatus::Active,
         for_votes: Uint128::zero(),
@@ -543,18 +542,9 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+fn query_config(deps: Deps) -> StdResult<Config> {
     let config = CONFIG.load(deps.storage)?;
-
-    Ok(ConfigResponse {
-        address_provider_address: config.address_provider_address.into(),
-        proposal_voting_period: config.proposal_voting_period,
-        proposal_effective_delay: config.proposal_effective_delay,
-        proposal_expiration_period: config.proposal_expiration_period,
-        proposal_required_deposit: config.proposal_required_deposit,
-        proposal_required_quorum: config.proposal_required_quorum,
-        proposal_required_threshold: config.proposal_required_threshold,
-    })
+    Ok(config)
 }
 
 fn query_proposals(
@@ -573,22 +563,8 @@ fn query_proposals(
         .range(deps.storage, option_start, None, Order::Ascending)
         .take(limit)
         .map(|item| {
-            let (k, v) = item?;
-
-            Ok(ProposalInfo {
-                proposal_id: read_be_u64(&k)?,
-                submitter_address: v.submitter_address.into(),
-                status: v.status,
-                for_votes: v.for_votes,
-                against_votes: v.against_votes,
-                start_height: v.start_height,
-                end_height: v.end_height,
-                title: v.title,
-                description: v.description,
-                link: v.link,
-                messages: v.messages,
-                deposit_amount: v.deposit_amount,
-            })
+            let (_k, v) = item?;
+            Ok(v)
         })
         .collect();
 
@@ -598,23 +574,9 @@ fn query_proposals(
     })
 }
 
-fn query_proposal(deps: Deps, proposal_id: u64) -> StdResult<ProposalInfo> {
+fn query_proposal(deps: Deps, proposal_id: u64) -> StdResult<Proposal> {
     let proposal = PROPOSALS.load(deps.storage, U64Key::new(proposal_id))?;
-
-    Ok(ProposalInfo {
-        proposal_id,
-        submitter_address: proposal.submitter_address.into(),
-        status: proposal.status,
-        for_votes: proposal.for_votes,
-        against_votes: proposal.against_votes,
-        start_height: proposal.start_height,
-        end_height: proposal.end_height,
-        title: proposal.title,
-        description: proposal.description,
-        link: proposal.link,
-        messages: proposal.messages,
-        deposit_amount: proposal.deposit_amount,
-    })
+    Ok(proposal)
 }
 
 fn query_proposal_votes(
@@ -705,11 +667,12 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{Coin, OwnedDeps, StdError, SubMsg};
-    use mars::math::decimal::Decimal;
-    use mars::testing::{mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams};
+    use mars_core::math::decimal::Decimal;
+    use mars_core::testing::{
+        mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams,
+    };
 
     use crate::msg::ExecuteMsg::UpdateConfig;
-    use crate::msg::MigrateMsg;
 
     const TEST_PROPOSAL_VOTING_PERIOD: u64 = 2000;
     const TEST_PROPOSAL_EFFECTIVE_DELAY: u64 = 200;
@@ -1131,6 +1094,7 @@ mod tests {
         assert_eq!(global_state.proposal_count, 1);
 
         let proposal = PROPOSALS.load(&deps.storage, U64Key::new(1_u64)).unwrap();
+        assert_eq!(proposal.proposal_id, 1);
         assert_eq!(proposal.submitter_address, submitter_address);
         assert_eq!(proposal.status, ProposalStatus::Active);
         assert_eq!(proposal.for_votes, Uint128::new(0));
@@ -1261,7 +1225,7 @@ mod tests {
             assert_eq!(
                 res_error,
                 StdError::NotFound {
-                    kind: "council::state::Proposal".to_string(),
+                    kind: "mars_core::council::Proposal".to_string(),
                 }
                 .into()
             );
@@ -1895,7 +1859,7 @@ mod tests {
                         msg: CosmosMsg::Wasm(WasmMsg::Migrate {
                             contract_addr: contract_address.to_string(),
                             new_code_id,
-                            msg: to_binary(&MigrateMsg {}).unwrap(),
+                            msg: binary_msg.clone(),
                         }),
                     },
                 ]),
@@ -1927,7 +1891,7 @@ mod tests {
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Migrate {
                     contract_addr: contract_address.to_string(),
                     new_code_id,
-                    msg: to_binary(&MigrateMsg {}).unwrap(),
+                    msg: binary_msg.clone(),
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: other_address.to_string(),
@@ -2118,6 +2082,7 @@ mod tests {
 
     fn th_build_mock_proposal(deps: DepsMut, mock_proposal: MockProposal) -> Proposal {
         let proposal = Proposal {
+            proposal_id: mock_proposal.id,
             submitter_address: Addr::unchecked("submitter"),
             status: mock_proposal.status,
             for_votes: mock_proposal.for_votes,
