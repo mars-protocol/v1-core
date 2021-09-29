@@ -1,6 +1,7 @@
-use cosmwasm_std::{to_binary, Addr, Binary, ContractResult, Decimal, QuerierResult};
+use cosmwasm_std::{to_binary, Addr, Binary, ContractResult, QuerierResult};
 use std::collections::HashMap;
 
+use crate::math::decimal::Decimal;
 use crate::oracle::msg::{AssetPriceResponse, QueryMsg};
 
 pub struct OracleQuerier {

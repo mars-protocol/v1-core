@@ -1,7 +1,7 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env,
-    MessageInfo, Order, OverflowError, OverflowOperation, QueryRequest, Response, StdError,
-    StdResult, Uint128, WasmMsg, WasmQuery,
+    attr, entry_point, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
+    OverflowError, OverflowOperation, QueryRequest, Response, StdError, StdResult, Uint128,
+    WasmMsg, WasmQuery,
 };
 
 use crate::error::ContractError;
@@ -12,6 +12,7 @@ use mars::address_provider::{helpers::query_addresses, msg::MarsContract};
 use mars::error::MarsError;
 use mars::helpers::option_string_to_addr;
 use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use mars::math::decimal::Decimal;
 
 // INIT
 

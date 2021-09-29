@@ -1,6 +1,17 @@
-import { Dec, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { deployContract, executeContract, queryContract, setTimeoutDuration, sleep } from "../helpers.js"
+import {
+  Dec,
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import { strictEqual } from "assert"
+import {
+  deployContract,
+  executeContract,
+  queryContract,
+  setTimeoutDuration,
+  sleep
+} from "../helpers.js"
 
 // HELPERS
 
@@ -29,7 +40,11 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
 // TESTS
 
-async function testLunaPrice(terra: LCDClient, deployer: Wallet, oracle: string) {
+async function testLunaPrice(
+  terra: LCDClient,
+  deployer: Wallet,
+  oracle: string,
+) {
   console.log("testLunaPrice")
 
   await executeContract(terra, deployer, oracle,
@@ -41,13 +56,20 @@ async function testLunaPrice(terra: LCDClient, deployer: Wallet, oracle: string)
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom: "uluna" } } } })
+  const marsOraclePrice = await queryContract(terra, oracle,
+    { asset_price: { asset: { native: { denom: "uluna" } } } }
+  )
   const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
 
   strictEqual(new Dec(marsOraclePrice).toString(), terraOraclePrice?.amount.toString())
 }
 
-async function testNativeTokenPrice(terra: LCDClient, deployer: Wallet, oracle: string, denom: string) {
+async function testNativeTokenPrice(
+  terra: LCDClient,
+  deployer: Wallet,
+  oracle: string,
+  denom: string,
+) {
   console.log("testNativeTokenPrice:", denom)
 
   await executeContract(terra, deployer, oracle,
@@ -59,7 +81,9 @@ async function testNativeTokenPrice(terra: LCDClient, deployer: Wallet, oracle: 
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle, { asset_price: { asset: { native: { denom } } } })
+  const marsOraclePrice = await queryContract(terra, oracle,
+    { asset_price: { asset: { native: { denom } } } }
+  )
   const terraOraclePrice = await terra.oracle.exchangeRate(denom)
   const terraOracleLunaUsdPrice = await terra.oracle.exchangeRate("uusd")
 
@@ -82,9 +106,7 @@ async function main() {
   console.log("upload contracts")
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   await testLunaPrice(terra, deployer, oracle)

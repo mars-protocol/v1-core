@@ -1,15 +1,15 @@
 use cosmwasm_std::{
     from_binary, from_slice,
     testing::{MockQuerier, MOCK_CONTRACT_ADDR},
-    Addr, Coin, Decimal, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128,
-    WasmQuery,
+    Addr, Coin, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128, WasmQuery,
 };
 use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
 use terraswap::asset::PairInfo;
 
 use crate::{
-    address_provider, incentives, ma_token, oracle, testing::mock_address_provider, xmars_token,
+    address_provider, incentives, ma_token, oracle, testing::mock_address_provider, vesting,
+    xmars_token,
 };
 
 use super::{
@@ -18,8 +18,10 @@ use super::{
     incentives_querier::IncentivesQuerier,
     native_querier::NativeQuerier,
     oracle_querier::OracleQuerier,
+    vesting_querier::VestingQuerier,
     xmars_querier::XMarsQuerier,
 };
+use crate::math::decimal::Decimal;
 
 pub struct MarsMockQuerier {
     base: MockQuerier<TerraQueryWrapper>,
@@ -28,6 +30,7 @@ pub struct MarsMockQuerier {
     xmars_querier: XMarsQuerier,
     astroport_pair_querier: AstroportPairQuerier,
     oracle_querier: OracleQuerier,
+    vesting_querier: VestingQuerier,
     incentives_querier: IncentivesQuerier,
 }
 
@@ -54,9 +57,10 @@ impl MarsMockQuerier {
             base,
             native_querier: NativeQuerier::default(),
             cw20_querier: Cw20Querier::default(),
-            oracle_querier: OracleQuerier::default(),
             xmars_querier: XMarsQuerier::default(),
             astroport_pair_querier: AstroportPairQuerier::default(),
+            oracle_querier: OracleQuerier::default(),
+            vesting_querier: VestingQuerier::default(),
             incentives_querier: IncentivesQuerier::default(),
         }
     }
@@ -135,6 +139,16 @@ impl MarsMockQuerier {
         self.xmars_querier.total_supplies_at.insert(block, balance);
     }
 
+    pub fn set_vesting_address(&mut self, address: Addr) {
+        self.vesting_querier.vesting_address = address;
+    }
+
+    pub fn set_locked_voting_power_at(&mut self, address: Addr, block: u64, voting_power: Uint128) {
+        self.vesting_querier
+            .voting_power_at
+            .insert((address, block), voting_power);
+    }
+
     pub fn set_astroport_pair(&mut self, pair_info: PairInfo) {
         let asset_infos = &pair_info.asset_infos;
         let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
@@ -159,6 +173,7 @@ impl MarsMockQuerier {
 
             QueryRequest::Wasm(WasmQuery::Smart { contract_addr, msg }) => {
                 let contract_addr = Addr::unchecked(contract_addr);
+
                 // Cw20 Queries
                 let parse_cw20_query: StdResult<Cw20QueryMsg> = from_binary(msg);
                 if let Ok(cw20_query) = parse_cw20_query {
@@ -212,6 +227,14 @@ impl MarsMockQuerier {
                     return self
                         .incentives_querier
                         .handle_query(&contract_addr, incentives_query);
+                }
+
+                // Vesting Queries
+                let parse_vesting_query: StdResult<vesting::msg::QueryMsg> = from_binary(msg);
+                if let Ok(vesting_query) = parse_vesting_query {
+                    return self
+                        .vesting_querier
+                        .handle_query(&contract_addr, vesting_query);
                 }
 
                 panic!("[mock]: Unsupported wasm query: {:?}", msg);

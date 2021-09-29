@@ -1,4 +1,8 @@
-import { BlockTxBroadcastResult, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual } from "assert"
 import fetch from "node-fetch"
@@ -12,6 +16,12 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import {
+  getBlockHeight,
+  mintCw20,
+  queryBalanceCw20,
+  transferCw20
+} from "./test_helpers.js"
 
 // CONSTS
 
@@ -38,40 +48,30 @@ const LUNA_USD_PRICE = 25
 
 // HELPERS
 
-async function getBlockHeight(terra: LCDClient, txResult: BlockTxBroadcastResult) {
-  await sleep(100)
-  const txInfo = await terra.tx.txInfo(txResult.txhash)
-  return txInfo.height
-}
-
 async function getLatestBlockHeight() {
   const response = await fetch(`${LOCAL_TERRA_LCD_URL}/blocks/latest`)
   const obj: any = await response.json()
   return parseInt(obj.block.header.height)
 }
 
-async function assertXmarsBalanceAt(terra: LCDClient, xMars: string, address: string, block: number, expectedBalance: number) {
+async function assertXmarsBalanceAt(
+  terra: LCDClient,
+  xMars: string,
+  address: string,
+  block: number,
+  expectedBalance: number,
+) {
   const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      mint: {
-        recipient,
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function castVote(terra: LCDClient, wallet: Wallet, council: string, proposalId: number, vote: string) {
+async function castVote(
+  terra: LCDClient,
+  wallet: Wallet,
+  council: string,
+  proposalId: number,
+  vote: string,
+) {
   return await executeContract(terra, wallet, council,
     {
       cast_vote: {
@@ -143,9 +143,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: council
-    }
+    { owner: council }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
@@ -159,6 +157,17 @@ async function main() {
         treasury_fee_share: "0.2",
         ma_token_code_id: maTokenCodeId,
         close_factor: "0.5",
+      }
+    }
+  )
+
+  const vesting = await deployContract(terra, deployer, "../artifacts/vesting.wasm",
+    {
+      address_provider_address: addressProvider,
+      default_unlock_schedule: {
+        start_time: 0,
+        cliff: 0,
+        duration: 0
       }
     }
   )
@@ -195,6 +204,7 @@ async function main() {
           oracle_address: oracle,
           red_bank_address: redBank,
           staking_address: staking,
+          vesting_address: vesting,
           xmars_token_address: xMars,
           protocol_admin_address: deployer.key.accAddress,
         }
@@ -312,14 +322,7 @@ async function main() {
 
   console.log("alice sends entire xMars balance to bob")
 
-  await executeContract(terra, alice, xMars,
-    {
-      transfer: {
-        recipient: bob.key.accAddress,
-        amount: String(ALICE_XMARS_BALANCE)
-      }
-    }
-  )
+  await transferCw20(terra, alice, xMars, bob.key.accAddress, ALICE_XMARS_BALANCE)
 
   await assertXmarsBalanceAt(terra, xMars, alice.key.accAddress, blockHeight - 1, ALICE_XMARS_BALANCE)
   await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, blockHeight - 1, BOB_XMARS_BALANCE)
@@ -346,28 +349,28 @@ async function main() {
 
   console.log("- alice's proposal passes, so her Mars deposit is returned")
 
-  const aliceMarsBalanceBefore = await queryCw20Balance(terra, alice.key.accAddress, mars)
+  const aliceMarsBalanceBefore = await queryBalanceCw20(terra, alice.key.accAddress, mars)
 
   await executeContract(terra, deployer, council, { end_proposal: { proposal_id: aliceProposalId } })
 
   const aliceProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: aliceProposalId } })
   strictEqual(aliceProposalStatus.status, "passed")
 
-  const aliceMarsBalanceAfter = await queryCw20Balance(terra, alice.key.accAddress, mars)
+  const aliceMarsBalanceAfter = await queryBalanceCw20(terra, alice.key.accAddress, mars)
   strictEqual(aliceMarsBalanceAfter, aliceMarsBalanceBefore + ALICE_PROPOSAL_DEPOSIT)
 
   console.log("- bob's proposal was rejected, so his Mars deposit is sent to the staking contract")
 
-  const bobMarsBalanceBefore = await queryCw20Balance(terra, bob.key.accAddress, mars)
-  const stakingContractMarsBalanceBefore = await queryCw20Balance(terra, staking, mars)
+  const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+  const stakingContractMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
 
   await executeContract(terra, deployer, council, { end_proposal: { proposal_id: bobProposalId } })
 
   const bobProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: bobProposalId } })
   strictEqual(bobProposalStatus.status, "rejected")
 
-  const bobMarsBalanceAfter = await queryCw20Balance(terra, bob.key.accAddress, mars)
-  const stakingContractMarsBalanceAfter = await queryCw20Balance(terra, staking, mars)
+  const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
+  const stakingContractMarsBalanceAfter = await queryBalanceCw20(terra, staking, mars)
   strictEqual(bobMarsBalanceAfter, bobMarsBalanceBefore)
   strictEqual(stakingContractMarsBalanceAfter, stakingContractMarsBalanceBefore + BOB_PROPOSAL_DEPOSIT)
 
@@ -384,10 +387,10 @@ async function main() {
   strictEqual(marketsList.markets_list[0].denom, "uluna")
 
   // check that the asset has been initialised in the oracle contract
-  const assetPriceConfig = await queryContract(terra, oracle,
-    { asset_price_config: { asset: { native: { denom: "uluna" } } } }
+  const assetConfig = await queryContract(terra, oracle,
+    { asset_config: { asset: { native: { denom: "uluna" } } } }
   )
-  strictEqual(parseInt(assetPriceConfig.price_source.fixed.price), LUNA_USD_PRICE)
+  strictEqual(parseInt(assetConfig.price_source.fixed.price), LUNA_USD_PRICE)
 
   console.log("OK")
 }

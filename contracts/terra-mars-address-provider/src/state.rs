@@ -32,6 +32,8 @@ pub struct Config {
     pub staking_address: Addr,
     /// Treasury contract address
     pub treasury_address: Addr,
+    /// Vesting contract address
+    pub vesting_address: Addr,
     /// xMars token address
     pub xmars_token_address: Addr,
 }

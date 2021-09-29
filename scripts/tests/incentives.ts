@@ -1,51 +1,50 @@
 import {
-  BlockTxBroadcastResult,
   LCDClient,
   LocalTerra,
   Wallet
 } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
 import { join } from "path"
+import 'dotenv/config.js'
 import {
   deployContract,
   executeContract,
-  queryContract,
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
+import {
+  depositNative,
+  getTxTimestamp,
+  queryBalanceCw20,
+  queryMaAssetAddress,
+  setAssetOraclePriceSource,
+  transferCw20,
+  withdraw
+} from "./test_helpers.js"
 
 // CONSTS
 
-const CW_PLUS_ARTIFACTS_PATH = "../../cw-plus/artifacts"
-const TERRASWAP_ARTIFACTS_PATH = "../../terraswap/artifacts"
+// required environment variables:
+const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
+const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
 
 const INCENTIVES_UMARS_BALANCE = 1_000_000_000000
-
 const ULUNA_UMARS_EMISSION_RATE = 2_000000
 const UUSD_UMARS_EMISSION_RATE = 4_000000
+const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
 // multiples of coins to deposit and withdraw from the red bank
 const X = 10_000_000000
 
 // HELPERS
 
-async function maAssetAddress(terra: LCDClient, redBank: string, denom: string) {
-  const market = await queryContract(terra, redBank, { market: { asset: { native: { denom: denom } } } })
-  return market.ma_token_address
-}
-
-async function setAsset(terra: LCDClient, wallet: Wallet, oracle: string, denom: string, price: number) {
-  await executeContract(terra, wallet, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: denom } },
-        price_source: { fixed: { price: String(price) } }
-      }
-    }
-  )
-}
-
-async function setAssetIncentive(terra: LCDClient, wallet: Wallet, incentives: string, maTokenAddress: string, umarsEmissionRate: number) {
+async function setAssetIncentive(
+  terra: LCDClient,
+  wallet: Wallet,
+  incentives: string,
+  maTokenAddress: string,
+  umarsEmissionRate: number,
+) {
   await executeContract(terra, wallet, incentives,
     {
       set_asset_incentive: {
@@ -56,43 +55,27 @@ async function setAssetIncentive(terra: LCDClient, wallet: Wallet, incentives: s
   )
 }
 
-async function txTimestamp(terra: LCDClient, result: BlockTxBroadcastResult) {
-  const txInfo = await terra.tx.txInfo(result.txhash)
-  return Date.parse(txInfo.timestamp) / 1000 // seconds
-}
-
-async function deposit(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  const result = await executeContract(terra, wallet, redBank, { deposit_native: { denom: denom } }, `${amount}${denom}`)
-  return await txTimestamp(terra, result)
-}
-
-async function claimRewards(terra: LCDClient, wallet: Wallet, incentives: string) {
+async function claimRewards(
+  terra: LCDClient,
+  wallet: Wallet,
+  incentives: string,
+) {
   const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} })
-  return await txTimestamp(terra, result)
+  return await getTxTimestamp(terra, result)
 }
 
-async function queryBalance(terra: LCDClient, wallet: Wallet, token: string) {
-  const result = await queryContract(terra, token, { balance: { address: wallet.key.accAddress } })
-  return parseInt(result.balance)
-}
-
-function computeExpectedRewards(startTime: number, endTime: number, umarsRate: number) {
+function computeExpectedRewards(
+  startTime: number,
+  endTime: number,
+  umarsRate: number,
+) {
   return (endTime - startTime) * umarsRate
 }
 
-async function withdrawUusd(terra: LCDClient, wallet: Wallet, redBank: string, amount: number) {
-  const result = await executeContract(terra, wallet, redBank,
-    {
-      withdraw: {
-        asset: { native: { denom: "uusd" } },
-        amount: String(amount),
-      }
-    }
-  )
-  return await txTimestamp(terra, result)
-}
-
-function assertqueryBalance(balance: number, expectedBalance: number) {
+function assertBalance(
+  balance: number,
+  expectedBalance: number,
+) {
   return strictEqual(balance, Math.floor(expectedBalance))
 }
 
@@ -234,8 +217,13 @@ async function main() {
       }
     }
   )
-  await setAsset(terra, deployer, oracle, "uluna", 25)
-  const maUluna = await maAssetAddress(terra, redBank, "uluna")
+
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uluna" } },
+    25
+  )
+
+  const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -265,8 +253,13 @@ async function main() {
       }
     }
   )
-  await setAsset(terra, deployer, oracle, "uusd", 1)
-  const maUusd = await maAssetAddress(terra, redBank, "uusd")
+
+  await setAssetOraclePriceSource(terra, deployer, oracle,
+    { native: { denom: "uusd" } },
+    1
+  )
+
+  const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 
   console.log("set incentives")
 
@@ -277,115 +270,118 @@ async function main() {
 
   console.log("deposit assets")
 
-  const aliceLunaDepositTime = await deposit(terra, alice, redBank, "uluna", X)
-  const aliceUsdDepositTime = await deposit(terra, alice, redBank, "uusd", X)
-  const bobLunaDepositTime = await deposit(terra, bob, redBank, "uluna", X)
-  const carolLunaDepositTime = await deposit(terra, carol, redBank, "uluna", 2 * X)
-  const danUsdDepositTime = await deposit(terra, dan, redBank, "uusd", X)
+  let result = await depositNative(terra, alice, redBank, "uluna", X)
+  const aliceLunaDepositTime = await getTxTimestamp(terra, result)
+
+  result = await depositNative(terra, alice, redBank, "uusd", X)
+  const aliceUsdDepositTime = await getTxTimestamp(terra, result)
+
+  result = await depositNative(terra, bob, redBank, "uluna", X)
+  const bobLunaDepositTime = await getTxTimestamp(terra, result)
+
+  result = await depositNative(terra, carol, redBank, "uluna", 2 * X)
+  const carolLunaDepositTime = await getTxTimestamp(terra, result)
+
+  result = await depositNative(terra, dan, redBank, "uusd", X)
+  const danUsdDepositTime = await getTxTimestamp(terra, result)
 
   const aliceClaimRewardsTime = await claimRewards(terra, alice, incentives)
-  let aliceXmarsBalance = await queryBalance(terra, alice, xMars)
+  let aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   let expectedAliceXmarsBalance =
     computeExpectedRewards(aliceLunaDepositTime, bobLunaDepositTime, ULUNA_UMARS_EMISSION_RATE) +
     computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(carolLunaDepositTime, aliceClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4) +
     computeExpectedRewards(aliceUsdDepositTime, danUsdDepositTime, UUSD_UMARS_EMISSION_RATE) +
     computeExpectedRewards(danUsdDepositTime, aliceClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
-  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   const bobClaimRewardsTime = await claimRewards(terra, bob, incentives)
-  let bobXmarsBalance = await queryBalance(terra, bob, xMars)
+  let bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   let expectedBobXmarsBalance =
     computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(carolLunaDepositTime, bobClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4)
-  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   const carolClaimRewardsTime = await claimRewards(terra, carol, incentives)
-  const carolXmarsBalance = await queryBalance(terra, carol, xMars)
+  const carolXmarsBalance = await queryBalanceCw20(terra, carol.key.accAddress, xMars)
   const expectedCarolXmarsBalance = computeExpectedRewards(carolLunaDepositTime, carolClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 2)
-  assertqueryBalance(carolXmarsBalance, expectedCarolXmarsBalance)
+  assertBalance(carolXmarsBalance, expectedCarolXmarsBalance)
 
   const danClaimRewardsTime = await claimRewards(terra, dan, incentives)
-  const danXmarsBalance = await queryBalance(terra, dan, xMars)
+  const danXmarsBalance = await queryBalanceCw20(terra, dan.key.accAddress, xMars)
   const expectedDanXmarsBalance = computeExpectedRewards(danUsdDepositTime, danClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
-  assertqueryBalance(danXmarsBalance, expectedDanXmarsBalance)
+  assertBalance(danXmarsBalance, expectedDanXmarsBalance)
 
   console.log("turn off uluna incentives")
 
-  const ulunaIncentiveEndTime = await txTimestamp(
-    terra,
-    await executeContract(terra, deployer, incentives,
-      {
-        set_asset_incentive: {
-          ma_token_address: maUluna,
-          emission_per_second: "0"
-        }
+  result = await executeContract(terra, deployer, incentives,
+    {
+      set_asset_incentive: {
+        ma_token_address: maUluna,
+        emission_per_second: "0"
       }
-    )
+    }
   )
+  const ulunaIncentiveEndTime = await getTxTimestamp(terra, result)
 
   // Bob accrues rewards for uluna until the rewards were turned off
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryBalance(terra, bob, xMars)
-  expectedBobXmarsBalance += computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
-  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
+  expectedBobXmarsBalance +=
+    computeExpectedRewards(bobClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4)
+  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   // Alice accrues rewards for uluna until the rewards were turned off,
   // and continues to accrue rewards for uusd
   const aliceClaimRewardsTime2 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   expectedAliceXmarsBalance +=
     computeExpectedRewards(aliceClaimRewardsTime, ulunaIncentiveEndTime, ULUNA_UMARS_EMISSION_RATE / 4) +
     computeExpectedRewards(aliceClaimRewardsTime, aliceClaimRewardsTime2, UUSD_UMARS_EMISSION_RATE / 2)
-  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
-  console.log("transfer uusd")
+  console.log("transfer maUusd")
 
-  const uusdTransferTime = await txTimestamp(
-    terra,
-    await executeContract(terra, alice, maUusd,
-      {
-        transfer: {
-          recipient: bob.key.accAddress,
-          amount: String(X / 2),
-        }
-      }
-    )
-  )
+  result = await transferCw20(terra, alice, maUusd, bob.key.accAddress, X / 2 * MA_TOKEN_SCALING_FACTOR)
+  const uusdTransferTime = await getTxTimestamp(terra, result)
 
   // Alice accrues rewards for X uusd until transferring X/2 uusd to Bob,
   // then accrues rewards for X/2 uusd
   const aliceClaimRewardsTime3 = await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
   expectedAliceXmarsBalance +=
     computeExpectedRewards(aliceClaimRewardsTime2, uusdTransferTime, UUSD_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(uusdTransferTime, aliceClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for uusd after receiving X/2 uusd from Alice
   const bobClaimRewardsTime3 = await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryBalance(terra, bob, xMars)
-  expectedBobXmarsBalance += computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
-  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
+  expectedBobXmarsBalance +=
+    computeExpectedRewards(uusdTransferTime, bobClaimRewardsTime3, UUSD_UMARS_EMISSION_RATE / 4)
+  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("withdraw uusd")
 
-  const aliceWithdrawUusdTime = await withdrawUusd(terra, alice, redBank, X / 2)
-  const bobWithdrawUusdTime = await withdrawUusd(terra, bob, redBank, X / 2)
+  result = await withdraw(terra, alice, redBank, { native: { denom: "uusd" } }, X / 2)
+  const aliceWithdrawUusdTime = await getTxTimestamp(terra, result)
+  result = await withdraw(terra, bob, redBank, { native: { denom: "uusd" } }, X / 2)
+  const bobWithdrawUusdTime = await getTxTimestamp(terra, result)
 
   // Alice accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, alice, incentives)
-  aliceXmarsBalance = await queryBalance(terra, alice, xMars)
-  expectedAliceXmarsBalance += computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
-  assertqueryBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
+  aliceXmarsBalance = await queryBalanceCw20(terra, alice.key.accAddress, xMars)
+  expectedAliceXmarsBalance +=
+    computeExpectedRewards(aliceClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4)
+  assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
   // Bob accrues rewards for X/2 uusd until withdrawing
   await claimRewards(terra, bob, incentives)
-  bobXmarsBalance = await queryBalance(terra, bob, xMars)
+  bobXmarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars)
   expectedBobXmarsBalance +=
     computeExpectedRewards(bobClaimRewardsTime3, aliceWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 4) +
     computeExpectedRewards(aliceWithdrawUusdTime, bobWithdrawUusdTime, UUSD_UMARS_EMISSION_RATE / 3)
-  assertqueryBalance(bobXmarsBalance, expectedBobXmarsBalance)
+  assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("OK")
 }

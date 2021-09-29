@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Binary, Decimal, Deps, DepsMut, Env, Event, MessageInfo,
-    QuerierWrapper, QueryRequest, Response, StdError, StdResult, Uint128, WasmQuery,
+    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, QuerierWrapper,
+    QueryRequest, Response, StdError, StdResult, Uint128, WasmQuery,
 };
 use terra_cosmwasm::TerraQuerier;
 
@@ -22,6 +22,7 @@ use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAss
 use crate::astroport::pair::{
     CumulativePricesResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
 };
+use mars::math::decimal::Decimal;
 
 // INIT
 
@@ -273,7 +274,7 @@ fn query_asset_price(
 
             match asset_prices_query {
                 Some(exchange_rate_item) => Ok(AssetPriceResponse {
-                    price: exchange_rate_item.exchange_rate,
+                    price: exchange_rate_item.exchange_rate.into(),
                     last_updated: env.block.time.seconds(),
                 }),
                 None => Err(StdError::generic_err("No native price found")),

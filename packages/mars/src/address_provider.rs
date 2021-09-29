@@ -48,6 +48,8 @@ pub mod msg {
         /// Treasury contract accumulates protocol fees that can be spent by the council through
         /// the voting of proposals
         pub treasury_address: Option<String>,
+        /// Vesting contract
+        pub vesting_address: Option<String>,
         /// xMars token cw20 contract
         pub xmars_token_address: Option<String>,
     }
@@ -65,6 +67,7 @@ pub mod msg {
         RedBank,
         Staking,
         Treasury,
+        Vesting,
         XMarsToken,
     }
 
@@ -92,6 +95,7 @@ pub mod msg {
         pub red_bank_address: Addr,
         pub staking_address: Addr,
         pub treasury_address: Addr,
+        pub vesting_address: Addr,
         pub xmars_token_address: Addr,
     }
 }

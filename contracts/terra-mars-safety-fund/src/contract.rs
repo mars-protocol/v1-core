@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, Uint128,
+    entry_point, to_binary, Binary, CosmosMsg, Decimal as StdDecimal, Deps, DepsMut, Env,
+    MessageInfo, Response, StdResult, Uint128,
 };
 use terraswap::asset::AssetInfo;
 
@@ -95,7 +95,7 @@ pub fn execute_update_config(
     info: MessageInfo,
     owner: Option<String>,
     astroport_factory_address: Option<String>,
-    astroport_max_spread: Option<Decimal>,
+    astroport_max_spread: Option<StdDecimal>,
 ) -> Result<Response, MarsError> {
     let mut config = CONFIG.load(deps.storage)?;
 
@@ -172,7 +172,7 @@ mod tests {
     use cosmwasm_std::{
         attr,
         testing::{mock_dependencies, mock_env, mock_info},
-        Addr, BankMsg, Coin, Decimal, SubMsg, Uint128,
+        Addr, BankMsg, Coin, SubMsg, Uint128,
     };
 
     #[test]
@@ -182,7 +182,7 @@ mod tests {
         let msg = InstantiateMsg {
             owner: String::from("owner"),
             astroport_factory_address: String::from("astroport_factory"),
-            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_max_spread: StdDecimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
 
@@ -204,7 +204,7 @@ mod tests {
         let msg = InstantiateMsg {
             owner: String::from("owner"),
             astroport_factory_address: String::from("astroport_factory"),
-            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_max_spread: StdDecimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -227,7 +227,7 @@ mod tests {
         let msg = UpdateConfig {
             owner: Some(String::from("new_owner")),
             astroport_factory_address: Some(String::from("new_factory")),
-            astroport_max_spread: Some(Decimal::from_ratio(10u128, 100u128)),
+            astroport_max_spread: Some(StdDecimal::from_ratio(10u128, 100u128)),
         };
         let info = mock_info("owner", &[]);
         // we can just call .unwrap() to assert this was a success
@@ -244,7 +244,7 @@ mod tests {
         );
         assert_eq!(
             new_config.astroport_max_spread,
-            Decimal::from_ratio(10u128, 100u128)
+            StdDecimal::from_ratio(10u128, 100u128)
         );
     }
 
@@ -255,7 +255,7 @@ mod tests {
         let msg = InstantiateMsg {
             owner: String::from("owner"),
             astroport_factory_address: String::from("astroport_factory"),
-            astroport_max_spread: Decimal::from_ratio(1u128, 100u128),
+            astroport_max_spread: StdDecimal::from_ratio(1u128, 100u128),
         };
         let info = mock_info("owner", &[]);
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();

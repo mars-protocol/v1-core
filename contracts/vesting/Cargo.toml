@@ -1,7 +1,7 @@
 [package]
-name = "terra-mars-incentives"
-version = "1.0.0"
-authors = ["Spike Spiegel <spikeonmars@protonmail.com>"]
+name = "vesting"
+version = "0.1.0"
+authors = ["larry_0x <larry@delphidigital.io>"]
 edition = "2018"
 
 exclude = [
@@ -20,16 +20,17 @@ crate-type = ["cdylib", "rlib"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-terra-mars = { path = "../../packages/terra-mars", version = "1.0.0" }
+mars = { path = "../../packages/mars", version = "0.1.0" }
 
+terra-cosmwasm = "2.2.0"
+
+cosmwasm-std = "0.16.0"
 cw20 = "0.8"
-
-cosmwasm-std = { version = "0.16.2" }
-cw-storage-plus = { version = "0.8.0" }
+cw-storage-plus = "0.8.0"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.20"
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.2"
+cosmwasm-schema = "0.16.0"

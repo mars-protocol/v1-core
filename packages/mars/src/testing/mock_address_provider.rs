@@ -43,6 +43,7 @@ fn get_contract_address(contract: MarsContract) -> Addr {
         MarsContract::RedBank => Addr::unchecked("red_bank"),
         MarsContract::Staking => Addr::unchecked("staking"),
         MarsContract::Treasury => Addr::unchecked("treasury"),
+        MarsContract::Vesting => Addr::unchecked("vesting"),
         MarsContract::XMarsToken => Addr::unchecked("xmars_token"),
     }
 }

@@ -1,5 +1,6 @@
-use cosmwasm_std::{Decimal, OverflowError, StdError};
+use cosmwasm_std::{OverflowError, StdError};
 use mars::error::MarsError;
+use mars::math::decimal::Decimal;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]

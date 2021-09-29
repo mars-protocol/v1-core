@@ -1,4 +1,9 @@
-import { Coin, LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
+import {
+  LCDClient,
+  LocalTerra,
+  Wallet
+} from "@terra-money/terra.js"
+import { strictEqual } from "assert"
 import {
   deployContract,
   executeContract,
@@ -6,7 +11,11 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strictEqual } from "assert"
+import {
+  borrowNative,
+  depositNative,
+  setAssetOraclePriceSource
+} from "./test_helpers.js"
 
 // CONSTS
 
@@ -16,13 +25,15 @@ const USD_BORROW = 100_000_000_000000
 
 // HELPERS
 
-async function getDebt(terra: LCDClient, borrower: Wallet, redBank: string) {
+async function getDebt(
+  terra: LCDClient,
+  borrower: Wallet,
+  redBank: string,
+) {
   const debts = await queryContract(terra, redBank,
     { user_debt: { user_address: borrower.key.accAddress } }
   )
-
   const debt = debts.debts.filter((coin: any) => coin.denom == "uusd")[0].amount_scaled
-
   return parseInt(debt)
 }
 
@@ -35,13 +46,13 @@ async function main() {
   const deployer = terra.wallets.test1
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
+  // mock contract addresses
+  const protocolRewardsCollector = terra.wallets.test10.key.accAddress
 
   console.log("upload contracts")
 
   const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const incentives = await deployContract(terra, deployer, "../artifacts/incentives.wasm",
@@ -52,9 +63,7 @@ async function main() {
   )
 
   const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
-    {
-      owner: deployer.key.accAddress
-    }
+    { owner: deployer.key.accAddress }
   )
 
   const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
@@ -80,6 +89,7 @@ async function main() {
           incentives_address: incentives,
           oracle_address: oracle,
           red_bank_address: redBank,
+          protocol_rewards_collector: protocolRewardsCollector,
           protocol_admin_address: deployer.key.accAddress,
         }
       }
@@ -92,11 +102,7 @@ async function main() {
   await executeContract(terra, deployer, redBank,
     {
       init_asset: {
-        asset: {
-          native: {
-            denom: "uluna"
-          }
-        },
+        asset: { native: { denom: "uluna" } },
         asset_params: {
           initial_borrow_rate: "0.1",
           max_loan_to_value: "0.55",
@@ -121,24 +127,13 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: "uluna" } },
-        price_source: { fixed: { price: "25" } }
-      }
-    }
-  )
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
 
   // uusd
   await executeContract(terra, deployer, redBank,
     {
       init_asset: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
+        asset: { native: { denom: "uusd" } },
         asset_params: {
           initial_borrow_rate: "0.2",
           max_loan_to_value: "0.75",
@@ -163,53 +158,21 @@ async function main() {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
-    {
-      set_asset: {
-        asset: { native: { denom: "uusd" } },
-        price_source: { fixed: { price: "1" } }
-      }
-    }
-  )
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
 
   // TESTS
 
   console.log("provide usd")
 
-  await executeContract(terra, provider, redBank,
-    {
-      deposit_native: {
-        denom: "uusd"
-      }
-    },
-    `${USD_COLLATERAL}uusd`
-  )
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
 
   console.log("provide luna")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      deposit_native: {
-        denom: "uluna"
-      }
-    },
-    `${LUNA_COLLATERAL}uluna`
-  )
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
 
   console.log("borrow")
 
-  await executeContract(terra, borrower, redBank,
-    {
-      borrow: {
-        asset: {
-          native: {
-            denom: "uusd"
-          }
-        },
-        amount: String(USD_BORROW)
-      }
-    }
-  )
+  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
 
   console.log("repay")
 
@@ -219,11 +182,7 @@ async function main() {
 
   while (debt > 0) {
     await executeContract(terra, borrower, redBank,
-      {
-        repay_native: {
-          denom: "uusd"
-        }
-      },
+      { repay_native: { denom: "uusd" } },
       `${repay}uusd`
     )
 

@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Decimal, Deps, StdError, StdResult, Uint128};
+use cosmwasm_std::{Addr, Deps, StdError, StdResult, Uint128};
 
 use crate::msg::UserHealthStatus;
 use mars::asset::AssetType;
@@ -10,6 +10,7 @@ use crate::interest_rates::{
     get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
 };
 use crate::state::{Debt, User, DEBTS};
+use mars::math::decimal::Decimal;
 
 /// User global position
 pub struct UserPosition {
@@ -154,7 +155,7 @@ fn get_user_asset_positions(
                 user_address.clone(),
             )?;
 
-            let liquidity_index = get_updated_liquidity_index(&market, block_time);
+            let liquidity_index = get_updated_liquidity_index(&market, block_time)?;
             let collateral_amount = get_descaled_amount(asset_balance_scaled, liquidity_index);
 
             (
@@ -171,7 +172,7 @@ fn get_user_asset_positions(
             let user_debt: Debt =
                 DEBTS.load(deps.storage, (asset_reference_vec.as_slice(), user_address))?;
 
-            let borrow_index = get_updated_borrow_index(&market, block_time);
+            let borrow_index = get_updated_borrow_index(&market, block_time)?;
             let debt_amount = get_descaled_amount(user_debt.amount_scaled, borrow_index);
 
             (debt_amount, user_debt.uncollateralized)

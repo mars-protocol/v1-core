@@ -33,6 +33,7 @@ pub fn instantiate(
         red_bank_address: Addr::unchecked(""),
         staking_address: Addr::unchecked(""),
         treasury_address: Addr::unchecked(""),
+        vesting_address: Addr::unchecked(""),
         xmars_token_address: Addr::unchecked(""),
     };
 
@@ -82,6 +83,7 @@ pub fn execute_update_config(
         red_bank_address,
         staking_address,
         treasury_address,
+        vesting_address,
         xmars_token_address,
     } = config_params;
 
@@ -112,6 +114,8 @@ pub fn execute_update_config(
         option_string_to_addr(deps.api, staking_address, config.staking_address)?;
     config.treasury_address =
         option_string_to_addr(deps.api, treasury_address, config.treasury_address)?;
+    config.vesting_address =
+        option_string_to_addr(deps.api, vesting_address, config.vesting_address)?;
     config.xmars_token_address =
         option_string_to_addr(deps.api, xmars_token_address, config.xmars_token_address)?;
 
@@ -145,6 +149,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         red_bank_address: config.red_bank_address,
         staking_address: config.staking_address,
         treasury_address: config.treasury_address,
+        vesting_address: config.vesting_address,
         xmars_token_address: config.xmars_token_address,
     })
 }
@@ -176,6 +181,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
         MarsContract::RedBank => config.red_bank_address.clone(),
         MarsContract::Staking => config.staking_address.clone(),
         MarsContract::Treasury => config.treasury_address.clone(),
+        MarsContract::Vesting => config.vesting_address.clone(),
         MarsContract::XMarsToken => config.xmars_token_address.clone(),
     }
 }

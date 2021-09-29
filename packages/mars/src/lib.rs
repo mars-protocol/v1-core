@@ -5,15 +5,16 @@ pub mod incentives;
 pub mod ma_token;
 pub mod oracle;
 pub mod staking;
+pub mod vesting;
 pub mod xmars_token;
 
 // Types
 pub mod asset;
+pub mod math;
 
 // Helpers
 pub mod error;
 pub mod helpers;
-pub mod math;
 pub mod swapping;
 pub mod tax;
 

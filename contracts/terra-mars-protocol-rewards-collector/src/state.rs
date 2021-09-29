@@ -1,10 +1,11 @@
-use cosmwasm_std::{Addr, Decimal};
+use cosmwasm_std::{Addr, Decimal as StdDecimal};
 use cw_storage_plus::{Item, Map};
 use mars::helpers::all_conditions_valid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ContractError;
+use mars::math::decimal::Decimal;
 
 pub const CONFIG: Item<Config> = Item::new("config");
 pub const ASSET_CONFIG: Map<&[u8], AssetConfig> = Map::new("assets");
@@ -23,7 +24,7 @@ pub struct Config {
     /// Astroport factory contract address
     pub astroport_factory_address: Addr,
     /// Astroport max spread
-    pub astroport_max_spread: Decimal,
+    pub astroport_max_spread: StdDecimal,
 }
 
 impl Config {

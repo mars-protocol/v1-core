@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
-    Env, MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
+    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env,
+    MessageInfo, Order, QuerierWrapper, QueryRequest, Response, StdResult, Uint128, WasmMsg,
     WasmQuery,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -10,6 +10,7 @@ use mars::address_provider;
 use mars::address_provider::msg::MarsContract;
 use mars::error::MarsError;
 use mars::helpers::{option_string_to_addr, read_be_u64, zero_address};
+use mars::vesting;
 use mars::xmars_token;
 
 use crate::error::ContractError;
@@ -22,6 +23,7 @@ use crate::state::{
     GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES,
 };
 use crate::types::ProposalMessage;
+use mars::math::decimal::Decimal;
 
 // Proposal validation attributes
 const MIN_TITLE_LENGTH: usize = 4;
@@ -258,19 +260,33 @@ pub fn execute_cast_vote(
     }
 
     let config = CONFIG.load(deps.storage)?;
-    let xmars_token_address = address_provider::helpers::query_address(
+    let mars_contracts = vec![MarsContract::XMarsToken, MarsContract::Vesting];
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        MarsContract::XMarsToken,
+        mars_contracts,
     )?;
+    let vesting_address = addresses_query.pop().unwrap();
+    let xmars_token_address = addresses_query.pop().unwrap();
 
     let balance_at_block = proposal.start_height - 1;
-    let voting_power = xmars_get_balance_at(
+
+    // The voting power of a user consists of two parts:
+    // 1. the amount of xMARS token in the user's wallet
+    // 2. the amount of xMARS locked in the vesting contract owned by the user
+    let voting_power_free = xmars_get_balance_at(
         &deps.querier,
         xmars_token_address,
         info.sender.clone(),
         balance_at_block,
     )?;
+    let voting_power_locked = vesting_get_balance_at(
+        &deps.querier,
+        vesting_address,
+        info.sender.clone(),
+        balance_at_block,
+    )?;
+    let voting_power = voting_power_free + voting_power_locked;
 
     if voting_power.is_zero() {
         return Err(ContractError::VoteNoVotingPower {
@@ -667,6 +683,21 @@ fn xmars_get_balance_at(
     Ok(query.balance)
 }
 
+fn vesting_get_balance_at(
+    querier: &QuerierWrapper,
+    vesting_address: Addr,
+    user_address: Addr,
+    block: u64,
+) -> StdResult<Uint128> {
+    querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: vesting_address.into(),
+        msg: to_binary(&vesting::msg::QueryMsg::VotingPowerAt {
+            account: user_address.to_string(),
+            block,
+        })?,
+    }))
+}
+
 // TESTS
 
 #[cfg(test)]
@@ -674,6 +705,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{Coin, OwnedDeps, StdError, SubMsg};
+    use mars::math::decimal::Decimal;
     use mars::testing::{mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams};
 
     use crate::msg::ExecuteMsg::UpdateConfig;
@@ -1186,6 +1218,7 @@ mod tests {
             .set_xmars_balance_at(voter_address, 99_999, Uint128::new(100));
         deps.querier
             .set_xmars_balance_at(invalid_voter_address, 99_999, Uint128::zero());
+        deps.querier.set_vesting_address(Addr::unchecked("vesting"));
 
         let active_proposal_id = 1_u64;
         th_build_mock_proposal(
@@ -1299,6 +1332,10 @@ mod tests {
         deps.querier
             .set_xmars_balance_at(voter_address.clone(), 99_999, Uint128::new(100));
 
+        deps.querier.set_vesting_address(Addr::unchecked("vesting"));
+        deps.querier
+            .set_locked_voting_power_at(voter_address.clone(), 99_999, Uint128::new(23));
+
         let active_proposal = th_build_mock_proposal(
             deps.as_mut(),
             MockProposal {
@@ -1342,7 +1379,7 @@ mod tests {
                 attr("proposal_id", active_proposal_id.to_string()),
                 attr("voter", "voter"),
                 attr("vote", "for"),
-                attr("voting_power", 100.to_string()),
+                attr("voting_power", 123.to_string()), // 100 (free) + 23 (locked)
             ],
             res.attributes
         );
@@ -1350,7 +1387,7 @@ mod tests {
         let proposal = PROPOSALS
             .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128::new(100));
+        assert_eq!(proposal.for_votes, Uint128::new(123));
         assert_eq!(proposal.against_votes, Uint128::new(0));
 
         let proposal_vote = PROPOSAL_VOTES
@@ -1361,7 +1398,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(proposal_vote.option, ProposalVoteOption::For);
-        assert_eq!(proposal_vote.power, Uint128::new(100));
+        assert_eq!(proposal_vote.power, Uint128::new(123));
 
         // Voting again with same address should fail
         let msg = ExecuteMsg::CastVote {
@@ -1450,7 +1487,7 @@ mod tests {
         let proposal = PROPOSALS
             .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128::new(100 + 300));
+        assert_eq!(proposal.for_votes, Uint128::new(123 + 300));
         assert_eq!(proposal.against_votes, Uint128::new(200 + 400));
     }
 
@@ -1539,6 +1576,7 @@ mod tests {
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
             .set_xmars_total_supply_at(99_999, Uint128::new(100));
+        deps.querier.set_vesting_address(Addr::unchecked("vesting"));
 
         th_build_mock_proposal(
             deps.as_mut(),
@@ -1591,6 +1629,8 @@ mod tests {
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
             .set_xmars_total_supply_at(89_999, Uint128::new(100_000));
+        deps.querier.set_vesting_address(Addr::unchecked("vesting"));
+
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
         let proposal_quorum = Decimal::from_ratio(2_u128, 100_u128);
         let proposal_end_height = 100_000u64;
@@ -1919,6 +1959,8 @@ mod tests {
 
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
+        deps.querier.set_vesting_address(Addr::unchecked("vesting"));
+
         let active_proposal_id = 1_u64;
 
         let voter_address1 = Addr::unchecked("voter1");

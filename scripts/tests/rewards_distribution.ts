@@ -1,5 +1,13 @@
-import { Coin, Int, LCDClient, LocalTerra, MnemonicKey, Wallet } from "@terra-money/terra.js"
-import { strictEqual, strict as assert } from "assert"
+import {
+  Coin,
+  LocalTerra,
+  MnemonicKey,
+  Wallet
+} from "@terra-money/terra.js"
+import {
+  strictEqual,
+  strict as assert
+} from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
@@ -12,6 +20,19 @@ import {
   toEncodedBinary,
   uploadContract
 } from "../helpers.js"
+import {
+  borrowCw20,
+  borrowNative,
+  deductTax,
+  depositCw20,
+  depositNative,
+  mintCw20,
+  queryBalanceCw20,
+  queryMaAssetAddress,
+  queryBalanceNative,
+  setAssetOraclePriceSource,
+  approximateEqual
+} from "./test_helpers.js"
 
 // CONSTS
 
@@ -45,122 +66,7 @@ const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
 const CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT = 1_000_000_000000
 const CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT = CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT * CW20_TOKEN_USD_PRICE
 
-// HELPERS
-
-async function queryMaAssetAddress(terra: LCDClient, redBank: string, asset: Asset): Promise<string> {
-  const market = await queryContract(terra, redBank, { market: { asset: asset } })
-  return market.ma_token_address
-}
-
-async function setAssetOraclePriceSource(terra: LCDClient, wallet: Wallet, oracle: string, asset: Asset, price: number) {
-  await executeContract(terra, wallet, oracle,
-    {
-      set_asset: {
-        asset: asset,
-        price_source: { fixed: { price: String(price) } }
-      }
-    }
-  )
-}
-
-async function mintCw20(terra: LCDClient, wallet: Wallet, contract: string, recipient: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      mint: {
-        recipient: recipient,
-        amount: String(amount),
-      }
-    }
-  )
-}
-
-async function depositNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    { deposit_native: { denom: denom } },
-    `${amount}${denom}`
-  )
-}
-
-async function depositCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, contract,
-    {
-      send: {
-        contract: redBank,
-        amount: String(amount),
-        msg: toEncodedBinary({ deposit_cw20: {} })
-      }
-    }
-  )
-}
-
-async function borrowNative(terra: LCDClient, wallet: Wallet, redBank: string, denom: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { native: { denom: denom } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function borrowCw20(terra: LCDClient, wallet: Wallet, redBank: string, contract: string, amount: number) {
-  return await executeContract(terra, wallet, redBank,
-    {
-      borrow: {
-        asset: { cw20: { contract_addr: contract } },
-        amount: String(amount)
-      }
-    }
-  )
-}
-
-async function queryNativeBalance(terra: LCDClient, address: string, denom: string) {
-  const balances = await terra.bank.balance(address)
-  const balance = balances.get(denom)
-  if (balance === undefined) {
-    return 0
-  }
-  return balance.amount.toNumber()
-}
-
-async function queryCw20Balance(terra: LCDClient, userAddress: string, contractAddress: string) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
-  return parseInt(result.balance)
-}
-
-async function computeTax(terra: LCDClient, coin: Coin) {
-  const DECIMAL_FRACTION = new Int("1000000000000000000") // 10^18
-  const taxRate = await terra.treasury.taxRate()
-  const taxCap = (await terra.treasury.taxCap(coin.denom)).amount
-  const amount = coin.amount
-  const tax = amount.sub(
-    amount
-      .mul(DECIMAL_FRACTION)
-      .div(DECIMAL_FRACTION.mul(taxRate).add(DECIMAL_FRACTION))
-  )
-  return tax.gt(taxCap) ? taxCap : tax
-}
-
-async function deductTax(terra: LCDClient, coin: Coin) {
-  return coin.amount.sub(await computeTax(terra, coin)).floor()
-}
-
-function approximateEqual(actual: number, expected: number, tol: number) {
-  try {
-    assert(actual >= expected - tol && actual <= expected + tol)
-  } catch (error) {
-    strictEqual(actual, expected)
-  }
-}
-
 // TYPES
-
-interface Native { native: { denom: string } }
-
-interface CW20 { cw20: { contract_addr: string } }
-
-type Asset = Native | CW20
 
 interface Env {
   terra: LocalTerra
@@ -199,12 +105,12 @@ async function testNative(env: Env) {
   {
     console.log("provider provides uusd")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
     strictEqual(maUusdBalanceBefore, 0)
 
     await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL_AMOUNT)
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
     strictEqual(maUusdBalanceAfter, 0)
   }
 
@@ -219,21 +125,21 @@ async function testNative(env: Env) {
   {
     console.log("repay")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
 
     await executeContract(terra, borrower, redBank,
       { repay_native: { denom: "uusd" } },
       `${Math.floor(USD_BORROW_AMOUNT)}uusd`
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
     assert(maUusdBalanceAfter > maUusdBalanceBefore)
   }
 
   {
     console.log("withdraw")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
 
     await executeContract(terra, provider, redBank,
       {
@@ -244,7 +150,7 @@ async function testNative(env: Env) {
       }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
+    const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
     assert(maUusdBalanceAfter > maUusdBalanceBefore)
   }
 
@@ -253,8 +159,8 @@ async function testNative(env: Env) {
   {
     console.log("- specify an amount")
 
-    const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
 
     // withdraw half of the deposited balance
     await executeContract(terra, deployer, protocolRewardsCollector,
@@ -266,8 +172,8 @@ async function testNative(env: Env) {
       }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
     assert(maUusdBalanceAfter < maUusdBalanceBefore)
     assert(uusdBalanceAfter > uusdBalanceBefore)
   }
@@ -275,15 +181,15 @@ async function testNative(env: Env) {
   {
     console.log("- don't specify an amount")
 
-    const uusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const uusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
 
     // withdraw remaining balance
     let result = await executeContract(terra, deployer, protocolRewardsCollector,
       { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
     )
 
-    const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-    const uusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
+    const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
+    const uusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
     assert(uusdBalanceAfter > uusdBalanceBefore)
 
     // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
@@ -317,19 +223,19 @@ async function testNative(env: Env) {
   {
     console.log("distribute uusd rewards")
 
-    const protocolRewardsCollectorUusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceBefore = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceBefore = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceBefore = await queryNativeBalance(terra, staking, "uusd")
+    const protocolRewardsCollectorUusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceBefore = await queryBalanceNative(terra, treasury, "uusd")
+    const safetyFundUusdBalanceBefore = await queryBalanceNative(terra, safetyFund, "uusd")
+    const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
     await executeContract(terra, deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     )
 
-    const protocolRewardsCollectorUusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceAfter = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
+    const protocolRewardsCollectorUusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceAfter = await queryBalanceNative(terra, treasury, "uusd")
+    const safetyFundUusdBalanceAfter = await queryBalanceNative(terra, safetyFund, "uusd")
+    const stakingUusdBalanceAfter = await queryBalanceNative(terra, staking, "uusd")
 
     // Check a tight interval instead of equality for safety fund, treasury and staking transfer errors
     approximateEqual(protocolRewardsCollectorUusdBalanceAfter, 0, 3)
@@ -390,12 +296,12 @@ async function testCw20(env: Env) {
   {
     console.log("provider provides cw20 token 1")
 
-    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
     strictEqual(maCwToken1BalanceBefore, 0)
 
     await depositCw20(terra, provider, redBank, cw20Token1, CW20_TOKEN_1_COLLATERAL_AMOUNT)
 
-    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
     strictEqual(maCwToken1BalanceAfter, 0)
   }
 
@@ -410,7 +316,7 @@ async function testCw20(env: Env) {
   {
     console.log("repay")
 
-    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
 
     await executeContract(terra, borrower, cw20Token1,
       {
@@ -422,14 +328,14 @@ async function testCw20(env: Env) {
       }
     )
 
-    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
     assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
   }
 
   {
     console.log("withdraw")
 
-    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
 
     await executeContract(terra, provider, redBank,
       {
@@ -440,7 +346,7 @@ async function testCw20(env: Env) {
       }
     )
 
-    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
+    const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
     assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
   }
 
@@ -449,8 +355,8 @@ async function testCw20(env: Env) {
   {
     console.log("- specify an amount")
 
-    const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
-    const cwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw half of the deposited balance
     await executeContract(terra, deployer, protocolRewardsCollector,
@@ -462,8 +368,8 @@ async function testCw20(env: Env) {
       }
     )
 
-    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
-    const cwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
     assert(maCwToken1BalanceAfter < maCwToken1BalanceBefore)
     assert(cwToken1BalanceAfter > cwToken1BalanceBefore)
   }
@@ -471,15 +377,15 @@ async function testCw20(env: Env) {
   {
     console.log("- don't specify an amount")
 
-    const cwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    const cwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw remaining balance
     const result = await executeContract(terra, deployer, protocolRewardsCollector,
       { withdraw_from_red_bank: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     )
 
-    const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
-    const cwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, cw20Token1)
+    const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
+    const cwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
     assert(cwToken1BalanceAfter > cwToken1BalanceBefore)
 
     // withdrawing from the red bank triggers protocol rewards to be minted to the protocol rewards
@@ -502,11 +408,7 @@ async function testCw20(env: Env) {
   console.log("swap cw20 token 1 to uusd")
 
   await executeContract(terra, deployer, protocolRewardsCollector,
-    {
-      swap_asset_to_uusd: {
-        offer_asset_info: { token: { contract_addr: cw20Token1 } }
-      }
-    }
+    { swap_asset_to_uusd: { offer_asset_info: { token: { contract_addr: cw20Token1 } } } }
   )
 
   console.log("enable uusd for distribution")
@@ -523,19 +425,19 @@ async function testCw20(env: Env) {
   {
     console.log("distribute uusd rewards")
 
-    const protocolRewardsCollectorUusdBalanceBefore = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceBefore = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceBefore = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceBefore = await queryNativeBalance(terra, staking, "uusd")
+    const protocolRewardsCollectorUusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceBefore = await queryBalanceNative(terra, treasury, "uusd")
+    const safetyFundUusdBalanceBefore = await queryBalanceNative(terra, safetyFund, "uusd")
+    const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
     await executeContract(terra, deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     )
 
-    const protocolRewardsCollectorUusdBalanceAfter = await queryNativeBalance(terra, protocolRewardsCollector, "uusd")
-    const treasuryUusdBalanceAfter = await queryNativeBalance(terra, treasury, "uusd")
-    const safetyFundUusdBalanceAfter = await queryNativeBalance(terra, safetyFund, "uusd")
-    const stakingUusdBalanceAfter = await queryNativeBalance(terra, staking, "uusd")
+    const protocolRewardsCollectorUusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
+    const treasuryUusdBalanceAfter = await queryBalanceNative(terra, treasury, "uusd")
+    const safetyFundUusdBalanceAfter = await queryBalanceNative(terra, safetyFund, "uusd")
+    const stakingUusdBalanceAfter = await queryBalanceNative(terra, staking, "uusd")
 
     // Check a tight interval instead of equality for safety fund, treasury and staking transfer errors
     approximateEqual(protocolRewardsCollectorUusdBalanceAfter, 0, 3)
@@ -632,8 +534,8 @@ async function testLiquidateNative(env: Env) {
   }
 
   // get the protocol rewards collector balances before the borrower is liquidated
-  const maUusdBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-  const maUlunaBalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maUluna)
+  const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
+  const maUlunaBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUluna)
 
   await executeContract(terra, liquidator, redBank,
     {
@@ -648,8 +550,8 @@ async function testLiquidateNative(env: Env) {
   )
 
   // get the protocol rewards collector balances after the borrower is liquidated
-  const maUusdBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUusd)
-  const maUlunaBalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maUluna)
+  const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
+  const maUlunaBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUluna)
   assert(maUusdBalanceAfter > maUusdBalanceBefore)
   assert(maUlunaBalanceAfter > maUlunaBalanceBefore)
 }
@@ -720,8 +622,8 @@ async function testLiquidateCw20(env: Env) {
   }
 
   // get the protocol rewards collector balances before the borrower is liquidated
-  const maCwToken1BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
-  const maCwToken2BalanceBefore = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token2)
+  const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
+  const maCwToken2BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token2)
 
   await executeContract(terra, liquidator, cw20Token1,
     {
@@ -740,8 +642,8 @@ async function testLiquidateCw20(env: Env) {
   )
 
   // get the protocol rewards collector balances after the borrower is liquidated
-  const maCwToken1BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token1)
-  const maCwToken2BalanceAfter = await queryCw20Balance(terra, protocolRewardsCollector, maCw20Token2)
+  const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
+  const maCwToken2BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token2)
   assert(maCwToken1BalanceAfter > maCwToken1BalanceBefore)
   assert(maCwToken2BalanceAfter > maCwToken2BalanceBefore)
 }
@@ -823,7 +725,7 @@ async function main() {
           protocol_rewards_collector_address: protocolRewardsCollector,
           staking_address: staking,
           treasury_address: treasury,
-          insurance_fund_address: safetyFund,
+          safety_fund_address: safetyFund,
           incentives_address: incentives,
           oracle_address: oracle,
           red_bank_address: redBank,

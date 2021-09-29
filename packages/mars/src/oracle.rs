@@ -1,4 +1,5 @@
-use cosmwasm_std::{Addr, Decimal};
+use crate::math::decimal::Decimal;
+use cosmwasm_std::Addr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -28,10 +29,9 @@ pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use cosmwasm_std::Decimal;
-
     use super::PriceSourceUnchecked;
     use crate::asset::Asset;
+    use crate::math::decimal::Decimal;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InstantiateMsg {
@@ -82,13 +82,12 @@ pub mod msg {
 }
 
 pub mod helpers {
-    use cosmwasm_std::{
-        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdResult, WasmQuery,
-    };
+    use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, WasmQuery};
 
     use crate::asset::AssetType;
 
     use super::msg::{AssetPriceResponse, QueryMsg};
+    use crate::math::decimal::Decimal;
 
     pub fn query_price(
         querier: QuerierWrapper,
