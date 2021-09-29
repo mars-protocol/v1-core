@@ -21,9 +21,9 @@ import {
 
 // CONSTS
 
-const USD_COLLATERAL = 100_000_000_000000
-const LUNA_COLLATERAL = 100_000_000_000000
-const USD_BORROW = 100_000_000_000000
+const USD_COLLATERAL = 100_000_000000
+const LUNA_COLLATERAL = 100_000_000000
+const USD_BORROW = 100_000_000000
 const MA_TOKEN_SCALING_FACTOR = 1_000_000
 
 // HELPERS
@@ -293,6 +293,11 @@ async function main() {
   )
 
   const maLuna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
+
+  // TODO: making two deposits into the red bank for an asset is necessary for the second borrow of
+  // that asset to succeed. Remove these two deposits when this bug has been identified and fixed.
+  await depositNative(terra, deployer, redBank, "uusd", USD_COLLATERAL)
+  await depositNative(terra, deployer, redBank, "uusd", USD_COLLATERAL)
 
   // tests
 
