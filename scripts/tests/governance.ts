@@ -161,6 +161,17 @@ async function main() {
     }
   )
 
+  const vesting = await deployContract(terra, deployer, "../artifacts/vesting.wasm",
+    {
+      address_provider_address: addressProvider,
+      default_unlock_schedule: {
+        start_time: 0,
+        cliff: 0,
+        duration: 0
+      }
+    }
+  )
+
   const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
@@ -193,6 +204,7 @@ async function main() {
           oracle_address: oracle,
           red_bank_address: redBank,
           staking_address: staking,
+          vesting_address: vesting,
           xmars_token_address: xMars,
           protocol_admin_address: deployer.key.accAddress,
         }
