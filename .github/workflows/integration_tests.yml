@@ -23,7 +23,7 @@ jobs:
       matrix:
         test: [borrow_exact_liquidity]
     env:
-      CW_PLUS_ARTIFACTS_PATH: /home/cw-plus-artifacts
+      CW_PLUS_ARTIFACTS_PATH: /home/runner/work/cw-plus-artifacts
     steps:
       - uses: actions/checkout@v2
       - name: download cw-plus artifacts
