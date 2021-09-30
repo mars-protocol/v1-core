@@ -10,6 +10,7 @@ use mars_core::math::decimal::Decimal;
 
 use mars_core::address_provider;
 use mars_core::address_provider::MarsContract;
+use mars_core::staking;
 
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
