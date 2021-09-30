@@ -35,7 +35,7 @@ jobs:
         uses: actions/download-artifact@v2
         with:
           name: mars-artifacts
-          path: $GITHUB_WORKSPACE/artifacts
+          path: artifacts
       - name: npm install
         run: |
           cd $GITHUB_WORKSPACE/scripts
