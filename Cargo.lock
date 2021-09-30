@@ -434,7 +434,7 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
+ "cw-storage-plus 0.9.1",
  "mars-core",
  "terra-cosmwasm",
  "thiserror",
@@ -461,7 +461,7 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
+ "cw-storage-plus 0.9.1",
  "cw20 0.9.1",
  "mars-core",
  "schemars",
@@ -475,7 +475,7 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
+ "cw-storage-plus 0.9.1",
  "cw20 0.9.1",
  "mars-core",
  "schemars",
@@ -489,11 +489,11 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
- "cw0 0.8.0",
- "cw2 0.8.0",
- "cw20 0.8.0",
- "cw20-base 0.8.0",
+ "cw-storage-plus 0.9.1",
+ "cw0 0.9.1",
+ "cw2 0.9.1",
+ "cw20 0.9.1",
+ "cw20-base 0.9.1",
  "mars-core",
  "schemars",
  "serde",

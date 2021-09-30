@@ -15,12 +15,13 @@ use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
-use mars::cw20_core::instantiate_token_info_and_marketing;
-use mars::ma_token::msg::{BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use mars_core::cw20_core::instantiate_token_info_and_marketing;
 
+use crate::Config;
 use crate::allowances::{execute_send_from, execute_transfer_from};
 use crate::core;
-use crate::state::{Config, CONFIG};
+use crate::msg::{BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{CONFIG};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
@@ -392,13 +393,14 @@ pub fn query_underlying_asset_balance(
 mod tests {
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, Addr, CosmosMsg, StdError, SubMsg, WasmMsg};
+
     use cw20::{
         Cw20Coin, Logo, LogoInfo, MarketingInfoResponse, MinterResponse, TokenInfoResponse,
     };
     use cw20_base::msg::InstantiateMarketingInfo;
-    use mars::ma_token::msg::InitHook;
 
     use super::*;
+    use crate::msg::InitHook;
     use crate::test_helpers::{do_instantiate, do_instantiate_with_minter, get_balance};
 
     mod instantiate {
@@ -641,7 +643,7 @@ mod tests {
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("incentives"),
-                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                     user_address: Addr::unchecked(&winner),
                     user_balance_before: Uint128::zero(),
                     total_supply_before: amount,
@@ -841,7 +843,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr1),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
@@ -851,7 +853,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr2),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,
@@ -949,7 +951,7 @@ mod tests {
                 vec![
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from("incentives"),
-                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                        msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: Addr::unchecked(&addr1),
                             user_balance_before: amount1,
                             total_supply_before: amount1,
@@ -959,7 +961,7 @@ mod tests {
                     })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: String::from("incentives"),
-                        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                        msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                             user_address: Addr::unchecked(&addr2),
                             user_balance_before: Uint128::zero(),
                             total_supply_before: amount1,
@@ -1044,7 +1046,7 @@ mod tests {
             res.messages,
             vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: String::from("incentives"),
-                msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                     user_address: Addr::unchecked(&addr1),
                     user_balance_before: amount1,
                     total_supply_before: amount1,
@@ -1121,7 +1123,7 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                    msg: to_binary(&mars_core::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
                         sender_address: Addr::unchecked(&addr1),
                         recipient_address: Addr::unchecked(&contract),
                         sender_previous_balance: amount1,
@@ -1134,7 +1136,7 @@ mod tests {
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
 
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&addr1),
                         user_balance_before: amount1,
                         total_supply_before: amount1,
@@ -1144,7 +1146,7 @@ mod tests {
                 })),
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("incentives"),
-                    msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+                    msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
                         user_address: Addr::unchecked(&contract),
                         user_balance_before: Uint128::zero(),
                         total_supply_before: amount1,

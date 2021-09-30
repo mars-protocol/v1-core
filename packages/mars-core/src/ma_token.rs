@@ -1,3 +1,14 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::Addr;
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct Config {
+    pub red_bank_address: Addr,
+    pub incentives_address: Addr,
+}
+
 pub mod msg {
     use cosmwasm_std::{Binary, Uint128};
     use cw20::{Cw20Coin, Expiration, Logo, MinterResponse};

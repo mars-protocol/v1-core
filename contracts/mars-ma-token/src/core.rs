@@ -3,7 +3,7 @@ use cosmwasm_std::{to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, Uin
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
-use crate::state::Config;
+use crate::Config;
 
 /// Deduct amount from sender balance and add it to recipient balance
 /// Returns messages to be sent on the final response
@@ -98,7 +98,7 @@ pub fn finalize_transfer_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: red_bank_address.into(),
-        msg: to_binary(&red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+        msg: to_binary(&mars_core::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
             sender_address,
             recipient_address,
             sender_previous_balance,
@@ -117,7 +117,7 @@ pub fn balance_change_msg(
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: incentives_address.into(),
-        msg: to_binary(&mars::incentives::msg::ExecuteMsg::BalanceChange {
+        msg: to_binary(&mars_core::incentives::msg::ExecuteMsg::BalanceChange {
             user_address,
             user_balance_before,
             total_supply_before,

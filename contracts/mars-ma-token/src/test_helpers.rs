@@ -1,12 +1,13 @@
 use cosmwasm_std::{Deps, DepsMut, Uint128};
 
 use cosmwasm_std::testing::{mock_env, mock_info};
+
 use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
 use cw20_base::contract::{query_balance, query_minter, query_token_info};
 
-use mars::ma_token::msg::InstantiateMsg;
 
 use crate::contract::instantiate;
+use crate::msg::InstantiateMsg;
 
 pub fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
     query_balance(deps, address.into()).unwrap().balance
