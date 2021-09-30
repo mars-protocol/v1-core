@@ -4,15 +4,17 @@ use cosmwasm_std::{
     WasmMsg, WasmQuery,
 };
 
+use mars_core::error::MarsError;
+use mars_core::helpers::option_string_to_addr;
+use mars_core::math::decimal::Decimal;
+
+use mars_core::address_provider;
+use mars_core::address_provider::MarsContract;
+
 use crate::error::ContractError;
-use crate::state::{
-    AssetIncentive, Config, ASSET_INCENTIVES, CONFIG, USER_ASSET_INDICES, USER_UNCLAIMED_REWARDS,
-};
-use mars::address_provider::{helpers::query_addresses, msg::MarsContract};
-use mars::error::MarsError;
-use mars::helpers::option_string_to_addr;
-use mars::incentives::msg::{ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use mars::math::decimal::Decimal;
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{ASSET_INCENTIVES, CONFIG, USER_ASSET_INDICES, USER_UNCLAIMED_REWARDS};
+use crate::{AssetIncentive, Config};
 
 // INIT
 
@@ -23,7 +25,6 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
-    // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
         address_provider_address: deps.api.addr_validate(&msg.address_provider_address)?,
@@ -97,7 +98,7 @@ pub fn execute_set_asset_incentive(
         Some(mut asset_incentive) => {
             // Update index up to now
             let total_supply =
-                mars::helpers::cw20_get_total_supply(&deps.querier, ma_asset_address.clone())?;
+                mars_core::helpers::cw20_get_total_supply(&deps.querier, ma_asset_address.clone())?;
             asset_incentive_update_index(
                 &mut asset_incentive,
                 total_supply,
@@ -238,7 +239,7 @@ pub fn execute_claim_rewards(
         // Build message to stake mars and send resulting xmars to the user
         let config = CONFIG.load(deps.storage)?;
         let mars_contracts = vec![MarsContract::MarsToken, MarsContract::Staking];
-        let mut addresses_query = query_addresses(
+        let mut addresses_query = address_provider::helpers::query_addresses(
             &deps.querier,
             config.address_provider_address,
             mars_contracts,
@@ -251,7 +252,7 @@ pub fn execute_claim_rewards(
             msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
                 amount: total_unclaimed_rewards,
-                msg: to_binary(&terra_mars::staking::msg::ReceiveMsg::Stake {
+                msg: to_binary(&mars_core::staking::msg::ReceiveMsg::Stake {
                     recipient: Some(user_address.to_string()),
                 })?,
             })?,
@@ -413,10 +414,10 @@ fn compute_user_unclaimed_rewards(
             .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
 
         // Get asset user balances and total supply
-        let balance_and_total_supply: mars::ma_token::msg::BalanceAndTotalSupplyResponse =
+        let balance_and_total_supply: mars_core::ma_token::msg::BalanceAndTotalSupplyResponse =
             deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: ma_token_address.to_string(),
-                msg: to_binary(&mars::ma_token::msg::QueryMsg::BalanceAndTotalSupply {
+                msg: to_binary(&mars_core::ma_token::msg::QueryMsg::BalanceAndTotalSupply {
                     address: user_address.to_string(),
                 })?,
             }))?;
@@ -465,11 +466,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+fn query_config(deps: Deps) -> StdResult<Config> {
     let config = CONFIG.load(deps.storage)?;
-    Ok(ConfigResponse {
-        owner: config.owner,
-    })
+    Ok(config)
 }
 
 fn query_asset_incentive(
@@ -501,7 +500,7 @@ mod tests {
         testing::{mock_env, mock_info, MockApi, MockStorage},
         Addr, BankMsg, Coin, OwnedDeps, SubMsg, Timestamp, Uint128,
     };
-    use mars::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
+    use mars_core::testing::{mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     // init
     #[test]
@@ -548,7 +547,7 @@ mod tests {
         let ma_asset_address = Addr::unchecked("ma_asset");
 
         let info = mock_info("owner", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(1_000_000),
             ..Default::default()
         });
@@ -599,7 +598,7 @@ mod tests {
 
         // execute msg
         let info = mock_info("owner", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(1_000_000),
             ..Default::default()
         });
@@ -676,7 +675,7 @@ mod tests {
             .unwrap();
 
         let info = mock_info("ma_asset", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(600_000),
             ..Default::default()
         });
@@ -751,7 +750,7 @@ mod tests {
             .unwrap();
 
         let info = mock_info("ma_asset", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(time_contract_call),
             ..Default::default()
         });
@@ -828,7 +827,7 @@ mod tests {
 
         {
             let info = mock_info("ma_asset", &[]);
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
             });
@@ -852,7 +851,7 @@ mod tests {
                 ma_asset_address.clone(),
                 &[(user_address.clone(), user_balance)],
             );
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call + 1000),
                 ..Default::default()
             });
@@ -897,7 +896,7 @@ mod tests {
             let time_contract_call = 600_000_u64;
             let user_balance = Uint128::new(10_000);
 
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
             });
@@ -962,7 +961,7 @@ mod tests {
             let time_contract_call = 700_000_u64;
             let user_balance = Uint128::new(20_000);
 
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
             });
@@ -1028,7 +1027,7 @@ mod tests {
             let time_contract_call = 700_000_u64;
             let user_balance = Uint128::new(20_000);
 
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_time: Timestamp::from_seconds(time_contract_call),
                 ..Default::default()
             });
@@ -1198,14 +1197,14 @@ mod tests {
 
         // MSG
         let info = mock_info("user", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(time_contract_call),
             ..Default::default()
         });
         let msg = ExecuteMsg::ClaimRewards {};
 
         // query a bit before gives less rewards
-        let env_before = mars::testing::mock_env(MockEnvParams {
+        let env_before = mars_core::testing::mock_env(MockEnvParams {
             block_time: Timestamp::from_seconds(time_contract_call - 10_000),
             ..Default::default()
         });
@@ -1315,26 +1314,6 @@ mod tests {
             ]
         );
     }
-
-    /*
-    #[test]
-    fn test_asset_init_then_balance_change_then_claim() {
-        let mut deps = th_setup(&[]);
-        let ma_asset_address = Addr::unchecked("ma_asset");
-
-        let info = mock_info("owner", &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(1_000_000),
-            ..Default::default()
-        });
-        let msg = ExecuteMsg::SetAssetIncentive {
-            ma_token_address: ma_asset_address.to_string(),
-            emission_per_second: Uint128::new(600),
-        };
-
-        let res = execute(deps.as_mut(), env, info, msg).unwrap();
-    }
-    */
 
     #[test]
     fn test_update_config() {

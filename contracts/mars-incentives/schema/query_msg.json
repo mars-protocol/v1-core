@@ -16,7 +16,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Query info about asset incentive for a given ma_token",
+      "description": "Query info about asset incentive for a given maToken",
       "type": "object",
       "required": [
         "asset_incentive"

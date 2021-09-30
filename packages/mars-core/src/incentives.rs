@@ -1,3 +1,30 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::{Addr, Uint128};
+
+use crate::math::decimal::Decimal;
+
+/// Global configuration
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Config {
+    /// Contract owner
+    pub owner: Addr,
+    /// Address provider returns addresses for all protocol contracts
+    pub address_provider_address: Addr,
+}
+
+/// Incentive Metadata for a given incentive
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AssetIncentive {
+    /// How much MARS per second is emitted to be then distributed to all maToken holders
+    pub emission_per_second: Uint128,
+    /// Total MARS assigned for distribution since the start of the incentive
+    pub index: Decimal,
+    /// Last time (in seconds) index was updated
+    pub last_updated: u64,
+}
+
 pub mod msg {
     use cosmwasm_std::{Addr, CosmosMsg, Uint128};
     use schemars::JsonSchema;
@@ -14,30 +41,29 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ExecuteMsg {
-        /// Set emission per second for an asset
-        /// ma_token_address
+        /// Set emission per second for an asset to holders of its maToken
         SetAssetIncentive {
-            /// Ma token address associated with the incentives
+            /// maToken address associated with the incentives
             ma_token_address: String,
-            /// How many Mars will be assigned per second to be distributed among all liquidity
-            /// providers
+            /// How many MARS will be assigned per second to be distributed among all maToken
+            /// holders
             emission_per_second: Uint128,
         },
 
         /// Handle balance change updating user and asset rewards.
-        /// Sent from an external contract, triggered on user balance changes
+        /// Sent from an external contract, triggered on user balance changes.
         /// Will return an empty response if no incentive is applied for the asset
         BalanceChange {
-            /// user address. Address is trusted as it must be validated by the maToken
+            /// User address. Address is trusted as it must be validated by the maToken
             /// contract before calling this method
             user_address: Addr,
-            /// user balance up to the instant before the change
+            /// User maToken balance up to the instant before the change
             user_balance_before: Uint128,
-            /// total supply up to the instant before the change
+            /// Total maToken supply up to the instant before the change
             total_supply_before: Uint128,
         },
 
-        /// Claim rewards. Mars rewards accrued by the user will be staked into xMars before
+        /// Claim rewards. MARS rewards accrued by the user will be staked into xMARS before
         /// being sent.
         ClaimRewards {},
 
@@ -47,7 +73,7 @@ pub mod msg {
             address_provider_address: Option<String>,
         },
 
-        /// Execute Cosmos msg. Only callable by owner
+        /// Execute Cosmos msg (only callable by owner)
         ExecuteCosmosMsg(CosmosMsg),
     }
 
@@ -57,16 +83,10 @@ pub mod msg {
         /// Query contract config
         Config {},
 
-        /// Query info about asset incentive for a given ma_token
+        /// Query info about asset incentive for a given maToken
         AssetIncentive { ma_token_address: String },
 
         /// Query user current unclaimed rewards
         UserUnclaimedRewards { user_address: String },
-    }
-
-    /// Query response with config values
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ConfigResponse {
-        pub owner: Addr,
     }
 }

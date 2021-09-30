@@ -3,7 +3,7 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
-      "description": "Set emission per second for an asset ma_token_address",
+      "description": "Set emission per second for an asset to holders of its maToken",
       "type": "object",
       "required": [
         "set_asset_incentive"
@@ -17,7 +17,7 @@
           ],
           "properties": {
             "emission_per_second": {
-              "description": "How many Mars will be assigned per second to be distributed among all liquidity providers",
+              "description": "How many MARS will be assigned per second to be distributed among all maToken holders",
               "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
@@ -25,7 +25,7 @@
               ]
             },
             "ma_token_address": {
-              "description": "Ma token address associated with the incentives",
+              "description": "maToken address associated with the incentives",
               "type": "string"
             }
           }
@@ -34,7 +34,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Handle balance change updating user and asset rewards. Sent from an external contract, triggered on user balance changes Will return an empty response if no incentive is applied for the asset",
+      "description": "Handle balance change updating user and asset rewards. Sent from an external contract, triggered on user balance changes. Will return an empty response if no incentive is applied for the asset",
       "type": "object",
       "required": [
         "balance_change"
@@ -49,7 +49,7 @@
           ],
           "properties": {
             "total_supply_before": {
-              "description": "total supply up to the instant before the change",
+              "description": "Total maToken supply up to the instant before the change",
               "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
@@ -57,7 +57,7 @@
               ]
             },
             "user_address": {
-              "description": "user address. Address is trusted as it must be validated by the maToken contract before calling this method",
+              "description": "User address. Address is trusted as it must be validated by the maToken contract before calling this method",
               "allOf": [
                 {
                   "$ref": "#/definitions/Addr"
@@ -65,7 +65,7 @@
               ]
             },
             "user_balance_before": {
-              "description": "user balance up to the instant before the change",
+              "description": "User maToken balance up to the instant before the change",
               "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
@@ -78,7 +78,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Claim rewards. Mars rewards accrued by the user will be staked into xMars before being sent.",
+      "description": "Claim rewards. MARS rewards accrued by the user will be staked into xMARS before being sent.",
       "type": "object",
       "required": [
         "claim_rewards"
@@ -118,7 +118,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Execute Cosmos msg. Only callable by owner",
+      "description": "Execute Cosmos msg (only callable by owner)",
       "type": "object",
       "required": [
         "execute_cosmos_msg"
