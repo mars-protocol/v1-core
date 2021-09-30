@@ -23,8 +23,9 @@ use mars_core::math::decimal::Decimal;
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::interest_rates::{
-    apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
-    get_updated_liquidity_index, update_interest_rates,
+    apply_accumulated_interests, get_descaled_amount, get_scaled_amount,
+    get_scaled_amount_rounded_up, get_updated_borrow_index, get_updated_liquidity_index,
+    update_interest_rates,
 };
 use crate::msg::{
     CreateOrUpdateConfig, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, QueryMsg, ReceiveMsg,
@@ -992,7 +993,7 @@ pub fn execute_borrow(
             amount_scaled: Uint128::zero(),
             uncollateralized: uncollateralized_debt,
         });
-    let borrow_amount_scaled = get_scaled_amount(
+    let borrow_amount_scaled = get_scaled_amount_rounded_up(
         borrow_amount,
         get_updated_borrow_index(&borrow_market, env.block.time.seconds())?,
     );
@@ -1078,7 +1079,7 @@ pub fn execute_repay(
         response,
     )?;
 
-    let mut repay_amount_scaled = get_scaled_amount(
+    let mut repay_amount_scaled = get_scaled_amount_rounded_up(
         repay_amount,
         get_updated_borrow_index(&market, env.block.time.seconds())?,
     );
@@ -1326,7 +1327,7 @@ pub fn execute_liquidate(
 
     // 5. Update debt market and positions
 
-    let debt_amount_to_repay_scaled = get_scaled_amount(
+    let debt_amount_to_repay_scaled = get_scaled_amount_rounded_up(
         debt_amount_to_repay,
         get_updated_borrow_index(&debt_market, block_time)?,
     );
@@ -2028,7 +2029,7 @@ pub fn query_scaled_debt_amount(
 ) -> StdResult<Uint128> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
-    let scaled_amount = get_scaled_amount(
+    let scaled_amount = get_scaled_amount_rounded_up(
         amount,
         get_updated_borrow_index(&market, env.block.time.seconds())?,
     );
@@ -4477,7 +4478,7 @@ mod tests {
                 (cw20_contract_addr.as_bytes(), &borrower_addr),
             )
             .unwrap();
-        let expected_debt_scaled_1_after_borrow = get_scaled_amount(
+        let expected_debt_scaled_1_after_borrow = get_scaled_amount_rounded_up(
             Uint128::from(borrow_amount),
             expected_params_cw20.borrow_index,
         );
@@ -4543,7 +4544,7 @@ mod tests {
             .unwrap();
 
         let expected_debt_scaled_1_after_borrow_again = expected_debt_scaled_1_after_borrow
-            + get_scaled_amount(
+            + get_scaled_amount_rounded_up(
                 Uint128::from(borrow_amount),
                 expected_params_cw20.borrow_index,
             );
@@ -4636,7 +4637,7 @@ mod tests {
             .unwrap();
         let market_2_after_borrow_2 = MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
-        let expected_debt_scaled_2_after_borrow_2 = get_scaled_amount(
+        let expected_debt_scaled_2_after_borrow_2 = get_scaled_amount_rounded_up(
             Uint128::from(borrow_amount),
             expected_params_native.borrow_index,
         );
@@ -4743,7 +4744,7 @@ mod tests {
             MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
 
         let expected_debt_scaled_2_after_repay_some_2 = expected_debt_scaled_2_after_borrow_2
-            - get_scaled_amount(
+            - get_scaled_amount_rounded_up(
                 Uint128::from(repay_amount),
                 expected_params_native.borrow_index,
             );
@@ -4872,7 +4873,7 @@ mod tests {
 
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        let expected_repay_amount_scaled = get_scaled_amount(
+        let expected_repay_amount_scaled = get_scaled_amount_rounded_up(
             Uint128::from(repay_amount),
             expected_params_cw20.borrow_index,
         );
@@ -5502,7 +5503,7 @@ mod tests {
             th_init_market(deps.as_mut(), b"native_debt", &native_debt_market);
 
         let mut expected_user_cw20_debt_scaled =
-            get_scaled_amount(user_debt, cw20_debt_market_initial.borrow_index);
+            get_scaled_amount_rounded_up(user_debt, cw20_debt_market_initial.borrow_index);
 
         // Set user as having collateral and debt in respective markets
         {
@@ -5865,7 +5866,7 @@ mod tests {
                 .unwrap();
 
             let expected_less_debt_scaled =
-                get_scaled_amount(first_debt_to_repay, expected_debt_rates.borrow_index);
+                get_scaled_amount_rounded_up(first_debt_to_repay, expected_debt_rates.borrow_index);
 
             expected_user_cw20_debt_scaled =
                 expected_user_cw20_debt_scaled - expected_less_debt_scaled;
@@ -6048,7 +6049,7 @@ mod tests {
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled =
-                get_scaled_amount(expected_less_debt, expected_debt_rates.borrow_index);
+                get_scaled_amount_rounded_up(expected_less_debt, expected_debt_rates.borrow_index);
             expected_user_cw20_debt_scaled =
                 expected_user_cw20_debt_scaled - expected_less_debt_scaled;
 
@@ -6244,7 +6245,7 @@ mod tests {
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled =
-                get_scaled_amount(expected_less_debt, expected_debt_rates.borrow_index);
+                get_scaled_amount_rounded_up(expected_less_debt, expected_debt_rates.borrow_index);
             expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             let debt = DEBTS
@@ -6459,7 +6460,7 @@ mod tests {
 
             // check user's debt decreased by the appropriate amount
             let expected_less_debt_scaled =
-                get_scaled_amount(expected_less_debt, expected_debt_rates.borrow_index);
+                get_scaled_amount_rounded_up(expected_less_debt, expected_debt_rates.borrow_index);
             expected_user_debt_scaled = expected_user_debt_scaled - expected_less_debt_scaled;
 
             let debt = DEBTS
@@ -7055,7 +7056,7 @@ mod tests {
             .unwrap();
 
         let expected_debt_scaled_after_borrow =
-            get_scaled_amount(initial_borrow_amount, expected_params.borrow_index);
+            get_scaled_amount_rounded_up(initial_borrow_amount, expected_params.borrow_index);
 
         assert_eq!(expected_debt_scaled_after_borrow, debt.amount_scaled);
 
@@ -7282,7 +7283,7 @@ mod tests {
                 weighted_liquidation_threshold_in_uusd,
                 token_3_exchange_rate,
             );
-            let token_3_debt_scaled = get_scaled_amount(
+            let token_3_debt_scaled = get_scaled_amount_rounded_up(
                 max_debt_for_valid_hf,
                 get_updated_borrow_index(&market_3_initial, env.block.time.seconds()).unwrap(),
             );
@@ -7476,10 +7477,10 @@ mod tests {
 
         // When borrowing, new computed index is used for scaled amount
         let more_debt_scaled =
-            get_scaled_amount(Uint128::from(deltas.more_debt), expected_indices.borrow);
+            get_scaled_amount_rounded_up(Uint128::from(deltas.more_debt), expected_indices.borrow);
         // When repaying, new computed index is used for scaled amount
         let less_debt_scaled =
-            get_scaled_amount(Uint128::from(deltas.less_debt), expected_indices.borrow);
+            get_scaled_amount_rounded_up(Uint128::from(deltas.less_debt), expected_indices.borrow);
         // NOTE: Don't panic here so that the total repay of debt can be simulated
         // when less debt is greater than outstanding debt
         let new_debt_total_scaled =

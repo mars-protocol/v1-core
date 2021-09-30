@@ -14,6 +14,7 @@ use crate::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
+const HALF_SCALING_FACTOR: u128 = SCALING_FACTOR / 2;
 
 const SECONDS_PER_YEAR: u64 = 31536000u64;
 
@@ -104,6 +105,17 @@ pub fn calculate_applied_linear_interest_rate(
 pub fn get_scaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
     // Scale by SCALING_FACTOR to have better precision
     let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR);
+    Decimal::divide_uint128_by_decimal(scaled_amount, index)
+}
+
+/// Round up scaled amount. Let's have amount = 5 and index = 3. When we do standard calculations:
+/// let scaled_amount = get_scaled_amount(amount, index);
+/// let descaled_amount = get_descaled_amount(scaled_amount, index);
+/// descaled_amount will be equal to 4 which means that a user can borrow 5 and repay 4.
+/// We want to avoid this by rounding up.
+pub fn get_scaled_amount_rounded_up(amount: Uint128, index: Decimal) -> Uint128 {
+    // Scale by SCALING_FACTOR to have better precision
+    let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR + HALF_SCALING_FACTOR);
     Decimal::divide_uint128_by_decimal(scaled_amount, index)
 }
 
@@ -216,7 +228,11 @@ pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 mod tests {
     use mars_core::math::decimal::Decimal;
 
-    use crate::interest_rates::calculate_applied_linear_interest_rate;
+    use crate::interest_rates::{
+        calculate_applied_linear_interest_rate, get_descaled_amount, get_scaled_amount,
+        get_scaled_amount_rounded_up,
+    };
+    use cosmwasm_std::Uint128;
 
     #[test]
     fn test_accumulated_index_calculation() {
@@ -227,5 +243,32 @@ mod tests {
             calculate_applied_linear_interest_rate(index, rate, time_elapsed).unwrap();
 
         assert_eq!(accumulated, Decimal::from_ratio(11u128, 100u128));
+    }
+
+    #[test]
+    fn test_scaled_amount_roundup() {
+        let value = Uint128::new(5u128);
+        let index = Decimal::from_ratio(3u128, 1u128);
+        let scaled_amount = get_scaled_amount_rounded_up(value, index);
+        let descaled_amount = get_descaled_amount(scaled_amount, index);
+        assert_eq!(descaled_amount, value);
+
+        let value = Uint128::new(99u128);
+        let index = Decimal::from_ratio(33u128, 1u128);
+        let scaled_amount = get_scaled_amount_rounded_up(value, index);
+        let descaled_amount = get_descaled_amount(scaled_amount, index);
+        assert_eq!(descaled_amount, value);
+
+        let value = Uint128::new(9876543u128);
+        let index = Decimal::from_ratio(3333u128, 10u128);
+        let scaled_amount = get_scaled_amount_rounded_up(value, index);
+        let descaled_amount = get_descaled_amount(scaled_amount, index);
+        assert_eq!(descaled_amount, value);
+
+        let value = Uint128::new(98765432199u128);
+        let index = Decimal::from_ratio(1234567u128, 1000u128);
+        let scaled_amount = get_scaled_amount_rounded_up(value, index);
+        let descaled_amount = get_descaled_amount(scaled_amount, index);
+        assert_eq!(descaled_amount, value);
     }
 }
