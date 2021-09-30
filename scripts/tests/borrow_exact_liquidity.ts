@@ -24,7 +24,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
 
 // MAIN
 
-(async () => {
+async function main() {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -169,4 +169,9 @@ const MARS_COLLATERAL = 100_000_000_000000;
   await borrowNative(terra, borrower, redBank, "uusd", UUSD_COLLATERAL)
 
   console.log("OK")
-})()
+}
+
+main().catch(err => {
+  console.log(err)
+  throw err
+})
