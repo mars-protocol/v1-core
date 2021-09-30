@@ -3,7 +3,7 @@ on: push
 name: Basic
 
 jobs:
-  build:
+  build-mars-artifacts:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -16,7 +16,7 @@ jobs:
           path: |
             artifacts
 
-  cw-plus:
+  build-cw-plus-artifacts:
     runs-on: ubuntu-latest
     steps:
       - name: build artifacts
@@ -37,7 +37,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build-mars-artifacts, build-cw-plus-artifacts]
     strategy:
       matrix:
         test: [borrow_exact_liquidity]
