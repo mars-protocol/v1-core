@@ -17,6 +17,7 @@ jobs:
             artifacts
   test:
     runs-on: ubuntu-latest
+    needs: build
     strategy:
       matrix:
         test: [borrow_exact_liquidity]
