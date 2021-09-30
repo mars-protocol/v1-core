@@ -38,6 +38,7 @@ export class TransactionError extends CustomError {
     public rawLog: string,
   ) {
     super("transaction failed")
+    console.log(this)
   }
 }
 
