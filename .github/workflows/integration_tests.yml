@@ -3,30 +3,31 @@ on: push
 name: Basic
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: build artifacts
+        run: $GITHUB_WORKSPACE/scripts/build_artifacts.sh
+      - name: upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: artifacts
+          path: |
+            artifacts
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        test: [build_exact_liquidity]
+        test: [borrow_exact_liquidity]
     steps:
       - uses: actions/checkout@v2
-      - name: Cache node modules
-        uses: actions/cache@v2
-        env:
-          cache-name: cache-node-modules
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-build-${{ env.cache-name }}-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ env.cache-name }}-
-            ${{ runner.os }}-build-
-            ${{ runner.os }}-
+      - name: download artifacts
+        uses: actions/download-artifact@v2
       - name: npm install
         run: |
           cd $GITHUB_WORKSPACE/scripts
           npm install
-      - name: build artifacts
-        run: $GITHUB_WORKSPACE/scripts/build_artifacts.sh
       - name: LocalTerra
         run: |
           cd
