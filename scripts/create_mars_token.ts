@@ -62,7 +62,11 @@ const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
 const TOKEN_NAME = "Mars"
 const TOKEN_SYMBOL = "MARS"
 const TOKEN_DECIMALS = 6
-const TOKEN_CAP = 1_000_000_000_000000;
+const TOKEN_CAP = 1_000_000_000_000000
+const TOKEN_DESCRIPTION = "Mars is a fully automated, on-chain credit protocol built on Terra " +
+  "and governed by a decentralised community of users and developers."
+const TOKEN_PROJECT = "https://marsprotocol.io"; // TODO
+const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
 
 // MAIN
 
@@ -120,12 +124,19 @@ const TOKEN_CAP = 1_000_000_000_000000;
       mint: {
         minter: proxyAddress,
         cap: String(TOKEN_CAP)
+      },
+      marketing: {
+        marketing: proxyAddress,
+        description: TOKEN_DESCRIPTION,
+        project: TOKEN_PROJECT,
+        logo: { url: TOKEN_LOGO }
       }
     }
   )
   console.log("mars:", marsAddress)
   console.log(await queryContract(terra, marsAddress, { token_info: {} }))
   console.log(await queryContract(terra, marsAddress, { minter: {} }))
+  console.log(await queryContract(terra, marsAddress, { marketing_info: {} }))
 
   // Set the proxy as the Mars token contract owner
   await performTransaction(terra, wallet,
