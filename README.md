@@ -92,7 +92,7 @@ Required environment variables (can be set in `scripts/.env`):
 
 ```sh
 CW_PLUS_ARTIFACTS_PATH # path to cw-plus artifacts
-TERRASWAP_ARTIFACTS_PATH # path to terraswap artifacts
+ASTROPORT_ARTIFACTS_PATH # path to astroport artifacts
 ```
 
 ### Generating a whitelist.json
