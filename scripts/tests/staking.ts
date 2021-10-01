@@ -32,7 +32,7 @@ import {
 
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
-const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
+const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!
 
 const COOLDOWN_DURATION_SECONDS = 2
 const MARS_STAKE_AMOUNT = 1_000_000000
@@ -98,12 +98,19 @@ async function main() {
     { owner: deployer.key.accAddress }
   )
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
-  const terraswapFactory = await deployContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"),
+  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
-      pair_code_id: pairCodeID,
-      token_code_id: tokenCodeID
+      token_code_id: tokenCodeID,
+      pair_configs: [
+        {
+          code_id: pairCodeID,
+          pair_type: { xyk: {} },
+          total_fee_bps: 0,
+          maker_fee_bps: 0
+        }
+      ]
     }
   )
 
@@ -112,7 +119,7 @@ async function main() {
       config: {
         owner: deployer.key.accAddress,
         address_provider_address: addressProvider,
-        astroport_factory_address: terraswapFactory,
+        astroport_factory_address: astroportFactory,
         astroport_max_spread: "0.05",
         cooldown_duration: COOLDOWN_DURATION_SECONDS,
       }
@@ -154,11 +161,12 @@ async function main() {
     }
   )
 
-  // terraswap pairs
+  // astroport pairs
 
-  let result = await executeContract(terra, deployer, terraswapFactory,
+  let result = await executeContract(terra, deployer, astroportFactory,
     {
       create_pair: {
+        pair_type: { xyk: {} },
         asset_infos: [
           { token: { contract_addr: mars } },
           { native_token: { denom: "uusd" } }
@@ -168,9 +176,10 @@ async function main() {
   )
   const marsUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
-  result = await executeContract(terra, deployer, terraswapFactory,
+  result = await executeContract(terra, deployer, astroportFactory,
     {
       create_pair: {
+        pair_type: { xyk: {} },
         asset_infos: [
           { native_token: { denom: "uluna" } },
           { native_token: { denom: "uusd" } }

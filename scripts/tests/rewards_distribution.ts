@@ -38,7 +38,7 @@ import {
 
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
-const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
+const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!
 
 // protocol rewards collector
 const SAFETY_FUND_FEE_SHARE = 0.1
@@ -694,12 +694,19 @@ async function main() {
     }
   )
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
-  const terraswapFactory = await deployContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"),
+  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
-      pair_code_id: pairCodeID,
-      token_code_id: tokenCodeID
+      token_code_id: tokenCodeID,
+      pair_configs: [
+        {
+          code_id: pairCodeID,
+          pair_type: { xyk: {} },
+          total_fee_bps: 0,
+          maker_fee_bps: 0
+        }
+      ]
     }
   )
 
@@ -710,7 +717,7 @@ async function main() {
         address_provider_address: addressProvider,
         safety_fund_fee_share: String(SAFETY_FUND_FEE_SHARE),
         treasury_fee_share: String(TREASURY_FEE_SHARE),
-        astroport_factory_address: terraswapFactory,
+        astroport_factory_address: astroportFactory,
         astroport_max_spread: "0.05",
       }
     }
@@ -888,11 +895,12 @@ async function main() {
   )
   const maCw20Token2 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token2 } })
 
-  // terraswap pair
+  // astroport pair
 
-  let result = await executeContract(terra, deployer, terraswapFactory,
+  let result = await executeContract(terra, deployer, astroportFactory,
     {
       create_pair: {
+        pair_type: { xyk: {} },
         asset_infos: [
           { token: { contract_addr: cw20Token1 } },
           { native_token: { denom: "uusd" } }
