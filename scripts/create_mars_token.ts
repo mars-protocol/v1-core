@@ -17,9 +17,10 @@ import {
   MsgExecuteContract,
   MsgSend,
   MsgUpdateContractAdmin,
-  StdTx,
+  // StdTx,
   Wallet
 } from "@terra-money/terra.js"
+import { StdTx } from "@terra-money/terra.js/dist/core/StdTx"
 import { CLIKey } from "@terra-money/terra.js/dist/key/CLIKey.js"
 import { strictEqual } from "assert"
 import { execSync } from "child_process"
@@ -178,46 +179,50 @@ const TOKEN_CAP = 1_000_000_000_000000;
   const tx = await createTransaction(multisig,
     new MsgExecuteContract(MULTISIG_ADDRESS, proxyAddress, proxyExecuteMsg)
   )
-  writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
-  // Create K of N signatures for the tx
-  let fileNames: Array<string> = []
-  for (const key of MULTISIG_KEYS.slice(0, MULTISIG_THRESHOLD)) {
-    const cliKey = new CLIKey({ keyName: key, multisig: MULTISIG_ADDRESS })
-    const signature = await cliKey.createSignature(tx)
+  console.log(JSON.stringify(tx.toData()))
+  // let d = tx.toData()
+  // new StdTx(tx.body.messages, tx.auth_info.fee, d.signatures, d.body.memo, d.body.timeout_height)
+  // writeFileSync('unsigned_tx.json', tx.toStdTx().toJSON())
 
-    const fileName = `${key}_sig.json`
-    writeFileSync(fileName, signature.toJSON())
-    fileNames.push(fileName)
-  }
+  // // Create K of N signatures for the tx
+  // let fileNames: Array<string> = []
+  // for (const key of MULTISIG_KEYS.slice(0, MULTISIG_THRESHOLD)) {
+  //   const cliKey = new CLIKey({ keyName: key, multisig: MULTISIG_ADDRESS })
+  //   const signature = await cliKey.createSignature(tx)
 
-  // Create a signed tx by aggregating the K signatures
-  const signedTxData = execSync(
-    `terracli tx multisign unsigned_tx.json ${MULTISIG_NAME} ${fileNames.join(" ")} ` +
-    `--offline ` +
-    `--chain-id ${tx.chain_id} --account-number ${tx.account_number} --sequence ${tx.sequence} `,
-    { encoding: 'utf-8' }
-  )
+  //   const fileName = `${key}_sig.json`
+  //   writeFileSync(fileName, signature.toJSON())
+  //   fileNames.push(fileName)
+  // }
 
-  // Broadcast the tx
-  const signedTx = StdTx.fromData(JSON.parse(signedTxData.toString()))
-  const result = await broadcastTransaction(terra, signedTx)
-  if (isTxError(result)) {
-    throw new TransactionError(result.code, result.codespace, result.raw_log)
-  }
+  // // Create a signed tx by aggregating the K signatures
+  // const signedTxData = execSync(
+  //   `terracli tx multisign unsigned_tx.json ${MULTISIG_NAME} ${fileNames.join(" ")} ` +
+  //   `--offline ` +
+  //   `--chain-id ${tx.chain_id} --account-number ${tx.account_number} --sequence ${tx.sequence} `,
+  //   { encoding: 'utf-8' }
+  // )
 
-  const tokenInfo = await queryContract(terra, marsAddress, { token_info: {} })
-  console.log(tokenInfo)
-  strictEqual(parseInt(tokenInfo.total_supply), mintAmount)
+  // // Broadcast the tx
+  // const signedTx = StdTx.fromData(JSON.parse(signedTxData.toString()))
+  // const result = await broadcastTransaction(terra, signedTx)
+  // if (isTxError(result)) {
+  //   throw new TransactionError(result.code, result.codespace, result.raw_log)
+  // }
 
-  const balance = await queryContract(terra, marsAddress, { balance: { address: recipient } })
-  console.log(balance)
-  strictEqual(parseInt(balance.balance), mintAmount)
+  // const tokenInfo = await queryContract(terra, marsAddress, { token_info: {} })
+  // console.log(tokenInfo)
+  // strictEqual(parseInt(tokenInfo.total_supply), mintAmount)
 
-  // Remove tmp files
-  for (const fileName of [...fileNames, "unsigned_tx.json"]) {
-    unlinkSync(fileName)
-  }
+  // const balance = await queryContract(terra, marsAddress, { balance: { address: recipient } })
+  // console.log(balance)
+  // strictEqual(parseInt(balance.balance), mintAmount)
+
+  // // Remove tmp files
+  // for (const fileName of [...fileNames, "unsigned_tx.json"]) {
+  //   unlinkSync(fileName)
+  // }
 
   console.log("OK")
 })()

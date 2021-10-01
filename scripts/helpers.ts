@@ -8,7 +8,8 @@ import {
   MsgInstantiateContract,
   MsgMigrateContract,
   MsgStoreCode,
-  StdTx,
+  Tx,
+  // StdTx,
   Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
@@ -33,7 +34,7 @@ export async function sleep(timeout: number) {
 
 export class TransactionError extends CustomError {
   public constructor(
-    public code: number,
+    public code: number | string,
     public codespace: string | undefined,
     public rawLog: string,
   ) {
@@ -45,7 +46,7 @@ export async function createTransaction(wallet: Wallet, msg: Msg) {
   return await wallet.createTx({ msgs: [msg] })
 }
 
-export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
+export async function broadcastTransaction(terra: LCDClient, signedTx: Tx) {
   const result = await terra.tx.broadcast(signedTx)
   await sleep(TIMEOUT)
   return result
@@ -53,7 +54,15 @@ export async function broadcastTransaction(terra: LCDClient, signedTx: StdTx) {
 
 export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: Msg) {
   const tx = await createTransaction(wallet, msg)
-  const signedTx = await wallet.key.signTx(tx)
+  const { account_number, sequence } = await wallet.accountNumberAndSequence()
+  const signedTx = await wallet.key.signTx(tx,
+    {
+      accountNumber: account_number,
+      sequence: sequence,
+      chainID: terra.config.chainID,
+      signMode: 1, // SignMode.SIGN_MODE_DIRECT,
+    }
+  )
   const result = await broadcastTransaction(terra, signedTx)
   if (isTxError(result)) {
     throw new TransactionError(result.code, result.codespace, result.raw_log)
