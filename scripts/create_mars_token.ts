@@ -65,7 +65,7 @@ const TOKEN_DECIMALS = 6
 const TOKEN_CAP = 1_000_000_000_000000
 const TOKEN_DESCRIPTION = "Mars is a fully automated, on-chain credit protocol built on Terra " +
   "and governed by a decentralised community of users and developers."
-const TOKEN_PROJECT = "https://marsprotocol.io"; // TODO
+const TOKEN_PROJECT = "https://marsprotocol.io"
 const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
 
 // MAIN
@@ -73,7 +73,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
 (async () => {
   const isLocalTerra = CHAIN_ID == "localterra" || CHAIN_ID == undefined
 
-  let terra: LCDClient | LocalTerra
+  let terra: LCDClient
   let wallet: Wallet
 
   if (isLocalTerra) {
@@ -97,6 +97,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
 
   // Instantiate the token minter proxy contract
   const cw1WhitelistCodeId = await uploadContract(terra, wallet, join(CW_PLUS_ARTIFACTS_PATH, "cw1_whitelist.wasm"))
+
   console.log("cw1 whitelist code ID:", cw1WhitelistCodeId)
 
   const proxyAddress = await instantiateContract(terra, wallet, cw1WhitelistCodeId,
@@ -108,11 +109,13 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
       ]
     }
   )
+
   console.log("proxy:", proxyAddress)
   console.log(await queryContract(terra, proxyAddress, { admin_list: {} }))
 
   // Instantiate Mars token contract
   const cw20CodeId = await uploadContract(terra, wallet, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
+
   console.log("cw20 code ID:", cw20CodeId)
 
   const marsAddress = await instantiateContract(terra, wallet, cw20CodeId,
@@ -133,6 +136,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
       }
     }
   )
+
   console.log("mars:", marsAddress)
   console.log(await queryContract(terra, marsAddress, { token_info: {} }))
   console.log(await queryContract(terra, marsAddress, { minter: {} }))
@@ -142,11 +146,12 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
   await performTransaction(terra, wallet,
     new MsgUpdateContractAdmin(wallet.key.accAddress, MULTISIG_ADDRESS, marsAddress)
   )
-  const marsContractInfo = await terra.wasm.contractInfo(marsAddress)
-  strictEqual(marsContractInfo.admin, MULTISIG_ADDRESS)
+
+  strictEqual((await terra.wasm.contractInfo(marsAddress)).admin, MULTISIG_ADDRESS)
 
   // Remove wallet from mars-minter admins
   await executeContract(terra, wallet, proxyAddress, { update_admins: { admins: [MULTISIG_ADDRESS] } })
+
   console.log(await queryContract(terra, proxyAddress, { admin_list: {} }))
 
   // Mint tokens
