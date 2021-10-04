@@ -1,7 +1,11 @@
-use cosmwasm_std::{OverflowError, StdError};
-use mars::error::MarsError;
-use mars::math::decimal::Decimal;
 use thiserror::Error;
+
+use cosmwasm_std::{OverflowError, StdError};
+
+use mars_core::error::MarsError;
+use mars_core::math::decimal::Decimal;
+
+use crate::MarketError;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {
@@ -13,6 +17,9 @@ pub enum ContractError {
 
     #[error("{0}")]
     Overflow(#[from] OverflowError),
+
+    #[error("{0}")]
+    Market(#[from] MarketError),
 
     #[error("Price not found for asset: {label:?}")]
     PriceNotFound { label: String },
@@ -97,20 +104,6 @@ pub enum ContractError {
     )]
     CannotTransferTokenWhenInvalidHealthFactor {},
 
-    #[error("maintenance_margin should be greater than max_loan_to_value. maintenance_margin: {maintenance_margin:?}, max_loan_to_value: {max_loan_to_value:?}")]
-    InvalidMaintenanceMargin {
-        maintenance_margin: Decimal,
-        max_loan_to_value: Decimal,
-    },
-
-    #[error("max_borrow_rate should be greater than or equal to min_borrow_rate. max_borrow_rate: {max_borrow_rate:?}, min_borrow_rate: {min_borrow_rate:?}")]
-    InvalidMinMaxBorrowRate {
-        max_borrow_rate: Decimal,
-        min_borrow_rate: Decimal,
-    },
-
-    #[error("Optimal utilization rate can't be greater than one")]
-    InvalidOptimalUtilizationRate {},
 
     #[error("Failed to encode asset reference into string")]
     CannotEncodeAssetReferenceIntoString {},

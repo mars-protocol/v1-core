@@ -10,35 +10,37 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
 use cw_storage_plus::U32Key;
 
-use crate::msg::{
-    AmountResponse, CollateralInfo, CollateralResponse, ConfigResponse, CreateOrUpdateConfig,
-    DebtInfo, DebtResponse, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, MarketInfo,
-    MarketResponse, MarketsListResponse, QueryMsg, ReceiveMsg, UncollateralizedLoanLimitResponse,
-    UserPositionResponse,
-};
-use mars::address_provider;
-use mars::address_provider::msg::MarsContract;
-use mars::ma_token;
+use mars_core::address_provider;
+use mars_core::address_provider::msg::MarsContract;
+use mars_core::ma_token;
 
-use mars::asset::{
+use mars_core::asset::{
     build_send_asset_with_tax_deduction_msg, build_send_cw20_token_msg,
     build_send_native_asset_with_tax_deduction_msg, Asset, AssetType,
 };
-use mars::error::MarsError;
-use mars::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
+use mars_core::error::MarsError;
+use mars_core::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
+use mars_core::math::decimal::Decimal;
 
+use crate::{
+    CollateralInfo, CollateralResponse, ConfigResponse,
+    UserHealthStatus, Config, Debt, GlobalState, Market, User, DebtInfo, DebtResponse,
+    MarketInfo, MarketResponse, MarketsListResponse, UncollateralizedLoanLimitResponse,
+    UserPositionResponse,
+};
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::interest_rates::{
     apply_accumulated_interests, get_descaled_amount, get_scaled_amount, get_updated_borrow_index,
     get_updated_liquidity_index, update_interest_rates,
 };
-use crate::msg::UserHealthStatus;
-use crate::state::{
-    Config, Debt, GlobalState, Market, User, CONFIG, DEBTS, GLOBAL_STATE, MARKETS,
-    MARKET_REFERENCES_BY_INDEX, MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+use crate::msg::{
+    CreateOrUpdateConfig, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, QueryMsg, ReceiveMsg,
 };
-use mars::math::decimal::Decimal;
+use crate::state::{ 
+    CONFIG, DEBTS, GLOBAL_STATE, MARKETS, MARKET_REFERENCES_BY_INDEX,
+    MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+};
 
 // INIT
 
@@ -569,6 +571,67 @@ pub fn execute_init_asset(
     }
 }
 
+/// Initialize new market
+pub fn create_market(
+    block_time: Timestamp,
+    index: u32,
+    asset_type: AssetType,
+    params: InitOrUpdateAssetParams,
+) -> Result<Market, ContractError> {
+    // Destructuring a struct’s fields into separate variables in order to force
+    // compile error if we add more params
+    let InitOrUpdateAssetParams {
+        initial_borrow_rate: borrow_rate,
+        max_loan_to_value,
+        reserve_factor,
+        maintenance_margin,
+        liquidation_bonus,
+        interest_rate_strategy,
+        active,
+        deposit_enabled,
+        borrow_enabled,
+    } = params;
+
+    // All fields should be available
+    let available = borrow_rate.is_some()
+        && max_loan_to_value.is_some()
+        && reserve_factor.is_some()
+        && maintenance_margin.is_some()
+        && liquidation_bonus.is_some()
+        && interest_rate_strategy.is_some()
+        && active.is_some()
+        && deposit_enabled.is_some()
+        && borrow_enabled.is_some();
+
+    if !available {
+        return Err(MarsError::InstantiateParamsUnavailable {}.into());
+    }
+
+    let new_market = Market {
+        index,
+        asset_type,
+        ma_token_address: Addr::unchecked(""),
+        borrow_index: Decimal::one(),
+        liquidity_index: Decimal::one(),
+        borrow_rate: borrow_rate.unwrap(),
+        liquidity_rate: Decimal::zero(),
+        max_loan_to_value: max_loan_to_value.unwrap(),
+        reserve_factor: reserve_factor.unwrap(),
+        interests_last_updated: block_time.seconds(),
+        debt_total_scaled: Uint128::zero(),
+        maintenance_margin: maintenance_margin.unwrap(),
+        liquidation_bonus: liquidation_bonus.unwrap(),
+        interest_rate_strategy: interest_rate_strategy.unwrap(),
+        active: active.unwrap(),
+        deposit_enabled: deposit_enabled.unwrap(),
+        borrow_enabled: borrow_enabled.unwrap(),
+    };
+
+    new_market.validate()?;
+
+    Ok(new_market)
+}
+
 pub fn execute_init_asset_token_callback(
     deps: DepsMut,
     _env: Env,
@@ -610,22 +673,71 @@ pub fn execute_update_asset(
     let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
+        None => Err(ContractError::AssetNotInitialized {}),
         Some(market) => {
-            let protocol_rewards_collector_address = address_provider::helpers::query_address(
-                &deps.querier,
-                config.address_provider_address,
-                MarsContract::ProtocolRewardsCollector,
-            )?;
+            // Destructuring a struct’s fields into separate variables in order to force
+            // compile error if we add more params
+            let InitOrUpdateAssetParams {
+                initial_borrow_rate: _,
+                max_loan_to_value,
+                reserve_factor,
+                maintenance_margin,
+                liquidation_bonus,
+                interest_rate_strategy,
+                active,
+                deposit_enabled,
+                borrow_enabled,
+            } = asset_params;
 
-            let (updated_market, mut response) = market.update(
-                &deps,
-                &env,
-                asset_reference.as_slice(),
-                asset_params,
-                &asset_label,
-                protocol_rewards_collector_address,
-                Response::new(),
-            )?;
+            // If reserve factor or interest rates are updated we update indexes with
+            // current values before applying the change to prevent applying this
+            // new params to a period where they were not valid yet. Interests rates are
+            // recalculated after changes are applied.
+            let should_update_interest_rates = (reserve_factor.is_some()
+                && reserve_factor.unwrap() != self.reserve_factor)
+                || interest_rate_strategy.is_some();
+
+            let mut response = Response::new();
+
+            if should_update_interest_rates {
+                let protocol_rewards_collector_address = address_provider::helpers::query_address(
+                    &deps.querier,
+                    config.address_provider_address,
+                    MarsContract::ProtocolRewardsCollector,
+                )?;
+                response = apply_accumulated_interests(
+                    env,
+                    protocol_rewards_collector_address,
+                    &mut self,
+                    response,
+                )?;
+            }
+
+            let mut updated_market = Market {
+                max_loan_to_value: max_loan_to_value.unwrap_or(market.max_loan_to_value),
+                reserve_factor: reserve_factor.unwrap_or(market.reserve_factor),
+                maintenance_margin: maintenance_margin.unwrap_or(market.maintenance_margin),
+                liquidation_bonus: liquidation_bonus.unwrap_or(market.liquidation_bonus),
+                interest_rate_strategy: interest_rate_strategy.unwrap_or(market.interest_rate_strategy),
+                active: active.unwrap_or(market.active),
+                deposit_enabled: deposit_enabled.unwrap_or(market.deposit_enabled),
+                borrow_enabled: borrow_enabled.unwrap_or(market.borrow_enabled),
+                ..market
+            };
+
+            updated_market.validate()?;
+
+            if should_update_interest_rates {
+                response = update_interest_rates(
+                    deps,
+                    env,
+                    reference,
+                    &mut updated_market,
+                    Uint128::zero(),
+                    asset_label,
+                    response,
+                )?;
+            }
             MARKETS.save(deps.storage, asset_reference.as_slice(), &updated_market)?;
 
             response = response
@@ -634,7 +746,6 @@ pub fn execute_update_asset(
 
             Ok(response)
         }
-        None => Err(ContractError::AssetNotInitialized {}),
     }
 }
 
@@ -1864,16 +1975,14 @@ fn query_scaled_liquidity_amount(
     env: Env,
     asset: Asset,
     amount: Uint128,
-) -> StdResult<AmountResponse> {
+) -> StdResult<Uin128> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
     let scaled_amount = get_scaled_amount(
         amount,
         get_updated_liquidity_index(&market, env.block.time.seconds())?,
     );
-    Ok(AmountResponse {
-        amount: scaled_amount,
-    })
+    Ok(scaled_amount)
 }
 
 fn query_scaled_debt_amount(
@@ -1888,9 +1997,7 @@ fn query_scaled_debt_amount(
         amount,
         get_updated_borrow_index(&market, env.block.time.seconds())?,
     );
-    Ok(AmountResponse {
-        amount: scaled_amount,
-    })
+    Ok(scaled_amount)
 }
 
 fn query_descaled_liquidity_amount(
@@ -1906,9 +2013,7 @@ fn query_descaled_liquidity_amount(
         amount,
         get_updated_liquidity_index(&market, env.block.time.seconds())?,
     );
-    Ok(AmountResponse {
-        amount: descaled_amount,
-    })
+    Ok(descaled_amount)
 }
 
 fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
