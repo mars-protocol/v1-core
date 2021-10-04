@@ -4,13 +4,13 @@ use mars_core::asset::AssetType;
 use mars_core::helpers::cw20_get_balance;
 use mars_core::math::decimal::Decimal;
 
-use crate::{Debt, User, UserHealthStatus};
 use crate::contract::{get_bit, market_get_from_index};
 use crate::error::ContractError;
 use crate::interest_rates::{
     get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
 };
 use crate::state::DEBTS;
+use crate::{Debt, User, UserHealthStatus};
 
 /// User global position
 pub struct UserPosition {

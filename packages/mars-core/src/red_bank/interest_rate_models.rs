@@ -2,10 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use cosmwasm_std::{StdResult};
+use cosmwasm_std::StdResult;
 
 use crate::math::decimal::Decimal;
-
 
 pub trait InterestRateModel {
     /// Updates borrow and liquidity rates based on model parameters

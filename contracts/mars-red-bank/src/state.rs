@@ -1,4 +1,3 @@
-
 use cosmwasm_std::{Addr, Uint128};
 use cw_storage_plus::{Item, Map, U32Key};
 
@@ -18,4 +17,3 @@ pub const MARKET_REFERENCES_BY_MA_TOKEN: Map<&Addr, Vec<u8>> = Map::new("market_
 pub const DEBTS: Map<(&[u8], &Addr), Debt> = Map::new("debts");
 pub const UNCOLLATERALIZED_LOAN_LIMITS: Map<(&[u8], &Addr), Uint128> =
     Map::new("uncollateralized_loan_limits");
-

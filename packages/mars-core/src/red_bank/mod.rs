@@ -268,7 +268,7 @@ pub struct CollateralInfo {
     pub enabled: bool,
 }
 
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct UncollateralizedLoanLimitResponse {
     /// Limit an address has for an uncollateralized loan for a specific asset.
     /// 0 limit means no collateral.
@@ -285,4 +285,3 @@ pub struct UserPositionResponse {
     pub weighted_maintenance_margin_in_uusd: Uint128,
     pub health_status: UserHealthStatus,
 }
-

@@ -16,12 +16,13 @@ use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
 use mars_core::cw20_core::instantiate_token_info_and_marketing;
+use mars_core::red_bank;
 
-use crate::Config;
 use crate::allowances::{execute_send_from, execute_transfer_from};
 use crate::core;
 use crate::msg::{BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{CONFIG};
+use crate::state::CONFIG;
+use crate::Config;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:ma-token";
@@ -375,18 +376,15 @@ pub fn query_underlying_asset_balance(
 
     let config = CONFIG.load(deps.storage)?;
 
-    let query: Uint128 =
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: config.red_bank_address.into(),
-            msg: to_binary(&red_bank::msg::QueryMsg::DescaledLiquidityAmount {
-                ma_token_address: env.contract.address.into(),
-                amount: balance,
-            })?,
-        }))?;
+    let query: Uint128 = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: config.red_bank_address.into(),
+        msg: to_binary(&red_bank::msg::QueryMsg::DescaledLiquidityAmount {
+            ma_token_address: env.contract.address.into(),
+            amount: balance,
+        })?,
+    }))?;
 
-    Ok(BalanceResponse {
-        balance: query,
-    })
+    Ok(BalanceResponse { balance: query })
 }
 
 #[cfg(test)]
@@ -1123,13 +1121,15 @@ mod tests {
             vec![
                 SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: String::from("red_bank"),
-                    msg: to_binary(&mars_core::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
-                        sender_address: Addr::unchecked(&addr1),
-                        recipient_address: Addr::unchecked(&contract),
-                        sender_previous_balance: amount1,
-                        recipient_previous_balance: Uint128::zero(),
-                        amount: transfer,
-                    })
+                    msg: to_binary(
+                        &mars_core::red_bank::msg::ExecuteMsg::FinalizeLiquidityTokenTransfer {
+                            sender_address: Addr::unchecked(&addr1),
+                            recipient_address: Addr::unchecked(&contract),
+                            sender_previous_balance: amount1,
+                            recipient_previous_balance: Uint128::zero(),
+                            amount: transfer,
+                        }
+                    )
                     .unwrap(),
                     funds: vec![],
                 })),

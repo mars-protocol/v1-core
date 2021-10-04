@@ -5,7 +5,6 @@ use cosmwasm_std::testing::{mock_env, mock_info};
 use cw20::{Cw20Coin, MinterResponse, TokenInfoResponse};
 use cw20_base::contract::{query_balance, query_minter, query_token_info};
 
-
 use crate::contract::instantiate;
 use crate::msg::InstantiateMsg;
 

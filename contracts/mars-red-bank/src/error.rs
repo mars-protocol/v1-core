@@ -104,7 +104,6 @@ pub enum ContractError {
     )]
     CannotTransferTokenWhenInvalidHealthFactor {},
 
-
     #[error("Failed to encode asset reference into string")]
     CannotEncodeAssetReferenceIntoString {},
 

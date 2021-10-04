@@ -22,12 +22,6 @@ use mars_core::error::MarsError;
 use mars_core::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
 use mars_core::math::decimal::Decimal;
 
-use crate::{
-    CollateralInfo, CollateralResponse, ConfigResponse,
-    UserHealthStatus, Config, Debt, GlobalState, Market, User, DebtInfo, DebtResponse,
-    MarketInfo, MarketResponse, MarketsListResponse, UncollateralizedLoanLimitResponse,
-    UserPositionResponse,
-};
 use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::interest_rates::{
@@ -37,9 +31,14 @@ use crate::interest_rates::{
 use crate::msg::{
     CreateOrUpdateConfig, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, QueryMsg, ReceiveMsg,
 };
-use crate::state::{ 
+use crate::state::{
     CONFIG, DEBTS, GLOBAL_STATE, MARKETS, MARKET_REFERENCES_BY_INDEX,
     MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
+};
+use crate::{
+    CollateralInfo, CollateralResponse, Config, ConfigResponse, Debt, DebtInfo, DebtResponse,
+    GlobalState, Market, MarketInfo, MarketResponse, MarketsListResponse,
+    UncollateralizedLoanLimitResponse, User, UserHealthStatus, UserPositionResponse,
 };
 
 // INIT
@@ -718,7 +717,8 @@ pub fn execute_update_asset(
                 reserve_factor: reserve_factor.unwrap_or(market.reserve_factor),
                 maintenance_margin: maintenance_margin.unwrap_or(market.maintenance_margin),
                 liquidation_bonus: liquidation_bonus.unwrap_or(market.liquidation_bonus),
-                interest_rate_strategy: interest_rate_strategy.unwrap_or(market.interest_rate_strategy),
+                interest_rate_strategy: interest_rate_strategy
+                    .unwrap_or(market.interest_rate_strategy),
                 active: active.unwrap_or(market.active),
                 deposit_enabled: deposit_enabled.unwrap_or(market.deposit_enabled),
                 borrow_enabled: borrow_enabled.unwrap_or(market.borrow_enabled),
