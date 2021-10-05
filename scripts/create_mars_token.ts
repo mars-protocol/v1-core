@@ -11,6 +11,7 @@ Dependencies:
 */
 
 import {
+  isTxError,
   LCDClient,
   LegacyAminoMultisigPublicKey,
   LocalTerra,
@@ -36,6 +37,7 @@ import {
   recover,
   setTimeoutDuration,
   toEncodedBinary,
+  transactionErrorFromResult,
   uploadContract
 } from "./helpers.js"
 
@@ -252,7 +254,10 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
 
   // Broadcast the tx
   const result = await broadcastTransaction(terra, tx)
-  console.log(result.txhash)
+  if (isTxError(result)) {
+    throw transactionErrorFromResult(result)
+  }
+  console.log(`https://finder.terra.money/${CHAIN_ID}/tx/${result.txhash}`)
 
   // Test
   const tokenInfo = await queryContract(terra, marsAddress, { token_info: {} })
