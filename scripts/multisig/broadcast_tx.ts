@@ -40,9 +40,9 @@ const SIGNATURES = (process.env.SIGNATURES!).split(",");
 
   // Sign the tx using the signatures from the multisig key holders
   const signatures = SIGNATURES.map(
-    x => SignatureV2.fromData(
+    file => SignatureV2.fromData(
       JSON.parse(
-        readFileSync(x).toString()
+        readFileSync(file).toString()
       ).signatures[0]
     )
   )
