@@ -22,10 +22,9 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 
-terraswap = "2.4.0"
+cw-storage-plus = "0.9.0"
 
 cosmwasm-std = "0.16.2"
-cw-storage-plus = "0.8.0"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
