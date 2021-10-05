@@ -3,10 +3,8 @@ Script to deploy a cw20 token to Terra Columbus-5, setting the token minter and 
 to a cw1 whitelist contract that has a multisig as the sole admin.
 
 Dependencies:
-  - terrad v0.5
   - cw-plus v0.9.1
   - LocalTerra (optional)
-  - Add accounts and multisig to terrad
   - Set environment variables in a .env file (see below for details of the required variables)
 */
 
