@@ -10,8 +10,7 @@ use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
 use cw_storage_plus::U32Key;
 
-use mars_core::address_provider;
-use mars_core::address_provider::msg::MarsContract;
+use mars_core::address_provider::{self, MarsContract};
 use mars_core::ma_token;
 
 use mars_core::asset::{
@@ -319,8 +318,8 @@ pub fn execute_withdraw(
     let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
-    if !market.allow_withdraw() {
-        return Err(ContractError::WithdrawNotAllowed { asset: asset_label });
+    if !market.active {
+        return Err(ContractError::MarketNotActive { asset: asset_label });
     }
 
     let asset_ma_addr = market.ma_token_address.clone();
@@ -492,7 +491,12 @@ pub fn execute_init_asset(
     match market_option {
         None => {
             let market_idx = money_market.market_count;
-            let new_market = Market::create(env.block.time, market_idx, asset_type, asset_params)?;
+            let new_market = create_market(
+                env.block.time.seconds(),
+                market_idx,
+                asset_type,
+                asset_params,
+            )?;
 
             // Save new market
             MARKETS.save(deps.storage, asset_reference.as_slice(), &new_market)?;
@@ -572,7 +576,7 @@ pub fn execute_init_asset(
 
 /// Initialize new market
 pub fn create_market(
-    block_time: Timestamp,
+    block_time: u64,
     index: u32,
     asset_type: AssetType,
     params: InitOrUpdateAssetParams,
@@ -616,7 +620,7 @@ pub fn create_market(
         liquidity_rate: Decimal::zero(),
         max_loan_to_value: max_loan_to_value.unwrap(),
         reserve_factor: reserve_factor.unwrap(),
-        interests_last_updated: block_time.seconds(),
+        interests_last_updated: block_time,
         debt_total_scaled: Uint128::zero(),
         maintenance_margin: maintenance_margin.unwrap(),
         liquidation_bonus: liquidation_bonus.unwrap(),
@@ -673,7 +677,7 @@ pub fn execute_update_asset(
     let market_option = MARKETS.may_load(deps.storage, asset_reference.as_slice())?;
     match market_option {
         None => Err(ContractError::AssetNotInitialized {}),
-        Some(market) => {
+        Some(mut market) => {
             // Destructuring a struct’s fields into separate variables in order to force
             // compile error if we add more params
             let InitOrUpdateAssetParams {
@@ -693,7 +697,7 @@ pub fn execute_update_asset(
             // new params to a period where they were not valid yet. Interests rates are
             // recalculated after changes are applied.
             let should_update_interest_rates = (reserve_factor.is_some()
-                && reserve_factor.unwrap() != self.reserve_factor)
+                && reserve_factor.unwrap() != market.reserve_factor)
                 || interest_rate_strategy.is_some();
 
             let mut response = Response::new();
@@ -705,9 +709,9 @@ pub fn execute_update_asset(
                     MarsContract::ProtocolRewardsCollector,
                 )?;
                 response = apply_accumulated_interests(
-                    env,
+                    &env,
                     protocol_rewards_collector_address,
-                    &mut self,
+                    &mut market,
                     response,
                 )?;
             }
@@ -729,12 +733,12 @@ pub fn execute_update_asset(
 
             if should_update_interest_rates {
                 response = update_interest_rates(
-                    deps,
-                    env,
-                    reference,
+                    &deps,
+                    &env,
+                    &asset_reference,
                     &mut updated_market,
                     Uint128::zero(),
-                    asset_label,
+                    &asset_label,
                     response,
                 )?;
             }
@@ -760,9 +764,13 @@ pub fn execute_deposit(
     deposit_amount: Uint128,
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
-
-    if !market.allow_deposit() {
-        return Err(ContractError::DepositNotAllowed {
+    if !market.active {
+        return Err(ContractError::MarketNotActive {
+            asset: asset_label.to_string(),
+        });
+    }
+    if !market.deposit_enabled {
+        return Err(ContractError::DepositNotEnabled {
             asset: asset_label.to_string(),
         });
     }
@@ -858,15 +866,19 @@ pub fn execute_borrow(
 
     // Load market and user state
     let global_state = GLOBAL_STATE.load(deps.storage)?;
-    let mut borrow_market = match MARKETS.load(deps.storage, asset_reference.as_slice()) {
-        Ok(borrow_market) if borrow_market.allow_borrow() => borrow_market,
-        Ok(_) => {
-            return Err(ContractError::BorrowNotAllowed { asset: asset_label });
-        }
-        Err(_) => {
-            return Err(ContractError::BorrowMarketNotExists { asset: asset_label });
-        }
-    };
+    let mut borrow_market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
+
+    if !borrow_market.active {
+        return Err(ContractError::MarketNotActive {
+            asset: asset_label.to_string(),
+        });
+    }
+    if !borrow_market.borrow_enabled {
+        return Err(ContractError::BorrowNotEnabled {
+            asset: asset_label.to_string(),
+        });
+    }
+
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
         .may_load(
             deps.storage,
@@ -913,7 +925,7 @@ pub fn execute_borrow(
             // if user was already borrowing, get price from user position
             user_position.get_asset_price(asset_reference.as_slice(), &asset_label)?
         } else {
-            mars::oracle::helpers::query_price(
+            mars_core::oracle::helpers::query_price(
                 deps.querier,
                 oracle_address,
                 &asset_label,
@@ -1040,8 +1052,8 @@ pub fn execute_repay(
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
-    if !market.allow_repay() {
-        return Err(ContractError::RepayNotAllowed {
+    if !market.active {
+        return Err(ContractError::MarketNotActive {
             asset: asset_label.to_string(),
         });
     }
@@ -1188,12 +1200,10 @@ pub fn execute_liquidate(
     let mut collateral_market =
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
 
-    if !collateral_market.allow_liquidate() {
-        return Err(
-            ContractError::LiquidationNotAllowedWhenCollateralMarketInactive {
-                asset: collateral_asset_label,
-            },
-        );
+    if !collateral_market.active {
+        return Err(ContractError::MarketNotActive {
+            asset: collateral_asset_label,
+        });
     }
 
     // check if user has available collateral in specified collateral asset to be liquidated
@@ -1256,8 +1266,8 @@ pub fn execute_liquidate(
 
     let mut debt_market = MARKETS.load(deps.storage, debt_asset_reference.as_slice())?;
 
-    if !debt_market.allow_liquidate() {
-        return Err(ContractError::LiquidationNotAllowedWhenDebtMarketInactive {
+    if !debt_market.active {
+        return Err(ContractError::MarketNotActive {
             asset: debt_asset_label,
         });
     }
@@ -1443,11 +1453,13 @@ fn process_ma_token_transfer_to_liquidator(
 
     response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
-        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
-            sender: user_addr.to_string(),
-            recipient: liquidator_addr.to_string(),
-            amount: collateral_amount_to_liquidate_scaled,
-        })?,
+        msg: to_binary(
+            &mars_core::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
+                sender: user_addr.to_string(),
+                recipient: liquidator_addr.to_string(),
+                amount: collateral_amount_to_liquidate_scaled,
+            },
+        )?,
         funds: vec![],
     }));
 
@@ -1515,7 +1527,7 @@ fn process_underlying_asset_transfer_to_liquidator(
 
     response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: collateral_market.ma_token_address.to_string(),
-        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
+        msg: to_binary(&mars_core::ma_token::msg::ExecuteMsg::Burn {
             user: user_addr.to_string(),
 
             amount: collateral_amount_to_liquidate_scaled,
@@ -1975,7 +1987,7 @@ fn query_scaled_liquidity_amount(
     env: Env,
     asset: Asset,
     amount: Uint128,
-) -> StdResult<Uin128> {
+) -> StdResult<Uint128> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
     let scaled_amount = get_scaled_amount(
@@ -1990,7 +2002,7 @@ fn query_scaled_debt_amount(
     env: Env,
     asset: Asset,
     amount: Uint128,
-) -> StdResult<AmountResponse> {
+) -> StdResult<Uint128> {
     let asset_reference = asset.get_reference();
     let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
     let scaled_amount = get_scaled_amount(
@@ -2005,7 +2017,7 @@ fn query_descaled_liquidity_amount(
     env: Env,
     ma_token_address: String,
     amount: Uint128,
-) -> StdResult<AmountResponse> {
+) -> StdResult<Uint128> {
     let ma_token_address = deps.api.addr_validate(&ma_token_address)?;
     let market_reference = MARKET_REFERENCES_BY_MA_TOKEN.load(deps.storage, &ma_token_address)?;
     let market = MARKETS.load(deps.storage, market_reference.as_slice())?;
@@ -2157,19 +2169,23 @@ pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Mar
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interest_rate_models::{
-        DynamicInterestRate, InterestRateModel, InterestRateStrategy, LinearInterestRate,
-    };
-    use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
-    use crate::msg::CreateOrUpdateConfig;
-    use crate::msg::ExecuteMsg::UpdateConfig;
+
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{attr, coin, from_binary, BankMsg, OwnedDeps, SubMsg};
-    use mars::tax::deduct_tax;
-    use mars::testing::{
+
+    use mars_core::tax::deduct_tax;
+    use mars_core::testing::{
         mock_dependencies, mock_env, mock_env_at_block_time, mock_info, MarsMockQuerier,
         MockEnvParams,
     };
+
+    use crate::interest_rate_models::{
+        DynamicInterestRate, InterestRateModel, InterestRateModelError, InterestRateStrategy,
+        LinearInterestRate,
+    };
+    use crate::interest_rates::{calculate_applied_linear_interest_rate, SCALING_FACTOR};
+    use crate::msg::CreateOrUpdateConfig;
+    use crate::MarketError;
 
     #[test]
     fn test_proper_initialization() {
@@ -2267,7 +2283,7 @@ mod tests {
         // *
         // non owner is not authorized
         // *
-        let msg = UpdateConfig {
+        let msg = ExecuteMsg::UpdateConfig {
             config: init_config.clone(),
         };
         let info = mock_info("somebody");
@@ -2283,7 +2299,7 @@ mod tests {
             close_factor: Some(close_factor),
             ..init_config.clone()
         };
-        let msg = UpdateConfig { config };
+        let msg = ExecuteMsg::UpdateConfig { config };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
@@ -2305,7 +2321,7 @@ mod tests {
             ma_token_code_id: Some(40u64),
             close_factor: Some(close_factor),
         };
-        let msg = UpdateConfig {
+        let msg = ExecuteMsg::UpdateConfig {
             config: config.clone(),
         };
 
@@ -2413,13 +2429,15 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            MarsError::ParamsNotLessOrEqualOne {
-                expected_params:
-                    "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
-                        .to_string(),
-                invalid_params: "max_loan_to_value, reserve_factor".to_string()
-            }
-            .into()
+            ContractError::Market(
+                MarsError::ParamsNotLessOrEqualOne {
+                    expected_params:
+                        "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
+                            .to_string(),
+                    invalid_params: "max_loan_to_value, reserve_factor".to_string()
+                }
+                .into()
+            )
         );
 
         // *
@@ -2440,10 +2458,10 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::InvalidMaintenanceMargin {
+            ContractError::Market(MarketError::InvalidMaintenanceMargin {
                 maintenance_margin: Decimal::from_ratio(1u128, 2u128),
                 max_loan_to_value: Decimal::from_ratio(1u128, 2u128)
-            }
+            })
         );
 
         // *
@@ -2468,10 +2486,13 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::InvalidMinMaxBorrowRate {
-                min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
-                max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
-            }
+            ContractError::Market(
+                InterestRateModelError::InvalidMinMaxBorrowRate {
+                    min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+                    max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
+                }
+                .into()
+            )
         );
 
         // *
@@ -2493,7 +2514,10 @@ mod tests {
         };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidOptimalUtilizationRate {});
+        assert_eq!(
+            error_res,
+            ContractError::Market(InterestRateModelError::InvalidOptimalUtilizationRate {}.into())
+        );
 
         // *
         // owner is authorized
@@ -2774,13 +2798,12 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                MarsError::ParamsNotLessOrEqualOne {
+                ContractError::Market(MarsError::ParamsNotLessOrEqualOne {
                     expected_params:
                         "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
                             .to_string(),
                     invalid_params: "maintenance_margin".to_string()
-                }
-                .into()
+                }.into())
             );
         }
 
@@ -2803,10 +2826,10 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::InvalidMaintenanceMargin {
+                ContractError::Market(MarketError::InvalidMaintenanceMargin {
                     maintenance_margin: Decimal::from_ratio(1u128, 2u128),
                     max_loan_to_value: Decimal::from_ratio(6u128, 10u128)
-                }
+                })
             );
         }
 
@@ -2835,10 +2858,13 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::InvalidMinMaxBorrowRate {
-                    min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
-                    max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
-                }
+                ContractError::Market(
+                    InterestRateModelError::InvalidMinMaxBorrowRate {
+                        min_borrow_rate: Decimal::from_ratio(5u128, 10u128),
+                        max_borrow_rate: Decimal::from_ratio(4u128, 10u128)
+                    }
+                    .into()
+                )
             );
         }
 
@@ -2864,7 +2890,12 @@ mod tests {
             };
             let info = mock_info("owner");
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(error_res, ContractError::InvalidOptimalUtilizationRate {});
+            assert_eq!(
+                error_res,
+                ContractError::Market(
+                    InterestRateModelError::InvalidOptimalUtilizationRate {}.into()
+                )
+            );
         }
 
         // *
@@ -3236,7 +3267,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::not_found("red_bank::state::Market").into()
+            StdError::not_found("mars_core::red_bank::Market").into()
         );
     }
 
@@ -3437,7 +3468,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::not_found("red_bank::state::Market").into()
+            StdError::not_found("mars_core::red_bank::Market").into()
         );
     }
 
@@ -3453,23 +3484,22 @@ mod tests {
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            StdError::not_found("red_bank::state::Market").into()
+            StdError::not_found("mars_core::red_bank::Market").into()
         );
     }
 
     #[test]
-    fn test_cannot_deposit_if_market_disabled() {
+    fn test_cannot_deposit_if_market_not_active() {
         let mut deps = th_setup(&[]);
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            deposit_enabled: false,
-            borrow_enabled: false,
+            deposit_enabled: true,
             ..Default::default()
         };
-        let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+        th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
         // Check error when deposit not allowed on market
         let env = mock_env(MockEnvParams::default());
@@ -3480,16 +3510,38 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::DepositNotAllowed {
+            ContractError::MarketNotActive {
                 asset: "somecoin".to_string()
             }
         );
+    }
 
-        // Validate different configurations for market flags
-        market.active = true;
-        assert!(!market.allow_deposit());
-        market.deposit_enabled = true;
-        assert!(market.allow_deposit());
+    #[test]
+    fn test_cannot_deposit_if_market_not_enabled() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: true,
+            deposit_enabled: false,
+            ..Default::default()
+        };
+        th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        // Check error when deposit not allowed on market
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("depositor", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::DepositNative {
+            denom: String::from("somecoin"),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            ContractError::DepositNotEnabled {
+                asset: "somecoin".to_string()
+            }
+        );
     }
 
     #[test]
@@ -3835,7 +3887,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::WithdrawNotAllowed {
+            ContractError::MarketNotActive {
                 asset: "somecoin".to_string()
             }
         );
@@ -4885,7 +4937,7 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::RepayNotAllowed {
+            ContractError::MarketNotActive {
                 asset: "somecoin".to_string()
             }
         );
@@ -5237,18 +5289,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cannot_borrow_if_market_disabled() {
+    fn test_cannot_borrow_if_market_not_active() {
         let mut deps = th_setup(&[]);
 
         let mock_market = Market {
             ma_token_address: Addr::unchecked("ma_somecoin"),
             asset_type: AssetType::Native,
             active: false,
-            deposit_enabled: false,
-            borrow_enabled: false,
+            borrow_enabled: true,
             ..Default::default()
         };
-        let mut market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+        th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
         // Check error when borrowing not allowed on market
         let env = mock_env(MockEnvParams::default());
@@ -5262,16 +5313,41 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::BorrowNotAllowed {
+            ContractError::MarketNotActive {
                 asset: "somecoin".to_string()
             }
         );
+    }
 
-        // Validate different configurations for market flags
-        market.active = true;
-        assert!(!market.allow_borrow());
-        market.borrow_enabled = true;
-        assert!(market.allow_borrow());
+    #[test]
+    fn test_cannot_borrow_if_market_not_enabled() {
+        let mut deps = th_setup(&[]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("ma_somecoin"),
+            asset_type: AssetType::Native,
+            active: true,
+            borrow_enabled: false,
+            ..Default::default()
+        };
+        th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        // Check error when borrowing not allowed on market
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info("borrower", &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::Borrow {
+            asset: Asset::Native {
+                denom: "somecoin".to_string(),
+            },
+            amount: Uint128::new(1000),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            ContractError::BorrowNotEnabled {
+                asset: "somecoin".to_string()
+            }
+        );
     }
 
     #[test]
@@ -5582,7 +5658,7 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::LiquidationNotAllowedWhenCollateralMarketInactive {
+                ContractError::MarketNotActive {
                     asset: "collateral".to_string()
                 }
             );
@@ -5625,7 +5701,7 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, liquidate_msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::LiquidationNotAllowedWhenDebtMarketInactive {
+                ContractError::MarketNotActive {
                     asset: "cw20_debt".to_string()
                 }
             );
@@ -5711,18 +5787,20 @@ mod tests {
                     })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
-                        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
-                            sender: user_address.to_string(),
-                            recipient: liquidator_address.to_string(),
-                            amount: expected_liquidated_collateral_amount_scaled.into(),
-                        })
+                        msg: to_binary(
+                            &mars_core::ma_token::msg::ExecuteMsg::TransferOnLiquidation {
+                                sender: user_address.to_string(),
+                                recipient: liquidator_address.to_string(),
+                                amount: expected_liquidated_collateral_amount_scaled.into(),
+                            }
+                        )
                         .unwrap(),
                         funds: vec![]
                     })),
                 ]
             );
 
-            mars::testing::assert_eq_vec(
+            mars_core::testing::assert_eq_vec(
                 res.attributes,
                 vec![
                     attr("action", "liquidate"),
@@ -5886,7 +5964,7 @@ mod tests {
                     })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
-                        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
+                        msg: to_binary(&mars_core::ma_token::msg::ExecuteMsg::Burn {
                             user: user_address.to_string(),
                             amount: expected_liquidated_collateral_amount_scaled.into(),
                         })
@@ -5916,7 +5994,7 @@ mod tests {
                 ]
             );
 
-            mars::testing::assert_eq_vec(
+            mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
                     attr("collateral_market", "collateral"),
@@ -6077,7 +6155,7 @@ mod tests {
                 vec![
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
-                        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
+                        msg: to_binary(&mars_core::ma_token::msg::ExecuteMsg::Burn {
                             user: user_address.to_string(),
                             amount: expected_liquidated_collateral_amount_scaled.into(),
                         })
@@ -6107,7 +6185,7 @@ mod tests {
                 ]
             );
 
-            mars::testing::assert_eq_vec(
+            mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
                     attr("collateral_market", "collateral"),
@@ -6293,7 +6371,7 @@ mod tests {
                     })),
                     SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
                         contract_addr: collateral_market_ma_token_addr.to_string(),
-                        msg: to_binary(&mars::ma_token::msg::ExecuteMsg::Burn {
+                        msg: to_binary(&mars_core::ma_token::msg::ExecuteMsg::Burn {
                             user: user_address.to_string(),
                             amount: expected_liquidated_collateral_amount_scaled.into(),
                         })
@@ -6325,7 +6403,7 @@ mod tests {
                 ]
             );
 
-            mars::testing::assert_eq_vec(
+            mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
                     attr("collateral_market", "collateral"),
@@ -7314,38 +7392,6 @@ mod tests {
         let msg = InstantiateMsg { config };
         instantiate(deps.as_mut(), env, info, msg).unwrap();
         deps
-    }
-
-    impl Default for Market {
-        fn default() -> Self {
-            let dynamic_ir = DynamicInterestRate {
-                min_borrow_rate: Decimal::zero(),
-                max_borrow_rate: Decimal::one(),
-                kp_1: Default::default(),
-                optimal_utilization_rate: Default::default(),
-                kp_augmentation_threshold: Default::default(),
-                kp_2: Default::default(),
-            };
-            Market {
-                index: 0,
-                ma_token_address: zero_address(),
-                liquidity_index: Default::default(),
-                borrow_index: Default::default(),
-                borrow_rate: Default::default(),
-                liquidity_rate: Default::default(),
-                max_loan_to_value: Default::default(),
-                reserve_factor: Default::default(),
-                interests_last_updated: 0,
-                debt_total_scaled: Default::default(),
-                asset_type: AssetType::Native,
-                maintenance_margin: Decimal::one(),
-                liquidation_bonus: Decimal::zero(),
-                interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
-                active: true,
-                deposit_enabled: true,
-                borrow_enabled: true,
-            }
-        }
     }
 
     fn th_init_market(deps: DepsMut, key: &[u8], market: &Market) -> Market {

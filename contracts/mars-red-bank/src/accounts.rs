@@ -4,6 +4,8 @@ use mars_core::asset::AssetType;
 use mars_core::helpers::cw20_get_balance;
 use mars_core::math::decimal::Decimal;
 
+use mars_core::oracle;
+
 use crate::contract::{get_bit, market_get_from_index};
 use crate::error::ContractError;
 use crate::interest_rates::{
@@ -195,7 +197,7 @@ fn get_user_asset_positions(
             },
         };
 
-        let asset_price = mars::oracle::helpers::query_price(
+        let asset_price = oracle::helpers::query_price(
             deps.querier,
             oracle_address.clone(),
             &asset_label,

@@ -1,16 +1,17 @@
+use std::str;
+
 use cosmwasm_std::{
     to_binary, Addr, CosmosMsg, DepsMut, Env, Event, Response, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
-use std::str;
 
-use mars::asset::AssetType;
-use mars::helpers::cw20_get_balance;
+use mars_core::asset::AssetType;
+use mars_core::helpers::cw20_get_balance;
+use mars_core::math::decimal::Decimal;
 
 use crate::error::ContractError;
 use crate::interest_rate_models::InterestRateModel;
-use crate::state::Market;
-use mars::math::decimal::Decimal;
+use crate::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
@@ -230,8 +231,9 @@ pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 
 #[cfg(test)]
 mod tests {
+    use mars_core::math::decimal::Decimal;
+
     use crate::interest_rates::calculate_applied_linear_interest_rate;
-    use mars::math::decimal::Decimal;
 
     #[test]
     fn test_accumulated_index_calculation() {

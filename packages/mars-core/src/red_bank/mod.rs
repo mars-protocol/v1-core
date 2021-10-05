@@ -9,10 +9,12 @@ use cosmwasm_std::{Addr, Uint128};
 
 use crate::asset::AssetType;
 use crate::error::MarsError;
-use crate::helpers::all_conditions_valid;
+use crate::helpers::{all_conditions_valid, zero_address};
 use crate::math::decimal::Decimal;
 
-use self::interest_rate_models::{InterestRateModel, InterestRateModelError, InterestRateStrategy};
+use self::interest_rate_models::{
+    DynamicInterestRate, InterestRateModel, InterestRateModelError, InterestRateStrategy,
+};
 
 /// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -95,7 +97,7 @@ pub struct Market {
 }
 
 impl Market {
-    fn validate(&self) -> Result<(), MarketError> {
+    pub fn validate(&self) -> Result<(), MarketError> {
         self.interest_rate_strategy.validate()?;
 
         // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
@@ -126,25 +128,37 @@ impl Market {
 
         Ok(())
     }
+}
 
-    pub fn allow_deposit(&self) -> bool {
-        self.active && self.deposit_enabled
-    }
-
-    pub fn allow_withdraw(&self) -> bool {
-        self.active
-    }
-
-    pub fn allow_borrow(&self) -> bool {
-        self.active && self.borrow_enabled
-    }
-
-    pub fn allow_repay(&self) -> bool {
-        self.active
-    }
-
-    pub fn allow_liquidate(&self) -> bool {
-        self.active
+impl Default for Market {
+    fn default() -> Self {
+        let dynamic_ir = DynamicInterestRate {
+            min_borrow_rate: Decimal::zero(),
+            max_borrow_rate: Decimal::one(),
+            kp_1: Default::default(),
+            optimal_utilization_rate: Default::default(),
+            kp_augmentation_threshold: Default::default(),
+            kp_2: Default::default(),
+        };
+        Market {
+            index: 0,
+            ma_token_address: zero_address(),
+            liquidity_index: Default::default(),
+            borrow_index: Default::default(),
+            borrow_rate: Default::default(),
+            liquidity_rate: Default::default(),
+            max_loan_to_value: Default::default(),
+            reserve_factor: Default::default(),
+            interests_last_updated: 0,
+            debt_total_scaled: Default::default(),
+            asset_type: AssetType::Native,
+            maintenance_margin: Decimal::one(),
+            liquidation_bonus: Decimal::zero(),
+            interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
+            active: true,
+            deposit_enabled: true,
+            borrow_enabled: true,
+        }
     }
 }
 

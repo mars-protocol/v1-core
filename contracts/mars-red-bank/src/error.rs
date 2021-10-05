@@ -3,7 +3,6 @@ use thiserror::Error;
 use cosmwasm_std::{OverflowError, StdError};
 
 use mars_core::error::MarsError;
-use mars_core::math::decimal::Decimal;
 
 use crate::MarketError;
 
@@ -58,9 +57,6 @@ pub enum ContractError {
     #[error("Borrow amount must be greater than 0 {asset:?}")]
     InvalidBorrowAmount { asset: String },
 
-    #[error("No borrow market exists with asset: {asset:?}")]
-    BorrowMarketNotExists { asset: String },
-
     #[error("Address has no collateral deposited")]
     UserNoCollateral {},
 
@@ -110,20 +106,14 @@ pub enum ContractError {
     #[error("Contract current asset balance cannot be less than liquidity taken")]
     OperationExceedsAvailableLiquidity {},
 
-    #[error("Cannot withdraw asset {asset:?}")]
-    WithdrawNotAllowed { asset: String },
+    #[error("Deposit for {asset:?} is not enabled")]
+    DepositNotEnabled { asset: String },
 
-    #[error("Cannot deposit asset {asset:?}")]
-    DepositNotAllowed { asset: String },
+    #[error("Borrow for {asset:?} is not enabled")]
+    BorrowNotEnabled { asset: String },
 
-    #[error("Cannot borrow asset {asset:?}")]
-    BorrowNotAllowed { asset: String },
-
-    #[error("Cannot repay asset {asset:?}")]
-    RepayNotAllowed { asset: String },
-
-    #[error("Cannot liquidate. Collateral asset {asset:?}")]
-    LiquidationNotAllowedWhenCollateralMarketInactive { asset: String },
+    #[error("Cannot perform operation. Market for {asset:?} is not active")]
+    MarketNotActive { asset: String },
 
     #[error("Cannot liquidate. Debt asset {asset:?}")]
     LiquidationNotAllowedWhenDebtMarketInactive { asset: String },
