@@ -56,7 +56,8 @@ const TOKEN_CAP = 1_000_000_000_000000
 const TOKEN_DESCRIPTION = "Mars is a fully automated, on-chain credit protocol built on Terra " +
   "and governed by a decentralised community of users and developers."
 const TOKEN_PROJECT = "https://marsprotocol.io"
-const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
+// TODO host a logo on Mars website and use that the URL here
+const TOKEN_LOGO = "https://marsprotocol.io/logo.png";
 
 // MAIN
 
