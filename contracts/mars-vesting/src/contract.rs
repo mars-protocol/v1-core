@@ -1,24 +1,24 @@
+use std::str::FromStr;
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
     StdError, StdResult, SubMsg, Uint128, WasmMsg,
 };
+
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 
-use mars::address_provider;
-use mars::address_provider::msg::MarsContract;
-use mars::error::MarsError;
-use mars::staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
-use mars::vesting::msg::{
-    AllocationResponse, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, SimulateWithdrawResponse,
-};
-use mars::vesting::{AllocationParams, AllocationStatus, Config, Stake};
+use mars_core::error::MarsError;
 
+use mars_core::address_provider::{self, MarsContract};
+use mars_core::staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
+
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{CONFIG, CURRENT_STAKER, PARAMS, STATUS, VOTING_POWER_SNAPSHOTS};
-
-use std::str::FromStr;
+use crate::{
+    AllocationParams, AllocationResponse, AllocationStatus, Config, SimulateWithdrawResponse, Stake,
+};
 
 //----------------------------------------------------------------------------------------
 // Entry Points
@@ -433,8 +433,7 @@ fn query_voting_power(deps: Deps, _env: Env, account: String, block: u64) -> Std
 mod helpers {
     use cosmwasm_std::Uint128;
 
-    use mars::vesting::msg::SimulateWithdrawResponse;
-    use mars::vesting::{AllocationParams, AllocationStatus, Schedule};
+    use crate::{AllocationParams, AllocationStatus, Schedule, SimulateWithdrawResponse};
 
     use std::cmp;
 
@@ -539,7 +538,6 @@ mod helpers {
                 break;
             }
         }
-
         let mars_to_withdraw_as_xmars = mars_withdrawable - mars_to_withdraw;
 
         status.mars_withdrawn_as_mars += mars_to_withdraw;
@@ -559,19 +557,19 @@ mod helpers {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use cosmwasm_std::testing::{MockApi, MockStorage};
     use cosmwasm_std::{
         ContractResult, CosmosMsg, OwnedDeps, SubMsg, SubMsgExecutionResponse, Timestamp, WasmMsg,
     };
 
-    use mars::testing::{
+    use mars_core::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time, mock_info,
         MarsMockQuerier, MockEnvParams,
     };
-    use mars::vesting::msg::InstantiateMsg;
-    use mars::vesting::Schedule;
 
-    use super::*;
+    use crate::Schedule;
 
     const DEFAULT_UNLOCK_SCHEDULE: Schedule = Schedule {
         start_time: 1635724800, // 2021-11-01

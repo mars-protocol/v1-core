@@ -13,7 +13,7 @@ pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use cosmwasm_std::{CosmosMsg};
+    use cosmwasm_std::CosmosMsg;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InstantiateMsg {
@@ -27,9 +27,7 @@ pub mod msg {
         ExecuteCosmosMsg(CosmosMsg),
 
         /// Update contract config (only callable by owner)
-        UpdateConfig {
-            owner: Option<String>,
-        },
+        UpdateConfig { owner: Option<String> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

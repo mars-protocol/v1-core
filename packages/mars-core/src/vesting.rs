@@ -1,6 +1,7 @@
-use cosmwasm_std::Uint128;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::{Addr, Uint128};
 
 // T = String (unchecked) or Addr (checked)
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -84,13 +85,32 @@ impl AllocationStatus {
     }
 }
 
+pub type ConfigResponse = Config<Addr>;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AllocationResponse {
+    pub params: AllocationParams,
+    pub status: AllocationStatus,
+    pub voting_power_snapshots: Vec<(u64, Uint128)>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct SimulateWithdrawResponse {
+    /// Amount of MARS to receive in the form of MARS token
+    pub mars_to_withdraw: Uint128,
+    /// Amount of MARS to receive in the form of xMARS token
+    pub mars_to_withdraw_as_xmars: Uint128,
+    /// Amount of xMARS token to receive, corresponding to `mars_to_withdraw_as_xmars` MARS
+    pub xmars_to_withdraw: Uint128,
+}
+
 pub mod msg {
-    use cosmwasm_std::{Addr, Uint128};
-    use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
-    use super::{AllocationParams, AllocationStatus, Config};
+    use cw20::Cw20ReceiveMsg;
+
+    use super::{AllocationParams, Config};
 
     pub type InstantiateMsg = Config<String>;
 
@@ -128,24 +148,5 @@ pub mod msg {
         /// Total amount of xMARS owned by an account that's under custody by this contract
         /// Used by Martian Council to determine the account's vested voting power
         VotingPowerAt { account: String, block: u64 },
-    }
-
-    pub type ConfigResponse = Config<Addr>;
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct AllocationResponse {
-        pub params: AllocationParams,
-        pub status: AllocationStatus,
-        pub voting_power_snapshots: Vec<(u64, Uint128)>,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct SimulateWithdrawResponse {
-        /// Amount of MARS to receive in the form of MARS token
-        pub mars_to_withdraw: Uint128,
-        /// Amount of MARS to receive in the form of xMARS token
-        pub mars_to_withdraw_as_xmars: Uint128,
-        /// Amount of xMARS token to receive, corresponding to `mars_to_withdraw_as_xmars` MARS
-        pub xmars_to_withdraw: Uint128,
     }
 }
