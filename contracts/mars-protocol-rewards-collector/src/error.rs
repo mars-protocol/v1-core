@@ -1,6 +1,8 @@
 use cosmwasm_std::{OverflowError, StdError, Uint128};
-use mars::error::MarsError;
 use thiserror::Error;
+
+use crate::ConfigError;
+use mars_core::error::MarsError;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {
@@ -13,12 +15,12 @@ pub enum ContractError {
     #[error("{0}")]
     Overflow(#[from] OverflowError),
 
+    #[error("{0}")]
+    ConfigError(#[from] ConfigError),
+
     #[error("Asset is not enabled for distribution: {label:?}")]
     AssetNotEnabled { label: String },
 
     #[error("Amount to distribute {amount} is larger than available balance {balance}")]
     AmountToDistributeTooLarge { amount: Uint128, balance: Uint128 },
-
-    #[error("Invalid fee share amounts. Sum of safety and treasury fee shares exceeds one")]
-    InvalidFeeShareAmounts {},
 }

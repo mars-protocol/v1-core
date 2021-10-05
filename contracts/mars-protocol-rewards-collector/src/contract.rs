@@ -2,20 +2,21 @@ use cosmwasm_std::{
     entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
     StdResult, Uint128, WasmMsg,
 };
-use mars::{
-    address_provider::{self, msg::MarsContract},
-    asset::{build_send_asset_with_tax_deduction_msg, Asset},
-    error::MarsError,
-    helpers::{cw20_get_balance, option_string_to_addr, zero_address},
-    swapping::execute_swap,
-};
+
 use terraswap::asset::AssetInfo;
 
-use crate::{
-    error::ContractError,
-    msg::{ConfigResponse, CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg},
-    state::{AssetConfig, Config, ASSET_CONFIG, CONFIG},
-};
+use mars_core::asset::{build_send_asset_with_tax_deduction_msg, Asset};
+use mars_core::error::MarsError;
+use mars_core::helpers::{cw20_get_balance, option_string_to_addr, zero_address};
+use mars_core::swapping::execute_swap;
+
+use mars_core::address_provider::{self, MarsContract};
+use mars_core::red_bank;
+
+use crate::error::ContractError;
+use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{ASSET_CONFIG, CONFIG};
+use crate::{AssetConfig, Config};
 
 // INIT
 
@@ -368,17 +369,10 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+fn query_config(deps: Deps) -> StdResult<Config> {
     let config = CONFIG.load(deps.storage)?;
 
-    Ok(ConfigResponse {
-        owner: config.owner.to_string(),
-        address_provider_address: config.address_provider_address.to_string(),
-        safety_fund_fee_share: config.safety_fund_fee_share,
-        treasury_fee_share: config.treasury_fee_share,
-        astroport_factory_address: config.astroport_factory_address.to_string(),
-        astroport_max_spread: config.astroport_max_spread,
-    })
+    Ok(config)
 }
 
 fn query_asset_config(deps: Deps, asset: Asset) -> StdResult<AssetConfig> {
@@ -396,18 +390,22 @@ fn query_asset_config(deps: Deps, asset: Asset) -> StdResult<AssetConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::msg::ExecuteMsg::UpdateConfig;
+
     use cosmwasm_std::{
         attr, coin, from_binary,
         testing::{mock_env, MockApi, MockStorage, MOCK_CONTRACT_ADDR},
         Addr, BankMsg, Coin, Decimal as StdDecimal, OwnedDeps, StdError, SubMsg,
     };
+
     use cw20::Cw20ExecuteMsg;
-    use mars::math::decimal::Decimal;
-    use mars::{
+
+    use mars_core::math::decimal::Decimal;
+    use mars_core::{
         tax::deduct_tax,
         testing::{mock_dependencies, mock_info, MarsMockQuerier},
     };
+
+    use crate::ConfigError;
 
     #[test]
     fn test_proper_initialization() {
@@ -456,10 +454,10 @@ mod tests {
         let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             response,
-            MarsError::ParamsNotLessOrEqualOne {
+            ConfigError::Mars(MarsError::ParamsNotLessOrEqualOne {
                 expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
                 invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
-            }
+            })
             .into()
         );
 
@@ -476,7 +474,7 @@ mod tests {
         let exceeding_fees_msg = InstantiateMsg { config };
         let response =
             instantiate(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg).unwrap_err();
-        assert_eq!(response, ContractError::InvalidFeeShareAmounts {});
+        assert_eq!(response, ConfigError::InvalidFeeShareAmounts {}.into());
 
         // *
         // init config with valid params
@@ -496,7 +494,7 @@ mod tests {
 
         // it worked, let's query the state
         let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
-        let value: ConfigResponse = from_binary(&res).unwrap();
+        let value: Config = from_binary(&res).unwrap();
         assert_eq!(value.owner, "owner");
         assert_eq!(value.address_provider_address, "address_provider");
         assert_eq!(value.safety_fund_fee_share, safety_fund_fee_share);
@@ -524,7 +522,7 @@ mod tests {
         // *
         // non owner is not authorized
         // *
-        let msg = UpdateConfig {
+        let msg = ExecuteMsg::UpdateConfig {
             config: base_config.clone(),
         };
         let info = mock_info("somebody");
@@ -542,15 +540,15 @@ mod tests {
             treasury_fee_share: Some(treasury_fee_share),
             ..base_config.clone()
         };
-        let msg = UpdateConfig { config };
+        let msg = ExecuteMsg::UpdateConfig { config };
         let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
-            MarsError::ParamsNotLessOrEqualOne {
+            ConfigError::Mars(MarsError::ParamsNotLessOrEqualOne {
                 expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
                 invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
-            }
+            })
             .into()
         );
 
@@ -564,10 +562,10 @@ mod tests {
             treasury_fee_share: None,
             ..base_config
         };
-        let exceeding_fees_msg = UpdateConfig { config };
+        let exceeding_fees_msg = ExecuteMsg::UpdateConfig { config };
         let error_res =
             execute(deps.as_mut(), mock_env(), info.clone(), exceeding_fees_msg).unwrap_err();
-        assert_eq!(error_res, ContractError::InvalidFeeShareAmounts {});
+        assert_eq!(error_res, ConfigError::InvalidFeeShareAmounts {}.into());
 
         // *
         // update config with all new params
@@ -583,7 +581,7 @@ mod tests {
             astroport_factory_address: Some("new_astroport".to_string()),
             astroport_max_spread: Some(astroport_max_spread),
         };
-        let msg = UpdateConfig {
+        let msg = ExecuteMsg::UpdateConfig {
             config: config.clone(),
         };
         // we can just call .unwrap() to assert this was a success
@@ -689,7 +687,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err,
-            StdError::not_found("protocol_rewards_collector::state::AssetConfig")
+            StdError::not_found("mars_core::protocol_rewards_collector::AssetConfig")
         );
 
         // querying unknown assets returns that they are not enabled
