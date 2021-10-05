@@ -168,7 +168,7 @@ export async function setupOracle(
       try {
         pairQueryResponse = await queryContract(terra, oracleFactoryAddress, pairQueryMsg)
       } catch (error: any) {
-        if (error.response.data.error.includes("PairInfoRaw not found")) {
+        if (error.response.data.message.includes("PairInfoRaw not found")) {
           console.log("Pair not found, creating pair...");
 
           const createPairMsg = {

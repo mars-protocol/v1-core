@@ -424,7 +424,7 @@ async function main() {
     await assert.rejects(
       executeContract(terra, bob, staking, { claim: {} }),
       (error: any) => {
-        return error.response.data.error.includes("Cooldown has not ended")
+        return error.response.data.message.includes("Cooldown has not ended")
       }
     )
   }
