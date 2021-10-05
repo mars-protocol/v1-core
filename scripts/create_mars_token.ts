@@ -101,10 +101,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/logo.png"; // TODO
       "quality vacuum heart guard buzz spike sight swarm shove special gym robust assume sudden deposit grid alcohol choice devote leader tilt noodle tide penalty"
   })
 
-  const multisigPubKey = new LegacyAminoMultisigPublicKey(2, [
-    mk1.publicKey as SimplePublicKey,
-    mk2.publicKey as SimplePublicKey,
-  ])
+  const multisigPubKey = new LegacyAminoMultisigPublicKey(2, [mk1, mk2].map(x => x.publicKey as SimplePublicKey))
   const multisigAddress = multisigPubKey.address()
   const multisig = new MultiSignature(multisigPubKey)
 
