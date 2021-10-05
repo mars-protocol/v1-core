@@ -76,7 +76,7 @@ export async function queryBalanceNative(
   address: string,
   denom: string,
 ) {
-  const balances = await terra.bank.balance(address)
+  const [balances, _] = await terra.bank.balance(address)
   const balance = balances.get(denom)
   if (balance === undefined) {
     return 0

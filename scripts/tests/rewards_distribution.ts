@@ -205,7 +205,7 @@ async function testNative(env: Env) {
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     ),
     (error: any) => {
-      return error.response.data.error.includes("Asset is not enabled for distribution: \"uusd\"")
+      return error.response.data.message.includes("Asset is not enabled for distribution: \"uusd\"")
     }
   )
 
@@ -401,7 +401,7 @@ async function testCw20(env: Env) {
       { distribute_protocol_rewards: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     ),
     (error: any) => {
-      return error.response.data.error.includes(`Asset is not enabled for distribution: \"${cw20Token1}\"`)
+      return error.response.data.message.includes(`Asset is not enabled for distribution: \"${cw20Token1}\"`)
     }
   )
 

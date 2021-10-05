@@ -75,7 +75,7 @@ async function testHealthFactorChecks(
   await assert.rejects(
     transferCw20(terra, borrower, maLuna, recipient.key.accAddress, LUNA_COLLATERAL * MA_TOKEN_SCALING_FACTOR),
     (error: any) => {
-      return error.response.data.error.includes(
+      return error.response.data.message.includes(
         "Cannot make token transfer if it results in a health factor lower than 1 for the sender"
       )
     }
@@ -150,7 +150,7 @@ async function testTransferCollateral(
       }
     ),
     (error: any) => {
-      return error.response.data.error.includes(
+      return error.response.data.message.includes(
         "User's health factor can't be less than 1 after disabling collateral"
       )
     }
