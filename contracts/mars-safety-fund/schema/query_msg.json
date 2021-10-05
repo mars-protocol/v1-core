@@ -3,6 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
+      "description": "Query contract config",
       "type": "object",
       "required": [
         "config"

@@ -7,6 +7,7 @@ pub mod ma_token;
 pub mod oracle;
 pub mod protocol_rewards_collector;
 pub mod red_bank;
+pub mod safety_fund;
 pub mod staking;
 pub mod vesting;
 pub mod xmars_token;

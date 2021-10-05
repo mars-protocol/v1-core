@@ -1,6 +1,8 @@
-use cosmwasm_std::{OverflowError, StdError};
-use mars::error::MarsError;
 use thiserror::Error;
+
+use cosmwasm_std::{OverflowError, StdError};
+
+use mars_core::error::MarsError;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ContractError {

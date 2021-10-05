@@ -550,11 +550,10 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
+ "cw-storage-plus 0.9.1",
  "mars-core",
  "schemars",
  "serde",
- "terraswap",
 ]
 
 [[package]]
@@ -563,8 +562,8 @@ version = "1.0.0"
 dependencies = [
  "cosmwasm-schema",
  "cosmwasm-std",
- "cw-storage-plus 0.8.0",
- "cw20 0.8.0",
+ "cw-storage-plus 0.9.1",
+ "cw20 0.9.1",
  "mars-core",
  "schemars",
  "serde",

@@ -9,17 +9,19 @@ use cw_storage_plus::{Bound, U64Key};
 
 use terraswap::asset::AssetInfo;
 
+use mars_core::error::MarsError;
+use mars_core::helpers::{
+    cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address,
+};
+use mars_core::math::decimal::Decimal;
+use mars_core::swapping::execute_swap;
+
+use mars_core::address_provider::{self, MarsContract};
+
 use crate::error::ContractError;
 use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE, SLASH_EVENTS};
 use crate::{Claim, Config, GlobalState, SlashEvent};
-
-use mars::address_provider;
-use mars::address_provider::msg::MarsContract;
-use mars::error::MarsError;
-use mars::helpers::{cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address};
-use mars::math::decimal::Decimal;
-use mars::swapping::execute_swap;
 
 // INSTANTIATE
 
@@ -554,7 +556,7 @@ mod tests {
     use cosmwasm_std::{
         attr, Addr, Coin, CosmosMsg, Decimal as StdDecimal, OwnedDeps, StdError, SubMsg, Timestamp,
     };
-    use mars::testing::{
+    use mars_core::testing::{
         mock_dependencies, mock_env, mock_env_at_block_height, mock_env_at_block_time,
         MarsMockQuerier, MockEnvParams,
     };
