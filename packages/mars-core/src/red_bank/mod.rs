@@ -223,7 +223,6 @@ pub struct ConfigResponse {
     pub close_factor: Decimal,
 }
 
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MarketsListResponse {
     pub markets_list: Vec<MarketInfo>,

@@ -4,14 +4,15 @@ use cosmwasm_std::{
 };
 use terra_cosmwasm::TerraQuerier;
 
-use mars::asset::Asset;
-use mars::helpers::option_string_to_addr;
+use mars_core::asset::Asset;
+use mars_core::helpers::option_string_to_addr;
+use mars_core::math::decimal::Decimal;
 
-use mars::oracle::msg::{AssetPriceResponse, ConfigResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use mars::oracle::{PriceSourceChecked, PriceSourceUnchecked};
-
-use crate::state::{
-    AstroportTwapData, Config, PriceConfig, ASTROPORT_TWAP_DATA, CONFIG, PRICE_CONFIGS,
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{ASTROPORT_TWAP_DATA, CONFIG, PRICE_CONFIGS};
+use crate::{
+    AssetPriceResponse, AstroportTwapData, Config, PriceConfig, PriceSourceChecked,
+    PriceSourceUnchecked,
 };
 
 // Once astroport package is published on crates.io, update Cargo.toml and change these to
@@ -22,7 +23,6 @@ use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAss
 use crate::astroport::pair::{
     CumulativePricesResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
 };
-use mars::math::decimal::Decimal;
 
 // INIT
 
@@ -234,11 +234,9 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_config(deps: Deps, _env: Env) -> StdResult<ConfigResponse> {
+fn query_config(deps: Deps, _env: Env) -> StdResult<Config> {
     let config = CONFIG.load(deps.storage)?;
-    Ok(ConfigResponse {
-        owner: config.owner.into(),
-    })
+    Ok(config)
 }
 
 fn query_asset_config(deps: Deps, _env: Env, asset: Asset) -> StdResult<PriceConfig> {
@@ -364,7 +362,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_info, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
+    use mars_core::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {

@@ -1,7 +1,9 @@
-use crate::math::decimal::Decimal;
-use cosmwasm_std::Addr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::{Addr, Uint128};
+
+use crate::math::decimal::Decimal;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -25,13 +27,43 @@ pub enum PriceSource<A> {
 pub type PriceSourceUnchecked = PriceSource<String>;
 pub type PriceSourceChecked = PriceSource<Addr>;
 
+/// Contract global configuration
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct Config {
+    pub owner: Addr,
+}
+
+/// Price source configuration for a given asset
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PriceConfig {
+    pub price_source: PriceSourceChecked,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AstroportTwapData {
+    /// Timestamp of the most recent TWAP data update
+    pub timestamp: u64,
+    /// Cumulative price of the asset retrieved by the most recent TWAP data update
+    pub price_cumulative: Uint128,
+    /// Price of the asset averaged over the last two TWAP data updates
+    pub price_average: Decimal,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AssetPriceResponse {
+    /// Price of the asset averaged over the last two TWAP data updates
+    pub price: Decimal,
+    /// Timestamp of the most recent TWAP data update. Contracts querying the price data are recommended
+    /// to check this value and determine if the data is too old to be considered valid.
+    pub last_updated: u64,
+}
+
 pub mod msg {
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
     use super::PriceSourceUnchecked;
     use crate::asset::Asset;
-    use crate::math::decimal::Decimal;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InstantiateMsg {
@@ -65,29 +97,16 @@ pub mod msg {
         /// (meant to be used by protocol contracts only)
         AssetPriceByReference { asset_reference: Vec<u8> },
     }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct ConfigResponse {
-        pub owner: String,
-    }
-
-    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-    pub struct AssetPriceResponse {
-        /// Price of the asset averaged over the last two TWAP data updates
-        pub price: Decimal,
-        /// Timestamp of the most recent TWAP data update. Contracts querying the price data are recommended
-        /// to check this value and determine if the data is too old to be considered valid.
-        pub last_updated: u64,
-    }
 }
 
 pub mod helpers {
     use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, WasmQuery};
 
     use crate::asset::AssetType;
-
-    use super::msg::{AssetPriceResponse, QueryMsg};
     use crate::math::decimal::Decimal;
+
+    use super::msg::QueryMsg;
+    use super::AssetPriceResponse;
 
     pub fn query_price(
         querier: QuerierWrapper,
