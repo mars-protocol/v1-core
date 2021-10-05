@@ -1,4 +1,5 @@
 import {
+  BlockTxBroadcastResult,
   Coin,
   isTxError,
   LCDClient,
@@ -9,7 +10,7 @@ import {
   MsgMigrateContract,
   MsgStoreCode,
   Tx,
-  // StdTx,
+  TxError,
   Wallet
 } from '@terra-money/terra.js';
 import { readFileSync } from 'fs';
@@ -60,14 +61,18 @@ export async function performTransaction(terra: LCDClient, wallet: Wallet, msg: 
       accountNumber: account_number,
       sequence: sequence,
       chainID: terra.config.chainID,
-      signMode: 1, // SignMode.SIGN_MODE_DIRECT,
+      signMode: 1, // SignMode.SIGN_MODE_DIRECT
     }
   )
   const result = await broadcastTransaction(terra, signedTx)
   if (isTxError(result)) {
-    throw new TransactionError(result.code, result.codespace, result.raw_log)
+    throw transactionErrorFromResult(result)
   }
   return result
+}
+
+export function transactionErrorFromResult(result: BlockTxBroadcastResult & TxError) {
+  return new TransactionError(result.code, result.codespace, result.raw_log)
 }
 
 export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath: string) {
