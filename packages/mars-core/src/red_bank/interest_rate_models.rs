@@ -212,8 +212,8 @@ impl InterestRateModel for LinearInterestRate {
 
 #[cfg(test)]
 mod tests {
-    use crate::interest_rate_models::{DynamicInterestRate, InterestRateModel, LinearInterestRate};
-    use mars::math::decimal::Decimal;
+    use super::{DynamicInterestRate, InterestRateModel, LinearInterestRate};
+    use crate::math::decimal::Decimal;
 
     #[test]
     fn test_dynamic_interest_rates_calculation() {

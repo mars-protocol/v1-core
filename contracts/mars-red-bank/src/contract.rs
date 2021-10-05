@@ -36,8 +36,8 @@ use crate::state::{
 };
 use crate::{
     CollateralInfo, CollateralResponse, Config, ConfigResponse, Debt, DebtInfo, DebtResponse,
-    GlobalState, Market, MarketInfo, MarketResponse, MarketsListResponse,
-    UncollateralizedLoanLimitResponse, User, UserHealthStatus, UserPositionResponse,
+    GlobalState, Market, MarketInfo, MarketsListResponse, User, UserHealthStatus,
+    UserPositionResponse,
 };
 
 // INIT
@@ -1864,7 +1864,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     })
 }
 
-fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
+fn query_market(deps: Deps, asset: Asset) -> StdResult<Market> {
     let (label, reference, _) = asset.get_attributes();
     let market = match MARKETS.load(deps.storage, reference.as_slice()) {
         Ok(market) => market,
@@ -1876,24 +1876,7 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<MarketResponse> {
         }
     };
 
-    Ok(MarketResponse {
-        ma_token_address: market.ma_token_address,
-        borrow_index: market.borrow_index,
-        liquidity_index: market.liquidity_index,
-        borrow_rate: market.borrow_rate,
-        liquidity_rate: market.liquidity_rate,
-        max_loan_to_value: market.max_loan_to_value,
-        interests_last_updated: market.interests_last_updated,
-        debt_total_scaled: market.debt_total_scaled,
-        asset_type: market.asset_type,
-        maintenance_margin: market.maintenance_margin,
-        liquidation_bonus: market.liquidation_bonus,
-        reserve_factor: market.reserve_factor,
-        interest_rate_strategy: market.interest_rate_strategy,
-        active: market.active,
-        deposit_enabled: market.deposit_enabled,
-        borrow_enabled: market.borrow_enabled,
-    })
+    Ok(market)
 }
 
 fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
@@ -1968,13 +1951,13 @@ fn query_uncollateralized_loan_limit(
     deps: Deps,
     user_address: Addr,
     asset: Asset,
-) -> StdResult<UncollateralizedLoanLimitResponse> {
+) -> StdResult<Uint128> {
     let (asset_label, asset_reference, _) = asset.get_attributes();
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
         .load(deps.storage, (asset_reference.as_slice(), &user_address));
 
     match uncollateralized_loan_limit {
-        Ok(limit) => Ok(UncollateralizedLoanLimitResponse { limit }),
+        Ok(limit) => Ok(limit),
         Err(_) => Err(StdError::not_found(format!(
             "No uncollateralized loan approved for user_address: {} on asset: {}",
             user_address, asset_label

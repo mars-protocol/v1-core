@@ -1,12 +1,17 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "MarketResponse",
+  "title": "Market",
+  "description": "Asset markets",
   "type": "object",
   "required": [
+    "active",
     "asset_type",
+    "borrow_enabled",
     "borrow_index",
     "borrow_rate",
     "debt_total_scaled",
+    "deposit_enabled",
+    "index",
     "interest_rate_strategy",
     "interests_last_updated",
     "liquidation_bonus",
@@ -18,46 +23,125 @@
     "reserve_factor"
   ],
   "properties": {
+    "active": {
+      "description": "If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)",
+      "type": "boolean"
+    },
     "asset_type": {
-      "$ref": "#/definitions/AssetType"
+      "description": "Indicated whether the asset is native or a cw20 token",
+      "allOf": [
+        {
+          "$ref": "#/definitions/AssetType"
+        }
+      ]
+    },
+    "borrow_enabled": {
+      "description": "If false cannot borrow",
+      "type": "boolean"
     },
     "borrow_index": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Borrow index (Used to compute borrow interest)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "borrow_rate": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Rate charged to borrowers",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "debt_total_scaled": {
-      "$ref": "#/definitions/Uint128"
+      "description": "Total debt scaled for the market's currency",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Uint128"
+        }
+      ]
+    },
+    "deposit_enabled": {
+      "description": "If false cannot deposit",
+      "type": "boolean"
+    },
+    "index": {
+      "description": "Market index (Bit position on data)",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
     },
     "interest_rate_strategy": {
-      "$ref": "#/definitions/InterestRateStrategy"
+      "description": "Interest rate strategy to calculate borrow_rate and liquidity_rate",
+      "allOf": [
+        {
+          "$ref": "#/definitions/InterestRateStrategy"
+        }
+      ]
     },
     "interests_last_updated": {
+      "description": "Timestamp (seconds) where indexes and rates where last updated",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
     },
     "liquidation_bonus": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral from user in an amount equal to debt repayed + bonus)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "liquidity_index": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Liquidity index (Used to compute deposit interest)",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "liquidity_rate": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Rate paid to depositors",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "ma_token_address": {
-      "$ref": "#/definitions/Addr"
+      "description": "maToken contract address",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Addr"
+        }
+      ]
     },
     "maintenance_margin": {
-      "$ref": "#/definitions/Decimal"
+      "description": "LTV (if using only the asset as collateral) that if surpassed, makes the user's position liquidatable",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "max_loan_to_value": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Max uusd that can be borrowed per uusd collateral when using the asset as collateral",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     },
     "reserve_factor": {
-      "$ref": "#/definitions/Decimal"
+      "description": "Portion of the borrow rate that is kept as protocol rewards",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Decimal"
+        }
+      ]
     }
   },
   "definitions": {

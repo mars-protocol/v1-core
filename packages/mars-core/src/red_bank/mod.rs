@@ -223,25 +223,6 @@ pub struct ConfigResponse {
     pub close_factor: Decimal,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct MarketResponse {
-    pub ma_token_address: Addr,
-    pub asset_type: AssetType,
-    pub max_loan_to_value: Decimal,
-    pub maintenance_margin: Decimal,
-    pub liquidation_bonus: Decimal,
-    pub reserve_factor: Decimal,
-    pub interest_rate_strategy: InterestRateStrategy,
-    pub borrow_index: Decimal,
-    pub liquidity_index: Decimal,
-    pub borrow_rate: Decimal,
-    pub liquidity_rate: Decimal,
-    pub interests_last_updated: u64,
-    pub debt_total_scaled: Uint128,
-    pub active: bool,
-    pub deposit_enabled: bool,
-    pub borrow_enabled: bool,
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MarketsListResponse {
@@ -250,7 +231,7 @@ pub struct MarketsListResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MarketInfo {
-    /// Either denom for a native token or asset address for a cw20
+    /// Asset denom
     pub denom: String,
     /// Address for the corresponding maToken
     pub ma_token_address: Addr,
@@ -263,9 +244,9 @@ pub struct DebtResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct DebtInfo {
-    /// Either denom for a native token or asset address for a cw20
+    /// Asset denom
     pub denom: String,
-    /// Scaled amount
+    /// Scaled amount stored in contract state
     pub amount_scaled: Uint128,
 }
 
@@ -276,17 +257,10 @@ pub struct CollateralResponse {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct CollateralInfo {
-    /// Either denom for a native token or asset address for a cw20
+    /// Asset denom
     pub denom: String,
     /// Wether the user is using asset as collateral or not
     pub enabled: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct UncollateralizedLoanLimitResponse {
-    /// Limit an address has for an uncollateralized loan for a specific asset.
-    /// 0 limit means no collateral.
-    pub limit: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

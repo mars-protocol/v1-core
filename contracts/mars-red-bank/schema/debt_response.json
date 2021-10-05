@@ -22,7 +22,7 @@
       ],
       "properties": {
         "amount_scaled": {
-          "description": "Scaled amount",
+          "description": "Scaled amount stored in contract state",
           "allOf": [
             {
               "$ref": "#/definitions/Uint128"
@@ -30,7 +30,7 @@
           ]
         },
         "denom": {
-          "description": "Either denom for a native token or asset address for a cw20",
+          "description": "Asset denom",
           "type": "string"
         }
       }
