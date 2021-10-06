@@ -5,6 +5,7 @@ import {
   deployContract,
   executeContract,
   setTimeoutDuration,
+  TransactionError,
   uploadContract
 } from "../helpers.js"
 import {
@@ -20,11 +21,15 @@ import {
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 
 const UUSD_COLLATERAL = 1_000_000_000000
-const MARS_COLLATERAL = 100_000_000_000000
+const MARS_COLLATERAL = 100_000_000_000000;
 
 // MAIN
 
-async function main() {
+// async function main() {
+(async () => {
+  // throw new Error("testing")
+  // throw new TransactionError("code_hello", "codespace_hello", "rawlog_hiya")
+
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -169,9 +174,4 @@ async function main() {
   await borrowNative(terra, borrower, redBank, "uusd", UUSD_COLLATERAL)
 
   console.log("OK")
-}
-
-main().catch(err => {
-  console.log(err)
-  process.exit(1)
-})
+})()

@@ -39,7 +39,7 @@ async function getDebt(
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -197,9 +197,4 @@ async function main() {
   strictEqual(debt, 0)
 
   console.log("OK")
-}
-
-main().catch(err => {
-  console.log(err)
-  process.exit(1)
-})
+})()
