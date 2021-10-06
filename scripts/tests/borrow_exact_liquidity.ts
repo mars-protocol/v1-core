@@ -5,7 +5,6 @@ import {
   deployContract,
   executeContract,
   setTimeoutDuration,
-  TransactionError,
   uploadContract
 } from "../helpers.js"
 import {
@@ -25,11 +24,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
 
 // MAIN
 
-// async function main() {
 (async () => {
-  // throw new Error("testing")
-  // throw new TransactionError("code_hello", "codespace_hello", "rawlog_hiya")
-
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
