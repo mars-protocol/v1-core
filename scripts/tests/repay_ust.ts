@@ -51,24 +51,24 @@ async function getDebt(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
+  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/incentives.wasm",
+  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
+  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
+  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/red_bank.wasm",
+  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,

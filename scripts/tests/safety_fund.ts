@@ -222,7 +222,7 @@ async function testSwapTokenToUsd(env: Env, address: string) {
     }
   )
 
-  const safetyFund = await deployContract(terra, deployer, "../artifacts/safety_fund.wasm",
+  const safetyFund = await deployContract(terra, deployer, "../artifacts/mars_safety_fund.wasm",
     {
       owner: deployer.key.accAddress,
       astroport_factory_address: astroportFactory,

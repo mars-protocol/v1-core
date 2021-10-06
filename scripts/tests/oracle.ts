@@ -105,7 +105,7 @@ async function testNativeTokenPrice(
 
   console.log("upload contracts")
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
+  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 

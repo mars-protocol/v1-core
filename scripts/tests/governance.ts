@@ -124,11 +124,11 @@ async function waitUntilBlockHeight(blockHeight: number) {
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
+  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const council = await deployContract(terra, deployer, "../artifacts/council.wasm",
+  const council = await deployContract(terra, deployer, "../artifacts/mars_council.wasm",
     {
       config: {
         address_provider_address: addressProvider,
@@ -142,13 +142,13 @@ async function waitUntilBlockHeight(blockHeight: number) {
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/oracle.wasm",
+  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
     { owner: council }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/ma_token.wasm")
+  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/red_bank.wasm",
+  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: council,
@@ -161,7 +161,7 @@ async function waitUntilBlockHeight(blockHeight: number) {
     }
   )
 
-  const vesting = await deployContract(terra, deployer, "../artifacts/vesting.wasm",
+  const vesting = await deployContract(terra, deployer, "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
       default_unlock_schedule: {
@@ -182,7 +182,7 @@ async function waitUntilBlockHeight(blockHeight: number) {
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/xmars_token.wasm",
+  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
