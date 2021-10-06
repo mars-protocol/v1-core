@@ -14,15 +14,16 @@ use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
-use mars::cw20_core::instantiate_token_info_and_marketing;
-use mars::xmars_token::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, TotalSupplyResponse};
+use mars_core::cw20_core::instantiate_token_info_and_marketing;
 
 use crate::allowances::{execute_burn_from, execute_send_from, execute_transfer_from};
 use crate::core;
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::snapshots::{
     capture_balance_snapshot, capture_total_supply_snapshot, get_balance_snapshot_value_at,
     get_total_supply_snapshot_value_at,
 };
+use crate::TotalSupplyResponse;
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:xmars-token";
@@ -270,7 +271,7 @@ mod tests {
     };
     use cw20_base::msg::InstantiateMarketingInfo;
 
-    use mars::testing::MockEnvParams;
+    use mars_core::testing::MockEnvParams;
 
     use super::*;
 
@@ -696,7 +697,7 @@ mod tests {
 
         // valid transfer
         let info = mock_info(addr1.as_ref(), &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_height: 100_000,
             ..Default::default()
         });
@@ -764,7 +765,7 @@ mod tests {
 
         // valid burn reduces total supply
         let info = mock_info(addr1.as_ref(), &[]);
-        let env = mars::testing::mock_env(MockEnvParams {
+        let env = mars_core::testing::mock_env(MockEnvParams {
             block_height: 200_000,
             ..Default::default()
         });
@@ -905,7 +906,7 @@ mod tests {
             current_addr2_balance += mint_amount;
 
             let info = mock_info(minter.as_str(), &[]);
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_height: current_block,
                 ..Default::default()
             });
@@ -930,7 +931,7 @@ mod tests {
             current_addr2_balance += transfer_amount;
 
             let info = mock_info(addr1.as_str(), &[]);
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_height: current_block,
                 ..Default::default()
             });
@@ -956,7 +957,7 @@ mod tests {
 
             let info = mock_info(addr2.as_str(), &[]);
 
-            let env = mars::testing::mock_env(MockEnvParams {
+            let env = mars_core::testing::mock_env(MockEnvParams {
                 block_height: current_block,
                 ..Default::default()
             });

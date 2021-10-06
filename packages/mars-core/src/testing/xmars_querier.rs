@@ -50,7 +50,7 @@ impl XMarsQuerier {
 
             xmars_token::msg::QueryMsg::TotalSupplyAt { block } => {
                 match self.total_supplies_at.get(&block) {
-                    Some(balance) => Ok(to_binary(&xmars_token::msg::TotalSupplyResponse {
+                    Some(balance) => Ok(to_binary(&xmars_token::TotalSupplyResponse {
                         total_supply: *balance,
                     })
                     .into())

@@ -1,5 +1,14 @@
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use cosmwasm_std::Uint128;
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
+pub struct TotalSupplyResponse {
+    pub total_supply: Uint128,
+}
+
 pub mod msg {
-    use cosmwasm_std::Uint128;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
 
@@ -60,10 +69,5 @@ pub mod msg {
         /// contract.
         /// Return type: DownloadLogoResponse.
         DownloadLogo {},
-    }
-
-    #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug, Default)]
-    pub struct TotalSupplyResponse {
-        pub total_supply: Uint128,
     }
 }

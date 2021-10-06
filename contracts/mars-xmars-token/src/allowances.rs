@@ -115,7 +115,7 @@ mod tests {
     use cw20_base::contract::{query_balance, query_token_info};
 
     use crate::contract::{execute, instantiate, query_balance_at, query_total_supply_at};
-    use mars::xmars_token::msg::{ExecuteMsg, InstantiateMsg};
+    use crate::msg::{ExecuteMsg, InstantiateMsg};
 
     fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
         query_balance(deps, address.into()).unwrap().balance
