@@ -870,12 +870,12 @@ pub fn execute_borrow(
 
     if !borrow_market.active {
         return Err(ContractError::MarketNotActive {
-            asset: asset_label.to_string(),
+            asset: asset_label,
         });
     }
     if !borrow_market.borrow_enabled {
         return Err(ContractError::BorrowNotEnabled {
-            asset: asset_label.to_string(),
+            asset: asset_label,
         });
     }
 
