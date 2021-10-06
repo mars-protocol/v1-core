@@ -869,14 +869,10 @@ pub fn execute_borrow(
     let mut borrow_market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     if !borrow_market.active {
-        return Err(ContractError::MarketNotActive {
-            asset: asset_label,
-        });
+        return Err(ContractError::MarketNotActive { asset: asset_label });
     }
     if !borrow_market.borrow_enabled {
-        return Err(ContractError::BorrowNotEnabled {
-            asset: asset_label,
-        });
+        return Err(ContractError::BorrowNotEnabled { asset: asset_label });
     }
 
     let uncollateralized_loan_limit = UNCOLLATERALIZED_LOAN_LIMITS
