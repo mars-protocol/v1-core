@@ -253,7 +253,7 @@ pub fn execute_claim_rewards(
             msg: to_binary(&cw20::Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
                 amount: total_unclaimed_rewards,
-                msg: to_binary(&mars_core::staking::msg::ReceiveMsg::Stake {
+                msg: to_binary(&staking::msg::ReceiveMsg::Stake {
                     recipient: Some(user_address.to_string()),
                 })?,
             })?,

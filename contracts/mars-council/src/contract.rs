@@ -619,7 +619,7 @@ fn xmars_get_total_supply_at(
     xmars_address: Addr,
     block: u64,
 ) -> StdResult<Uint128> {
-    let query: xmars_token::msg::TotalSupplyResponse =
+    let query: xmars_token::TotalSupplyResponse =
         querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: xmars_address.into(),
             msg: to_binary(&xmars_token::msg::QueryMsg::TotalSupplyAt { block })?,
