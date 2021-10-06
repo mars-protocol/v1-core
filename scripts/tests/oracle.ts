@@ -95,7 +95,7 @@ async function testNativeTokenPrice(
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -116,6 +116,4 @@ async function main() {
   await testNativeTokenPrice(terra, deployer, oracle, "ukrw")
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

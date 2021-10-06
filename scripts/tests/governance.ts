@@ -108,7 +108,7 @@ async function waitUntilBlockHeight(blockHeight: number) {
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -393,6 +393,4 @@ async function main() {
   strictEqual(parseInt(assetConfig.price_source.fixed.price), LUNA_USD_PRICE)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

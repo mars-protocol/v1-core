@@ -58,7 +58,7 @@ async function checkCollateral(
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -223,6 +223,4 @@ async function main() {
   await depositNative(terra, someone, redBank, "uusd", USD_COLLATERAL)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

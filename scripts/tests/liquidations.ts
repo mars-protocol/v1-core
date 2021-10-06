@@ -99,7 +99,7 @@ async function testCollateralizedNativeLoan(
   let txEvents = txResult.logs[0].eventsByType
 
   // amount received after deducting Terra tax from the borrowed amount
-  let uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[0]).amount.toNumber()
+  let uusdAmountReceivedFromBorrow = Coin.fromString(txEvents.coin_received.amount[1]).amount.toNumber()
   let expectedUusdAmountReceived = (await deductTax(terra, new Coin("uusd", uusdAmountBorrowed))).toNumber()
   strictEqual(uusdAmountReceivedFromBorrow, expectedUusdAmountReceived)
 
@@ -543,7 +543,7 @@ async function testUncollateralizedNativeLoan(
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -772,6 +772,4 @@ async function main() {
   await testUncollateralizedNativeLoan(env, terra.wallets.test10)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

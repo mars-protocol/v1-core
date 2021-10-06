@@ -80,7 +80,7 @@ function assertBalance(
 
 // MAIN
 
-async function main() {
+(async () => {
   // SETUP
 
   setTimeoutDuration(100)
@@ -376,6 +376,4 @@ async function main() {
   assertBalance(bobXmarsBalance, expectedBobXmarsBalance)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

@@ -650,7 +650,7 @@ async function testLiquidateCw20(env: Env) {
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -979,6 +979,4 @@ async function main() {
   await testLiquidateCw20(env)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err))
+})()

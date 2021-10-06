@@ -198,7 +198,7 @@ async function testSwapTokenToUsd(env: Env, address: string) {
 
 // MAIN
 
-async function main() {
+(async () => {
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
@@ -260,6 +260,4 @@ async function main() {
   await testSwapTokenToUsd(env, tokenAddress)
 
   console.log("OK")
-}
-
-main().catch(err => console.log(err));
+})()
