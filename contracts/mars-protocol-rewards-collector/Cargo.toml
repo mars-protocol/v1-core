@@ -22,8 +22,8 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 
-cw20 = "0.9"
-cw20-base = { version = "0.9", features = ["library"] }
+cw20 = "0.9.0"
+cw20-base = { version = "0.9.0", features = ["library"] }
 cw-storage-plus = "0.9.0"
 
 cosmwasm-std = "0.16.2"

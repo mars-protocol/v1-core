@@ -24,7 +24,7 @@ mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 
 cw-storage-plus = "0.9.0"
 
-cosmwasm-std = { version = "0.16.2", features = ["iterator"] }
+cosmwasm-std = "0.16.2"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }

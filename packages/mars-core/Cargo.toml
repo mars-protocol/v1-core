@@ -15,11 +15,11 @@ backtraces = ["cosmwasm-std/backtraces"]
 terra-cosmwasm = "2.2.0"
 terraswap = "2.4.0"
 
-cw2 = "0.9"
-cw20 = "0.9"
-cw20-base = { version = "0.9", features = ["library"] }
+cw2 = "0.9.0"
+cw20 = "0.9.0"
+cw20-base = { version = "0.9.0", features = ["library"] }
 
-cosmwasm-std = { version = "0.16.2" }
+cosmwasm-std = "0.16.2"
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
