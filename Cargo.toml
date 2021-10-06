@@ -1,7 +1,7 @@
 [workspace]
 members = ["contracts/*", "packages/*"]
 
-[profile.release.package.mars]
+[profile.release.package.mars-core]
 opt-level = 3
 debug = false
 debug-assertions = false
