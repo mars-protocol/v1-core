@@ -26,7 +26,6 @@ import {
 
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
-const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
 
 const INCENTIVES_UMARS_BALANCE = 1_000_000_000000
 const ULUNA_UMARS_EMISSION_RATE = 2_000000
@@ -94,6 +93,8 @@ async function main() {
   const bob = terra.wallets.test3
   const carol = terra.wallets.test4
   const dan = terra.wallets.test5
+  // mock contract addresses
+  const astroportFactory = terra.wallets.test10.key.accAddress
 
   console.log("upload contracts")
 
@@ -127,21 +128,12 @@ async function main() {
     }
   )
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
-  const terraswapFactory = await deployContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"),
-    {
-      "pair_code_id": pairCodeID,
-      "token_code_id": tokenCodeID
-    }
-  )
-
   const staking = await deployContract(terra, deployer, "../artifacts/staking.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
         address_provider_address: addressProvider,
-        astroport_factory_address: terraswapFactory,
+        astroport_factory_address: astroportFactory,
         astroport_max_spread: "0.05",
         cooldown_duration: 10,
         unstake_window: 300,

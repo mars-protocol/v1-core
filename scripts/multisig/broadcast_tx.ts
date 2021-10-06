@@ -1,48 +1,68 @@
-import { LCDClient, StdTx } from "@terra-money/terra.js"
-import { execSync } from "child_process"
+import {
+  isTxError,
+  LCDClient,
+  LegacyAminoMultisigPublicKey,
+  SimplePublicKey,
+  Tx
+} from "@terra-money/terra.js"
+import { SignatureV2 } from "@terra-money/terra.js/dist/core/SignatureV2.js"
+import { MultiSignature } from "@terra-money/terra.js/dist/core/MultiSignature.js"
 import { readFileSync } from "fs"
 import 'dotenv/config.js'
-import { broadcastTransaction } from "../helpers"
+import {
+  broadcastTransaction,
+  transactionErrorFromResult
+} from "../helpers.js"
 
 // Required environment variables:
-
-// Terra network details
+// Terra network details:
 const CHAIN_ID = process.env.CHAIN_ID!
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL!
+// Multisig details:
+const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!).split(",").map(x => new SimplePublicKey(x))
+const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
+// Signature JSON files:
+const SIGNATURES = (process.env.SIGNATURES!).split(",");
 
-// Multisig details
-const MULTISIG_NAME = process.env.MULTISIG_NAME!
-// Returned by `create_unsigned_tx.ts` when the unsigned tx was generated
-const ACCOUNT_NUMBER = process.env.ACCOUNT_NUMBER!
-// Returned by `create_unsigned_tx.ts` when the unsigned tx was generated
-const SEQUENCE = process.env.SEQUENCE!
+// MAIN
 
-// Signatures
-const SIGNATURES = (process.env.SIGNATURES!).split(",")
-
-// Main
-
-async function main() {
+(async () => {
   const terra = new LCDClient({
     URL: LCD_CLIENT_URL,
     chainID: CHAIN_ID
   })
 
+  const multisigPubKey = new LegacyAminoMultisigPublicKey(MULTISIG_THRESHOLD, MULTISIG_PUBLIC_KEYS)
+  const multisigAddress = multisigPubKey.address()
+  const multisig = new MultiSignature(multisigPubKey)
+
+  const tx = Tx.fromData(JSON.parse(readFileSync("unsigned_tx.json").toString()))
+
   // Sign the tx using the signatures from the multisig key holders
-  const signedTx = "signed_tx.json"
-  execSync(`
-    terracli tx multisign unsigned_tx.json ${MULTISIG_NAME} ${SIGNATURES.join(" ")} \
-      --chain-id ${CHAIN_ID} \
-      --offline \
-      --account-number ${ACCOUNT_NUMBER} \
-      --sequence ${SEQUENCE} \
-      --output-document ${signedTx}
-  `)
-  const tx = StdTx.fromData(JSON.parse(readFileSync(signedTx).toString()))
+  const signatures = SIGNATURES.map(
+    file => SignatureV2.fromData(
+      JSON.parse(
+        readFileSync(file).toString()
+      ).signatures[0]
+    )
+  )
+
+  multisig.appendSignatureV2s(signatures)
+
+  const accInfo = await terra.auth.accountInfo(multisigAddress)
+
+  tx.appendSignatures([
+    new SignatureV2(
+      multisigPubKey,
+      multisig.toSignatureDescriptor(),
+      accInfo.getSequenceNumber()
+    )
+  ])
 
   // Broadcast the tx
   const result = await broadcastTransaction(terra, tx)
+  if (isTxError(result)) {
+    throw transactionErrorFromResult(result)
+  }
   console.log(`https://finder.terra.money/${CHAIN_ID}/tx/${result.txhash}`)
-}
-
-main().catch(err => console.log(err))
+})()

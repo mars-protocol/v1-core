@@ -24,7 +24,7 @@ import { queryBalanceNative } from "./test_helpers.js"
 // CONSTS
 
 // required environment variables
-const TERRASWAP_ARTIFACTS_PATH = process.env.TERRASWAP_ARTIFACTS_PATH!
+const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!
 
 const TOKEN_SUPPLY = 1_000_000_000_000000
 const TOKEN_LP = 10_000_000_000000
@@ -33,19 +33,18 @@ const SAFETY_FUND_TOKEN_BALANCE = 100_000_000000
 
 // TYPES
 
-interface TerraSwapNativeToken { native_token: { denom: string } }
+interface AstroportNativeToken { native_token: { denom: string } }
 
-interface TerraSwapToken { token: { contract_addr: string } }
+interface AstroportToken { token: { contract_addr: string } }
 
-type TerraSwapAsset = TerraSwapNativeToken | TerraSwapToken
+type AstroportAsset = AstroportNativeToken | AstroportToken
 
 interface Env {
   terra: LocalTerra,
   deployer: Wallet,
   tokenCodeID: number,
   pairCodeID: number,
-  factoryCodeID: number,
-  terraswapFactory: string,
+  astroportFactory: string,
   safetyFund: string,
 }
 
@@ -54,15 +53,16 @@ interface Env {
 async function instantiateUsdPair(
   terra: LCDClient,
   wallet: Wallet,
-  terraswapFactory: string,
-  bid: TerraSwapAsset,
+  astroportFactory: string,
+  bid: AstroportAsset,
 ) {
-  const result = await executeContract(terra, wallet, terraswapFactory,
+  const result = await executeContract(terra, wallet, astroportFactory,
     {
       create_pair: {
+        pair_type: { xyk: {} },
         asset_infos: [
           bid,
-          { "native_token": { "denom": "uusd" } }
+          { native_token: { denom: "uusd" } }
         ]
       }
     }
@@ -74,19 +74,19 @@ async function provideLiquidity(
   terra: LCDClient,
   wallet: Wallet,
   address: string,
-  token: TerraSwapAsset,
+  token: AstroportAsset,
   coins: string,
 ) {
   await executeContract(terra, wallet, address,
     {
-      "provide_liquidity": {
-        "assets": [
+      provide_liquidity: {
+        assets: [
           {
-            "info": token,
-            "amount": String(TOKEN_LP)
+            info: token,
+            amount: String(TOKEN_LP)
           }, {
-            "info": { "native_token": { "denom": "uusd" } },
-            "amount": String(USD_LP)
+            info: { native_token: { denom: "uusd" } },
+            amount: String(USD_LP)
           }
         ]
       }
@@ -98,12 +98,12 @@ async function provideLiquidity(
 // TESTS
 
 async function testSwapNativeTokenToUsd(env: Env, denom: string) {
-  const { terra, safetyFund, deployer, terraswapFactory } = env
+  const { terra, safetyFund, deployer, astroportFactory } = env
 
-  const NATIVE_TOKEN = { "native_token": { "denom": denom } }
+  const NATIVE_TOKEN = { native_token: { denom } }
 
   // instantiate a native token/USD Astroport pair
-  const pairAddress = await instantiateUsdPair(terra, deployer, terraswapFactory, NATIVE_TOKEN)
+  const pairAddress = await instantiateUsdPair(terra, deployer, astroportFactory, NATIVE_TOKEN)
 
   await provideLiquidity(terra, deployer, pairAddress, NATIVE_TOKEN, `${USD_LP}uusd,${TOKEN_LP}${denom}`)
 
@@ -144,18 +144,18 @@ async function testSwapNativeTokenToUsd(env: Env, denom: string) {
 }
 
 async function testSwapTokenToUsd(env: Env, address: string) {
-  const { terra, safetyFund, deployer, terraswapFactory } = env
+  const { terra, safetyFund, deployer, astroportFactory } = env
 
-  const TOKEN = { "token": { "contract_addr": address } }
+  const TOKEN = { token: { contract_addr: address } }
 
   // instantiate a token/USD Astroport pair
-  const pairAddress = await instantiateUsdPair(terra, deployer, terraswapFactory, TOKEN)
+  const pairAddress = await instantiateUsdPair(terra, deployer, astroportFactory, TOKEN)
   // approve the pair contract to transfer the token
   await executeContract(terra, deployer, address,
     {
-      "increase_allowance": {
-        "spender": pairAddress,
-        "amount": String(TOKEN_LP),
+      increase_allowance: {
+        spender: pairAddress,
+        amount: String(TOKEN_LP),
       }
     }
   )
@@ -164,9 +164,9 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   // transfer some tokens to the safety fund
   await executeContract(terra, deployer, address,
     {
-      "transfer": {
-        "amount": String(SAFETY_FUND_TOKEN_BALANCE),
-        "recipient": safetyFund
+      transfer: {
+        amount: String(SAFETY_FUND_TOKEN_BALANCE),
+        recipient: safetyFund
       }
     }
   )
@@ -177,9 +177,9 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   // swap the token balance in the safety fund to USD
   await executeContract(terra, deployer, safetyFund,
     {
-      "swap_asset_to_uusd": {
-        "offer_asset_info": TOKEN,
-        "amount": String(SAFETY_FUND_TOKEN_BALANCE)
+      swap_asset_to_uusd: {
+        offer_asset_info: TOKEN,
+        amount: String(SAFETY_FUND_TOKEN_BALANCE)
       }
     }
   )
@@ -187,11 +187,11 @@ async function testSwapTokenToUsd(env: Env, address: string) {
   // check the safety fund balances
   const usdBalance = await queryBalanceNative(terra, safetyFund, "uusd")
   assert(usdBalance > prevUsdBalance)
-  const tokenBalance = await queryContract(terra, address, { "balance": { "address": safetyFund } })
+  const tokenBalance = await queryContract(terra, address, { balance: { address: safetyFund } })
   strictEqual(parseInt(tokenBalance.balance), 0)
 
   // check the Astroport pair balances
-  const pool = await queryContract(terra, pairAddress, { "pool": {} })
+  const pool = await queryContract(terra, pairAddress, { pool: {} })
   strictEqual(parseInt(pool.assets[0].amount), TOKEN_LP + SAFETY_FUND_TOKEN_BALANCE)
   assert(parseInt(pool.assets[1].amount) < USD_LP)
 }
@@ -204,37 +204,41 @@ async function main() {
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
 
-  console.log("deploying Astroport contracts")
-  const tokenCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_pair.wasm"))
-  const factoryCodeID = await uploadContract(terra, deployer, join(TERRASWAP_ARTIFACTS_PATH, "terraswap_factory.wasm"))
-  // instantiate the factory contract without `init_hook`, so that it can be a directory of pairs
-  const terraswapFactory = await instantiateContract(terra, deployer, factoryCodeID,
+  console.log("upload contracts")
+
+  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
-      "pair_code_id": pairCodeID,
-      "token_code_id": tokenCodeID
+      token_code_id: tokenCodeID,
+      pair_configs: [
+        {
+          code_id: pairCodeID,
+          pair_type: { xyk: {} },
+          total_fee_bps: 0,
+          maker_fee_bps: 0
+        }
+      ]
     }
   )
 
-  console.log("deploying Mars safety fund")
   const safetyFund = await deployContract(terra, deployer, "../artifacts/safety_fund.wasm",
     {
-      "owner": deployer.key.accAddress,
-      "astroport_factory_address": terraswapFactory,
-      "astroport_max_spread": "0.01",
+      owner: deployer.key.accAddress,
+      astroport_factory_address: astroportFactory,
+      astroport_max_spread: "0.01",
     }
   )
 
-  console.log("deploying a token contract")
   const tokenAddress = await instantiateContract(terra, deployer, tokenCodeID,
     {
-      "name": "Mars",
-      "symbol": "MARS",
-      "decimals": 6,
-      "initial_balances": [
+      name: "Mars",
+      symbol: "MARS",
+      decimals: 6,
+      initial_balances: [
         {
-          "address": deployer.key.accAddress,
-          "amount": String(TOKEN_SUPPLY)
+          address: deployer.key.accAddress,
+          amount: String(TOKEN_SUPPLY)
         }
       ]
     }
@@ -245,8 +249,7 @@ async function main() {
     deployer,
     tokenCodeID,
     pairCodeID,
-    factoryCodeID,
-    terraswapFactory,
+    astroportFactory,
     safetyFund,
   }
 

@@ -61,7 +61,7 @@ async function testLunaPrice(
   )
   const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
 
-  strictEqual(new Dec(marsOraclePrice).toString(), terraOraclePrice?.amount.toString())
+  strictEqual(new Dec(marsOraclePrice.price).toString(), terraOraclePrice?.amount.toString())
 }
 
 async function testNativeTokenPrice(
@@ -90,7 +90,7 @@ async function testNativeTokenPrice(
   const denomUsdPrice = new Dec(terraOracleLunaUsdPrice?.amount)
     .div(new Dec(terraOraclePrice?.amount))
 
-  strictEqual(new Dec(marsOraclePrice).toString(), denomUsdPrice.toString())
+  strictEqual(new Dec(marsOraclePrice.price).toString(), denomUsdPrice.toString())
 }
 
 // MAIN

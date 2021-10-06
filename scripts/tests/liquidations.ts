@@ -124,7 +124,7 @@ async function testCollateralizedNativeLoan(
       `${uusdAmountLiquidated}uusd`
     ),
     (error: any) => {
-      return error.response.data.error.includes(
+      return error.response.data.message.includes(
         "User's health factor is not less than 1 and thus cannot be liquidated"
       )
     }
@@ -268,7 +268,7 @@ async function testCollateralizedNativeLoan(
     strictEqual(maUlunaBalanceDifference, collateralAmountLiquidated * MA_TOKEN_SCALING_FACTOR)
   } else {
     const ulunaBalanceDifference = ulunaBalanceAfter - ulunaBalanceBefore
-    const ulunaTxFee = txInfo.tx.fee.amount.get("uluna")!.amount.toNumber()
+    const ulunaTxFee = txInfo.tx.auth_info.fee.amount.get("uluna")!.amount.toNumber()
     strictEqual(ulunaBalanceDifference, collateralAmountLiquidated - ulunaTxFee)
   }
 }
@@ -334,7 +334,7 @@ async function testCollateralizedCw20Loan(
       }
     ),
     (error: any) => {
-      return error.response.data.error.includes(
+      return error.response.data.message.includes(
         "User's health factor is not less than 1 and thus cannot be liquidated"
       )
     }
@@ -528,7 +528,7 @@ async function testUncollateralizedNativeLoan(
       `${uusdAmountBorrowed}uusd`
     ),
     (error: any) => {
-      return error.response.data.error.includes(
+      return error.response.data.message.includes(
         "user has a positive uncollateralized loan limit and thus cannot be liquidated"
       )
     }
