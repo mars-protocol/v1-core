@@ -475,10 +475,10 @@ fn query_config(deps: Deps) -> StdResult<Config> {
 fn query_asset_incentive(
     deps: Deps,
     ma_token_address_unchecked: String,
-) -> StdResult<AssetIncentive> {
+) -> StdResult<Option<AssetIncentive>> {
     let ma_token_address = deps.api.addr_validate(&ma_token_address_unchecked)?;
-    let asset_incentive = ASSET_INCENTIVES.load(deps.storage, &ma_token_address)?;
-    Ok(asset_incentive)
+    let option_asset_incentive = ASSET_INCENTIVES.may_load(deps.storage, &ma_token_address)?;
+    Ok(option_asset_incentive)
 }
 
 fn query_user_unclaimed_rewards(

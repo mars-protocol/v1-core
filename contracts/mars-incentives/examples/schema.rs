@@ -17,5 +17,5 @@ fn main() {
     export_schema(&schema_for!(QueryMsg), &out_dir);
 
     export_schema(&schema_for!(Config), &out_dir);
-    export_schema(&schema_for!(AssetIncentive), &out_dir);
+    export_schema(&schema_for!(Option<AssetIncentive>), &out_dir);
 }

@@ -19,5 +19,5 @@ fn main() {
 
     export_schema(&schema_for!(Config), &out_dir);
     export_schema(&schema_for!(GlobalState), &out_dir);
-    export_schema(&schema_for!(Claim), &out_dir);
+    export_schema(&schema_for!(Option<Claim>), &out_dir);
 }
