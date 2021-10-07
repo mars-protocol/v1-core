@@ -94,7 +94,7 @@ async function assertXmarsTotalSupplyAt(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/address_provider.wasm",
+  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
@@ -114,7 +114,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  const staking = await deployContract(terra, deployer, "../artifacts/staking.wasm",
+  const staking = await deployContract(terra, deployer, "../artifacts/mars_staking.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -136,7 +136,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/xmars_token.wasm",
+  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
