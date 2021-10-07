@@ -64,13 +64,14 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
   // Prints a command that should be run by the multisig key holders to generate signatures
   // TODO add Ledger support
   console.log(`
-# Instructions to sign a tx for multisig ${multisigAddress}
-# - Set \`multisig\` to the name of the multisig in terrad (check the name with \`terrad keys list\`)
-# - Set \`from\` to your address that is a key to the multisig
-
+# Instructions to sign a tx for multisig ${multisigAddress}:
+# - 1. set \`multisig\` to the name of the multisig in terrad (check the name with \`terrad keys list\`):
 multisig=...
+
+# - 2. set \`from\` to your address that is a key to the multisig:
 from=terra1...
 
+# - 3. run the signing command:
 terrad tx sign ${unsignedTx} \\
   --multisig \$multisig \\
   --from \$from \\
