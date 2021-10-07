@@ -1,24 +1,14 @@
-import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js";
+import { LocalTerra } from "@terra-money/terra.js";
 import { join } from "path";
 import { strictEqual } from "assert";
-import fetch from "node-fetch";
 import "dotenv/config.js";
 import {
   deployContract,
   executeContract,
-  queryContract,
-  setTimeoutDuration,
-  sleep,
   toEncodedBinary,
   uploadContract,
 } from "../helpers.js";
-import {
-  getBlockHeight,
-  mintCw20,
-  queryBalanceCw20,
-  transferCw20,
-} from "./test_helpers.js";
-import { testnet } from "../deploy_configs.js";
+import { getBlockHeight, mintCw20, queryBalanceCw20 } from "./test_helpers.js";
 
 // CONSTS
 
