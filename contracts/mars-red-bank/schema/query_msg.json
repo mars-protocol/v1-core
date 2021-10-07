@@ -3,7 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
-      "description": "Get config parameters",
+      "description": "Get config",
       "type": "object",
       "required": [
         "config"
@@ -16,7 +16,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get asset market parameters",
+      "description": "Get asset market",
       "type": "object",
       "required": [
         "market"
@@ -75,7 +75,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get all debt positions for a user. Returns DebtResponse",
+      "description": "Get all debt positions for a user. Returns UsetDebtResponse",
       "type": "object",
       "required": [
         "user_debt"
@@ -96,7 +96,32 @@
       "additionalProperties": false
     },
     {
-      "description": "Get info about whether or not user is using each asset as collateral. Returns CollateralResponse",
+      "description": "Get user debt position for a specific asset. Returns UserAssetDebtResponse",
+      "type": "object",
+      "required": [
+        "user_asset_debt"
+      ],
+      "properties": {
+        "user_asset_debt": {
+          "type": "object",
+          "required": [
+            "asset",
+            "user_address"
+          ],
+          "properties": {
+            "asset": {
+              "$ref": "#/definitions/Asset"
+            },
+            "user_address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get info about whether or not user is using each asset as collateral. Returns UserCollateralResponse",
       "type": "object",
       "required": [
         "user_collateral"
@@ -138,7 +163,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent underlying asset amount for a maToken balance. Returns AmountResponse",
+      "description": "Get equivalent underlying asset amount for a maToken balance.",
       "type": "object",
       "required": [
         "scaled_liquidity_amount"
@@ -163,7 +188,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent underlying asset amount for a debt balance. Returns AmountResponse",
+      "description": "Get equivalent underlying asset amount for a debt balance.",
       "type": "object",
       "required": [
         "scaled_debt_amount"
@@ -188,7 +213,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent maToken amount for a given underlying asset balance. Returns AmountResponse",
+      "description": "Get equivalent maToken amount for a given underlying asset balance.",
       "type": "object",
       "required": [
         "descaled_liquidity_amount"
