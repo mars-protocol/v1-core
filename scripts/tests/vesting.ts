@@ -181,8 +181,6 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     protocol_admin_address: jv.key.accAddress,
   };
 
-  // console.log("contractAddresses =", contractAddresses);
-
   await executeContract(terra, deployer, addressProvider, {
     update_config: {
       config: contractAddresses,
