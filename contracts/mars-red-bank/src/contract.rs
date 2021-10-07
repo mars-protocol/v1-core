@@ -35,9 +35,9 @@ use crate::state::{
     MARKET_REFERENCES_BY_MA_TOKEN, UNCOLLATERALIZED_LOAN_LIMITS, USERS,
 };
 use crate::{
-    CollateralInfo, CollateralResponse, Config, ConfigResponse, Debt, DebtInfo, DebtResponse,
-    GlobalState, Market, MarketInfo, MarketsListResponse, User, UserHealthStatus,
-    UserPositionResponse,
+    Config, ConfigResponse, Debt, GlobalState, Market, MarketInfo, MarketsListResponse, User,
+    UserAssetCollateralResponse, UserAssetDebtResponse, UserCollateralResponse, UserDebtResponse,
+    UserHealthStatus, UserPositionResponse,
 };
 
 // INIT
@@ -1804,16 +1804,29 @@ pub fn execute_update_user_collateral_asset_status(
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
+
         QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
+
         QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
+
         QueryMsg::UserDebt { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_debt(deps, address)?)
+            to_binary(&query_user_debt(deps, env, address)?)
         }
+
+        QueryMsg::UserAssetDebt {
+            user_address,
+            asset,
+        } => {
+            let address = deps.api.addr_validate(&user_address)?;
+            to_binary(&query_user_asset_debt(deps, env, address, asset)?)
+        }
+
         QueryMsg::UserCollateral { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
             to_binary(&query_collateral(deps, address)?)
         }
+
         QueryMsg::UncollateralizedLoanLimit {
             user_address,
             asset,
@@ -1825,12 +1838,15 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
                 asset,
             )?)
         }
+
         QueryMsg::ScaledLiquidityAmount { asset, amount } => {
             to_binary(&query_scaled_liquidity_amount(deps, env, asset, amount)?)
         }
+
         QueryMsg::ScaledDebtAmount { asset, amount } => {
             to_binary(&query_scaled_debt_amount(deps, env, asset, amount)?)
         }
+
         QueryMsg::DescaledLiquidityAmount {
             ma_token_address,
             amount,
@@ -1840,6 +1856,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             ma_token_address,
             amount,
         )?),
+
         QueryMsg::UserPosition { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
             to_binary(&query_user_position(deps, env, address)?)
@@ -1847,7 +1864,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
-fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     let config = CONFIG.load(deps.storage)?;
     let money_market = GLOBAL_STATE.load(deps.storage)?;
 
@@ -1860,7 +1877,7 @@ fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
     })
 }
 
-fn query_market(deps: Deps, asset: Asset) -> StdResult<Market> {
+pub fn query_market(deps: Deps, asset: Asset) -> StdResult<Market> {
     let (label, reference, _) = asset.get_attributes();
     let market = match MARKETS.load(deps.storage, reference.as_slice()) {
         Ok(market) => market,
@@ -1875,16 +1892,20 @@ fn query_market(deps: Deps, asset: Asset) -> StdResult<Market> {
     Ok(market)
 }
 
-fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
+pub fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
     let markets_list: StdResult<Vec<_>> = MARKETS
         .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
-            let (k, v) = item?;
-            let denom = get_market_denom(deps, k, v.asset_type)?;
+            let (asset_reference, market) = item?;
+            let (denom, asset_label) =
+                get_asset_identifiers(deps, asset_reference.clone(), market.asset_type)?;
 
             Ok(MarketInfo {
                 denom,
-                ma_token_address: v.ma_token_address,
+                asset_label,
+                asset_reference,
+                asset_type: market.asset_type,
+                ma_token_address: market.ma_token_address,
             })
         })
         .collect();
@@ -1894,56 +1915,107 @@ fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
     })
 }
 
-fn query_debt(deps: Deps, address: Addr) -> StdResult<DebtResponse> {
-    let user = USERS.may_load(deps.storage, &address)?.unwrap_or_default();
+pub fn query_user_debt(deps: Deps, env: Env, user_address: Addr) -> StdResult<UserDebtResponse> {
+    let user = USERS
+        .may_load(deps.storage, &user_address)?
+        .unwrap_or_default();
 
     let debts: StdResult<Vec<_>> = MARKETS
         .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
-            let (k, v) = item?;
-            let denom = get_market_denom(deps, k.clone(), v.asset_type)?;
+            let (asset_reference, market) = item?;
+            let (denom, asset_label) =
+                get_asset_identifiers(deps, asset_reference.clone(), market.asset_type)?;
 
-            let is_borrowing_asset = get_bit(user.borrowed_assets, v.index)?;
-            if is_borrowing_asset {
-                let debt = DEBTS.load(deps.storage, (k.as_slice(), &address))?;
-                Ok(DebtInfo {
-                    denom,
-                    amount_scaled: debt.amount_scaled,
-                })
+            let is_borrowing_asset = get_bit(user.borrowed_assets, market.index)?;
+            let (amount_scaled, amount) = if is_borrowing_asset {
+                let debt = DEBTS.load(deps.storage, (asset_reference.as_slice(), &user_address))?;
+                let amount_scaled = debt.amount_scaled;
+                let amount = get_descaled_amount(
+                    amount_scaled,
+                    get_updated_borrow_index(&market, env.block.time.seconds())?,
+                );
+                (amount_scaled, amount)
             } else {
-                Ok(DebtInfo {
-                    denom,
-                    amount_scaled: Uint128::zero(),
-                })
-            }
+                (Uint128::zero(), Uint128::zero())
+            };
+
+            Ok(UserAssetDebtResponse {
+                denom,
+                asset_label,
+                asset_reference,
+                asset_type: market.asset_type,
+                amount_scaled,
+                amount,
+            })
         })
         .collect();
 
-    Ok(DebtResponse { debts: debts? })
+    Ok(UserDebtResponse { debts: debts? })
 }
 
-fn query_collateral(deps: Deps, address: Addr) -> StdResult<CollateralResponse> {
+pub fn query_user_asset_debt(
+    deps: Deps,
+    env: Env,
+    user_address: Addr,
+    asset: Asset,
+) -> StdResult<UserAssetDebtResponse> {
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
+
+    let market = MARKETS.load(deps.storage, &asset_reference)?;
+
+    let denom = get_asset_denom(deps, &asset_label, asset_type)?;
+
+    let (amount_scaled, amount) =
+        match DEBTS.may_load(deps.storage, (asset_reference.as_slice(), &user_address))? {
+            Some(debt) => {
+                let amount_scaled = debt.amount_scaled;
+                let amount = get_descaled_amount(
+                    amount_scaled,
+                    get_updated_borrow_index(&market, env.block.time.seconds())?,
+                );
+                (amount_scaled, amount)
+            }
+
+            None => (Uint128::zero(), Uint128::zero()),
+        };
+
+    Ok(UserAssetDebtResponse {
+        denom,
+        asset_label,
+        asset_reference,
+        asset_type: market.asset_type,
+        amount_scaled,
+        amount,
+    })
+}
+
+pub fn query_collateral(deps: Deps, address: Addr) -> StdResult<UserCollateralResponse> {
     let user = USERS.may_load(deps.storage, &address)?.unwrap_or_default();
 
     let collateral: StdResult<Vec<_>> = MARKETS
         .range(deps.storage, None, None, Order::Ascending)
         .map(|item| {
-            let (k, v) = item?;
-            let denom = get_market_denom(deps, k, v.asset_type)?;
+            let (asset_reference, market) = item?;
+            let (denom, asset_label) =
+                get_asset_identifiers(deps, asset_reference.clone(), market.asset_type)?;
 
-            Ok(CollateralInfo {
+            Ok(UserAssetCollateralResponse {
                 denom,
-                enabled: get_bit(user.collateral_assets, v.index)?,
+                asset_label,
+                asset_reference,
+                asset_type: market.asset_type,
+                enabled: get_bit(user.collateral_assets, market.index)?,
             })
         })
         .collect();
 
-    Ok(CollateralResponse {
+    Ok(UserCollateralResponse {
         collateral: collateral?,
     })
 }
 
-fn query_uncollateralized_loan_limit(
+pub fn query_uncollateralized_loan_limit(
     deps: Deps,
     user_address: Addr,
     asset: Asset,
@@ -1961,7 +2033,7 @@ fn query_uncollateralized_loan_limit(
     }
 }
 
-fn query_scaled_liquidity_amount(
+pub fn query_scaled_liquidity_amount(
     deps: Deps,
     env: Env,
     asset: Asset,
@@ -1976,7 +2048,7 @@ fn query_scaled_liquidity_amount(
     Ok(scaled_amount)
 }
 
-fn query_scaled_debt_amount(
+pub fn query_scaled_debt_amount(
     deps: Deps,
     env: Env,
     asset: Asset,
@@ -1991,7 +2063,7 @@ fn query_scaled_debt_amount(
     Ok(scaled_amount)
 }
 
-fn query_descaled_liquidity_amount(
+pub fn query_descaled_liquidity_amount(
     deps: Deps,
     env: Env,
     ma_token_address: String,
@@ -2007,7 +2079,7 @@ fn query_descaled_liquidity_amount(
     Ok(descaled_amount)
 }
 
-fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
+pub fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
     let config = CONFIG.load(deps.storage)?;
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     let user = USERS.load(deps.storage, &address)?;
@@ -2062,26 +2134,21 @@ fn get_denom_amount_from_coins(coins: &[Coin], denom: &str) -> Uint128 {
         .unwrap_or_else(Uint128::zero)
 }
 
-fn get_market_denom(
+fn get_asset_identifiers(
     deps: Deps,
-    market_reference: Vec<u8>,
+    asset_reference: Vec<u8>,
     asset_type: AssetType,
-) -> StdResult<String> {
+) -> StdResult<(String, String)> {
+    let asset_label = String::from_utf8(asset_reference)?;
+    let denom = get_asset_denom(deps, &asset_label, asset_type)?;
+    Ok((denom, asset_label))
+}
+
+fn get_asset_denom(deps: Deps, asset_label: &str, asset_type: AssetType) -> StdResult<String> {
     match asset_type {
-        AssetType::Native => match String::from_utf8(market_reference) {
-            Ok(denom) => Ok(denom),
-            Err(_) => Err(StdError::generic_err("failed to encode key into string")),
-        },
+        AssetType::Native => Ok(asset_label.to_string()),
         AssetType::Cw20 => {
-            let cw20_contract_address = match String::from_utf8(market_reference) {
-                Ok(cw20_contract_address) => cw20_contract_address,
-                Err(_) => {
-                    return Err(StdError::generic_err(
-                        "failed to encode key into contract address",
-                    ))
-                }
-            };
-            let cw20_contract_address = deps.api.addr_validate(&cw20_contract_address)?;
+            let cw20_contract_address = deps.api.addr_validate(asset_label)?;
             match cw20_get_symbol(&deps.querier, cw20_contract_address.clone()) {
                 Ok(symbol) => Ok(symbol),
                 Err(_) => {
@@ -2092,6 +2159,27 @@ fn get_market_denom(
                 }
             }
         }
+    }
+}
+
+pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
+    let asset_reference_vec =
+        match MARKET_REFERENCES_BY_INDEX.load(deps.storage, U32Key::new(index)) {
+            Ok(asset_reference_vec) => asset_reference_vec,
+            Err(_) => {
+                return Err(StdError::generic_err(format!(
+                    "no market reference exists with index: {}",
+                    index
+                )))
+            }
+        };
+
+    match MARKETS.load(deps.storage, asset_reference_vec.as_slice()) {
+        Ok(asset_market) => Ok((asset_reference_vec, asset_market)),
+        Err(_) => Err(StdError::generic_err(format!(
+            "no asset market exists with asset reference: {}",
+            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
+        ))),
     }
 }
 
@@ -2120,27 +2208,6 @@ fn unset_bit(bitmap: &mut Uint128, index: u32) -> StdResult<()> {
     }
     *bitmap = Uint128::from(bitmap.u128() & !(1 << index));
     Ok(())
-}
-
-pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
-    let asset_reference_vec =
-        match MARKET_REFERENCES_BY_INDEX.load(deps.storage, U32Key::new(index)) {
-            Ok(asset_reference_vec) => asset_reference_vec,
-            Err(_) => {
-                return Err(StdError::generic_err(format!(
-                    "no market reference exists with index: {}",
-                    index
-                )))
-            }
-        };
-
-    match MARKETS.load(deps.storage, asset_reference_vec.as_slice()) {
-        Ok(asset_market) => Ok((asset_reference_vec, asset_market)),
-        Err(_) => Err(StdError::generic_err(format!(
-            "no asset market exists with asset reference: {}",
-            String::from_utf8(asset_reference_vec).expect("Found invalid UTF-8")
-        ))),
-    }
 }
 
 // TESTS
