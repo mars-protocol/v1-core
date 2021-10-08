@@ -99,7 +99,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
           initial_borrow_rate: "0.1",
           max_loan_to_value: "0.55",
           reserve_factor: "0.2",
-          maintenance_margin: "0.65",
+          liquidation_threshold: "0.65",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
             linear: {
@@ -131,7 +131,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
           initial_borrow_rate: "0.2",
           max_loan_to_value: "0.75",
           reserve_factor: "0.2",
-          maintenance_margin: "0.85",
+          liquidation_threshold: "0.85",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
             linear: {

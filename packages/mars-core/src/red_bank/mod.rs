@@ -62,9 +62,8 @@ pub struct Market {
 
     /// Max uusd that can be borrowed per uusd collateral when using the asset as collateral
     pub max_loan_to_value: Decimal,
-    /// LTV (if using only the asset as collateral) that if surpassed, makes the user's position
-    /// liquidatable
-    pub maintenance_margin: Decimal,
+    /// uusd amount in debt position per uusd of asset collateral that if surpassed makes the user's position liquidatable.
+    pub liquidation_threshold: Decimal,
     /// Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral
     /// from user in an amount equal to debt repayed + bonus)
     pub liquidation_bonus: Decimal,
@@ -100,7 +99,7 @@ impl Market {
     pub fn validate(&self) -> Result<(), MarketError> {
         self.interest_rate_strategy.validate()?;
 
-        // max_loan_to_value, reserve_factor, maintenance_margin and liquidation_bonus should be less or equal 1
+        // max_loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
         let conditions_and_names = vec![
             (
                 self.max_loan_to_value.le(&Decimal::one()),
@@ -108,8 +107,8 @@ impl Market {
             ),
             (self.reserve_factor.le(&Decimal::one()), "reserve_factor"),
             (
-                self.maintenance_margin.le(&Decimal::one()),
-                "maintenance_margin",
+                self.liquidation_threshold.le(&Decimal::one()),
+                "liquidation_threshold",
             ),
             (
                 self.liquidation_bonus.le(&Decimal::one()),
@@ -118,10 +117,10 @@ impl Market {
         ];
         all_conditions_valid(conditions_and_names)?;
 
-        // maintenance_margin should be greater than max_loan_to_value
-        if self.maintenance_margin <= self.max_loan_to_value {
-            return Err(MarketError::InvalidMaintenanceMargin {
-                maintenance_margin: self.maintenance_margin,
+        // liquidation_threshold should be greater than max_loan_to_value
+        if self.liquidation_threshold <= self.max_loan_to_value {
+            return Err(MarketError::InvalidLiquidationThreshold {
+                liquidation_threshold: self.liquidation_threshold,
                 max_loan_to_value: self.max_loan_to_value,
             });
         }
@@ -152,7 +151,7 @@ impl Default for Market {
             interests_last_updated: 0,
             debt_total_scaled: Default::default(),
             asset_type: AssetType::Native,
-            maintenance_margin: Decimal::one(),
+            liquidation_threshold: Decimal::one(),
             liquidation_bonus: Decimal::zero(),
             interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
             active: true,
@@ -170,9 +169,9 @@ pub enum MarketError {
     #[error("{0}")]
     InterestRateModel(#[from] InterestRateModelError),
 
-    #[error("maintenance_margin should be greater than max_loan_to_value. maintenance_margin: {maintenance_margin:?}, max_loan_to_value: {max_loan_to_value:?}")]
-    InvalidMaintenanceMargin {
-        maintenance_margin: Decimal,
+    #[error("liquidation_threshold should be greater than max_loan_to_value. liquidation_threshold: {liquidation_threshold:?}, max_loan_to_value: {max_loan_to_value:?}")]
+    InvalidLiquidationThreshold {
+        liquidation_threshold: Decimal,
         max_loan_to_value: Decimal,
     },
 }
@@ -289,6 +288,6 @@ pub struct UserPositionResponse {
     /// Total debt minus the uncollateralized debt
     pub total_collateralized_debt_in_uusd: Uint128,
     pub max_debt_in_uusd: Uint128,
-    pub weighted_maintenance_margin_in_uusd: Uint128,
+    pub weighted_liquidation_threshold_in_uusd: Uint128,
     pub health_status: UserHealthStatus,
 }

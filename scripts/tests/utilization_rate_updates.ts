@@ -340,7 +340,7 @@ async function testDynamicInterestRate(env: Env) {
           initial_borrow_rate: "0.1",
           max_loan_to_value: String(MARS_MAX_LTV),
           reserve_factor: "0",
-          maintenance_margin: "0.65",
+          liquidation_threshold: "0.65",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
             dynamic: {
@@ -380,7 +380,7 @@ async function testDynamicInterestRate(env: Env) {
           initial_borrow_rate: "0.2",
           max_loan_to_value: String(UUSD_MAX_LTV),
           reserve_factor: "0",
-          maintenance_margin: "0.85",
+          liquidation_threshold: "0.85",
           liquidation_bonus: "0.1",
           interest_rate_strategy: {
             linear: {

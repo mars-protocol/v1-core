@@ -398,11 +398,11 @@ pub fn execute_withdraw(
 
         let withdraw_amount_in_uusd = withdraw_amount * withdraw_asset_price;
 
-        let weighted_maintenance_margin_in_uusd_after_withdraw = user_position
-            .weighted_maintenance_margin_in_uusd
-            .checked_sub(withdraw_amount_in_uusd * market.maintenance_margin)?;
+        let weighted_liquidation_threshold_in_uusd_after_withdraw = user_position
+            .weighted_liquidation_threshold_in_uusd
+            .checked_sub(withdraw_amount_in_uusd * market.liquidation_threshold)?;
         let health_factor_after_withdraw = Decimal::from_ratio(
-            weighted_maintenance_margin_in_uusd_after_withdraw,
+            weighted_liquidation_threshold_in_uusd_after_withdraw,
             user_position.total_collateralized_debt_in_uusd,
         );
         if health_factor_after_withdraw < Decimal::one() {
@@ -587,7 +587,7 @@ pub fn create_market(
         initial_borrow_rate: borrow_rate,
         max_loan_to_value,
         reserve_factor,
-        maintenance_margin,
+        liquidation_threshold,
         liquidation_bonus,
         interest_rate_strategy,
         active,
@@ -599,7 +599,7 @@ pub fn create_market(
     let available = borrow_rate.is_some()
         && max_loan_to_value.is_some()
         && reserve_factor.is_some()
-        && maintenance_margin.is_some()
+        && liquidation_threshold.is_some()
         && liquidation_bonus.is_some()
         && interest_rate_strategy.is_some()
         && active.is_some()
@@ -622,7 +622,7 @@ pub fn create_market(
         reserve_factor: reserve_factor.unwrap(),
         interests_last_updated: block_time,
         debt_total_scaled: Uint128::zero(),
-        maintenance_margin: maintenance_margin.unwrap(),
+        liquidation_threshold: liquidation_threshold.unwrap(),
         liquidation_bonus: liquidation_bonus.unwrap(),
         interest_rate_strategy: interest_rate_strategy.unwrap(),
         active: active.unwrap(),
@@ -684,7 +684,7 @@ pub fn execute_update_asset(
                 initial_borrow_rate: _,
                 max_loan_to_value,
                 reserve_factor,
-                maintenance_margin,
+                liquidation_threshold,
                 liquidation_bonus,
                 interest_rate_strategy,
                 active,
@@ -719,7 +719,8 @@ pub fn execute_update_asset(
             let mut updated_market = Market {
                 max_loan_to_value: max_loan_to_value.unwrap_or(market.max_loan_to_value),
                 reserve_factor: reserve_factor.unwrap_or(market.reserve_factor),
-                maintenance_margin: maintenance_margin.unwrap_or(market.maintenance_margin),
+                liquidation_threshold: liquidation_threshold
+                    .unwrap_or(market.liquidation_threshold),
                 liquidation_bonus: liquidation_bonus.unwrap_or(market.liquidation_bonus),
                 interest_rate_strategy: interest_rate_strategy
                     .unwrap_or(market.interest_rate_strategy),
@@ -2102,7 +2103,8 @@ pub fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<Use
         total_debt_in_uusd: user_position.total_debt_in_uusd,
         total_collateralized_debt_in_uusd: user_position.total_collateralized_debt_in_uusd,
         max_debt_in_uusd: user_position.max_debt_in_uusd,
-        weighted_maintenance_margin_in_uusd: user_position.weighted_maintenance_margin_in_uusd,
+        weighted_liquidation_threshold_in_uusd: user_position
+            .weighted_liquidation_threshold_in_uusd,
         health_status: user_position.health_status,
     })
 }
@@ -2421,7 +2423,7 @@ mod tests {
             initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
             max_loan_to_value: Some(Decimal::from_ratio(8u128, 10u128)),
             reserve_factor: Some(Decimal::from_ratio(1u128, 100u128)),
-            maintenance_margin: Some(Decimal::one()),
+            liquidation_threshold: Some(Decimal::one()),
             liquidation_bonus: Some(Decimal::zero()),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
@@ -2443,7 +2445,7 @@ mod tests {
         // *
         let empty_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: None,
-            maintenance_margin: None,
+            liquidation_threshold: None,
             liquidation_bonus: None,
             ..asset_params.clone()
         };
@@ -2478,7 +2480,7 @@ mod tests {
             ContractError::Market(
                 MarsError::ParamsNotLessOrEqualOne {
                     expected_params:
-                        "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
+                        "max_loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus"
                             .to_string(),
                     invalid_params: "max_loan_to_value, reserve_factor".to_string()
                 }
@@ -2491,7 +2493,7 @@ mod tests {
         // *
         let invalid_asset_params = InitOrUpdateAssetParams {
             max_loan_to_value: Some(Decimal::from_ratio(5u128, 10u128)),
-            maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
+            liquidation_threshold: Some(Decimal::from_ratio(5u128, 10u128)),
             ..asset_params.clone()
         };
         let msg = ExecuteMsg::InitAsset {
@@ -2504,8 +2506,8 @@ mod tests {
         let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
         assert_eq!(
             error_res,
-            ContractError::Market(MarketError::InvalidMaintenanceMargin {
-                maintenance_margin: Decimal::from_ratio(1u128, 2u128),
+            ContractError::Market(MarketError::InvalidLiquidationThreshold {
+                liquidation_threshold: Decimal::from_ratio(1u128, 2u128),
                 max_loan_to_value: Decimal::from_ratio(1u128, 2u128)
             })
         );
@@ -2774,7 +2776,7 @@ mod tests {
             initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
             max_loan_to_value: Some(Decimal::from_ratio(50u128, 100u128)),
             reserve_factor: Some(Decimal::from_ratio(1u128, 100u128)),
-            maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
+            liquidation_threshold: Some(Decimal::from_ratio(80u128, 100u128)),
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
@@ -2831,7 +2833,7 @@ mod tests {
         // *
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                maintenance_margin: Some(Decimal::from_ratio(110u128, 10u128)),
+                liquidation_threshold: Some(Decimal::from_ratio(110u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -2846,9 +2848,9 @@ mod tests {
                 error_res,
                 ContractError::Market(MarsError::ParamsNotLessOrEqualOne {
                     expected_params:
-                        "max_loan_to_value, reserve_factor, maintenance_margin, liquidation_bonus"
+                        "max_loan_to_value, reserve_factor, liquidation_threshold, liquidation_bonus"
                             .to_string(),
-                    invalid_params: "maintenance_margin".to_string()
+                    invalid_params: "liquidation_threshold".to_string()
                 }.into())
             );
         }
@@ -2859,7 +2861,7 @@ mod tests {
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
                 max_loan_to_value: Some(Decimal::from_ratio(6u128, 10u128)),
-                maintenance_margin: Some(Decimal::from_ratio(5u128, 10u128)),
+                liquidation_threshold: Some(Decimal::from_ratio(5u128, 10u128)),
                 ..asset_params
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -2872,8 +2874,8 @@ mod tests {
             let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::Market(MarketError::InvalidMaintenanceMargin {
-                    maintenance_margin: Decimal::from_ratio(1u128, 2u128),
+                ContractError::Market(MarketError::InvalidLiquidationThreshold {
+                    liquidation_threshold: Decimal::from_ratio(1u128, 2u128),
                     max_loan_to_value: Decimal::from_ratio(6u128, 10u128)
                 })
             );
@@ -2960,7 +2962,7 @@ mod tests {
                 initial_borrow_rate: Some(Decimal::from_ratio(20u128, 100u128)),
                 max_loan_to_value: Some(Decimal::from_ratio(60u128, 100u128)),
                 reserve_factor: Some(Decimal::from_ratio(10u128, 100u128)),
-                maintenance_margin: Some(Decimal::from_ratio(90u128, 100u128)),
+                liquidation_threshold: Some(Decimal::from_ratio(90u128, 100u128)),
                 liquidation_bonus: Some(Decimal::from_ratio(12u128, 100u128)),
                 interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
                 active: Some(true),
@@ -2987,8 +2989,8 @@ mod tests {
                 new_market.reserve_factor
             );
             assert_eq!(
-                asset_params.maintenance_margin.unwrap(),
-                new_market.maintenance_margin
+                asset_params.liquidation_threshold.unwrap(),
+                new_market.liquidation_threshold
             );
             assert_eq!(
                 asset_params.liquidation_bonus.unwrap(),
@@ -3021,7 +3023,7 @@ mod tests {
                 initial_borrow_rate: None,
                 max_loan_to_value: None,
                 reserve_factor: None,
-                maintenance_margin: None,
+                liquidation_threshold: None,
                 liquidation_bonus: None,
                 interest_rate_strategy: None,
                 active: None,
@@ -3050,8 +3052,8 @@ mod tests {
             );
             assert_eq!(market_before.reserve_factor, new_market.reserve_factor);
             assert_eq!(
-                market_before.maintenance_margin,
-                new_market.maintenance_margin
+                market_before.liquidation_threshold,
+                new_market.liquidation_threshold
             );
             assert_eq!(
                 market_before.liquidation_bonus,
@@ -3107,7 +3109,7 @@ mod tests {
             initial_borrow_rate: Some(Decimal::from_ratio(15u128, 100u128)),
             max_loan_to_value: Some(Decimal::from_ratio(50u128, 100u128)),
             reserve_factor: Some(Decimal::from_ratio(2u128, 100u128)),
-            maintenance_margin: Some(Decimal::from_ratio(80u128, 100u128)),
+            liquidation_threshold: Some(Decimal::from_ratio(80u128, 100u128)),
             liquidation_bonus: Some(Decimal::from_ratio(10u128, 100u128)),
             interest_rate_strategy: Some(InterestRateStrategy::Dynamic(dynamic_ir.clone())),
             active: Some(true),
@@ -3227,7 +3229,7 @@ mod tests {
             initial_borrow_rate: None,
             max_loan_to_value: None,
             reserve_factor: Some(Decimal::from_ratio(2_u128, 10_u128)),
-            maintenance_margin: None,
+            liquidation_threshold: None,
             liquidation_bonus: None,
             interest_rate_strategy: None,
             active: None,
@@ -3959,7 +3961,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(60u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(60u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3969,7 +3971,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(80u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(80u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -3979,7 +3981,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(40u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(40u128, 100u128),
             asset_type: AssetType::Native,
             ..Default::default()
         };
@@ -4051,14 +4053,14 @@ mod tests {
             let token_1_weighted_lt_in_uusd = get_descaled_amount(
                 ma_token_1_balance_scaled,
                 get_updated_liquidity_index(&market_1_initial, env.block.time.seconds()).unwrap(),
-            ) * market_1_initial.maintenance_margin
+            ) * market_1_initial.liquidation_threshold
                 * token_1_exchange_rate;
             let token_3_weighted_lt_in_uusd = get_descaled_amount(
                 ma_token_3_balance_scaled,
                 get_updated_liquidity_index(&market_3_initial, env.block.time.seconds()).unwrap(),
-            ) * market_3_initial.maintenance_margin
+            ) * market_3_initial.liquidation_threshold
                 * token_3_exchange_rate;
-            let weighted_maintenance_margin_in_uusd =
+            let weighted_liquidation_threshold_in_uusd =
                 token_1_weighted_lt_in_uusd + token_3_weighted_lt_in_uusd;
 
             let total_collateralized_debt_in_uusd = get_descaled_amount(
@@ -4068,8 +4070,8 @@ mod tests {
 
             // How much to withdraw in uusd to have health factor equal to one
             let how_much_to_withdraw_in_uusd = Decimal::divide_uint128_by_decimal(
-                weighted_maintenance_margin_in_uusd - total_collateralized_debt_in_uusd,
-                market_3_initial.maintenance_margin,
+                weighted_liquidation_threshold_in_uusd - total_collateralized_debt_in_uusd,
+                market_3_initial.liquidation_threshold,
             );
             Decimal::divide_uint128_by_decimal(how_much_to_withdraw_in_uusd, token_3_exchange_rate)
         };
@@ -5421,7 +5423,7 @@ mod tests {
         let liquidator_address = Addr::unchecked("liquidator");
 
         let collateral_max_ltv = Decimal::from_ratio(5u128, 10u128);
-        let collateral_maintenance_margin = Decimal::from_ratio(6u128, 10u128);
+        let collateral_liquidation_threshold = Decimal::from_ratio(6u128, 10u128);
         let collateral_liquidation_bonus = Decimal::from_ratio(1u128, 10u128);
         let collateral_price = Decimal::from_ratio(2_u128, 1_u128);
         let cw20_debt_price = Decimal::from_ratio(11_u128, 10_u128);
@@ -5475,7 +5477,7 @@ mod tests {
         let collateral_market = Market {
             ma_token_address: collateral_market_ma_token_addr.clone(),
             max_loan_to_value: collateral_max_ltv,
-            maintenance_margin: collateral_maintenance_margin,
+            liquidation_threshold: collateral_liquidation_threshold,
             liquidation_bonus: collateral_liquidation_bonus,
             debt_total_scaled: Uint128::new(800_000_000 * SCALING_FACTOR),
             liquidity_index: Decimal::one(),
@@ -6659,13 +6661,13 @@ mod tests {
             .set_oracle_price(b"debt".to_vec(), Decimal::one());
 
         let collateral_ltv = Decimal::from_ratio(5u128, 10u128);
-        let collateral_maintenance_margin = Decimal::from_ratio(7u128, 10u128);
+        let collateral_liquidation_threshold = Decimal::from_ratio(7u128, 10u128);
         let collateral_liquidation_bonus = Decimal::from_ratio(1u128, 10u128);
 
         let collateral_market = Market {
             ma_token_address: Addr::unchecked("collateral"),
             max_loan_to_value: collateral_ltv,
-            maintenance_margin: collateral_maintenance_margin,
+            liquidation_threshold: collateral_liquidation_threshold,
             liquidation_bonus: collateral_liquidation_bonus,
             debt_total_scaled: Uint128::zero(),
             liquidity_index: Decimal::one(),
@@ -6722,7 +6724,7 @@ mod tests {
 
         let healthy_user_debt_amount_scaled =
             Uint128::new(healthy_user_collateral_balance_scaled.u128())
-                * collateral_maintenance_margin;
+                * collateral_liquidation_threshold;
         let healthy_user_debt = Debt {
             amount_scaled: healthy_user_debt_amount_scaled.into(),
             uncollateralized: false,
@@ -6779,7 +6781,7 @@ mod tests {
         let mock_market = Market {
             ma_token_address: Addr::unchecked("masomecoin"),
             liquidity_index: Decimal::one(),
-            maintenance_margin: Decimal::from_ratio(5u128, 10u128),
+            liquidation_threshold: Decimal::from_ratio(5u128, 10u128),
             ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
@@ -7166,7 +7168,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(60u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(60u128, 100u128),
             ..Default::default()
         };
         let token_addr_2 = Addr::unchecked("depositedcoin2");
@@ -7177,7 +7179,7 @@ mod tests {
             liquidity_index: Decimal::from_ratio(1u128, 2u128),
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(80u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(80u128, 100u128),
             ..Default::default()
         };
         let token_addr_3 = Addr::unchecked("depositedcoin3");
@@ -7188,7 +7190,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(2u128, 1u128),
             max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
-            maintenance_margin: Decimal::from_ratio(40u128, 100u128),
+            liquidation_threshold: Decimal::from_ratio(40u128, 100u128),
             ..Default::default()
         };
 
@@ -7306,17 +7308,17 @@ mod tests {
             let token_1_weighted_lt_in_uusd = get_descaled_amount(
                 ma_token_1_balance_scaled,
                 get_updated_liquidity_index(&market_1_initial, env.block.time.seconds()).unwrap(),
-            ) * market_1_initial.maintenance_margin
+            ) * market_1_initial.liquidation_threshold
                 * token_1_exchange_rate;
             let token_2_weighted_lt_in_uusd = get_descaled_amount(
                 ma_token_2_balance_scaled,
                 get_updated_liquidity_index(&market_2_initial, env.block.time.seconds()).unwrap(),
-            ) * market_2_initial.maintenance_margin
+            ) * market_2_initial.liquidation_threshold
                 * token_2_exchange_rate;
-            let weighted_maintenance_margin_in_uusd =
+            let weighted_liquidation_threshold_in_uusd =
                 token_1_weighted_lt_in_uusd + token_2_weighted_lt_in_uusd;
             let max_debt_for_valid_hf = Decimal::divide_uint128_by_decimal(
-                weighted_maintenance_margin_in_uusd,
+                weighted_liquidation_threshold_in_uusd,
                 token_3_exchange_rate,
             );
             let token_3_debt_scaled = get_scaled_amount(
