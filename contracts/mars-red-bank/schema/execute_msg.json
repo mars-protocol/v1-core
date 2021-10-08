@@ -646,7 +646,7 @@
           ]
         },
         "liquidation_bonus": {
-          "description": "Bonus on the price of assets of the collateral when liquidators purchase it",
+          "description": "Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral from user in an amount equal to debt repayed + bonus)",
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"
@@ -657,7 +657,7 @@
           ]
         },
         "liquidation_threshold": {
-          "description": "Percentage at which the loan is defined as under-collateralized",
+          "description": "uusd amount in debt position per uusd of asset collateral that if surpassed makes the user's position liquidatable.",
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"
@@ -668,7 +668,7 @@
           ]
         },
         "max_loan_to_value": {
-          "description": "Max percentage of collateral that can be borrowed",
+          "description": "Max uusd that can be borrowed per uusd of collateral when using the asset as collateral",
           "anyOf": [
             {
               "$ref": "#/definitions/Decimal"

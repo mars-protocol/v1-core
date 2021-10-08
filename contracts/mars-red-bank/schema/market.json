@@ -96,7 +96,7 @@
       ]
     },
     "liquidation_threshold": {
-      "description": "LTV (if using only the asset as collateral) that if surpassed, makes the user's position liquidatable",
+      "description": "uusd amount in debt position per uusd of asset collateral that if surpassed makes the user's position liquidatable.",
       "allOf": [
         {
           "$ref": "#/definitions/Decimal"

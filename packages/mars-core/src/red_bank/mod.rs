@@ -62,8 +62,7 @@ pub struct Market {
 
     /// Max uusd that can be borrowed per uusd collateral when using the asset as collateral
     pub max_loan_to_value: Decimal,
-    /// LTV (if using only the asset as collateral) that if surpassed, makes the user's position
-    /// liquidatable
+    /// uusd amount in debt position per uusd of asset collateral that if surpassed makes the user's position liquidatable.
     pub liquidation_threshold: Decimal,
     /// Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral
     /// from user in an amount equal to debt repayed + bonus)
