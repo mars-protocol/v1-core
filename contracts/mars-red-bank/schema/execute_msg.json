@@ -656,7 +656,7 @@
             }
           ]
         },
-        "maintenance_margin": {
+        "liquidation_threshold": {
           "description": "Percentage at which the loan is defined as under-collateralized",
           "anyOf": [
             {

@@ -77,7 +77,7 @@ interface InitOrUpdateAssetParams {
   initial_borrow_rate: string
   max_loan_to_value: string
   reserve_factor: string
-  maintenance_margin: string
+  liquidation_threshold: string
   liquidation_bonus: string
   interest_rate_strategy: DynamicInterestRate | LinearInterestRate
   active: boolean

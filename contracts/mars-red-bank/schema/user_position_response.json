@@ -8,7 +8,7 @@
     "total_collateral_in_uusd",
     "total_collateralized_debt_in_uusd",
     "total_debt_in_uusd",
-    "weighted_maintenance_margin_in_uusd"
+    "weighted_liquidation_threshold_in_uusd"
   ],
   "properties": {
     "health_status": {
@@ -31,7 +31,7 @@
     "total_debt_in_uusd": {
       "$ref": "#/definitions/Uint128"
     },
-    "weighted_maintenance_margin_in_uusd": {
+    "weighted_liquidation_threshold_in_uusd": {
       "$ref": "#/definitions/Uint128"
     }
   },

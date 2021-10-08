@@ -57,7 +57,7 @@ export const testnet: Config = {
         initial_borrow_rate: "0.2",
         max_loan_to_value: "0.75",
         reserve_factor: "0.2",
-        maintenance_margin: "0.85",
+        liquidation_threshold: "0.85",
         liquidation_bonus: "0.1",
         interest_rate_strategy: {
           "dynamic": {
@@ -80,7 +80,7 @@ export const testnet: Config = {
         initial_borrow_rate: "0.1",
         max_loan_to_value: "0.55",
         reserve_factor: "0.2",
-        maintenance_margin: "0.65",
+        liquidation_threshold: "0.65",
         liquidation_bonus: "0.1",
         interest_rate_strategy: {
           "dynamic": {
@@ -104,7 +104,7 @@ export const testnet: Config = {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
         reserve_factor: "0.2",
-        maintenance_margin: "0.55",
+        liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {
@@ -128,7 +128,7 @@ export const testnet: Config = {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.35",
         reserve_factor: "0.2",
-        maintenance_margin: "0.45",
+        liquidation_threshold: "0.45",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {
@@ -152,7 +152,7 @@ export const testnet: Config = {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
         reserve_factor: "0.2",
-        maintenance_margin: "0.55",
+        liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {
@@ -237,7 +237,7 @@ export const bombay: Config = {
         initial_borrow_rate: "0.2",
         max_loan_to_value: "0.75",
         reserve_factor: "0.2",
-        maintenance_margin: "0.85",
+        liquidation_threshold: "0.85",
         liquidation_bonus: "0.1",
         interest_rate_strategy: {
           "dynamic": {
@@ -260,7 +260,7 @@ export const bombay: Config = {
         initial_borrow_rate: "0.1",
         max_loan_to_value: "0.55",
         reserve_factor: "0.2",
-        maintenance_margin: "0.65",
+        liquidation_threshold: "0.65",
         liquidation_bonus: "0.1",
         interest_rate_strategy: {
           "dynamic": {
@@ -284,7 +284,7 @@ export const bombay: Config = {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
         reserve_factor: "0.2",
-        maintenance_margin: "0.55",
+        liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {
@@ -308,7 +308,7 @@ export const bombay: Config = {
     //     initial_borrow_rate: "0.07",
     //     max_loan_to_value: "0.35",
     //     reserve_factor: "0.2",
-    //     maintenance_margin: "0.45",
+    //     liquidation_threshold: "0.45",
     //     liquidation_bonus: "0.15",
     //     interest_rate_strategy: {
     //       "dynamic": {
@@ -332,7 +332,7 @@ export const bombay: Config = {
         initial_borrow_rate: "0.07",
         max_loan_to_value: "0.45",
         reserve_factor: "0.2",
-        maintenance_margin: "0.55",
+        liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {

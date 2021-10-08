@@ -174,7 +174,7 @@ pub struct InitOrUpdateAssetParams {
     /// Max percentage of collateral that can be borrowed
     pub max_loan_to_value: Option<Decimal>,
     /// Percentage at which the loan is defined as under-collateralized
-    pub maintenance_margin: Option<Decimal>,
+    pub liquidation_threshold: Option<Decimal>,
     /// Bonus on the price of assets of the collateral when liquidators purchase it
     pub liquidation_bonus: Option<Decimal>,
 

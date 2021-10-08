@@ -20,7 +20,7 @@ pub struct UserPosition {
     pub total_debt_in_uusd: Uint128,
     pub total_collateralized_debt_in_uusd: Uint128,
     pub max_debt_in_uusd: Uint128,
-    pub weighted_maintenance_margin_in_uusd: Uint128,
+    pub weighted_liquidation_threshold_in_uusd: Uint128,
     pub health_status: UserHealthStatus,
     pub asset_positions: Vec<UserAssetPosition>,
 }
@@ -53,7 +53,7 @@ pub struct UserAssetPosition {
     pub debt_amount: Uint128,
     pub uncollateralized_debt: bool,
     pub max_ltv: Decimal,
-    pub maintenance_margin: Decimal,
+    pub liquidation_threshold: Decimal,
     pub asset_price: Decimal,
 }
 
@@ -81,7 +81,7 @@ pub fn get_user_position(
     let mut total_debt_in_uusd = Uint128::zero();
     let mut total_collateralized_debt_in_uusd = Uint128::zero();
     let mut max_debt_in_uusd = Uint128::zero();
-    let mut weighted_maintenance_margin_in_uusd = Uint128::zero();
+    let mut weighted_liquidation_threshold_in_uusd = Uint128::zero();
 
     for user_asset_position in &user_asset_positions {
         let asset_price = user_asset_position.asset_price;
@@ -90,8 +90,8 @@ pub fn get_user_position(
 
         max_debt_in_uusd =
             max_debt_in_uusd.checked_add(collateral_in_uusd * user_asset_position.max_ltv)?;
-        weighted_maintenance_margin_in_uusd = weighted_maintenance_margin_in_uusd
-            .checked_add(collateral_in_uusd * user_asset_position.maintenance_margin)?;
+        weighted_liquidation_threshold_in_uusd = weighted_liquidation_threshold_in_uusd
+            .checked_add(collateral_in_uusd * user_asset_position.liquidation_threshold)?;
 
         let debt_in_uusd = user_asset_position.debt_amount * asset_price;
         total_debt_in_uusd = total_debt_in_uusd.checked_add(debt_in_uusd)?;
@@ -108,7 +108,7 @@ pub fn get_user_position(
         UserHealthStatus::NotBorrowing
     } else {
         let health_factor = Decimal::from_ratio(
-            weighted_maintenance_margin_in_uusd,
+            weighted_liquidation_threshold_in_uusd,
             total_collateralized_debt_in_uusd,
         );
         UserHealthStatus::Borrowing(health_factor)
@@ -119,7 +119,7 @@ pub fn get_user_position(
         total_debt_in_uusd,
         total_collateralized_debt_in_uusd,
         max_debt_in_uusd,
-        weighted_maintenance_margin_in_uusd,
+        weighted_liquidation_threshold_in_uusd,
         health_status,
         asset_positions: user_asset_positions,
     };
@@ -149,7 +149,7 @@ fn get_user_asset_positions(
 
         let (asset_reference_vec, market) = market_get_from_index(&deps, i)?;
 
-        let (collateral_amount, max_ltv, maintenance_margin) = if user_is_using_as_collateral {
+        let (collateral_amount, max_ltv, liquidation_threshold) = if user_is_using_as_collateral {
             // query asset balance (ma_token contract gives back a scaled value)
             let asset_balance_scaled = cw20_get_balance(
                 &deps.querier,
@@ -163,7 +163,7 @@ fn get_user_asset_positions(
             (
                 collateral_amount,
                 market.max_loan_to_value,
-                market.maintenance_margin,
+                market.liquidation_threshold,
             )
         } else {
             (Uint128::zero(), Decimal::zero(), Decimal::zero())
@@ -213,7 +213,7 @@ fn get_user_asset_positions(
             debt_amount,
             uncollateralized_debt,
             max_ltv,
-            maintenance_margin,
+            liquidation_threshold,
             asset_price,
         };
         ret.push(user_asset_position);
