@@ -202,7 +202,7 @@ fn get_user_asset_positions(
             oracle_address.clone(),
             &asset_label,
             asset_reference_vec.clone(),
-            market.asset_type.clone(),
+            market.asset_type,
         )?;
 
         let user_asset_position = UserAssetPosition {

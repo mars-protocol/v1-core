@@ -232,32 +232,52 @@ pub struct MarketsListResponse {
 pub struct MarketInfo {
     /// Asset denom
     pub denom: String,
+    /// Either denom if native asset or contract address if cw20
+    pub asset_label: String,
+    /// Bytes used as key on the kv store for data related to the asset
+    pub asset_reference: Vec<u8>,
+    /// Indicated whether the asset is native or a cw20 token
+    pub asset_type: AssetType,
     /// Address for the corresponding maToken
     pub ma_token_address: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct DebtResponse {
-    pub debts: Vec<DebtInfo>,
+pub struct UserDebtResponse {
+    pub debts: Vec<UserAssetDebtResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct DebtInfo {
+pub struct UserAssetDebtResponse {
     /// Asset denom
     pub denom: String,
-    /// Scaled amount stored in contract state
+    /// Either denom if native asset or contract address if cw20
+    pub asset_label: String,
+    /// Bytes used as key on the kv store for data related to the asset
+    pub asset_reference: Vec<u8>,
+    /// Indicated whether the asset is native or a cw20 token
+    pub asset_type: AssetType,
+    /// Scaled debt amount stored in contract state
     pub amount_scaled: Uint128,
+    /// Underlying asset amount that is actually owed at the current block
+    pub amount: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct CollateralResponse {
-    pub collateral: Vec<CollateralInfo>,
+pub struct UserCollateralResponse {
+    pub collateral: Vec<UserAssetCollateralResponse>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct CollateralInfo {
+pub struct UserAssetCollateralResponse {
     /// Asset denom
     pub denom: String,
+    /// Either denom if native asset or contract address if cw20
+    pub asset_label: String,
+    /// Bytes used as key on the kv store for data related to the asset
+    pub asset_reference: Vec<u8>,
+    /// Indicated whether the asset is native or a cw20 token
+    pub asset_type: AssetType,
     /// Wether the user is using asset as collateral or not
     pub enabled: bool,
 }

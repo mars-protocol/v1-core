@@ -5,8 +5,8 @@ use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
 use mars_red_bank::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
 use mars_red_bank::{
-    CollateralResponse, ConfigResponse, DebtResponse, Market, MarketsListResponse,
-    UserPositionResponse,
+    ConfigResponse, Market, MarketsListResponse, UserAssetDebtResponse, UserCollateralResponse,
+    UserDebtResponse, UserPositionResponse,
 };
 
 fn main() {
@@ -23,7 +23,8 @@ fn main() {
     export_schema(&schema_for!(ConfigResponse), &out_dir);
     export_schema(&schema_for!(Market), &out_dir);
     export_schema(&schema_for!(MarketsListResponse), &out_dir);
-    export_schema(&schema_for!(DebtResponse), &out_dir);
-    export_schema(&schema_for!(CollateralResponse), &out_dir);
+    export_schema(&schema_for!(UserDebtResponse), &out_dir);
+    export_schema(&schema_for!(UserAssetDebtResponse), &out_dir);
+    export_schema(&schema_for!(UserCollateralResponse), &out_dir);
     export_schema(&schema_for!(UserPositionResponse), &out_dir);
 }

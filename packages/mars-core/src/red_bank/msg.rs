@@ -192,27 +192,39 @@ pub struct InitOrUpdateAssetParams {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryMsg {
-    /// Get config parameters
+    /// Get config
     Config {},
-    /// Get asset market parameters
+
+    /// Get asset market
     Market { asset: Asset },
+
     /// Get a list of all markets. Returns MarketsListResponse
     MarketsList {},
+
     /// Get uncollateralized limit for given asset and user.
     /// Returns UncollateralizedLoanLimitResponse
     UncollateralizedLoanLimit { user_address: String, asset: Asset },
-    /// Get all debt positions for a user. Returns DebtResponse
+
+    /// Get all debt positions for a user. Returns UsetDebtResponse
     UserDebt { user_address: String },
+
+    /// Get user debt position for a specific asset. Returns UserAssetDebtResponse
+    UserAssetDebt { user_address: String, asset: Asset },
+
     /// Get info about whether or not user is using each asset as collateral.
-    /// Returns CollateralResponse
+    /// Returns UserCollateralResponse
     UserCollateral { user_address: String },
+
     /// Get user position. Returns UserPositionResponse
     UserPosition { user_address: String },
-    /// Get equivalent underlying asset amount for a maToken balance. Returns AmountResponse
+
+    /// Get equivalent underlying asset amount for a maToken balance.
     ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
-    /// Get equivalent underlying asset amount for a debt balance. Returns AmountResponse
+
+    /// Get equivalent underlying asset amount for a debt balance.
     ScaledDebtAmount { asset: Asset, amount: Uint128 },
-    /// Get equivalent maToken amount for a given underlying asset balance. Returns AmountResponse
+
+    /// Get equivalent maToken amount for a given underlying asset balance.
     DescaledLiquidityAmount {
         ma_token_address: String,
         amount: Uint128,
