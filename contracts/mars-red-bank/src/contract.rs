@@ -14,8 +14,7 @@ use mars_core::address_provider::{self, MarsContract};
 use mars_core::ma_token;
 
 use mars_core::asset::{
-    build_send_asset_with_tax_deduction_msg, build_send_cw20_token_msg,
-    build_send_native_asset_with_tax_deduction_msg, Asset, AssetType,
+    build_send_asset_with_tax_deduction_msg, get_asset_balance, Asset, AssetType,
 };
 use mars_core::error::MarsError;
 use mars_core::helpers::{cw20_get_balance, cw20_get_symbol, option_string_to_addr, zero_address};
@@ -135,13 +134,14 @@ pub fn execute(
         ExecuteMsg::RepayNative { denom } => {
             let repayer_address = info.sender.clone();
             let repay_amount = get_denom_amount_from_coins(&info.funds, &denom);
+
             execute_repay(
                 deps,
                 env,
                 info,
                 repayer_address,
                 denom.as_bytes(),
-                denom.as_str(),
+                denom.clone(),
                 repay_amount,
                 AssetType::Native,
             )
@@ -275,7 +275,7 @@ pub fn execute_receive_cw20(
                 info,
                 repayer_addr,
                 token_contract_address.as_bytes(),
-                token_contract_address.as_str(),
+                token_contract_address.to_string(),
                 cw20_msg.amount,
                 AssetType::Cw20,
             )
@@ -315,7 +315,7 @@ pub fn execute_withdraw(
 ) -> Result<Response, ContractError> {
     let withdrawer_addr = info.sender;
 
-    let (asset_label, asset_reference, _asset_type) = asset.get_attributes();
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
     let mut market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
 
     if !market.active {
@@ -433,7 +433,6 @@ pub fn execute_withdraw(
     response = update_interest_rates(
         &deps,
         &env,
-        asset_reference.as_slice(),
         &mut market,
         withdraw_amount,
         &asset_label,
@@ -454,9 +453,9 @@ pub fn execute_withdraw(
     // send underlying asset to user
     response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
-        env.contract.address,
         withdrawer_addr.clone(),
-        asset,
+        asset_label.clone(),
+        asset_type,
         withdraw_amount,
     )?);
 
@@ -736,7 +735,6 @@ pub fn execute_update_asset(
                 response = update_interest_rates(
                     &deps,
                     &env,
-                    &asset_reference,
                     &mut updated_market,
                     Uint128::zero(),
                     &asset_label,
@@ -816,7 +814,6 @@ pub fn execute_deposit(
     response = update_interest_rates(
         &deps,
         &env,
-        asset_reference,
         &mut market,
         Uint128::zero(),
         asset_label,
@@ -1011,7 +1008,6 @@ pub fn execute_borrow(
     response = update_interest_rates(
         &deps,
         &env,
-        asset_reference.as_slice(),
         &mut borrow_market,
         borrow_amount,
         &asset_label,
@@ -1022,9 +1018,9 @@ pub fn execute_borrow(
     // Send borrow amount to borrower
     response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
-        env.contract.address,
         borrower_address.clone(),
-        asset,
+        asset_label.clone(),
+        asset_type,
         borrow_amount,
     )?);
 
@@ -1043,23 +1039,19 @@ pub fn execute_repay(
     _info: MessageInfo,
     repayer_address: Addr,
     asset_reference: &[u8],
-    asset_label: &str,
+    asset_label: String,
     repay_amount: Uint128,
     asset_type: AssetType,
 ) -> Result<Response, ContractError> {
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
 
     if !market.active {
-        return Err(ContractError::MarketNotActive {
-            asset: asset_label.to_string(),
-        });
+        return Err(ContractError::MarketNotActive { asset: asset_label });
     }
 
     // Cannot repay zero amount
     if repay_amount.is_zero() {
-        return Err(ContractError::InvalidRepayAmount {
-            asset: asset_label.to_string(),
-        });
+        return Err(ContractError::InvalidRepayAmount { asset: asset_label });
     }
 
     // Check new debt
@@ -1098,23 +1090,13 @@ pub fn execute_repay(
             repay_amount_scaled - debt.amount_scaled,
             get_updated_borrow_index(&market, env.block.time.seconds())?,
         );
-        let refund_msg = match asset_type {
-            AssetType::Native => build_send_native_asset_with_tax_deduction_msg(
-                deps.as_ref(),
-                env.contract.address.clone(),
-                repayer_address.clone(),
-                asset_label,
-                refund_amount,
-            )?,
-            AssetType::Cw20 => {
-                let token_contract_addr = deps.api.addr_validate(asset_label)?;
-                build_send_cw20_token_msg(
-                    repayer_address.clone(),
-                    token_contract_addr,
-                    refund_amount,
-                )?
-            }
-        };
+        let refund_msg = build_send_asset_with_tax_deduction_msg(
+            deps.as_ref(),
+            repayer_address.clone(),
+            asset_label.clone(),
+            asset_type,
+            refund_amount,
+        )?;
         response = response.add_message(refund_msg);
         repay_amount_scaled = debt.amount_scaled;
     }
@@ -1130,10 +1112,9 @@ pub fn execute_repay(
     response = update_interest_rates(
         &deps,
         &env,
-        asset_reference,
         &mut market,
         Uint128::zero(),
-        asset_label,
+        &asset_label,
         response,
     )?;
     MARKETS.save(deps.storage, asset_reference, &market)?;
@@ -1144,7 +1125,7 @@ pub fn execute_repay(
         unset_bit(&mut user.borrowed_assets, market.index)?;
         USERS.save(deps.storage, &repayer_address, &user)?;
         response = response.add_event(build_debt_position_changed_event(
-            asset_label,
+            &asset_label,
             false,
             repayer_address.to_string(),
         ));
@@ -1171,7 +1152,7 @@ pub fn execute_liquidate(
     receive_ma_token: bool,
 ) -> Result<Response, ContractError> {
     let block_time = env.block.time.seconds();
-    let (debt_asset_label, debt_asset_reference, _) = debt_asset.get_attributes();
+    let (debt_asset_label, debt_asset_reference, debt_asset_type) = debt_asset.get_attributes();
 
     // 1. Validate liquidation
     // If user (contract) has a positive uncollateralized limit then the user
@@ -1192,7 +1173,8 @@ pub fn execute_liquidate(
         });
     }
 
-    let (collateral_asset_label, collateral_asset_reference, _) = collateral_asset.get_attributes();
+    let (collateral_asset_label, collateral_asset_reference, collateral_asset_type) =
+        collateral_asset.get_attributes();
 
     let mut collateral_market =
         MARKETS.load(deps.storage, collateral_asset_reference.as_slice())?;
@@ -1321,9 +1303,8 @@ pub fn execute_liquidate(
             &env,
             &user_address,
             &liquidator_address,
-            collateral_asset,
-            collateral_asset_reference.as_slice(),
-            &collateral_asset_label,
+            collateral_asset_label.clone(),
+            collateral_asset_type,
             &mut collateral_market,
             collateral_amount_to_liquidate,
             protocol_rewards_collector_address,
@@ -1371,7 +1352,6 @@ pub fn execute_liquidate(
     response = update_interest_rates(
         &deps,
         &env,
-        debt_asset_reference.as_slice(),
         &mut debt_market,
         refund_amount,
         &debt_asset_label,
@@ -1391,9 +1371,9 @@ pub fn execute_liquidate(
     if refund_amount > Uint128::zero() {
         response = response.add_message(build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            env.contract.address,
             liquidator_address.clone(),
-            debt_asset,
+            debt_asset_label.clone(),
+            debt_asset_type,
             refund_amount,
         )?);
     }
@@ -1470,9 +1450,8 @@ fn process_underlying_asset_transfer_to_liquidator(
     env: &Env,
     user_addr: &Addr,
     liquidator_addr: &Addr,
-    collateral_asset: Asset,
-    collateral_asset_reference: &[u8],
-    collateral_asset_label: &str,
+    collateral_asset_label: String,
+    collateral_asset_type: AssetType,
     mut collateral_market: &mut Market,
     collateral_amount_to_liquidate: Uint128,
     protocol_rewards_collector_address: Addr,
@@ -1481,19 +1460,12 @@ fn process_underlying_asset_transfer_to_liquidator(
     let block_time = env.block.time.seconds();
 
     // Ensure contract has enough collateral to send back underlying asset
-    let contract_collateral_balance = match collateral_asset.clone() {
-        Asset::Native { denom } => {
-            deps.querier
-                .query_balance(env.contract.address.clone(), denom.as_str())?
-                .amount
-        }
-        Asset::Cw20 {
-            contract_addr: token_addr,
-        } => {
-            let token_addr = deps.api.addr_validate(&token_addr)?;
-            cw20_get_balance(&deps.querier, token_addr, env.contract.address.clone())?
-        }
-    };
+    let contract_collateral_balance = get_asset_balance(
+        deps.as_ref(),
+        env.contract.address.clone(),
+        collateral_asset_label.clone(),
+        collateral_asset_type,
+    )?;
 
     if contract_collateral_balance < collateral_amount_to_liquidate {
         return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
@@ -1510,10 +1482,9 @@ fn process_underlying_asset_transfer_to_liquidator(
     response = update_interest_rates(
         &deps,
         env,
-        collateral_asset_reference,
         &mut collateral_market,
         collateral_amount_to_liquidate,
-        collateral_asset_label,
+        &collateral_asset_label,
         response,
     )?;
 
@@ -1534,9 +1505,9 @@ fn process_underlying_asset_transfer_to_liquidator(
 
     response = response.add_message(build_send_asset_with_tax_deduction_msg(
         deps.as_ref(),
-        env.contract.address.clone(),
         liquidator_addr.clone(),
-        collateral_asset,
+        collateral_asset_label,
+        collateral_asset_type,
         collateral_amount_to_liquidate,
     )?);
 
@@ -6539,9 +6510,6 @@ mod tests {
             asset_type: AssetType::Native,
             ..Default::default()
         };
-        let native_collateral_asset = Asset::Native {
-            denom: "native_collateral".to_string(),
-        };
 
         {
             // Trying to transfer more underlying native asset than available should fail
@@ -6551,9 +6519,8 @@ mod tests {
                 &env,
                 &user_addr,
                 &liquidator_addr,
-                native_collateral_asset.clone(),
-                b"native_collateral",
-                "native_collateral",
+                "native_collateral".to_string(),
+                AssetType::Native,
                 &mut market,
                 collateral_amount_to_liquidate,
                 Addr::unchecked("protocol_rewards_collector"),
@@ -6574,9 +6541,8 @@ mod tests {
                 &env,
                 &user_addr,
                 &liquidator_addr,
-                native_collateral_asset,
-                b"native_collateral",
-                "native_collateral",
+                "native_collateral".to_string(),
+                AssetType::Native,
                 &mut market,
                 collateral_amount_to_liquidate,
                 Addr::unchecked("protocol_rewards_collector"),
@@ -6592,9 +6558,6 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let cw20_collateral_asset = Asset::Cw20 {
-            contract_addr: "cw20_collateral".to_string(),
-        };
 
         {
             // Trying to transfer more underlying cw20 asset than available should fail
@@ -6604,9 +6567,8 @@ mod tests {
                 &env,
                 &user_addr,
                 &liquidator_addr,
-                cw20_collateral_asset.clone(),
-                b"cw20_collateral",
-                "cw20_collateral",
+                "cw20_collateral".to_string(),
+                AssetType::Cw20,
                 &mut market,
                 collateral_amount_to_liquidate,
                 Addr::unchecked("protocol_rewards_collector"),
@@ -6627,9 +6589,8 @@ mod tests {
                 &env,
                 &user_addr,
                 &liquidator_addr,
-                cw20_collateral_asset,
-                b"cw20_collateral",
-                "cw20_collateral",
+                "cw20_collateral".to_string(),
+                AssetType::Cw20,
                 &mut market,
                 collateral_amount_to_liquidate,
                 Addr::unchecked("protocol_rewards_collector"),
