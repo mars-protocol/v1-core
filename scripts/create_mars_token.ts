@@ -9,33 +9,23 @@ Dependencies:
 */
 
 import {
-  isTxError,
   LCDClient,
   LegacyAminoMultisigPublicKey,
   LocalTerra,
-  MnemonicKey,
-  MsgExecuteContract,
-  MsgSend,
   MsgUpdateContractAdmin,
-  SignDoc,
   SimplePublicKey,
   Wallet
 } from "@terra-money/terra.js"
-import { MultiSignature } from '@terra-money/terra.js/dist/core/MultiSignature.js';
-import { SignatureV2 } from '@terra-money/terra.js/dist/core/SignatureV2.js';
 import { strictEqual } from "assert"
 import 'dotenv/config.js'
 import { join } from "path"
 import {
-  broadcastTransaction,
   executeContract,
   instantiateContract,
   performTransaction,
   queryContract,
   recover,
   setTimeoutDuration,
-  toEncodedBinary,
-  transactionErrorFromResult,
   uploadContract
 } from "./helpers.js"
 
@@ -43,6 +33,11 @@ import {
 
 // Required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
+// Multisig details:
+const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!)
+  .split(",")
+  .map(x => new SimplePublicKey(x))
+const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 
 // For networks other than LocalTerra:
 const CHAIN_ID = process.env.CHAIN_ID
@@ -83,32 +78,22 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
   }
 
   // Multisig
-  // NOTE this is for testnet use only -- do not mint tokens like this on mainnet
-  // For mainnet, load the multisigPubKey like this:
-  // const multisigPubKey = new LegacyAminoMultisigPublicKey(n, [
-  //   new SimplePublicKey("PUBKEY"),
-  //   new SimplePublicKey("PUBKEY"),
-  //   ...
-  // ])
-  const mk1 = new MnemonicKey({
-    mnemonic:
-      "notice oak worry limit wrap speak medal online prefer cluster roof addict wrist behave treat actual wasp year salad speed social layer crew genius"
-  })
-  const mk2 = new MnemonicKey({
-    mnemonic:
-      "quality vacuum heart guard buzz spike sight swarm shove special gym robust assume sudden deposit grid alcohol choice devote leader tilt noodle tide penalty"
-  })
-
-  const multisigPubKey = new LegacyAminoMultisigPublicKey(2, [mk1, mk2].map(x => x.publicKey as SimplePublicKey))
-  const multisigAddress = multisigPubKey.address()
-  const multisig = new MultiSignature(multisigPubKey)
+  const multisigPublicKey = new LegacyAminoMultisigPublicKey(MULTISIG_THRESHOLD, MULTISIG_PUBLIC_KEYS)
+  const multisigAddress = multisigPublicKey.address()
 
   // Instantiate the token minter proxy contract
-  const cw1WhitelistCodeId = await uploadContract(terra, wallet, join(CW_PLUS_ARTIFACTS_PATH, "cw1_whitelist.wasm"))
+  const cw1WhitelistCodeId = await uploadContract(
+    terra,
+    wallet,
+    join(CW_PLUS_ARTIFACTS_PATH, "cw1_whitelist.wasm")
+  )
 
   console.log("cw1 whitelist code ID:", cw1WhitelistCodeId)
 
-  const proxyAddress = await instantiateContract(terra, wallet, cw1WhitelistCodeId,
+  const proxyAddress = await instantiateContract(
+    terra,
+    wallet,
+    cw1WhitelistCodeId,
     {
       mutable: true,
       admins: [
@@ -119,14 +104,27 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
   )
 
   console.log("proxy:", proxyAddress)
-  console.log(await queryContract(terra, proxyAddress, { admin_list: {} }))
+  console.log(
+    await queryContract(
+      terra,
+      proxyAddress,
+      { admin_list: {} }
+    )
+  )
 
   // Instantiate Mars token contract
-  const cw20CodeId = await uploadContract(terra, wallet, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
+  const cw20CodeId = await uploadContract(
+    terra,
+    wallet,
+    join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm")
+  )
 
   console.log("cw20 code ID:", cw20CodeId)
 
-  const marsAddress = await instantiateContract(terra, wallet, cw20CodeId,
+  const marsAddress = await instantiateContract(
+    terra,
+    wallet,
+    cw20CodeId,
     {
       name: TOKEN_NAME,
       symbol: TOKEN_SYMBOL,
@@ -146,118 +144,59 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
   )
 
   console.log("mars:", marsAddress)
-  console.log(await queryContract(terra, marsAddress, { token_info: {} }))
-  console.log(await queryContract(terra, marsAddress, { minter: {} }))
-  console.log(await queryContract(terra, marsAddress, { marketing_info: {} }))
-
-  // Set the proxy as the Mars token contract owner
-  await performTransaction(terra, wallet,
-    new MsgUpdateContractAdmin(wallet.key.accAddress, multisigAddress, marsAddress)
+  console.log(
+    await queryContract(
+      terra,
+      marsAddress,
+      { token_info: {} }
+    )
+  )
+  console.log(
+    await queryContract(
+      terra,
+      marsAddress,
+      { minter: {} }
+    )
+  )
+  console.log(
+    await queryContract(
+      terra,
+      marsAddress,
+      { marketing_info: {} }
+    )
   )
 
-  strictEqual((await terra.wasm.contractInfo(marsAddress)).admin, multisigAddress)
-
-  // Remove wallet from mars-minter admins
-  await executeContract(terra, wallet, proxyAddress, { update_admins: { admins: [multisigAddress] } })
-
-  console.log(await queryContract(terra, proxyAddress, { admin_list: {} }))
-
-  // Mint tokens
-  // NOTE this is for testnet use only -- do not mint tokens like this on mainnet
-  const mintAmount = 1_000_000000
-  const recipient = wallet.key.accAddress
-
-  // Send coins to the multisig address. On testnet, use the faucet to initialise the multisig balance.
-  if (isLocalTerra) {
-    await performTransaction(terra, wallet, new MsgSend(
+  // Set the multisig as the Mars token contract admin
+  await performTransaction(
+    terra,
+    wallet,
+    new MsgUpdateContractAdmin(
       wallet.key.accAddress,
       multisigAddress,
-      {
-        uluna: 1_000_000000,
-        uusd: 1_000_000000
-      }
-    ))
-  }
-
-  // Create an unsigned tx
-  const mintMsg = {
-    mint: {
-      recipient: recipient,
-      amount: String(mintAmount)
-    }
-  }
-
-  const proxyExecuteMsg = {
-    execute: {
-      msgs: [
-        {
-          wasm: {
-            execute: {
-              contract_addr: marsAddress,
-              msg: toEncodedBinary(mintMsg),
-              funds: []
-            }
-          }
-        }
-      ]
-    }
-  }
-
-  const accInfo = await terra.auth.accountInfo(multisigAddress)
-
-  const tx = await terra.tx.create(
-    [
-      {
-        address: multisigAddress,
-        sequenceNumber: accInfo.getSequenceNumber(),
-        publicKey: accInfo.getPublicKey(),
-      },
-    ],
-    {
-      msgs: [
-        new MsgExecuteContract(
-          multisigAddress,
-          proxyAddress,
-          proxyExecuteMsg
-        )
-      ]
-    }
-  )
-
-  const signDoc = new SignDoc(
-    terra.config.chainID,
-    accInfo.getAccountNumber(),
-    accInfo.getSequenceNumber(),
-    tx.auth_info,
-    tx.body
-  )
-
-  // Create K of N signatures for the tx
-  const sig1 = await mk1.createSignatureAmino(signDoc)
-  const sig2 = await mk2.createSignatureAmino(signDoc)
-
-  multisig.appendSignatureV2s([sig1, sig2])
-
-  // Create a signed tx by aggregating the K signatures
-  tx.appendSignatures([
-    new SignatureV2(
-      multisigPubKey,
-      multisig.toSignatureDescriptor(),
-      accInfo.getSequenceNumber()
+      marsAddress
     )
-  ])
+  )
 
-  // Broadcast the tx
-  const result = await broadcastTransaction(terra, tx)
-  if (isTxError(result)) {
-    throw transactionErrorFromResult(result)
-  }
-  console.log(`https://finder.terra.money/${CHAIN_ID}/tx/${result.txhash}`)
+  strictEqual(
+    (await terra.wasm.contractInfo(marsAddress)).admin,
+    multisigAddress
+  )
 
-  // Test
-  const tokenInfo = await queryContract(terra, marsAddress, { token_info: {} })
-  console.log(tokenInfo)
-  strictEqual(parseInt(tokenInfo.total_supply), mintAmount)
+  // Remove wallet from mars-minter admins
+  await executeContract(
+    terra,
+    wallet,
+    proxyAddress,
+    { update_admins: { admins: [multisigAddress] } }
+  )
+
+  console.log(
+    await queryContract(
+      terra,
+      proxyAddress,
+      { admin_list: {} }
+    )
+  )
 
   console.log("OK")
 })()
