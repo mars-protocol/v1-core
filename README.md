@@ -1,5 +1,5 @@
 # Mars Protocol
-This repository contains the source code for the core smart contracts for Mars Protocol. Smart contracts are meant to be compiled to `.wasm` files and uploaded to the [Terra](https://www.terra.money/) blockchain.
+This repository contains the source code for the core smart contracts of Mars Protocol. Smart contracts are meant to be compiled to `.wasm` files and uploaded to the [Terra](https://www.terra.money/) blockchain.
 
 ## Building
 
