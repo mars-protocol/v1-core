@@ -77,6 +77,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
   // Multisig
   const multisigPublicKey = new LegacyAminoMultisigPublicKey(MULTISIG_THRESHOLD, MULTISIG_PUBLIC_KEYS)
   const multisigAddress = multisigPublicKey.address()
+  console.log("multisig:", multisigAddress)
 
   // Instantiate the token minter proxy contract
   const cw1WhitelistCodeId = await uploadContract(
@@ -94,8 +95,11 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
     {
       mutable: true,
       admins: [multisigAddress]
-    }
+    },
+    multisigAddress
   )
+
+  console.log(await terra.wasm.contractInfo(proxyAddress))
 
   console.log("proxy:", proxyAddress)
   console.log(
@@ -115,31 +119,27 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
 
   console.log("cw20 code ID:", cw20CodeId)
 
-  let result = await performTransaction(
+  const marsAddress = await instantiateContract(
     terra,
     wallet,
-    new MsgInstantiateContract(
-      wallet.key.accAddress,
-      multisigAddress,
-      cw20CodeId,
-      {
-        name: TOKEN_NAME,
-        symbol: TOKEN_SYMBOL,
-        decimals: TOKEN_DECIMALS,
-        initial_balances: [],
-        mint: { minter: proxyAddress },
-        marketing: {
-          marketing: multisigAddress,
-          description: TOKEN_DESCRIPTION,
-          project: TOKEN_PROJECT,
-          logo: { url: TOKEN_LOGO }
-        }
-      },
-      undefined
-    )
+    cw20CodeId,
+    {
+      name: TOKEN_NAME,
+      symbol: TOKEN_SYMBOL,
+      decimals: TOKEN_DECIMALS,
+      initial_balances: [],
+      mint: { minter: proxyAddress },
+      marketing: {
+        marketing: multisigAddress,
+        description: TOKEN_DESCRIPTION,
+        project: TOKEN_PROJECT,
+        logo: { url: TOKEN_LOGO }
+      }
+    },
+    multisigAddress
   )
-  let attributes = result.logs[0].events[0].attributes
-  const marsAddress = attributes[attributes.length - 1].value
+
+  console.log(await terra.wasm.contractInfo(marsAddress))
 
   console.log("mars:", marsAddress)
   console.log(
