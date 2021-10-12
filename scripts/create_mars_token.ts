@@ -1,6 +1,6 @@
 /*
-Script to deploy a cw20 token to Terra Columbus-5, setting the token minter and token contract owner
-to a cw1 whitelist contract that has a multisig as the sole admin.
+Script to deploy a cw20 token to Terra Columbus-5, setting the token minter to a cw1 whitelist
+contract that has a multisig as the sole admin.
 
 Dependencies:
   - cw-plus v0.9.1
@@ -12,7 +12,6 @@ import {
   LCDClient,
   LegacyAminoMultisigPublicKey,
   LocalTerra,
-  MsgInstantiateContract,
   SimplePublicKey,
   Wallet
 } from "@terra-money/terra.js"
@@ -20,7 +19,6 @@ import 'dotenv/config.js'
 import { join } from "path"
 import {
   instantiateContract,
-  performTransaction,
   queryContract,
   recover,
   setTimeoutDuration,
