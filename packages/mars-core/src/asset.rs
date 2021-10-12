@@ -3,6 +3,7 @@ use cw20::Cw20ExecuteMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::helpers::cw20_get_balance;
 use crate::tax::deduct_tax;
 
 /// Represents either a native asset or a cw20. Meant to be used as part of a msg
@@ -15,7 +16,9 @@ pub enum Asset {
 }
 
 impl Asset {
-    /// Get symbol (denom/addres), reference (bytes used as key for storage) and asset type
+    /// Get label (denom/address as string),
+    /// reference (denom/address as bytes, used as key for storage)
+    /// and asset type
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
         match &self {
             Asset::Native { denom } => {
@@ -45,27 +48,25 @@ pub enum AssetType {
     Native,
 }
 
-/// If the `AssetType` is `Native`, a "tax" is charged (see [`build_send_native_asset_with_tax_deduction_msg`] for details).
+/// Prepares a message to send the asset from the contract executing the messages to the recipient.
+/// If the `AssetType` is `Native`, a "tax" is charged (see [`build_send_native_asset_with_tax_deduction_msg`] for details). Also sender will always be the contract calling this method
+/// as it's the only Bank Transfer
 /// No tax is charged on `Cw20` asset transfers.
 pub fn build_send_asset_with_tax_deduction_msg(
     deps: Deps,
-    sender_address: Addr,
     recipient_address: Addr,
-    asset: Asset,
+    asset_label: String,
+    asset_type: AssetType,
     amount: Uint128,
 ) -> StdResult<CosmosMsg> {
-    match asset {
-        Asset::Native { denom } => Ok(build_send_native_asset_with_tax_deduction_msg(
+    match asset_type {
+        AssetType::Native => Ok(build_send_native_asset_with_tax_deduction_msg(
             deps,
-            sender_address,
             recipient_address,
-            denom.as_str(),
+            asset_label,
             amount,
         )?),
-        Asset::Cw20 { contract_addr } => {
-            let contract_addr = deps.api.addr_validate(&contract_addr)?;
-            build_send_cw20_token_msg(recipient_address, contract_addr, amount)
-        }
+        AssetType::Cw20 => build_send_cw20_token_msg(recipient_address, asset_label, amount),
     }
 }
 
@@ -75,34 +76,46 @@ pub fn build_send_asset_with_tax_deduction_msg(
 /// Instead of sending amount, send: amount - compute_tax(amount).
 pub fn build_send_native_asset_with_tax_deduction_msg(
     deps: Deps,
-    _sender: Addr,
-    recipient: Addr,
-    denom: &str,
+    recipient_address: Addr,
+    denom: String,
     amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Bank(BankMsg::Send {
-        to_address: recipient.into(),
-        amount: vec![deduct_tax(
-            deps,
-            Coin {
-                denom: denom.to_string(),
-                amount,
-            },
-        )?],
+        to_address: recipient_address.into(),
+        amount: vec![deduct_tax(deps, Coin { denom, amount })?],
     }))
 }
 
 pub fn build_send_cw20_token_msg(
-    recipient: Addr,
-    token_contract_address: Addr,
+    recipient_address: Addr,
+    token_contract_address_unchecked: String,
     amount: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: token_contract_address.into(),
+        contract_addr: token_contract_address_unchecked,
         msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: recipient.into(),
+            recipient: recipient_address.into(),
             amount,
         })?,
         funds: vec![],
     }))
+}
+
+/// Gets asset balance for the given address
+pub fn get_asset_balance(
+    deps: Deps,
+    address: Addr,
+    asset_label: String,
+    asset_type: AssetType,
+) -> StdResult<Uint128> {
+    match asset_type {
+        AssetType::Native => {
+            let balance_query = deps.querier.query_balance(address, asset_label.as_str())?;
+            Ok(balance_query.amount)
+        }
+        AssetType::Cw20 => {
+            let token_addr = deps.api.addr_validate(&asset_label)?;
+            cw20_get_balance(&deps.querier, token_addr, address)
+        }
+    }
 }

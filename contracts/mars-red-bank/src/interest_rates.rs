@@ -5,8 +5,7 @@ use cosmwasm_std::{
 };
 use cw20::Cw20ExecuteMsg;
 
-use mars_core::asset::AssetType;
-use mars_core::helpers::cw20_get_balance;
+use mars_core::asset::get_asset_balance;
 use mars_core::math::decimal::Decimal;
 
 use crate::error::ContractError;
@@ -163,33 +162,17 @@ pub fn get_updated_liquidity_index(market: &Market, block_time: u64) -> StdResul
 pub fn update_interest_rates(
     deps: &DepsMut,
     env: &Env,
-    reference: &[u8],
     market: &mut Market,
     liquidity_taken: Uint128,
     asset_label: &str,
     mut response: Response,
 ) -> Result<Response, ContractError> {
-    let contract_current_balance = match market.asset_type {
-        AssetType::Native => {
-            let denom = str::from_utf8(reference);
-            let denom = match denom {
-                Ok(denom) => denom,
-                Err(_) => return Err(ContractError::CannotEncodeAssetReferenceIntoString {}),
-            };
-            deps.querier
-                .query_balance(env.contract.address.clone(), denom)?
-                .amount
-        }
-        AssetType::Cw20 => {
-            let cw20_addr = str::from_utf8(reference);
-            let cw20_addr = match cw20_addr {
-                Ok(cw20_addr) => cw20_addr,
-                Err(_) => return Err(ContractError::CannotEncodeAssetReferenceIntoString {}),
-            };
-            let cw20_addr = deps.api.addr_validate(cw20_addr)?;
-            cw20_get_balance(&deps.querier, cw20_addr, env.contract.address.clone())?
-        }
-    };
+    let contract_current_balance = get_asset_balance(
+        deps.as_ref(),
+        env.contract.address.clone(),
+        asset_label.to_string(),
+        market.asset_type,
+    )?;
 
     if contract_current_balance < liquidity_taken {
         return Err(ContractError::OperationExceedsAvailableLiquidity {});

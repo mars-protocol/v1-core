@@ -5,9 +5,9 @@ use cosmwasm_std::{
 
 use terraswap::asset::AssetInfo;
 
-use mars_core::asset::{build_send_asset_with_tax_deduction_msg, Asset};
+use mars_core::asset::{build_send_asset_with_tax_deduction_msg, get_asset_balance, Asset};
 use mars_core::error::MarsError;
-use mars_core::helpers::{cw20_get_balance, option_string_to_addr, zero_address};
+use mars_core::helpers::{option_string_to_addr, zero_address};
 use mars_core::swapping::execute_swap;
 
 use mars_core::address_provider::{self, MarsContract};
@@ -218,28 +218,22 @@ pub fn execute_distribute_protocol_rewards(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    let (label, reference, _) = asset.get_attributes();
+    let (asset_label, asset_reference, asset_type) = asset.get_attributes();
 
     let asset_config = ASSET_CONFIG
-        .load(deps.storage, &reference)
+        .load(deps.storage, &asset_reference)
         .unwrap_or_default();
 
     if !asset_config.enabled_for_distribution {
-        return Err(ContractError::AssetNotEnabled { label });
+        return Err(ContractError::AssetNotEnabled { asset_label });
     }
 
-    let balance = match &asset {
-        Asset::Native { denom } => {
-            deps.querier
-                .query_balance(env.contract.address.clone(), denom.as_str())?
-                .amount
-        }
-        Asset::Cw20 { contract_addr } => cw20_get_balance(
-            &deps.querier,
-            deps.api.addr_validate(contract_addr)?,
-            env.contract.address.clone(),
-        )?,
-    };
+    let balance = get_asset_balance(
+        deps.as_ref(),
+        env.contract.address,
+        asset_label.clone(),
+        asset_type,
+    )?;
 
     let amount_to_distribute = match amount {
         Some(amount) if amount > balance => {
@@ -276,9 +270,9 @@ pub fn execute_distribute_protocol_rewards(
     if !safety_fund_amount.is_zero() {
         let safety_fund_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            env.contract.address.clone(),
             safety_fund_address,
-            asset.clone(),
+            asset_label.clone(),
+            asset_type,
             safety_fund_amount,
         )?;
         messages.push(safety_fund_msg);
@@ -286,9 +280,9 @@ pub fn execute_distribute_protocol_rewards(
     if !treasury_amount.is_zero() {
         let treasury_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            env.contract.address.clone(),
             treasury_address,
-            asset.clone(),
+            asset_label.clone(),
+            asset_type,
             treasury_amount,
         )?;
         messages.push(treasury_msg);
@@ -296,9 +290,9 @@ pub fn execute_distribute_protocol_rewards(
     if !staking_amount.is_zero() {
         let staking_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            env.contract.address,
             staking_address,
-            asset,
+            asset_label.clone(),
+            asset_type,
             staking_amount,
         )?;
         messages.push(staking_msg);
@@ -306,7 +300,7 @@ pub fn execute_distribute_protocol_rewards(
 
     let res = Response::new()
         .add_attribute("action", "distribute_protocol_income")
-        .add_attribute("asset", label)
+        .add_attribute("asset", asset_label)
         .add_attribute("amount", amount_to_distribute)
         .add_messages(messages);
 
@@ -760,7 +754,7 @@ mod tests {
         assert_eq!(
             error_res,
             ContractError::AssetNotEnabled {
-                label: "somecoin".to_string()
+                asset_label: "somecoin".to_string()
             }
         );
 
@@ -939,7 +933,7 @@ mod tests {
         assert_eq!(
             error_res,
             ContractError::AssetNotEnabled {
-                label: "cw20_address".to_string()
+                asset_label: "cw20_address".to_string()
             }
         );
 
