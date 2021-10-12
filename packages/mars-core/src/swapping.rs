@@ -26,7 +26,7 @@ pub fn execute_swap(
         )));
     }
 
-    let (contract_asset_balance, asset_label) = match offer_asset_info.clone() {
+    let (contract_offer_asset_balance, offer_asset_label) = match offer_asset_info.clone() {
         AssetInfo::NativeToken { denom } => (
             deps.querier
                 .query_balance(env.contract.address, denom.as_str())?
@@ -46,22 +46,27 @@ pub fn execute_swap(
         }
     };
 
-    if contract_asset_balance.is_zero() {
+    let ask_asset_label = match ask_asset_info.clone() {
+        AssetInfo::NativeToken { denom } => denom,
+        AssetInfo::Token { contract_addr } => contract_addr.to_string(),
+    };
+
+    if contract_offer_asset_balance.is_zero() {
         return Err(StdError::generic_err(format!(
             "Contract has no balance for the asset {}",
-            asset_label
+            offer_asset_label
         )));
     }
 
     let amount_to_swap = match amount {
-        Some(amount) if amount > contract_asset_balance => {
+        Some(amount) if amount > contract_offer_asset_balance => {
             return Err(StdError::generic_err(format!(
                 "The amount requested for swap exceeds contract balance for the asset {}",
-                asset_label
+                offer_asset_label
             )));
         }
         Some(amount) => amount,
-        None => contract_asset_balance,
+        None => contract_offer_asset_balance,
     };
 
     let pair_info: PairInfo = query_pair_info(
@@ -80,9 +85,12 @@ pub fn execute_swap(
         astroport_max_spread,
     )?;
 
-    let response = Response::new()
-        .add_message(send_msg)
-        .add_attributes(vec![attr("action", "swap"), attr("asset", asset_label)]);
+    let response = Response::new().add_message(send_msg).add_attributes(vec![
+        attr("action", "swap"),
+        attr("offer_asset", offer_asset_label),
+        attr("ask_asset", ask_asset_label),
+        attr("offer_asset_amount", amount_to_swap),
+    ]);
 
     Ok(response)
 }
@@ -295,7 +303,9 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "swap"),
-                attr("asset", cw20_contract_address.as_str()),
+                attr("offer_asset", cw20_contract_address.as_str()),
+                attr("ask_asset", "mars"),
+                attr("offer_asset_amount", "999"),
             ]
         );
     }
@@ -358,7 +368,12 @@ mod tests {
 
         assert_eq!(
             res.attributes,
-            vec![attr("action", "swap"), attr("asset", "uusd")]
+            vec![
+                attr("action", "swap"),
+                attr("offer_asset", "uusd"),
+                attr("ask_asset", "mars"),
+                attr("offer_asset_amount", contract_asset_balance.to_string()),
+            ]
         );
     }
 }
