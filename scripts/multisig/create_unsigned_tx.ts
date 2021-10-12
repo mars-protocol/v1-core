@@ -14,7 +14,9 @@ import 'dotenv/config.js'
 const CHAIN_ID = process.env.CHAIN_ID!
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL!
 // Multisig details:
-const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!).split(",").map(x => new SimplePublicKey(x))
+const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!)
+  .split(",")
+  .map(x => new SimplePublicKey(x))
 const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 // Transaction details:
 // The address that the tx will be sent to
