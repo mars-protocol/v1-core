@@ -47,7 +47,6 @@ const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL
 const TOKEN_NAME = "Mars"
 const TOKEN_SYMBOL = "MARS"
 const TOKEN_DECIMALS = 6
-const TOKEN_CAP = 1_000_000_000_000000
 const TOKEN_DESCRIPTION = "Mars is a fully automated, on-chain credit protocol built on Terra " +
   "and governed by a decentralised community of users and developers."
 const TOKEN_PROJECT = "https://marsprotocol.io"
@@ -130,10 +129,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
       symbol: TOKEN_SYMBOL,
       decimals: TOKEN_DECIMALS,
       initial_balances: [],
-      mint: {
-        minter: proxyAddress,
-        cap: String(TOKEN_CAP)
-      },
+      mint: { minter: proxyAddress },
       marketing: {
         marketing: proxyAddress,
         description: TOKEN_DESCRIPTION,
