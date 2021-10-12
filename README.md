@@ -8,7 +8,7 @@ This repository contains the source code for the core smart contracts of Mars Pr
 ./scripts/build_artifacts.sh
 ```
 
-Compiles and optimizes all contracts, storing them in `/artifacts` directory among with `checksum.txt` which contains sha256 hashes of each of the .wasm files (The script just uses CosmWasm's [rust-optimizer](https://github.com/CosmWasm/rust-optimizer)).
+Compiles and optimizes all contracts, storing them in `/artifacts` directory along with `checksum.txt` which contains sha256 hashes of each of the `.wasm` files (The script just uses CosmWasm's [rust-optimizer](https://github.com/CosmWasm/rust-optimizer)).
 
 ### Schemas
 ```
