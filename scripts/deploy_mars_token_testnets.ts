@@ -17,16 +17,9 @@ const MARS_ARTIFACTS_PATH = "../artifacts"
 async function main() {
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
-  const isTestnet = process.env.NETWORK === "testnet" || process.env.NETWORK === "bombay"
+  const isTestnet = process.env.NETWORK === "testnet"
 
   if (process.env.NETWORK === "testnet") {
-    terra = new LCDClient({
-      URL: 'https://tequila-lcd.terra.dev',
-      chainID: 'tequila-0004'
-    })
-    wallet = recover(terra, process.env.TEST_MAIN!)
-
-  } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
       chainID: 'bombay-12'
