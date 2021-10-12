@@ -9,11 +9,6 @@ async function main() {
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
-      URL: 'https://tequila-lcd.terra.dev',
-      chainID: 'tequila-0004'
-    })
-  } else if (process.env.NETWORK === "bombay") {
-    terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
       chainID: 'bombay-12'
     })

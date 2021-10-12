@@ -10,8 +10,8 @@ async function main() {
 
   if (process.env.NETWORK === "testnet") {
     terra = new LCDClient({
-      URL: 'https://tequila-lcd.terra.dev',
-      chainID: 'tequila-0004'
+      URL: 'https://bombay-lcd.terra.dev',
+      chainID: 'bombay-12'
     })
 
     wallet = await recover(terra, process.env.TEST_MAIN);

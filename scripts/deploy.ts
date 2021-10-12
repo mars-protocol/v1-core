@@ -24,17 +24,9 @@ async function main() {
   let terra: LCDClient | LocalTerra
   let wallet: Wallet
   let deployConfig: Config
-  const isTestnet = process.env.NETWORK === "testnet" || process.env.NETWORK === "bombay"
+  const isTestnet = process.env.NETWORK === "testnet"
 
   if (process.env.NETWORK === "testnet") {
-    terra = new LCDClient({
-      URL: 'https://tequila-lcd.terra.dev',
-      chainID: 'tequila-0004'
-    })
-    wallet = recover(terra, process.env.TEST_MAIN!)
-    deployConfig = testnet
-
-  } else if (process.env.NETWORK === "bombay") {
     terra = new LCDClient({
       URL: 'https://bombay-lcd.terra.dev',
       chainID: 'bombay-12'
@@ -85,7 +77,7 @@ async function main() {
   const addressProviderContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'address_provider.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_address_provider.wasm'),
     { "owner": wallet.key.accAddress },
   )
   console.log("Address Provider Contract Address: " + addressProviderContractAddress)
@@ -96,7 +88,7 @@ async function main() {
   const councilContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'council.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_council.wasm'),
     deployConfig.councilInitMsg,
   )
   console.log("Council Contract Address: " + councilContractAddress)
@@ -124,7 +116,7 @@ async function main() {
   const stakingContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'staking.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_staking.wasm'),
     deployConfig.stakingInitMsg,
   )
   console.log("Staking Contract Address: " + stakingContractAddress)
@@ -135,7 +127,7 @@ async function main() {
   const safetyFundContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'safety_fund.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_safety_fund.wasm'),
     deployConfig.safetyFundInitMsg,
   )
   console.log("Safety Fund Contract Address: " + safetyFundContractAddress)
@@ -146,7 +138,7 @@ async function main() {
   const treasuryContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'treasury.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_treasury.wasm'),
     deployConfig.treasuryInitMsg,
   )
   console.log("Treasury Contract Address: " + treasuryContractAddress)
@@ -156,7 +148,7 @@ async function main() {
   const incentivesContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'incentives.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_incentives.wasm'),
     {
       "owner": councilContractAddress,
       "address_provider_address": addressProviderContractAddress
@@ -169,7 +161,7 @@ async function main() {
   const xMarsTokenCodeId = await uploadContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'xmars_token.wasm')
+    join(MARS_ARTIFACTS_PATH, 'mars_xmars_token.wasm')
   )
   console.log(`Uploaded xMars token contract, code: ${xMarsTokenCodeId}`)
   const xMarsTokenContractAddress = await instantiateContract(
@@ -191,21 +183,45 @@ async function main() {
   const maTokenCodeId = await uploadContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'ma_token.wasm')
+    join(MARS_ARTIFACTS_PATH, 'mars_ma_token.wasm')
   )
   console.log(`Uploaded ma_token contract code: ${maTokenCodeId}`)
 
   /************************************* Deploy Protocol Rewards Collector Contract *************************************/
   console.log("Deploying Protocol Rewards Collector...")
-  deployConfig.protocolRewardsCollectorInitMsg.config.owner = councilContractAddress
+  deployConfig.protocolRewardsCollectorInitMsg.config.owner = wallet.key.accAddress
   deployConfig.protocolRewardsCollectorInitMsg.config.address_provider_address = addressProviderContractAddress
   const protocolRewardsCollectorContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'protocol_rewards_collector.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_protocol_rewards_collector.wasm'),
     deployConfig.protocolRewardsCollectorInitMsg,
   )
   console.log("Protocol Rewards Collector Contract Address: " + protocolRewardsCollectorContractAddress)
+
+  /************************************* Setup protocol reward collector enabled assets *************************************/
+  console.log("Enable uusd on Protocol Rewards Collector...")
+  await executeContract(terra, wallet, protocolRewardsCollectorContractAddress,
+    {
+      update_asset_config: {
+        asset: { native: { denom: "uusd" } },
+        enabled: true
+      }
+    }
+  )
+  console.log("uusd enabled")
+
+  /************************************* Update owner to council in Protocol Rewards Collector Contract *************************************/
+  await executeContract(terra, wallet, protocolRewardsCollectorContractAddress,
+    {
+      update_config: {
+        config: {
+          owner: councilContractAddress,
+        }
+      }
+    }
+  )
+  console.log("Protocol Rewards Collector owner successfully changed: ", await queryContract(terra, protocolRewardsCollectorContractAddress, { "config": {} }))
 
   /************************************* Deploy Red Bank Contract *************************************/
   console.log("Deploying Red Bank...")
@@ -215,7 +231,7 @@ async function main() {
   const redBankContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'red_bank.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_red_bank.wasm'),
     deployConfig.redBankInitMsg,
   )
   console.log(`Red Bank Contract Address: ${redBankContractAddress}`)
@@ -225,7 +241,7 @@ async function main() {
   const oracleContractAddress = await deployContract(
     terra,
     wallet,
-    join(MARS_ARTIFACTS_PATH, 'oracle.wasm'),
+    join(MARS_ARTIFACTS_PATH, 'mars_oracle.wasm'),
     {
       "owner": wallet.key.accAddress,
     },
