@@ -178,13 +178,18 @@ impl InterestRateModel for LinearInterestRate {
         reserve_factor: Decimal,
     ) -> StdResult<(Decimal, Decimal)> {
         let new_borrow_rate = if current_utilization_rate <= self.optimal_utilization_rate {
-            // The borrow interest rates increase slowly with utilisation
-            self.base
-                + self.slope_1.checked_mul(
-                    current_utilization_rate.checked_div(self.optimal_utilization_rate)?,
-                )?
+            if current_utilization_rate.is_zero() {
+                // prevent division by zero when optimal_utilization_rate is zero
+                self.base
+            } else {
+                // The borrow interest rates increase slowly with utilization
+                self.base
+                    + self.slope_1.checked_mul(
+                        current_utilization_rate.checked_div(self.optimal_utilization_rate)?,
+                    )?
+            }
         } else {
-            // The borrow interest rates increase sharply with utilisation
+            // The borrow interest rates increase sharply with utilization
             self.base
                 + self.slope_1
                 + self
@@ -229,106 +234,106 @@ mod tests {
             kp_2: Decimal::from_ratio(3u128, 1u128),
         };
 
-        // *
         // current utilization rate > optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal::percent(61);
-        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+        {
+            let current_utilization_rate = Decimal::percent(61);
+            let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate =
-            borrow_rate + dynamic_ir.kp_1.checked_mul(expected_error).unwrap();
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
+            // we want to increase borrow rate to decrease utilization rate
+            let expected_borrow_rate =
+                borrow_rate + dynamic_ir.kp_1.checked_mul(expected_error).unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
 
-        // *
         // current utilization rate < optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal::percent(59);
-        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+        {
+            let current_utilization_rate = Decimal::percent(59);
+            let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        let expected_error = dynamic_ir.optimal_utilization_rate - current_utilization_rate;
-        // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate =
-            borrow_rate - Decimal::checked_mul(dynamic_ir.kp_1, expected_error).unwrap();
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            let expected_error = dynamic_ir.optimal_utilization_rate - current_utilization_rate;
+            // we want to decrease borrow rate to increase utilization rate
+            let expected_borrow_rate =
+                borrow_rate - Decimal::checked_mul(dynamic_ir.kp_1, expected_error).unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
 
-        // *
         // current utilization rate > optimal utilization rate, increment KP by a multiplier if error goes beyond threshold
-        // *
-        let current_utilization_rate = Decimal::percent(72);
-        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+        {
+            let current_utilization_rate = Decimal::percent(72);
+            let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate =
-            borrow_rate + dynamic_ir.kp_2.checked_mul(expected_error).unwrap();
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            let expected_error = current_utilization_rate - dynamic_ir.optimal_utilization_rate;
+            // we want to increase borrow rate to decrease utilization rate
+            let expected_borrow_rate =
+                borrow_rate + dynamic_ir.kp_2.checked_mul(expected_error).unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
 
-        // *
         // current utilization rate < optimal utilization rate, borrow rate can't be less than min borrow rate
-        // *
-        let current_utilization_rate = Decimal::percent(10);
-        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+        {
+            let current_utilization_rate = Decimal::percent(10);
+            let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        // we want to decrease borrow rate to increase utilization rate
-        let expected_borrow_rate = dynamic_ir.min_borrow_rate;
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            // we want to decrease borrow rate to increase utilization rate
+            let expected_borrow_rate = dynamic_ir.min_borrow_rate;
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
 
-        // *
         // current utilization rate > optimal utilization rate, borrow rate can't be less than max borrow rate
-        // *
-        let current_utilization_rate = Decimal::percent(90);
-        let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+        {
+            let current_utilization_rate = Decimal::percent(90);
+            let (new_borrow_rate, new_liquidity_rate) = dynamic_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        // we want to increase borrow rate to decrease utilization rate
-        let expected_borrow_rate = dynamic_ir.max_borrow_rate;
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            // we want to increase borrow rate to decrease utilization rate
+            let expected_borrow_rate = dynamic_ir.max_borrow_rate;
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
     }
 
     fn th_expected_liquidity_rate(br: Decimal, ur: Decimal, rf: Decimal) -> Decimal {
@@ -349,107 +354,165 @@ mod tests {
             slope_2: Decimal::from_ratio(45u128, 100u128),
         };
 
-        // *
         // current utilization rate < optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal::percent(79);
-        let (new_borrow_rate, new_liquidity_rate) = linear_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
-
-        let expected_borrow_rate = linear_ir.base
-            + linear_ir
-                .slope_1
-                .checked_mul(current_utilization_rate)
-                .unwrap()
-                .checked_div(linear_ir.optimal_utilization_rate)
+        {
+            let current_utilization_rate = Decimal::percent(79);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
                 .unwrap();
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            let expected_borrow_rate = linear_ir.base
+                + linear_ir
+                    .slope_1
+                    .checked_mul(current_utilization_rate)
+                    .unwrap()
+                    .checked_div(linear_ir.optimal_utilization_rate)
+                    .unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        // *
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
+
         // current utilization rate == optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal::percent(80);
-        let (new_borrow_rate, new_liquidity_rate) = linear_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
-
-        let expected_borrow_rate = linear_ir.base
-            + linear_ir
-                .slope_1
-                .checked_mul(current_utilization_rate)
-                .unwrap()
-                .checked_div(linear_ir.optimal_utilization_rate)
+        {
+            let current_utilization_rate = Decimal::percent(80);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
                 .unwrap();
 
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            let expected_borrow_rate = linear_ir.base
+                + linear_ir
+                    .slope_1
+                    .checked_mul(current_utilization_rate)
+                    .unwrap()
+                    .checked_div(linear_ir.optimal_utilization_rate)
+                    .unwrap();
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        // *
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
+
         // current utilization rate >= optimal utilization rate
-        // *
-        let current_utilization_rate = Decimal::percent(81);
-        let (new_borrow_rate, new_liquidity_rate) = linear_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
-
-        let expected_borrow_rate = linear_ir.base
-            + linear_ir.slope_1
-            + linear_ir
-                .slope_2
-                .checked_mul(current_utilization_rate - linear_ir.optimal_utilization_rate)
-                .unwrap()
-                .checked_div(Decimal::one() - linear_ir.optimal_utilization_rate)
+        {
+            let current_utilization_rate = Decimal::percent(81);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
                 .unwrap();
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+            let expected_borrow_rate = linear_ir.base
+                + linear_ir.slope_1
+                + linear_ir
+                    .slope_2
+                    .checked_mul(current_utilization_rate - linear_ir.optimal_utilization_rate)
+                    .unwrap()
+                    .checked_div(Decimal::one() - linear_ir.optimal_utilization_rate)
+                    .unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        // *
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
+
         // current utilization rate == 100% and optimal utilization rate == 100%
-        // *
+        {
+            let borrow_rate = Decimal::percent(0);
+            let reserve_factor = Decimal::percent(1);
+            let linear_ir = LinearInterestRate {
+                optimal_utilization_rate: Decimal::percent(100),
+                base: Decimal::from_ratio(0u128, 100u128),
+                slope_1: Decimal::from_ratio(7u128, 100u128),
+                slope_2: Decimal::from_ratio(0u128, 100u128),
+            };
 
-        let borrow_rate = Decimal::percent(0);
-        let reserve_factor = Decimal::percent(1);
-        let linear_ir = LinearInterestRate {
-            optimal_utilization_rate: Decimal::percent(100),
-            base: Decimal::from_ratio(0u128, 100u128),
-            slope_1: Decimal::from_ratio(7u128, 100u128),
-            slope_2: Decimal::from_ratio(0u128, 100u128),
-        };
+            let current_utilization_rate = Decimal::percent(100);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
 
-        let current_utilization_rate = Decimal::percent(100);
-        let (new_borrow_rate, new_liquidity_rate) = linear_ir
-            .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
-            .unwrap();
+            let expected_borrow_rate = Decimal::percent(7);
 
-        let expected_borrow_rate = Decimal::percent(7);
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
 
-        let expected_liquidity_rate = th_expected_liquidity_rate(
-            expected_borrow_rate,
-            current_utilization_rate,
-            reserve_factor,
-        );
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
 
-        assert_eq!(new_borrow_rate, expected_borrow_rate);
-        assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        // current utilization rate == 0% and optimal utilization rate == 0%
+        {
+            let borrow_rate = Decimal::percent(0);
+            let reserve_factor = Decimal::percent(20);
+            let linear_ir = LinearInterestRate {
+                optimal_utilization_rate: Decimal::percent(0),
+                base: Decimal::from_ratio(2u128, 100u128),
+                slope_1: Decimal::from_ratio(7u128, 100u128),
+                slope_2: Decimal::from_ratio(0u128, 100u128),
+            };
+
+            let current_utilization_rate = Decimal::percent(0);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
+
+            let expected_borrow_rate = Decimal::percent(2);
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
+
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
+
+        // current utilization rate == 20% and optimal utilization rate == 0%
+        {
+            let borrow_rate = Decimal::percent(0);
+            let reserve_factor = Decimal::percent(20);
+            let linear_ir = LinearInterestRate {
+                optimal_utilization_rate: Decimal::percent(0),
+                base: Decimal::from_ratio(2u128, 100u128),
+                slope_1: Decimal::from_ratio(1u128, 100u128),
+                slope_2: Decimal::from_ratio(5u128, 100u128),
+            };
+
+            let current_utilization_rate = Decimal::percent(20);
+            let (new_borrow_rate, new_liquidity_rate) = linear_ir
+                .get_updated_interest_rates(current_utilization_rate, borrow_rate, reserve_factor)
+                .unwrap();
+
+            let expected_borrow_rate = linear_ir.base
+                + linear_ir.slope_1
+                + linear_ir
+                    .slope_2
+                    .checked_mul(current_utilization_rate)
+                    .unwrap();
+            let expected_liquidity_rate = th_expected_liquidity_rate(
+                expected_borrow_rate,
+                current_utilization_rate,
+                reserve_factor,
+            );
+
+            assert_eq!(new_borrow_rate, expected_borrow_rate);
+            assert_eq!(new_liquidity_rate, expected_liquidity_rate);
+        }
     }
 }
