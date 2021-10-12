@@ -12,15 +12,13 @@ import {
   LCDClient,
   LegacyAminoMultisigPublicKey,
   LocalTerra,
-  MsgUpdateContractAdmin,
+  MsgInstantiateContract,
   SimplePublicKey,
   Wallet
 } from "@terra-money/terra.js"
-import { strictEqual } from "assert"
 import 'dotenv/config.js'
 import { join } from "path"
 import {
-  executeContract,
   instantiateContract,
   performTransaction,
   queryContract,
@@ -95,10 +93,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
     cw1WhitelistCodeId,
     {
       mutable: true,
-      admins: [
-        wallet.key.accAddress,
-        multisigAddress
-      ]
+      admins: [multisigAddress]
     }
   )
 
@@ -120,24 +115,31 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
 
   console.log("cw20 code ID:", cw20CodeId)
 
-  const marsAddress = await instantiateContract(
+  let result = await performTransaction(
     terra,
     wallet,
-    cw20CodeId,
-    {
-      name: TOKEN_NAME,
-      symbol: TOKEN_SYMBOL,
-      decimals: TOKEN_DECIMALS,
-      initial_balances: [],
-      mint: { minter: proxyAddress },
-      marketing: {
-        marketing: proxyAddress,
-        description: TOKEN_DESCRIPTION,
-        project: TOKEN_PROJECT,
-        logo: { url: TOKEN_LOGO }
-      }
-    }
+    new MsgInstantiateContract(
+      wallet.key.accAddress,
+      multisigAddress,
+      cw20CodeId,
+      {
+        name: TOKEN_NAME,
+        symbol: TOKEN_SYMBOL,
+        decimals: TOKEN_DECIMALS,
+        initial_balances: [],
+        mint: { minter: proxyAddress },
+        marketing: {
+          marketing: multisigAddress,
+          description: TOKEN_DESCRIPTION,
+          project: TOKEN_PROJECT,
+          logo: { url: TOKEN_LOGO }
+        }
+      },
+      undefined
+    )
   )
+  let attributes = result.logs[0].events[0].attributes
+  const marsAddress = attributes[attributes.length - 1].value
 
   console.log("mars:", marsAddress)
   console.log(
@@ -159,38 +161,6 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
       terra,
       marsAddress,
       { marketing_info: {} }
-    )
-  )
-
-  // Set the multisig as the Mars token contract admin
-  await performTransaction(
-    terra,
-    wallet,
-    new MsgUpdateContractAdmin(
-      wallet.key.accAddress,
-      multisigAddress,
-      marsAddress
-    )
-  )
-
-  strictEqual(
-    (await terra.wasm.contractInfo(marsAddress)).admin,
-    multisigAddress
-  )
-
-  // Remove wallet from mars-minter admins
-  await executeContract(
-    terra,
-    wallet,
-    proxyAddress,
-    { update_admins: { admins: [multisigAddress] } }
-  )
-
-  console.log(
-    await queryContract(
-      terra,
-      proxyAddress,
-      { admin_list: {} }
     )
   )
 
