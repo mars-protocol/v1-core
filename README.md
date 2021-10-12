@@ -15,7 +15,7 @@ Compiles and optimizes all contracts, storing them in `/artifacts` directory alo
 ./scripts/build_schema.sh
 ```
 
-Is equivalent of running `cargo schema` in each of the smart contracts in `/contracts` directory, which creates `JSON` schema files for relevant contract calls, quieries and query responses (See: [cosmwams-schema](https://github.com/CosmWasm/cosmwasm/tree/main/packages/schema).
+Is equivalent of running `cargo schema` in each of the smart contracts in `/contracts` directory, which creates JSON schema files for relevant contract calls, quieries and query responses (See: [cosmwams-schema](https://github.com/CosmWasm/cosmwasm/tree/main/packages/schema).
 
 ## Linting
 `rustfmt` is used to format any Rust source code:
