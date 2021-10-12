@@ -179,7 +179,7 @@ impl InterestRateModel for LinearInterestRate {
     ) -> StdResult<(Decimal, Decimal)> {
         let new_borrow_rate = if current_utilization_rate <= self.optimal_utilization_rate {
             if current_utilization_rate.is_zero() {
-                // prevent division by zero when optimal_utilizarion_rate is zero
+                // prevent division by zero when optimal_utilization_rate is zero
                 self.base
             } else {
                 // The borrow interest rates increase slowly with utilization
