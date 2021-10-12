@@ -48,7 +48,7 @@ pub fn execute_swap(
 
     let ask_asset_label = match ask_asset_info.clone() {
         AssetInfo::NativeToken { denom } => denom,
-        AssetInfo::Token { contract_addr } => contract_addr.to_string(),
+        AssetInfo::Token { contract_addr } => contract_addr,
     };
 
     if contract_offer_asset_balance.is_zero() {
