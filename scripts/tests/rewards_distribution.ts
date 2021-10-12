@@ -780,7 +780,7 @@ async function testLiquidateCw20(env: Env) {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1", // TODO panics with 0
+              optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
@@ -812,7 +812,7 @@ async function testLiquidateCw20(env: Env) {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1", // TODO panics with 0
+              optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
@@ -844,7 +844,7 @@ async function testLiquidateCw20(env: Env) {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1", // TODO panics with 0
+              optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
@@ -876,7 +876,7 @@ async function testLiquidateCw20(env: Env) {
           liquidation_bonus: String(LIQUIDATION_BONUS),
           interest_rate_strategy: {
             linear: {
-              optimal_utilization_rate: "0.1", // TODO panics with 0
+              optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
