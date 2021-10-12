@@ -75,7 +75,8 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::default())
+    let res = Response::new().add_attribute("action", "update_config");
+    Ok(res)
 }
 
 pub fn execute_set_asset(
@@ -87,31 +88,37 @@ pub fn execute_set_asset(
 ) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
-    let asset_reference = asset.get_reference();
+    let (asset_label, asset_reference, _) = asset.get_attributes();
 
     if info.sender != config.owner {
         return Err(StdError::generic_err("Only owner can set asset"));
     }
 
-    let price_source: PriceSourceChecked = match price_source_unchecked {
-        PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed { price },
-        PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native { denom },
+    let (price_source, price_source_label) = match price_source_unchecked {
+        PriceSourceUnchecked::Fixed { price } => (PriceSourceChecked::Fixed { price }, "fixed"),
+        PriceSourceUnchecked::Native { denom } => (PriceSourceChecked::Native { denom }, "native"),
         PriceSourceUnchecked::AstroportSpot {
             pair_address,
             asset_address,
-        } => PriceSourceChecked::AstroportSpot {
-            pair_address: deps.api.addr_validate(&pair_address)?,
-            asset_address: deps.api.addr_validate(&asset_address)?,
-        },
+        } => (
+            PriceSourceChecked::AstroportSpot {
+                pair_address: deps.api.addr_validate(&pair_address)?,
+                asset_address: deps.api.addr_validate(&asset_address)?,
+            },
+            "astroport_spot",
+        ),
         PriceSourceUnchecked::AstroportTwap {
             pair_address,
             asset_address,
             min_period,
-        } => PriceSourceChecked::AstroportTwap {
-            pair_address: deps.api.addr_validate(&pair_address)?,
-            asset_address: deps.api.addr_validate(&asset_address)?,
-            min_period,
-        },
+        } => (
+            PriceSourceChecked::AstroportTwap {
+                pair_address: deps.api.addr_validate(&pair_address)?,
+                asset_address: deps.api.addr_validate(&asset_address)?,
+                min_period,
+            },
+            "astroport_twap",
+        ),
     };
 
     // For TWAP, we need to record the initial cumulative prices as part of the setup
@@ -140,7 +147,12 @@ pub fn execute_set_asset(
         &PriceConfig { price_source },
     )?;
 
-    Ok(Response::default())
+    let res = Response::new()
+        .add_attribute("action", "set_asset")
+        .add_attribute("asset", asset_label)
+        .add_attribute("price_source", price_source_label);
+
+    Ok(res)
 }
 
 /// Modified from
@@ -154,7 +166,7 @@ pub fn execute_update_astroport_twap_data(
     let mut events: Vec<Event> = vec![];
 
     for asset in assets {
-        let asset_reference = asset.get_reference();
+        let (asset_label, asset_reference, _) = asset.get_attributes();
         let price_config = PRICE_CONFIGS.load(deps.storage, asset_reference.as_slice())?;
         let twap_data_last = ASTROPORT_TWAP_DATA.load(deps.storage, asset_reference.as_slice())?;
 
@@ -205,16 +217,19 @@ pub fn execute_update_astroport_twap_data(
 
         events.push(
             Event::new("update_astroport_twap_data")
-                .add_attribute("asset", String::from_utf8(asset_reference).unwrap())
+                .add_attribute("asset", asset_label)
                 .add_attribute("timestamp_last", twap_data_last.price_cumulative)
                 .add_attribute("timestamp", twap_data.price_cumulative)
                 .add_attribute("price_cumulative_last", twap_data_last.price_cumulative)
                 .add_attribute("price_cumulative", twap_data.price_cumulative)
-                .add_attribute("price_average", format!("{}", twap_data.price_average)),
+                .add_attribute("price_average", twap_data.price_average.to_string()),
         );
     }
 
-    Ok(Response::new().add_events(events))
+    let res = Response::new()
+        .add_attribute("action", "update_astroport_twap_data")
+        .add_events(events);
+    Ok(res)
 }
 
 // QUERIES

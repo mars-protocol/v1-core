@@ -227,7 +227,7 @@ pub fn execute_submit_proposal(
 
     let response = Response::new().add_attributes(vec![
         attr("action", "submit_proposal"),
-        attr("proposal_submitter", submitter_address_unchecked),
+        attr("submitter", submitter_address_unchecked),
         attr("proposal_id", &global_state.proposal_count.to_string()),
         attr("proposal_end_height", &new_proposal.end_height.to_string()),
     ]);
@@ -514,7 +514,8 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::default())
+    let res = Response::new().add_attribute("action", "update_config");
+    Ok(res)
 }
 
 // QUERIES
@@ -1084,7 +1085,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "submit_proposal"),
-                attr("proposal_submitter", "submitter"),
+                attr("submitter", "submitter"),
                 attr("proposal_id", 1.to_string()),
                 attr("proposal_end_height", expected_end_height.to_string()),
             ]
@@ -1140,7 +1141,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "submit_proposal"),
-                attr("proposal_submitter", "submitter"),
+                attr("submitter", "submitter"),
                 attr("proposal_id", 2.to_string()),
                 attr("proposal_end_height", expected_end_height.to_string()),
             ]
