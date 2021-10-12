@@ -17,7 +17,7 @@ pub enum Asset {
 
 impl Asset {
     /// Get label (denom/address as string),
-    /// reference (denam/address as bytes, used as key for storage)
+    /// reference (denom/address as bytes, used as key for storage)
     /// and asset type
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
         match &self {
