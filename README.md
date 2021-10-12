@@ -24,7 +24,7 @@ Is equivalent of running `cargo schema` in each of the smart contracts in `/cont
 cargo fmt
 ```
 
-`Clippy` is used as a linting tool:
+`clippy` is used as a linting tool:
 
 ```
 cargo +nightly clippy --tests --all-features -- -D warnings
