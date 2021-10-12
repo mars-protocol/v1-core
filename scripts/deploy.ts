@@ -189,7 +189,7 @@ async function main() {
 
   /************************************* Deploy Protocol Rewards Collector Contract *************************************/
   console.log("Deploying Protocol Rewards Collector...")
-  deployConfig.protocolRewardsCollectorInitMsg.config.owner = councilContractAddress
+  deployConfig.protocolRewardsCollectorInitMsg.config.owner = wallet.key.accAddress
   deployConfig.protocolRewardsCollectorInitMsg.config.address_provider_address = addressProviderContractAddress
   const protocolRewardsCollectorContractAddress = await deployContract(
     terra,
@@ -198,6 +198,30 @@ async function main() {
     deployConfig.protocolRewardsCollectorInitMsg,
   )
   console.log("Protocol Rewards Collector Contract Address: " + protocolRewardsCollectorContractAddress)
+
+  /************************************* Setup protocol reward collector enabled assets *************************************/
+  console.log("Enable uusd on Protocol Rewards Collector...")
+  await executeContract(terra, wallet, protocolRewardsCollectorContractAddress,
+    {
+      update_asset_config: {
+        asset: { native: { denom: "uusd" } },
+        enabled: true
+      }
+    }
+  )
+  console.log("uusd enabled")
+
+  /************************************* Update owner to council in Protocol Rewards Collector Contract *************************************/
+  await executeContract(terra, wallet, protocolRewardsCollectorContractAddress,
+    {
+      update_config: {
+        config: {
+          owner: councilContractAddress,
+        }
+      }
+    }
+  )
+  console.log("Protocol Rewards Collector owner successfully changed: ", await queryContract(terra, protocolRewardsCollectorContractAddress, { "config": {} }))
 
   /************************************* Deploy Red Bank Contract *************************************/
   console.log("Deploying Red Bank...")
