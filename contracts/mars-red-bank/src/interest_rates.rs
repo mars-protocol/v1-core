@@ -14,7 +14,6 @@ use crate::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
 pub const SCALING_FACTOR: u128 = 1_000_000;
-const HALF_SCALING_FACTOR: u128 = SCALING_FACTOR / 2;
 
 const SECONDS_PER_YEAR: u64 = 31536000u64;
 
@@ -115,8 +114,8 @@ pub fn get_scaled_amount(amount: Uint128, index: Decimal) -> Uint128 {
 /// We want to avoid this by rounding up.
 pub fn get_scaled_amount_rounded_up(amount: Uint128, index: Decimal) -> Uint128 {
     // Scale by SCALING_FACTOR to have better precision
-    let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR + HALF_SCALING_FACTOR);
-    Decimal::divide_uint128_by_decimal(scaled_amount, index)
+    let scaled_amount = Uint128::from(amount.u128() * SCALING_FACTOR);
+    Decimal::divide_uint128_by_decimal_with_rounding_up(scaled_amount, index)
 }
 
 /// Descales the amount introduced by `get_scaled_amount`. As interest rate is accumulated
@@ -259,7 +258,7 @@ mod tests {
         let descaled_amount = get_descaled_amount(scaled_amount, index);
         assert_eq!(descaled_amount, value);
 
-        let value = Uint128::new(9876543u128);
+        let value = Uint128::new(9876542u128);
         let index = Decimal::from_ratio(3333u128, 10u128);
         let scaled_amount = get_scaled_amount_rounded_up(value, index);
         let descaled_amount = get_descaled_amount(scaled_amount, index);

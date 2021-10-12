@@ -96,6 +96,18 @@ impl Decimal {
         a.multiply_ratio(b.denominator(), b.numerator())
     }
 
+    /// Divide Uint128 by Decimal rounding half up to the nearest number (adapt floor and ceiling).
+    pub fn divide_uint128_by_decimal_with_rounding_up(a: Uint128, b: Decimal) -> Uint128 {
+        // (Uint128 / numerator / denominator) is equal to (Uint128 * denominator / numerator).
+        let numerator = b.denominator();
+        let denominator = b.numerator();
+        // Adapt floor and ceiling
+        let half_denominator = denominator / 2;
+        ((a.full_mul(numerator) + Uint256::from(half_denominator)) / Uint256::from(denominator))
+            .try_into()
+            .expect("multiplication overflow")
+    }
+
     pub fn to_std_decimal(&self) -> StdDecimal {
         StdDecimal::from_str(self.to_string().as_str()).unwrap()
     }
