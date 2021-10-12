@@ -152,7 +152,8 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::default())
+    let res = Response::new().add_attribute("action", "update_config");
+    Ok(res)
 }
 
 /// Update config
@@ -169,15 +170,18 @@ pub fn execute_update_asset_config(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    let reference = asset.get_reference();
+    let (asset_label, asset_reference, _) = asset.get_attributes();
 
     let new_asset_config = AssetConfig {
         enabled_for_distribution: enabled,
     };
 
-    ASSET_CONFIG.save(deps.storage, reference.as_slice(), &new_asset_config)?;
+    ASSET_CONFIG.save(deps.storage, asset_reference.as_slice(), &new_asset_config)?;
 
-    Ok(Response::default())
+    let res = Response::new()
+        .add_attribute("action", "update_asset_config")
+        .add_attribute("asset", asset_label);
+    Ok(res)
 }
 
 pub fn execute_withdraw_from_red_bank(
@@ -301,7 +305,13 @@ pub fn execute_distribute_protocol_rewards(
     let res = Response::new()
         .add_attribute("action", "distribute_protocol_income")
         .add_attribute("asset", asset_label)
-        .add_attribute("amount", amount_to_distribute)
+        .add_attribute(
+            "total_distributed_amount",
+            safety_fund_amount + treasury_amount + staking_amount,
+        )
+        .add_attribute("safety_fund_amount", safety_fund_amount)
+        .add_attribute("treasury_amount", treasury_amount)
+        .add_attribute("staking_amount", staking_amount)
         .add_messages(messages);
 
     Ok(res)
@@ -634,7 +644,13 @@ mod tests {
         let info = mock_info("owner");
         // we can just call .unwrap() to assert this was a success
         let res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "update_asset_config"),
+                attr("asset", "somecoin"),
+            ]
+        );
 
         // *
         // query asset config
@@ -659,7 +675,13 @@ mod tests {
         };
         // we can just call .unwrap() to assert this was a success
         let res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "update_asset_config"),
+                attr("asset", "somecoin"),
+            ]
+        );
 
         let reference = asset.get_reference();
         let value = ASSET_CONFIG
@@ -839,7 +861,10 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "somecoin"),
-                attr("amount", permissible_amount),
+                attr("total_distributed_amount", permissible_amount),
+                attr("safety_fund_amount", expected_safety_fund_amount),
+                attr("treasury_amount", expected_treasury_amount),
+                attr("staking_amount", expected_staking_amount),
             ]
         );
 
@@ -902,7 +927,13 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "somecoin"),
-                attr("amount", expected_rewards_to_be_distributed),
+                attr(
+                    "total_distributed_amount",
+                    expected_rewards_to_be_distributed
+                ),
+                attr("safety_fund_amount", expected_safety_fund_amount),
+                attr("treasury_amount", expected_treasury_amount),
+                attr("staking_amount", expected_staking_amount),
             ]
         );
     }
@@ -1013,7 +1044,10 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "cw20_address"),
-                attr("amount", permissible_amount),
+                attr("total_distributed_amount", permissible_amount),
+                attr("safety_fund_amount", expected_safety_fund_amount),
+                attr("treasury_amount", expected_treasury_amount),
+                attr("staking_amount", expected_staking_amount),
             ]
         );
 
@@ -1070,7 +1104,13 @@ mod tests {
             vec![
                 attr("action", "distribute_protocol_income"),
                 attr("asset", "cw20_address"),
-                attr("amount", expected_rewards_to_be_distributed),
+                attr(
+                    "total_distributed_amount",
+                    expected_rewards_to_be_distributed
+                ),
+                attr("safety_fund_amount", expected_safety_fund_amount),
+                attr("treasury_amount", expected_treasury_amount),
+                attr("staking_amount", expected_staking_amount),
             ]
         );
     }

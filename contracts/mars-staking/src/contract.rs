@@ -172,7 +172,8 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::default())
+    let res = Response::new().add_attribute("action", "update_config");
+    Ok(res)
 }
 
 pub fn execute_stake(
