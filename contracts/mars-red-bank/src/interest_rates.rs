@@ -205,7 +205,7 @@ pub fn update_interest_rates(
 
 pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
     Event::new("interests_updated")
-        .add_attribute("market", label)
+        .add_attribute("asset", label)
         .add_attribute("borrow_index", market.borrow_index.to_string())
         .add_attribute("liquidity_index", market.liquidity_index.to_string())
         .add_attribute("borrow_rate", market.borrow_rate.to_string())

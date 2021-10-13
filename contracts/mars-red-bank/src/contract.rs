@@ -242,7 +242,8 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    Ok(Response::default())
+    let res = Response::new().add_attribute("action", "update_config");
+    Ok(res)
 }
 
 /// cw20 receive implementation
@@ -461,7 +462,7 @@ pub fn execute_withdraw(
 
     response = response
         .add_attribute("action", "withdraw")
-        .add_attribute("market", asset_label.as_str())
+        .add_attribute("asset", asset_label.as_str())
         .add_attribute("user", withdrawer_addr.as_str())
         .add_attribute("burn_amount", withdraw_amount_scaled)
         .add_attribute("withdraw_amount", withdraw_amount);
@@ -651,7 +652,8 @@ pub fn execute_init_asset_token_callback(
         // save ma token contract to reference mapping
         MARKET_REFERENCES_BY_MA_TOKEN.save(deps.storage, &ma_contract_addr, &reference)?;
 
-        Ok(Response::default())
+        let res = Response::new().add_attribute("action", "init_asset_token_callback");
+        Ok(res)
     } else {
         // Can do this only once
         Err(MarsError::Unauthorized {}.into())
@@ -831,7 +833,7 @@ pub fn execute_deposit(
 
     response = response
         .add_attribute("action", "deposit")
-        .add_attribute("market", asset_label)
+        .add_attribute("asset", asset_label)
         .add_attribute("user", depositor_address.as_str())
         .add_attribute("amount", deposit_amount)
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1026,7 +1028,7 @@ pub fn execute_borrow(
 
     response = response
         .add_attribute("action", "borrow")
-        .add_attribute("market", asset_label.as_str())
+        .add_attribute("asset", asset_label.as_str())
         .add_attribute("user", borrower_address.as_str())
         .add_attribute("amount", borrow_amount);
     Ok(response)
@@ -1133,7 +1135,7 @@ pub fn execute_repay(
 
     response = response
         .add_attribute("action", "repay")
-        .add_attribute("market", asset_label)
+        .add_attribute("asset", asset_label)
         .add_attribute("user", repayer_address)
         .add_attribute("amount", repay_amount.checked_sub(refund_amount)?);
     Ok(response)
@@ -1380,8 +1382,8 @@ pub fn execute_liquidate(
 
     response = response
         .add_attribute("action", "liquidate")
-        .add_attribute("collateral_market", collateral_asset_label.as_str())
-        .add_attribute("debt_market", debt_asset_label.as_str())
+        .add_attribute("collateral_asset", collateral_asset_label.as_str())
+        .add_attribute("debt_asset", debt_asset_label.as_str())
         .add_attribute("user", user_address.as_str())
         .add_attribute("liquidator", liquidator_address.as_str())
         .add_attribute(
@@ -2084,14 +2086,14 @@ pub fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<Use
 
 fn build_collateral_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
     Event::new("collateral_position_changed")
-        .add_attribute("market", label)
+        .add_attribute("asset", label)
         .add_attribute("using_as_collateral", enabled.to_string())
         .add_attribute("user", user_addr)
 }
 
 fn build_debt_position_changed_event(label: &str, enabled: bool, user_addr: String) -> Event {
     Event::new("debt_position_changed")
-        .add_attribute("market", label)
+        .add_attribute("asset", label)
         .add_attribute("borrowing", enabled.to_string())
         .add_attribute("user", user_addr)
 }
@@ -3154,7 +3156,7 @@ mod tests {
         assert_eq!(
             res.events,
             vec![Event::new("interests_updated")
-                .add_attribute("market", "someasset")
+                .add_attribute("asset", "someasset")
                 .add_attribute("borrow_index", new_market.borrow_index.to_string())
                 .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
                 .add_attribute("borrow_rate", expected_borrow_rate.to_string())
@@ -3245,7 +3247,7 @@ mod tests {
         assert_eq!(
             res.events,
             vec![Event::new("interests_updated")
-                .add_attribute("market", "somecoin")
+                .add_attribute("asset", "somecoin")
                 .add_attribute("borrow_index", new_market.borrow_index.to_string())
                 .add_attribute("liquidity_index", new_market.liquidity_index.to_string())
                 .add_attribute("borrow_rate", expected_borrow_rate.to_string())
@@ -3348,7 +3350,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "deposit"),
-                attr("market", "somecoin"),
+                attr("asset", "somecoin"),
                 attr("user", "depositor"),
                 attr("amount", deposit_amount.to_string()),
             ]
@@ -3460,7 +3462,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "deposit"),
-                attr("market", cw20_addr.clone()),
+                attr("asset", cw20_addr.clone()),
                 attr("user", "depositor"),
                 attr("amount", deposit_amount.to_string()),
             ]
@@ -3682,7 +3684,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "withdraw"),
-                attr("market", "somecoin"),
+                attr("asset", "somecoin"),
                 attr("user", "withdrawer"),
                 attr("burn_amount", withdraw_amount_scaled.to_string()),
                 attr("withdraw_amount", withdraw_amount.to_string()),
@@ -3826,7 +3828,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "withdraw"),
-                attr("market", "somecontract"),
+                attr("asset", "somecontract"),
                 attr("user", "withdrawer"),
                 attr("burn_amount", withdraw_amount_scaled.to_string()),
                 attr("withdraw_amount", withdraw_amount.to_string()),
@@ -4237,7 +4239,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "withdraw"),
-                attr("market", "somecoin"),
+                attr("asset", "somecoin"),
                 attr("user", "withdrawer"),
                 attr("burn_amount", withdrawer_balance_scaled.to_string()),
                 attr("withdraw_amount", withdrawer_balance.to_string()),
@@ -4454,7 +4456,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "borrow"),
-                attr("market", "borrowedcoincw20"),
+                attr("asset", "borrowedcoincw20"),
                 attr("user", "borrower"),
                 attr("amount", borrow_amount.to_string()),
             ]
@@ -4614,7 +4616,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "borrow"),
-                attr("market", "borrowedcoinnative"),
+                attr("asset", "borrowedcoinnative"),
                 attr("user", "borrower"),
                 attr("amount", borrow_amount.to_string()),
             ]
@@ -4719,7 +4721,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "repay"),
-                attr("market", "borrowedcoinnative"),
+                attr("asset", "borrowedcoinnative"),
                 attr("user", "borrower"),
                 attr("amount", repay_amount.to_string()),
             ]
@@ -4800,7 +4802,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "repay"),
-                attr("market", "borrowedcoinnative"),
+                attr("asset", "borrowedcoinnative"),
                 attr("user", "borrower"),
                 attr("amount", repay_amount.to_string()),
             ]
@@ -4898,7 +4900,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "repay"),
-                attr("market", "borrowedcoincw20"),
+                attr("asset", "borrowedcoincw20"),
                 attr("user", "borrower"),
                 attr(
                     "amount",
@@ -5823,8 +5825,8 @@ mod tests {
                 res.attributes,
                 vec![
                     attr("action", "liquidate"),
-                    attr("collateral_market", "collateral"),
-                    attr("debt_market", cw20_debt_contract_addr.as_str()),
+                    attr("collateral_asset", "collateral"),
+                    attr("debt_asset", cw20_debt_contract_addr.as_str()),
                     attr("user", user_address.as_str()),
                     attr("liquidator", liquidator_address.as_str()),
                     attr(
@@ -6016,8 +6018,8 @@ mod tests {
             mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
-                    attr("collateral_market", "collateral"),
-                    attr("debt_market", cw20_debt_contract_addr.as_str()),
+                    attr("collateral_asset", "collateral"),
+                    attr("debt_asset", cw20_debt_contract_addr.as_str()),
                     attr("user", user_address.as_str()),
                     attr("liquidator", liquidator_address.as_str()),
                     attr(
@@ -6207,8 +6209,8 @@ mod tests {
             mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
-                    attr("collateral_market", "collateral"),
-                    attr("debt_market", cw20_debt_contract_addr.as_str()),
+                    attr("collateral_asset", "collateral"),
+                    attr("debt_asset", cw20_debt_contract_addr.as_str()),
                     attr("user", user_address.as_str()),
                     attr("liquidator", liquidator_address.as_str()),
                     attr(
@@ -6425,8 +6427,8 @@ mod tests {
             mars_core::testing::assert_eq_vec(
                 vec![
                     attr("action", "liquidate"),
-                    attr("collateral_market", "collateral"),
-                    attr("debt_market", "native_debt"),
+                    attr("collateral_asset", "collateral"),
+                    attr("debt_asset", "native_debt"),
                     attr("user", user_address.as_str()),
                     attr("liquidator", liquidator_address.as_str()),
                     attr(
@@ -7033,7 +7035,7 @@ mod tests {
             res.attributes,
             vec![
                 attr("action", "borrow"),
-                attr("market", "somecoin"),
+                attr("asset", "somecoin"),
                 attr("user", "borrower"),
                 attr("amount", initial_borrow_amount.to_string()),
             ]
@@ -7446,7 +7448,7 @@ mod tests {
 
     fn th_build_interests_updated_event(label: &str, ir: &TestInterestResults) -> Event {
         Event::new("interests_updated")
-            .add_attribute("market", label)
+            .add_attribute("asset", label)
             .add_attribute("borrow_index", ir.borrow_index.to_string())
             .add_attribute("liquidity_index", ir.liquidity_index.to_string())
             .add_attribute("borrow_rate", ir.borrow_rate.to_string())
