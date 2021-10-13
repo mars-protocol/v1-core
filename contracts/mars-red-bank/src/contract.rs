@@ -2204,7 +2204,7 @@ mod tests {
     };
     use crate::interest_rates::{
         calculate_applied_linear_interest_rate, compute_scaled_amount, compute_underlying_amount,
-        ScalingOperation, SCALING_FACTOR,
+        get_updated_borrow_index, get_updated_liquidity_index, ScalingOperation, SCALING_FACTOR,
     };
     use crate::msg::CreateOrUpdateConfig;
     use crate::MarketError;
