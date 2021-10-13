@@ -1,14 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Nullable_Claim",
-  "anyOf": [
-    {
-      "$ref": "#/definitions/Claim"
-    },
-    {
-      "type": "null"
+  "title": "ClaimResponse",
+  "description": "Response to a Claim query",
+  "type": "object",
+  "properties": {
+    "claim": {
+      "description": "Existing claim for the user, will return None if it doesn't exist",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Claim"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
-  ],
+  },
   "definitions": {
     "Claim": {
       "description": "Unstaking cooldown data",
