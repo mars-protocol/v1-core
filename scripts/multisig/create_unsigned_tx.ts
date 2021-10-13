@@ -81,7 +81,7 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
 # - 1. set \`multisig\` to the name of the multisig in terrad (check the name with \`terrad keys list\`):
 multisig=...
 
-# - 2. set \`from\` to your address that is a key to the multisig:
+# - 2. set \`from\` to your address that is a key to the multisig, or its name in terrad:
 from=terra1...
 
 # - 3. run the signing command:
