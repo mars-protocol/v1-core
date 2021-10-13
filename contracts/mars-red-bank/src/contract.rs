@@ -539,7 +539,7 @@ pub fn execute_init_asset(
                     admin: Some(protocol_admin_address.to_string()),
                     code_id: config.ma_token_code_id,
                     msg: to_binary(&ma_token::msg::InstantiateMsg {
-                        name: format!("mars {} liquidity token", symbol),
+                        name: format!("Mars {} liquidity token", symbol),
                         symbol: format!("ma{}", symbol),
                         decimals: 6,
                         initial_balances: vec![],
@@ -2577,7 +2577,7 @@ mod tests {
                 admin: Some("protocol_admin".to_string()),
                 code_id: 5u64,
                 msg: to_binary(&ma_token::msg::InstantiateMsg {
-                    name: String::from("mars someasset liquidity token"),
+                    name: String::from("Mars someasset liquidity token"),
                     symbol: String::from("masomeasset"),
                     decimals: 6,
                     initial_balances: vec![],
