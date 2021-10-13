@@ -378,9 +378,9 @@ pub fn query_underlying_asset_balance(
 
     let query: Uint128 = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr: config.red_bank_address.into(),
-        msg: to_binary(&red_bank::msg::QueryMsg::DescaledLiquidityAmount {
+        msg: to_binary(&red_bank::msg::QueryMsg::UnderlyingLiquidityAmount {
             ma_token_address: env.contract.address.into(),
-            amount: balance,
+            amount_scaled: balance,
         })?,
     }))?;
 
