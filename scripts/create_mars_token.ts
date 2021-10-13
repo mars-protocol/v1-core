@@ -45,7 +45,7 @@ const TOKEN_SYMBOL = "MARS"
 const TOKEN_DECIMALS = 6
 const TOKEN_DESCRIPTION = "Mars is a fully automated, on-chain credit protocol built on Terra " +
   "and governed by a decentralised community of users and developers."
-const TOKEN_PROJECT = "https://marsprotocol.io"
+const TOKEN_PROJECT = "Mars Protocol"
 const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
 
 // MAIN
