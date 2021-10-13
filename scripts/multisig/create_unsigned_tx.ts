@@ -16,6 +16,16 @@ const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL!
 // Multisig details:
 const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!)
   .split(",")
+  // terrad sorts keys of multisigs by comparing bytes of their address
+  .sort((a, b) => {
+    return Buffer.from(
+      new SimplePublicKey(a).rawAddress()
+    ).compare(
+      Buffer.from(
+        new SimplePublicKey(b).rawAddress()
+      )
+    )
+  })
   .map(x => new SimplePublicKey(x))
 const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 // Transaction details:
@@ -36,6 +46,7 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
   const multisigPubKey = new LegacyAminoMultisigPublicKey(MULTISIG_THRESHOLD, MULTISIG_PUBLIC_KEYS)
 
   const multisigAddress = multisigPubKey.address()
+  console.log("multisig:", multisigAddress)
 
   const accInfo = await terra.auth.accountInfo(multisigAddress)
 
