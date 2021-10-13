@@ -17,13 +17,14 @@ Run the following commands in a terminal:
 git clone https://github.com/terra-money/core.git
 cd core
 git checkout v0.5.6
+rm $(which terrad) # delete any currently installed versions
 make install
 ```
 
 Test that the installation was successful by running:
 
 ```sh
-terrad
+terrad version # should print `0.5.6`
 ```
 
 # Instructions for multisig key holders
@@ -98,10 +99,10 @@ You need to:
 cd path/to/directory
 ```
 
-- Set `multisig` to the name of the multisig in terrad (check the name with `terrad keys list`). If the name of your multisig is `my_multi`, then do:
+- Set `multisig` to the name of the multisig in terrad (check the name with `terrad keys list`). If the name of your multisig is `mars_multisig`, then do:
 
 ```sh
-multisig=my_multi
+multisig=mars_multisig
 ```
 
 - Replace `terra1...` in the signing command with your address. If your address is `terra1youraddress`, then do:
