@@ -11,7 +11,7 @@ import {
   uploadContract,
 } from "./helpers.js"
 import { LCDClient, LocalTerra, Wallet } from "@terra-money/terra.js"
-import { testnet, bombay, local } from "./deploy_configs.js"
+import { testnet, local } from "./deploy_configs.js"
 import { join } from "path"
 
 // consts
@@ -32,7 +32,7 @@ async function main() {
       chainID: 'bombay-12'
     })
     wallet = recover(terra, process.env.TEST_MAIN!)
-    deployConfig = bombay
+    deployConfig = testnet
   } else {
     terra = new LocalTerra()
     wallet = (terra as LocalTerra).wallets.test1
