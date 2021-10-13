@@ -69,7 +69,7 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
     })
 
     wallet = recover(terra, process.env.WALLET!)
-    console.log("wallet", wallet.key.accAddress)
+    console.log("wallet:", wallet.key.accAddress)
   }
 
   // Multisig
