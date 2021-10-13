@@ -114,7 +114,7 @@ pub fn get_scaled_liquidity_amount(
 ) -> StdResult<Uint128> {
     Ok(compute_scaled_amount(
         amount,
-        get_updated_liquidity_index(&market, timestamp)?,
+        get_updated_liquidity_index(market, timestamp)?,
         ScalingOperation::Liquidity,
     ))
 }
@@ -129,7 +129,7 @@ pub fn get_underlying_liquidity_amount(
 ) -> StdResult<Uint128> {
     Ok(compute_underlying_amount(
         amount_scaled,
-        get_updated_liquidity_index(&market, timestamp)?,
+        get_updated_liquidity_index(market, timestamp)?,
     ))
 }
 
@@ -143,7 +143,7 @@ pub fn get_scaled_debt_amount(
 ) -> StdResult<Uint128> {
     Ok(compute_scaled_amount(
         amount,
-        get_updated_borrow_index(&market, timestamp)?,
+        get_updated_borrow_index(market, timestamp)?,
         ScalingOperation::Debt,
     ))
 }
@@ -158,7 +158,7 @@ pub fn get_underlying_debt_amount(
 ) -> StdResult<Uint128> {
     Ok(compute_underlying_amount(
         amount_scaled,
-        get_updated_borrow_index(&market, timestamp)?,
+        get_updated_borrow_index(market, timestamp)?,
     ))
 }
 
@@ -272,7 +272,7 @@ pub fn update_interest_rates(
     let available_liquidity = contract_current_balance - liquidity_taken;
 
     let total_debt =
-        get_underlying_debt_amount(market.debt_total_scaled, &market, env.block.time.seconds())?;
+        get_underlying_debt_amount(market.debt_total_scaled, market, env.block.time.seconds())?;
     let current_utilization_rate = if total_debt > Uint128::zero() {
         let liquidity_and_debt = available_liquidity.checked_add(total_debt)?;
         Decimal::from_ratio(total_debt, liquidity_and_debt)

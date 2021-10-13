@@ -24,8 +24,7 @@ use crate::accounts::get_user_position;
 use crate::error::ContractError;
 use crate::interest_rates::{
     apply_accumulated_interests, get_scaled_debt_amount, get_scaled_liquidity_amount,
-    get_underlying_debt_amount, get_underlying_liquidity_amount, get_updated_borrow_index,
-    get_updated_liquidity_index, update_interest_rates,
+    get_underlying_debt_amount, get_underlying_liquidity_amount, update_interest_rates,
 };
 use crate::msg::{
     CreateOrUpdateConfig, ExecuteMsg, InitOrUpdateAssetParams, InstantiateMsg, QueryMsg, ReceiveMsg,
@@ -1419,7 +1418,7 @@ fn process_ma_token_transfer_to_liquidator(
 
     let collateral_amount_to_liquidate_scaled = get_scaled_liquidity_amount(
         collateral_amount_to_liquidate,
-        &collateral_market,
+        collateral_market,
         block_time,
     )?;
 
