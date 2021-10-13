@@ -48,11 +48,11 @@ pub struct SlashEvent {
     pub slash_percentage: Decimal,
 }
 
-/// Response to a Claim query
+/// Response to Claim query
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ClaimResponse {
-    /// Existing claim for the user, will return None if it doesn't exist
-    pub claim: Option<Claim>
+    /// Existing claim for a given address. Will return None if it doesn't exist
+    pub claim: Option<Claim>,
 }
 
 pub mod msg {

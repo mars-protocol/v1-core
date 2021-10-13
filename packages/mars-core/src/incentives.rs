@@ -25,6 +25,13 @@ pub struct AssetIncentive {
     pub last_updated: u64,
 }
 
+/// Response to AssetIncentive query
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct AssetIncentiveResponse {
+    /// Existing asset incentive for a given address. Will return None if it doesn't exist
+    pub asset_incentive: Option<AssetIncentive>,
+}
+
 pub mod msg {
     use cosmwasm_std::{Addr, CosmosMsg, Uint128};
     use schemars::JsonSchema;
