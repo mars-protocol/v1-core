@@ -16,7 +16,7 @@ pub fn compute_tax(deps: Deps, coin: &Coin) -> StdResult<Uint128> {
     let tax_cap = (terra_querier.query_tax_cap(coin.denom.to_string())?).cap;
     let amount = coin.amount;
     Ok(std::cmp::min(
-        amount - Decimal::divide_uint128_by_decimal(amount, Decimal::one() + tax_rate),
+        amount - Decimal::divide_uint128_by_decimal(amount, Decimal::one() + tax_rate)?,
         tax_cap,
     ))
 }

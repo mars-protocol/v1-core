@@ -7,7 +7,7 @@ use std::ops;
 use std::str::FromStr;
 
 use cosmwasm_std::Decimal as StdDecimal;
-use cosmwasm_std::{Fraction, StdError, Uint128, Uint256};
+use cosmwasm_std::{Fraction, StdError, StdResult, Uint128, Uint256};
 use std::convert::TryInto;
 
 /// A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0
@@ -66,7 +66,7 @@ impl Decimal {
     /// Function can return errors such as:
     /// - OverflowError from multiplication,
     /// - ConversionOverflowError during Uint256 to Uint128 conversion.
-    pub fn checked_mul(self, other: Self) -> Result<Self, StdError> {
+    pub fn checked_mul(self, other: Self) -> StdResult<Self> {
         let a_numerator = self.numerator();
         let b_numerator = other.numerator();
 
@@ -80,7 +80,7 @@ impl Decimal {
     /// - OverflowError from multiplication,
     /// - DivideByZeroError if 'other' is equal to 0,
     /// - ConversionOverflowError during Uint256 to Uint128 conversion.
-    pub fn checked_div(self, other: Self) -> Result<Self, StdError> {
+    pub fn checked_div(self, other: Self) -> StdResult<Self> {
         let a_numerator = self.numerator();
         let b_numerator = other.numerator();
 
@@ -92,20 +92,31 @@ impl Decimal {
 
     /// Divide Uint128 by Decimal.
     /// (Uint128 / numerator / denominator) is equal to (Uint128 * denominator / numerator).
-    pub fn divide_uint128_by_decimal(a: Uint128, b: Decimal) -> Uint128 {
-        a.multiply_ratio(b.denominator(), b.numerator())
+    pub fn divide_uint128_by_decimal(a: Uint128, b: Decimal) -> StdResult<Uint128> {
+        // (Uint128 / numerator / denominator) is equal to (Uint128 * denominator / numerator).
+        let numerator_u256 = a.full_mul(b.denominator());
+        let denominator_u256 = Uint256::from(b.numerator());
+
+        let result_u256 = numerator_u256 / denominator_u256;
+
+        let result = result_u256.try_into()?;
+        Ok(result)
     }
 
-    /// Divide Uint128 by Decimal rounding half up to the nearest number (adapt floor and ceiling).
-    pub fn divide_uint128_by_decimal_with_rounding_up(a: Uint128, b: Decimal) -> Uint128 {
+    /// Divide Uint128 by Decimal, rounding up to the nearest integer.
+    pub fn divide_uint128_by_decimal_and_ceil(a: Uint128, b: Decimal) -> StdResult<Uint128> {
         // (Uint128 / numerator / denominator) is equal to (Uint128 * denominator / numerator).
-        let numerator = b.denominator();
-        let denominator = b.numerator();
-        // Adapt floor and ceiling
-        let half_denominator = denominator / 2;
-        ((a.full_mul(numerator) + Uint256::from(half_denominator)) / Uint256::from(denominator))
-            .try_into()
-            .expect("multiplication overflow")
+        let numerator_u256 = a.full_mul(b.denominator());
+        let denominator_u256 = Uint256::from(b.numerator());
+
+        let mut result_u256 = numerator_u256 / denominator_u256;
+
+        if numerator_u256.checked_rem(denominator_u256)? > Uint256::zero() {
+            result_u256 += Uint256::from(1_u32);
+        }
+
+        let result = result_u256.try_into()?;
+        Ok(result)
     }
 
     pub fn to_std_decimal(&self) -> StdDecimal {
@@ -759,33 +770,114 @@ mod tests {
     }
 
     #[test]
-    fn divide_uint128_by_decimal() {
+    fn test_divide_uint128_by_decimal() {
         let a = Uint128::new(120u128);
         let b = Decimal::from_ratio(120u128, 15u128);
-        let c = Decimal::divide_uint128_by_decimal(a, b);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
         assert_eq!(c, Uint128::new(15u128));
 
         let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
         let b = Decimal::from_ratio(Decimal::DECIMAL_FRACTIONAL.u128(), 1u128);
-        let c = Decimal::divide_uint128_by_decimal(a, b);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
         assert_eq!(c, Uint128::new(1u128));
 
         let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
         let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL.u128());
-        let c = Decimal::divide_uint128_by_decimal(a, b);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
         assert_eq!(c, Uint128::new(Decimal::DECIMAL_FRACTIONAL_SQUARED.u128()));
 
         let a = Uint128::MAX;
         let b = Decimal::one();
-        let c = Decimal::divide_uint128_by_decimal(a, b);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
         assert_eq!(c, Uint128::MAX);
 
         let a = Uint128::new(1_000_000_000_000_000_000);
         let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL);
-        let c = Decimal::divide_uint128_by_decimal(a, b);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
         assert_eq!(
             c,
             Uint128::new(1_000_000_000_000_000_000_000_000_000_000_000_000)
+        );
+
+        // Division is truncated
+        let a = Uint128::new(100);
+        let b = Decimal::from_ratio(3u128, 1u128);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
+        assert_eq!(c, Uint128::new(33));
+
+        let a = Uint128::new(75);
+        let b = Decimal::from_ratio(100u128, 1u128);
+        let c = Decimal::divide_uint128_by_decimal(a, b).unwrap();
+        assert_eq!(c, Uint128::new(0));
+
+        // Overflow
+        let a = Uint128::MAX;
+        let b = Decimal::from_ratio(1_u128, 10_u128);
+        let res_error = Decimal::divide_uint128_by_decimal(a, b).unwrap_err();
+        assert_eq!(
+            res_error,
+            ConversionOverflowError::new(
+                "Uint256",
+                "Uint128",
+                "3402823669209384634633746074317682114550"
+            )
+            .into()
+        );
+    }
+
+    #[test]
+    fn test_divide_uint128_by_decimal_and_ceil() {
+        let a = Uint128::new(120u128);
+        let b = Decimal::from_ratio(120u128, 15u128);
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::new(15u128));
+
+        let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
+        let b = Decimal::from_ratio(Decimal::DECIMAL_FRACTIONAL.u128(), 1u128);
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::new(1u128));
+
+        let a = Uint128::new(Decimal::DECIMAL_FRACTIONAL.u128());
+        let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL.u128());
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::new(Decimal::DECIMAL_FRACTIONAL_SQUARED.u128()));
+
+        let a = Uint128::MAX;
+        let b = Decimal::one();
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::MAX);
+
+        let a = Uint128::new(1_000_000_000_000_000_000);
+        let b = Decimal::from_ratio(1u128, Decimal::DECIMAL_FRACTIONAL);
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(
+            c,
+            Uint128::new(1_000_000_000_000_000_000_000_000_000_000_000_000)
+        );
+
+        // Division is rounded up
+        let a = Uint128::new(100);
+        let b = Decimal::from_ratio(3u128, 1u128);
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::new(34));
+
+        let a = Uint128::new(75);
+        let b = Decimal::from_ratio(100u128, 1u128);
+        let c = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap();
+        assert_eq!(c, Uint128::new(1));
+
+        // Overflow
+        let a = Uint128::MAX;
+        let b = Decimal::from_ratio(1_u128, 10_u128);
+        let res_error = Decimal::divide_uint128_by_decimal_and_ceil(a, b).unwrap_err();
+        assert_eq!(
+            res_error,
+            ConversionOverflowError::new(
+                "Uint256",
+                "Uint128",
+                "3402823669209384634633746074317682114550"
+            )
+            .into()
         );
     }
 
