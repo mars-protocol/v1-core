@@ -8,9 +8,7 @@ use mars_core::oracle;
 
 use crate::contract::{get_bit, market_get_from_index};
 use crate::error::ContractError;
-use crate::interest_rates::{
-    get_descaled_amount, get_updated_borrow_index, get_updated_liquidity_index,
-};
+use crate::interest_rates::{get_underlying_debt_amount, get_underlying_liquidity_amount};
 use crate::state::DEBTS;
 use crate::{Debt, User, UserHealthStatus};
 
@@ -157,8 +155,8 @@ fn get_user_asset_positions(
                 user_address.clone(),
             )?;
 
-            let liquidity_index = get_updated_liquidity_index(&market, block_time)?;
-            let collateral_amount = get_descaled_amount(asset_balance_scaled, liquidity_index);
+            let collateral_amount =
+                get_underlying_liquidity_amount(asset_balance_scaled, &market, block_time)?;
 
             (
                 collateral_amount,
@@ -174,8 +172,8 @@ fn get_user_asset_positions(
             let user_debt: Debt =
                 DEBTS.load(deps.storage, (asset_reference_vec.as_slice(), user_address))?;
 
-            let borrow_index = get_updated_borrow_index(&market, block_time)?;
-            let debt_amount = get_descaled_amount(user_debt.amount_scaled, borrow_index);
+            let debt_amount =
+                get_underlying_debt_amount(user_debt.amount_scaled, &market, block_time)?;
 
             (debt_amount, user_debt.uncollateralized)
         } else {

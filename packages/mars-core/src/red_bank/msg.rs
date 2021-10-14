@@ -219,15 +219,25 @@ pub enum QueryMsg {
     /// Get user position. Returns UserPositionResponse
     UserPosition { user_address: String },
 
-    /// Get equivalent underlying asset amount for a maToken balance.
+    /// Get liquidity scaled amount for a given underlying asset amount
+    /// (i.e: how much maTokens will get minted if the given amount is deposited)
     ScaledLiquidityAmount { asset: Asset, amount: Uint128 },
 
-    /// Get equivalent underlying asset amount for a debt balance.
+    /// Get equivalent scaled debt for a given underlying asset amount.
+    /// (i.e: how much scaled debt is added if the given amount is borrowed)
     ScaledDebtAmount { asset: Asset, amount: Uint128 },
 
-    /// Get equivalent maToken amount for a given underlying asset balance.
-    DescaledLiquidityAmount {
+    /// Get underlying asset amount for a given maToken balance.
+    UnderlyingLiquidityAmount {
         ma_token_address: String,
-        amount: Uint128,
+        amount_scaled: Uint128,
+    },
+
+    /// Get underlying debt amount for a given asset and scaled amounts.
+    /// (i.e: How much underlying asset needs to be repaid to cancel a given scaled debt
+    /// amount stored in state)
+    UnderlyingDebtAmount {
+        asset: Asset,
+        amount_scaled: Uint128,
     },
 }

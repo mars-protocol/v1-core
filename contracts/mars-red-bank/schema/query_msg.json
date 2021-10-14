@@ -163,7 +163,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent underlying asset amount for a maToken balance.",
+      "description": "Get liquidity scaled amount for a given underlying asset amount (i.e: how much maTokens will get minted if the given amount is deposited)",
       "type": "object",
       "required": [
         "scaled_liquidity_amount"
@@ -188,7 +188,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent underlying asset amount for a debt balance.",
+      "description": "Get equivalent scaled debt for a given underlying asset amount. (i.e: how much scaled debt is added if the given amount is borrowed)",
       "type": "object",
       "required": [
         "scaled_debt_amount"
@@ -213,24 +213,49 @@
       "additionalProperties": false
     },
     {
-      "description": "Get equivalent maToken amount for a given underlying asset balance.",
+      "description": "Get underlying asset amount for a given maToken balance.",
       "type": "object",
       "required": [
-        "descaled_liquidity_amount"
+        "underlying_liquidity_amount"
       ],
       "properties": {
-        "descaled_liquidity_amount": {
+        "underlying_liquidity_amount": {
           "type": "object",
           "required": [
-            "amount",
+            "amount_scaled",
             "ma_token_address"
           ],
           "properties": {
-            "amount": {
+            "amount_scaled": {
               "$ref": "#/definitions/Uint128"
             },
             "ma_token_address": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Get underlying debt amount for a given asset and scaled amounts. (i.e: How much underlying asset needs to be repaid to cancel a given scaled debt amount stored in state)",
+      "type": "object",
+      "required": [
+        "underlying_debt_amount"
+      ],
+      "properties": {
+        "underlying_debt_amount": {
+          "type": "object",
+          "required": [
+            "amount_scaled",
+            "asset"
+          ],
+          "properties": {
+            "amount_scaled": {
+              "$ref": "#/definitions/Uint128"
+            },
+            "asset": {
+              "$ref": "#/definitions/Asset"
             }
           }
         }
