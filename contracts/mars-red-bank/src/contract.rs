@@ -1277,7 +1277,7 @@ pub fn execute_liquidate(
             collateral_market.liquidation_bonus,
             user_debt_asset_total_debt,
             sent_debt_asset_amount,
-        );
+        )?;
 
     // 4. Update collateral positions and market depending on whether the liquidator elects to
     // receive ma_tokens or the underlying asset
@@ -1520,7 +1520,7 @@ fn liquidation_compute_amounts(
     liquidation_bonus: Decimal,
     user_debt_asset_total_debt: Uint128,
     sent_debt_asset_amount: Uint128,
-) -> (Uint128, Uint128, Uint128) {
+) -> StdResult<(Uint128, Uint128, Uint128)> {
     // Debt: Only up to a fraction of the total debt (determined by the close factor) can be
     // repayed.
     let max_repayable_debt = close_factor * user_debt_asset_total_debt;
@@ -1539,8 +1539,7 @@ fn liquidation_compute_amounts(
     let mut collateral_amount_to_liquidate = Decimal::divide_uint128_by_decimal(
         collateral_amount_to_liquidate_in_uusd,
         collateral_price,
-    )
-    .unwrap();
+    )?;
 
     // If collateral amount to liquidate is higher than user_collateral_balance,
     // liquidate the full balance and adjust the debt amount to repay accordingly
@@ -1550,20 +1549,18 @@ fn liquidation_compute_amounts(
             Decimal::divide_uint128_by_decimal(
                 collateral_price * collateral_amount_to_liquidate,
                 debt_price,
-            )
-            .unwrap(),
+            )?,
             Decimal::one() + liquidation_bonus,
-        )
-        .unwrap();
+        )?
     }
 
     let refund_amount = sent_debt_asset_amount - debt_amount_to_repay;
 
-    (
+    Ok((
         debt_amount_to_repay,
         collateral_amount_to_liquidate,
         refund_amount,
-    )
+    ))
 }
 
 /// Update uncollateralized loan limit by a given amount in uusd
