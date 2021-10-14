@@ -21,7 +21,7 @@ use mars_core::address_provider::{self, MarsContract};
 use crate::error::ContractError;
 use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{CLAIMS, CONFIG, GLOBAL_STATE, SLASH_EVENTS};
-use crate::{Claim, Config, GlobalState, SlashEvent};
+use crate::{Claim, ClaimResponse, Config, GlobalState, SlashEvent};
 
 // INSTANTIATE
 
@@ -509,15 +509,17 @@ fn query_global_state(deps: Deps) -> StdResult<GlobalState> {
     Ok(global_state)
 }
 
-fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResult<Option<Claim>> {
+fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResult<ClaimResponse> {
     let user_address = deps.api.addr_validate(&user_address_unchecked)?;
     let option_claim = CLAIMS.may_load(deps.storage, &user_address)?;
 
     if let Some(mut claim) = option_claim {
         apply_slash_events_to_claim(deps.storage, &mut claim)?;
-        Ok(Some(claim))
+        Ok(ClaimResponse { claim: Some(claim) })
     } else {
-        Ok(option_claim)
+        Ok(ClaimResponse {
+            claim: option_claim,
+        })
     }
 }
 
@@ -974,7 +976,7 @@ mod tests {
                 "claimer".to_string(),
             )
             .unwrap();
-            assert_eq!(claim.amount, queried_claim.unwrap().amount);
+            assert_eq!(claim.amount, queried_claim.claim.unwrap().amount);
         }
 
         // Successful claim
@@ -1013,7 +1015,7 @@ mod tests {
                 "claimer".to_string(),
             )
             .unwrap();
-            assert_eq!(None, queried_claim);
+            assert_eq!(None, queried_claim.claim);
 
             let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
             assert_eq!(
@@ -1105,7 +1107,7 @@ mod tests {
                 "claimer".to_string(),
             )
             .unwrap();
-            assert_eq!(expected_claim_amount, queried_claim.unwrap().amount);
+            assert_eq!(expected_claim_amount, queried_claim.claim.unwrap().amount);
 
             let info = mock_info("claimer", &[]);
             let msg = ExecuteMsg::Claim {
@@ -1180,7 +1182,7 @@ mod tests {
                 "claimer".to_string(),
             )
             .unwrap();
-            assert_eq!(expected_claim_amount, queried_claim.unwrap().amount);
+            assert_eq!(expected_claim_amount, queried_claim.claim.unwrap().amount);
 
             let info = mock_info("claimer", &[]);
             let msg = ExecuteMsg::Claim { recipient: None };

@@ -48,6 +48,13 @@ pub struct SlashEvent {
     pub slash_percentage: Decimal,
 }
 
+/// Response to Claim query
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ClaimResponse {
+    /// Existing claim for a given address. Will return None if it doesn't exist
+    pub claim: Option<Claim>,
+}
+
 pub mod msg {
     use cosmwasm_std::{Decimal as StdDecimal, Uint128};
 

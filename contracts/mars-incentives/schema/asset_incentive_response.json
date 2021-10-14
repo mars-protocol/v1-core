@@ -1,14 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Nullable_AssetIncentive",
-  "anyOf": [
-    {
-      "$ref": "#/definitions/AssetIncentive"
-    },
-    {
-      "type": "null"
+  "title": "AssetIncentiveResponse",
+  "description": "Response to AssetIncentive query",
+  "type": "object",
+  "properties": {
+    "asset_incentive": {
+      "description": "Existing asset incentive for a given address. Will return None if it doesn't exist",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AssetIncentive"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
-  ],
+  },
   "definitions": {
     "AssetIncentive": {
       "description": "Incentive Metadata for a given incentive",

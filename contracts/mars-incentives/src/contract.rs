@@ -15,7 +15,7 @@ use mars_core::staking;
 use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{ASSET_INCENTIVES, CONFIG, USER_ASSET_INDICES, USER_UNCLAIMED_REWARDS};
-use crate::{AssetIncentive, Config};
+use crate::{AssetIncentive, AssetIncentiveResponse, Config};
 
 // INIT
 
@@ -475,10 +475,12 @@ fn query_config(deps: Deps) -> StdResult<Config> {
 fn query_asset_incentive(
     deps: Deps,
     ma_token_address_unchecked: String,
-) -> StdResult<Option<AssetIncentive>> {
+) -> StdResult<AssetIncentiveResponse> {
     let ma_token_address = deps.api.addr_validate(&ma_token_address_unchecked)?;
     let option_asset_incentive = ASSET_INCENTIVES.may_load(deps.storage, &ma_token_address)?;
-    Ok(option_asset_incentive)
+    Ok(AssetIncentiveResponse {
+        asset_incentive: option_asset_incentive,
+    })
 }
 
 fn query_user_unclaimed_rewards(
