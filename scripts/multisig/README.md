@@ -99,6 +99,18 @@ You need to:
 cd path/to/directory
 ```
 
+- Inspect the messages to be executed in the unsigned transaction.
+
+:warning: **Do not blindly sign transactions** :warning:
+
+```sh
+# For messages executed on a contract:
+jq ".body.messages[0].execute_msg" unsigned_tx.json
+
+# For messages executed via proxy contracts:
+jq ".body.messages[0].execute_msg.execute.msgs[0].wasm.execute.msg" unsigned_tx.json | tr -d '\"' | base64 -d
+```
+
 - Set `multisig` to the name of the multisig in terrad (check the name with `terrad keys list`). If the name of your multisig is `mars_multisig`, then do:
 
 ```sh
