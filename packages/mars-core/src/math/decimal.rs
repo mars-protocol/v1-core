@@ -917,4 +917,87 @@ mod tests {
             Decimal::percent(8765)
         );
     }
+
+    #[test]
+    fn std_decimal_compatibility() {
+        // StdDecimal can be serialized to Decimal
+        assert_eq!(
+            from_slice::<Decimal>(&to_vec(&StdDecimal::zero()).unwrap()).unwrap(),
+            Decimal::zero()
+        );
+        assert_eq!(
+            from_slice::<Decimal>(&to_vec(&StdDecimal::percent(8)).unwrap()).unwrap(),
+            Decimal::percent(8)
+        );
+        assert_eq!(
+            from_slice::<Decimal>(&to_vec(&StdDecimal::percent(87)).unwrap()).unwrap(),
+            Decimal::percent(87)
+        );
+        assert_eq!(
+            from_slice::<Decimal>(&to_vec(&StdDecimal::percent(876)).unwrap()).unwrap(),
+            Decimal::percent(876)
+        );
+        assert_eq!(
+            from_slice::<Decimal>(&to_vec(&StdDecimal::percent(8765)).unwrap()).unwrap(),
+            Decimal::percent(8765)
+        );
+        assert_eq!(
+            from_slice::<Decimal>(
+                &to_vec(&StdDecimal::from_ratio(3423423424000000_u128, 223_u128)).unwrap()
+            )
+            .unwrap(),
+            Decimal::from_ratio(3423423424000000_u128, 223_u128)
+        );
+        assert_eq!(
+            from_slice::<Decimal>(
+                &to_vec(&StdDecimal::from_ratio(
+                    123_u128,
+                    3424234234823842093840923848098409238_u128
+                ))
+                .unwrap()
+            )
+            .unwrap(),
+            Decimal::from_ratio(123_u128, 3424234234823842093840923848098409238_u128)
+        );
+
+        // Decimal can be serialized to StdDecimal
+        assert_eq!(
+            from_slice::<StdDecimal>(&to_vec(&Decimal::zero()).unwrap()).unwrap(),
+            StdDecimal::zero()
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(&to_vec(&Decimal::percent(8)).unwrap()).unwrap(),
+            StdDecimal::percent(8)
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(&to_vec(&Decimal::percent(87)).unwrap()).unwrap(),
+            StdDecimal::percent(87)
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(&to_vec(&Decimal::percent(876)).unwrap()).unwrap(),
+            StdDecimal::percent(876)
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(&to_vec(&Decimal::percent(8765)).unwrap()).unwrap(),
+            StdDecimal::percent(8765)
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(
+                &to_vec(&Decimal::from_ratio(3423423424000000_u128, 223_u128)).unwrap()
+            )
+            .unwrap(),
+            StdDecimal::from_ratio(3423423424000000_u128, 223_u128)
+        );
+        assert_eq!(
+            from_slice::<StdDecimal>(
+                &to_vec(&Decimal::from_ratio(
+                    123_u128,
+                    3424234234823842093840923848098409238_u128
+                ))
+                .unwrap()
+            )
+            .unwrap(),
+            StdDecimal::from_ratio(123_u128, 3424234234823842093840923848098409238_u128)
+        );
+    }
 }
