@@ -189,7 +189,7 @@ pub fn compute_scaled_amount(
 /// Descales the amount introduced by `get_scaled_amount`, returning the underlying amount.
 /// As interest rate is accumulated the index used to descale the amount should be bigger than the one used to scale it.
 pub fn compute_underlying_amount(scaled_amount: Uint128, index: Decimal) -> StdResult<Uint128> {
-    // Multiply scaled amount by decimal (index).checked_mul(index)?
+    // Multiply scaled amount by decimal (index)
     let before_factor = scaled_amount * index;
     // Descale by SCALING_FACTOR which is introduced when scaling the amount
     let result = before_factor.checked_div(SCALING_FACTOR)?;
