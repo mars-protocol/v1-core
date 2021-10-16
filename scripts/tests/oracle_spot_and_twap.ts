@@ -13,6 +13,7 @@ import {
 import { queryBalanceCw20, queryBalanceNative } from "./test_helpers.js";
 
 // TYPES
+
 // mars_core::oracle::AssetPriceResponse
 type AssetPriceResponse = {
   price: string;
@@ -46,10 +47,19 @@ let oracle: string;
 
 // HELPERS
 
-// https://stackoverflow.com/questions/14226803/wait-5-seconds-before-executing-next-line
-const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
-
 const diff = (a: number, b: number) => (a > b ? a - b : b - a);
+
+async function expectPromiseToFail(promise: Promise<any>) {
+  let failed = false;
+  try {
+    await promise;
+  } catch {
+    failed = true;
+  }
+  if (!failed) {
+    throw new Error("expecting to fail but was successful?!");
+  }
+}
 
 async function recordTwapSnapshot() {
   const result = await executeContract(terra, charlie, oracle, {
@@ -70,8 +80,8 @@ async function recordTwapSnapshot() {
   return { timestamp, cumulativePrice };
 }
 
-async function queryAnchorTokenPrice() {
-  let response: AssetPriceResponse = await queryContract(terra, oracle, {
+async function assertAnchorTokenPrice(expectedPrice: number) {
+  const response: AssetPriceResponse = await queryContract(terra, oracle, {
     asset_price: {
       asset: {
         cw20: {
@@ -80,30 +90,12 @@ async function queryAnchorTokenPrice() {
       },
     },
   });
-  return parseFloat(response.price);
-}
-
-async function expectPriceQueryToFail() {
-  let failed = false;
-  try {
-    await queryAnchorTokenPrice();
-  } catch (err) {
-    failed = true;
-    // cosmwasm StdError results in status code 500. we make sure the error is of not any other type
-    const msg = (err as Error).message;
-    strictEqual(msg, "Request failed with status code 500");
-  }
-
-  if (!failed) {
-    throw new Error("expecting query to fail but was successful?!");
-  }
-}
-
-async function assertAnchorTokenPrice(expectedPrice: number) {
-  strictEqual(await queryAnchorTokenPrice(), expectedPrice);
+  const price = parseFloat(response.price);
+  strictEqual(price, expectedPrice);
 }
 
 // MAIN
+
 (async () => {
   console.log("deployer:", deployer.key.accAddress);
   console.log("alice:   ", alice.key.accAddress);
@@ -156,8 +148,8 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   );
   console.log("success!");
 
-  process.stdout.write("creating astroport pair... ");
-  const result = await executeContract(terra, deployer, astroportFactory, {
+  process.stdout.write("creating astroport ANC-UST pair... ");
+  const result1 = await executeContract(terra, deployer, astroportFactory, {
     create_pair: {
       pair_type: { xyk: {} },
       asset_infos: [
@@ -174,7 +166,28 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
       ],
     },
   });
-  astroportPair = result.logs[0].eventsByType.from_contract.pair_contract_addr[0];
+  astroportPair = result1.logs[0].eventsByType.from_contract.pair_contract_addr[0];
+  console.log("success!");
+
+  process.stdout.write("creating astroport ANC-UST pair... ");
+  const result2 = await executeContract(terra, deployer, astroportFactory, {
+    create_pair: {
+      pair_type: { xyk: {} },
+      asset_infos: [
+        {
+          native_token: {
+            denom: "uluna",
+          },
+        },
+        {
+          native_token: {
+            denom: "uusd",
+          },
+        },
+      ],
+    },
+  });
+  const astroportPair2 = result2.logs[0].eventsByType.from_contract.pair_contract_addr[0];
   console.log("success!");
 
   process.stdout.write("alice provides initial liquidity to astroport pair... ");
@@ -220,7 +233,27 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   });
   console.log("success!");
 
-  process.stdout.write("configure spot price source... ");
+  process.stdout.write("configure spot price source with invalid pair, should fail... ");
+  await expectPromiseToFail(
+    executeContract(terra, deployer, oracle, {
+      set_asset: {
+        asset: {
+          cw20: {
+            contract_addr: anchorToken,
+          },
+        },
+        price_source: {
+          astroport_spot: {
+            pair_address: astroportPair2, // we set price source for ANC but use the addr of LUNA-UST pair
+            asset_address: anchorToken,
+          },
+        },
+      },
+    })
+  );
+  console.log("success!");
+
+  process.stdout.write("properly configure spot price source, should succeed... ");
   await executeContract(terra, deployer, oracle, {
     set_asset: {
       asset: {
@@ -315,7 +348,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
 
   // currently there is one snapshot, so querying price should fail
   process.stdout.write("expecting price query to fail... ");
-  await expectPriceQueryToFail();
+  await expectPromiseToFail(assertAnchorTokenPrice(0));
   console.log("success!");
 
   process.stdout.write("recoding TWAP snapshot... ");
@@ -324,7 +357,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
 
   // currently there are two snapshots, but their timestamps are too close, so query should still fail
   process.stdout.write("expecting price query to fail... ");
-  await expectPriceQueryToFail();
+  await expectPromiseToFail(assertAnchorTokenPrice(0));
   console.log("success!");
 
   // execute 3 swaps, and take a snapshot after each one

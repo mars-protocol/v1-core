@@ -84,13 +84,22 @@ pub fn execute_set_asset(
     }
 
     let (asset_label, asset_reference, _) = asset.get_attributes();
+    let price_source = price_source_unchecked.to_checked(deps.api)?;
+
+    // for spot and TWAP sources, we must make sure: the astroport pair indicated by `pair_address`
+    // must consists of UST and the asset of interest
+    match &price_source {
+        PriceSourceChecked::AstroportSpot { pair_address }
+        | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
+            assert_astroport_pool_assets(&deps.querier, &asset, &pair_address)?;
+        }
+        _ => (),
+    }
 
     PRICE_CONFIGS.save(
         deps.storage,
         &asset_reference,
-        &PriceConfig {
-            price_source: price_source_unchecked.to_checked(deps.api)?,
-        },
+        &PriceConfig { price_source },
     )?;
 
     Ok(Response::new()
@@ -301,8 +310,10 @@ fn query_asset_price(
 
 mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdResult, Uint128, WasmQuery,
+        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128,
+        WasmQuery,
     };
+    use mars_core::asset::Asset;
 
     // Once astroport package is published on crates.io, update Cargo.toml and change these to
     // use astroport::asset::{...};
@@ -327,6 +338,42 @@ mod helpers {
     pub fn ust() -> AstroportAssetInfo {
         AstroportAssetInfo::NativeToken {
             denom: "uusd".to_string(),
+        }
+    }
+
+    // Cast astroport::asset::AssetInfo into mars_core::asset::Asset so that they can be compared
+    impl From<&AstroportAssetInfo> for Asset {
+        fn from(info: &AstroportAssetInfo) -> Self {
+            match info {
+                AstroportAssetInfo::Token { contract_addr } => Asset::Cw20 {
+                    contract_addr: contract_addr.to_string(),
+                },
+                AstroportAssetInfo::NativeToken { denom } => Asset::Native {
+                    denom: denom.clone(),
+                },
+            }
+        }
+    }
+
+    /// Assert the astroport pair indicated by `pair_address` consists of UST and `asset`
+    pub fn assert_astroport_pool_assets(
+        querier: &QuerierWrapper,
+        asset: &Asset,
+        pair_address: &Addr,
+    ) -> StdResult<()> {
+        let response: PoolResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: pair_address.to_string(),
+            msg: to_binary(&AstroportQueryMsg::Pool {})?,
+        }))?;
+
+        let asset0: Asset = (&response.assets[0].info).into();
+        let asset1: Asset = (&response.assets[1].info).into();
+        let ust: Asset = (&ust()).into();
+
+        if (asset0 == ust && &asset1 == asset) || (asset1 == ust && &asset0 == asset) {
+            Ok(())
+        } else {
+            Err(StdError::generic_err("invalid pair"))
         }
     }
 
@@ -525,32 +572,6 @@ mod tests {
                 price_config.price_source,
                 PriceSourceChecked::Native {
                     denom: "luna".to_string()
-                }
-            );
-        }
-
-        // Astroport spot price
-        // TWAP price is quite similar to this so we don't do another separate test
-        {
-            let asset = Asset::Cw20 {
-                contract_addr: String::from("token"),
-            };
-            let reference = asset.get_reference();
-            let msg = ExecuteMsg::SetAsset {
-                asset: asset,
-                price_source: PriceSourceUnchecked::AstroportSpot {
-                    pair_address: "pair".to_string(),
-                },
-            };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-            let price_config = PRICE_CONFIGS
-                .load(&deps.storage, reference.as_slice())
-                .unwrap();
-            assert_eq!(
-                price_config.price_source,
-                PriceSourceChecked::AstroportSpot {
-                    pair_address: Addr::unchecked("pair"),
                 }
             );
         }
