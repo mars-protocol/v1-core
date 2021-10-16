@@ -12,15 +12,37 @@ pub enum PriceSource<A> {
     Fixed { price: Decimal },
     /// Native Terra stablecoins transaction rate quoted in UST
     Native { denom: String },
-    /// Astroport spot price quoted in the other asset of the pair
-    AstroportSpot { pair_address: A, asset_address: A },
-    /// Astroport TWAP price quoted in the other asset of the pair
-    AstroportTwap {
+    /// Astroport spot price quoted in the other asset of the pair. E.g. For ANC-UST pair, if the
+    /// asset of interest is ANC, the price is quoted in the form or uusd per uANC.
+    AstroportSpot {
+        /// Address of the Astroport pair
         pair_address: A,
+        /// Address of the asset of interest
+        ///
+        /// NOTE: Spot price in intended for CW20 tokens. Terra native tokens should use Fixed or
+        /// Native price sources.
         asset_address: A,
-        /// Minimum time (in seconds) required to pass between two TWAP data updates.
-        /// E.g. if set to 300, then prices will be averaged over periods of no less than 5 minutes.
-        min_period: u64,
+    },
+    /// Astroport TWAP price quoted in the other asset of the pair. E.g. For ANC-UST pair, if the
+    /// asset of interest is ANC, the price is quoted in the form or uusd per uANC.
+    AstroportTwap {
+        /// Address of the Astroport pair
+        pair_address: A,
+        /// Address of the asset of interest
+        ///
+        /// NOTE: Spot price in intended for CW20 tokens. Terra native tokens should use Fixed or
+        /// Native price sources.
+        asset_address: A,
+        /// The desired amount of time (in seconds) over which the price is to be averaged
+        window_size: u64,
+        /// When calculating averaged price, we take the most recent TWAP snapshot and find a second
+        /// snapshot in the range of window_size +/- tolerance. For example, if window size is 5 minutes
+        /// and tolerance is 1 minute, we look for snapshots that are 4 - 6 minutes back in time from
+        /// the most recent snapshot.
+        ///
+        /// If there are multiple snapshots within the range, we take the one that is closest to the
+        /// desired window size.
+        tolerance: u64,
     },
 }
 
@@ -40,21 +62,26 @@ pub struct PriceConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct AstroportTwapData {
+pub struct AstroportTwapSnapshot {
     /// Timestamp of the most recent TWAP data update
     pub timestamp: u64,
     /// Cumulative price of the asset retrieved by the most recent TWAP data update
     pub price_cumulative: Uint128,
-    /// Price of the asset averaged over the last two TWAP data updates
-    pub price_average: Decimal,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct AssetPriceResponse {
     /// Price of the asset averaged over the last two TWAP data updates
     pub price: Decimal,
-    /// Timestamp of the most recent TWAP data update. Contracts querying the price data are recommended
+    /// The last time the price data was updated. Contracts querying the price data are recommended
     /// to check this value and determine if the data is too old to be considered valid.
+    ///
+    /// For Fixed, Native, and AstroportSpot price sources, this is simply the current block timestamp
+    /// as prices are updated instantaneously with these sources.
+    ///
+    /// For AstroportTwap price source, this is the timestamp of the most recent TWAP snapshot.
+    /// E.g. If two TWAP price snapshots were taken at block A and B, where B is more recent than A,
+    /// and the price is averaged over A to B, then `last_updated` is the timestamp of block B.
     pub last_updated: u64,
 }
 
@@ -81,7 +108,7 @@ pub mod msg {
             price_source: PriceSourceUnchecked,
         },
         /// Fetch cumulative price from Astroport pair and record in contract storage
-        UpdateAstroportTwapData { assets: Vec<Asset> },
+        RecordTwapSnapshot { assets: Vec<Asset> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
