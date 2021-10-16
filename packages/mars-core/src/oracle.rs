@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use cosmwasm_std::{Addr, Uint128};
+use cosmwasm_std::{Addr, Api, StdResult, Uint128};
 
 use crate::math::decimal::Decimal;
 
@@ -48,6 +48,46 @@ pub enum PriceSource<A> {
 
 pub type PriceSourceUnchecked = PriceSource<String>;
 pub type PriceSourceChecked = PriceSource<Addr>;
+
+impl PriceSourceUnchecked {
+    pub fn to_label(&self) -> &str {
+        match self {
+            PriceSourceUnchecked::Fixed { .. } => "fixed",
+            PriceSourceUnchecked::Native { .. } => "native",
+            PriceSourceUnchecked::AstroportSpot { .. } => "astroport_spot",
+            PriceSourceUnchecked::AstroportTwap { .. } => "astroport_twap",
+        }
+    }
+
+    pub fn to_checked(&self, api: &dyn Api) -> StdResult<PriceSourceChecked> {
+        Ok(match self {
+            PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed {
+                price: price.clone(),
+            },
+            PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native {
+                denom: denom.clone(),
+            },
+            PriceSourceUnchecked::AstroportSpot {
+                pair_address,
+                asset_address,
+            } => PriceSourceChecked::AstroportSpot {
+                pair_address: api.addr_validate(&pair_address)?,
+                asset_address: api.addr_validate(&asset_address)?,
+            },
+            PriceSourceUnchecked::AstroportTwap {
+                pair_address,
+                asset_address,
+                window_size,
+                tolerance,
+            } => PriceSourceChecked::AstroportTwap {
+                pair_address: api.addr_validate(&pair_address)?,
+                asset_address: api.addr_validate(&asset_address)?,
+                window_size: window_size.clone(),
+                tolerance: tolerance.clone(),
+            },
+        })
+    }
+}
 
 /// Contract global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

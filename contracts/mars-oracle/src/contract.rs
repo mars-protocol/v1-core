@@ -15,7 +15,7 @@ use crate::{
     PriceSourceUnchecked,
 };
 
-use self::helpers::{diff, query_astroport_cumulative_price, query_astroport_spot_price};
+use self::helpers::*;
 
 // INIT
 
@@ -68,8 +68,7 @@ pub fn execute_update_config(
 
     CONFIG.save(deps.storage, &config)?;
 
-    let res = Response::new().add_attribute("action", "update_config");
-    Ok(res)
+    Ok(Response::new().add_attribute("action", "update_config"))
 }
 
 pub fn execute_set_asset(
@@ -80,55 +79,24 @@ pub fn execute_set_asset(
     price_source_unchecked: PriceSourceUnchecked,
 ) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
-
-    // let asset_reference = asset.get_reference();
-    let (asset_label, asset_reference, _) = asset.get_attributes();
-
     if info.sender != config.owner {
         return Err(StdError::generic_err("Only owner can set asset"));
     }
 
-    let (price_source, price_source_label) = match price_source_unchecked {
-        PriceSourceUnchecked::Fixed { price } => (PriceSourceChecked::Fixed { price }, "fixed"),
-        PriceSourceUnchecked::Native { denom } => (PriceSourceChecked::Native { denom }, "native"),
-        PriceSourceUnchecked::AstroportSpot {
-            pair_address,
-            asset_address,
-        } => (
-            PriceSourceChecked::AstroportSpot {
-                pair_address: deps.api.addr_validate(&pair_address)?,
-                asset_address: deps.api.addr_validate(&asset_address)?,
-            },
-            "astroport_spot",
-        ),
-        PriceSourceUnchecked::AstroportTwap {
-            pair_address,
-            asset_address,
-            window_size,
-            tolerance,
-        } => (
-            PriceSourceChecked::AstroportTwap {
-                pair_address: deps.api.addr_validate(&pair_address)?,
-                asset_address: deps.api.addr_validate(&asset_address)?,
-                window_size,
-                tolerance,
-            },
-            "astroport_twap",
-        ),
-    };
+    let (asset_label, asset_reference, _) = asset.get_attributes();
 
     PRICE_CONFIGS.save(
         deps.storage,
         &asset_reference,
-        &PriceConfig { price_source },
+        &PriceConfig {
+            price_source: price_source_unchecked.to_checked(deps.api)?,
+        },
     )?;
 
-    let res = Response::new()
+    Ok(Response::new()
         .add_attribute("action", "set_asset")
         .add_attribute("asset", asset_label)
-        .add_attribute("price_source", price_source_label);
-
-    Ok(res)
+        .add_attribute("price_source", price_source_unchecked.to_label()))
 }
 
 /// Modified from
@@ -191,10 +159,9 @@ pub fn execute_record_twap_snapshot(
         ]);
     }
 
-    let res = Response::new()
+    Ok(Response::new()
         .add_attribute("action", "record_twap_snapshot")
-        .add_attributes(attrs);
-    Ok(res)
+        .add_attributes(attrs))
 }
 
 // QUERIES
