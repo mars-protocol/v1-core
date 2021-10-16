@@ -117,14 +117,12 @@ pub fn execute_record_twap_snapshot(
         //
         // This block of code is really ugly because the same variable names are typed three times.
         // Is there a cleaner syntax?
-        let (pair_address, asset_address, window_size, tolerance) = match price_config.price_source
-        {
+        let (pair_address, window_size, tolerance) = match price_config.price_source {
             PriceSourceChecked::AstroportTwap {
                 pair_address,
-                asset_address,
                 window_size,
                 tolerance,
-            } => (pair_address, asset_address, window_size, tolerance),
+            } => (pair_address, window_size, tolerance),
             _ => {
                 return Err(StdError::generic_err("price source is not TWAP"));
             }
@@ -137,8 +135,7 @@ pub fn execute_record_twap_snapshot(
 
         // Query new price data
         let timestamp = env.block.time.seconds();
-        let price_cumulative =
-            query_astroport_cumulative_price(&deps.querier, &pair_address, &asset_address)?;
+        let price_cumulative = query_astroport_cumulative_price(&deps.querier, &pair_address)?;
 
         // Purge snapshots that are too old, i.e. more than [window_size + tolerance] away from the
         // most recent update. These snapshots will never be used in the future for calculating average
@@ -237,11 +234,8 @@ fn query_asset_price(
         // 3) The price is quoted in the other asset in the pair. For example, for MARS-UST
         // pair, the price of MARS is quoted in UST; for bLUNA-LUNA pair, the price of bLUNA
         // is quoted in LUNA.
-        PriceSourceChecked::AstroportSpot {
-            pair_address,
-            asset_address,
-        } => {
-            let price = query_astroport_spot_price(&deps.querier, &pair_address, &asset_address)?;
+        PriceSourceChecked::AstroportSpot { pair_address } => {
+            let price = query_astroport_spot_price(&deps.querier, &pair_address)?;
             Ok(AssetPriceResponse {
                 price: price.into(), // cast cosmwasm_std::Decimal to mars_core::math::decimal::Decimal
                 last_updated: env.block.time.seconds(),
@@ -307,8 +301,7 @@ fn query_asset_price(
 
 mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128,
-        WasmQuery,
+        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdResult, Uint128, WasmQuery,
     };
 
     // Once astroport package is published on crates.io, update Cargo.toml and change these to
@@ -317,11 +310,11 @@ mod helpers {
     // use astroport::pair::{...};
     use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
     use crate::astroport::pair::{
-        CumulativePricesResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
+        CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
     };
 
     // See comments for `query_astroport_spot_price`
-    static PROBE_AMOUNT: u128 = 1_000_000;
+    const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
     pub fn diff(a: u64, b: u64) -> u64 {
         if a > b {
@@ -331,26 +324,44 @@ mod helpers {
         }
     }
 
-    /// When calculating Spot price, we simulate a swap be offering PROBE_AMOUNT of the asset of interest,
+    pub fn ust() -> AstroportAssetInfo {
+        AstroportAssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        }
+    }
+
+    /// When calculating Spot price, we simulate a swap by offering PROBE_AMOUNT of the asset of interest,
     /// the find the return amount
     ///
     /// The Spot price is defined as: (return_amount + commission) / PROBE_AMOUNT
     pub fn query_astroport_spot_price(
         querier: &QuerierWrapper,
         pair_address: &Addr,
-        asset_address: &Addr,
     ) -> StdResult<Decimal> {
+        let response: PoolResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: pair_address.to_string(),
+            msg: to_binary(&AstroportQueryMsg::Pool {})?,
+        }))?;
+
+        // to calculate spot price, we offer one of the asset that is not UST, and the offer amount
+        // is PROBE_AMOUNT
+        //
+        // NOTE: here we assume one of the assets in the astroport pair must be UST. a check for this
+        // must be perform when configuring asset price sources
+        let offer_asset_info = if response.assets[0].info == ust() {
+            response.assets[1].info.clone()
+        } else {
+            response.assets[0].info.clone()
+        };
+        let offer_asset = AstroportAsset {
+            info: offer_asset_info,
+            amount: PROBE_AMOUNT,
+        };
+
         let response: SimulationResponse =
             querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
                 contract_addr: pair_address.to_string(),
-                msg: to_binary(&AstroportQueryMsg::Simulation {
-                    offer_asset: AstroportAsset {
-                        info: AstroportAssetInfo::Token {
-                            contract_addr: asset_address.clone(),
-                        },
-                        amount: Uint128::new(PROBE_AMOUNT),
-                    },
-                })?,
+                msg: to_binary(&AstroportQueryMsg::Simulation { offer_asset })?,
             }))?;
 
         Ok(Decimal::from_ratio(
@@ -362,7 +373,6 @@ mod helpers {
     pub fn query_astroport_cumulative_price(
         querier: &QuerierWrapper,
         pair_address: &Addr,
-        asset_address: &Addr,
     ) -> StdResult<Uint128> {
         let response: CumulativePricesResponse =
             querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
@@ -370,24 +380,17 @@ mod helpers {
                 msg: to_binary(&AstroportQueryMsg::CumulativePrices {})?,
             }))?;
 
-        // If the asset matches asset 0 in the pair, then we return `price0_cumulative_last`;
-        // if it matches asset 1, we return `price1_cumulative_last`. If it matches neither,
-        // we throw an error.
-        let asset_index = response.assets.iter().position(|asset| match &asset.info {
-            AstroportAssetInfo::Token { contract_addr } => contract_addr == asset_address,
-            AstroportAssetInfo::NativeToken { .. } => false,
-        });
-
-        match asset_index {
-            Some(index) => {
-                if index == 0 {
-                    Ok(response.price0_cumulative_last)
-                } else {
-                    Ok(response.price1_cumulative_last)
-                }
-            }
-            None => Err(StdError::generic_err("Asset mismatch")),
-        }
+        // if asset0 is UST, we return the cumulative price of asset1; otherwise, return the cumulative
+        // price of asset0
+        //
+        // NOTE: here we assume one of the assets in the astroport pair must be UST. a check for this
+        // must be perform when configuring asset price sources
+        let price_cumulative = if response.assets[0].info == ust() {
+            response.price1_cumulative_last
+        } else {
+            response.price0_cumulative_last
+        };
+        Ok(price_cumulative)
     }
 }
 
@@ -470,7 +473,6 @@ mod tests {
                 },
             };
             let info = mock_info("another_one", &[]);
-
             let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
             assert_eq!(err, StdError::generic_err("Only owner can set asset"));
         }
@@ -490,6 +492,7 @@ mod tests {
                 },
             };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
             let price_config = PRICE_CONFIGS
                 .load(&deps.storage, reference.as_slice())
                 .unwrap();
@@ -514,6 +517,7 @@ mod tests {
                 },
             };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
             let price_config = PRICE_CONFIGS
                 .load(&deps.storage, reference.as_slice())
                 .unwrap();
@@ -526,6 +530,7 @@ mod tests {
         }
 
         // Astroport spot price
+        // TWAP price is quite similar to this so we don't do another separate test
         {
             let asset = Asset::Cw20 {
                 contract_addr: String::from("token"),
@@ -535,10 +540,10 @@ mod tests {
                 asset: asset,
                 price_source: PriceSourceUnchecked::AstroportSpot {
                     pair_address: "pair".to_string(),
-                    asset_address: "asset".to_string(),
                 },
             };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+
             let price_config = PRICE_CONFIGS
                 .load(&deps.storage, reference.as_slice())
                 .unwrap();
@@ -546,7 +551,6 @@ mod tests {
                 price_config.price_source,
                 PriceSourceChecked::AstroportSpot {
                     pair_address: Addr::unchecked("pair"),
-                    asset_address: Addr::unchecked("asset")
                 }
             );
         }

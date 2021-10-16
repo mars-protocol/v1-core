@@ -12,19 +12,16 @@ pub enum PriceSource<A> {
     Fixed { price: Decimal },
     /// Native Terra stablecoins transaction rate quoted in UST
     Native { denom: String },
-    /// Astroport spot price quoted in the other asset of the pair. E.g. For ANC-UST pair, if the
-    /// asset of interest is ANC, the price is quoted in the form or uusd per uANC.
+    /// Astroport spot price quoted in UST
+    ///
+    /// NOTE: `pair_address` must point to an astroport pair consists of the asset of intereset and UST
     AstroportSpot {
         /// Address of the Astroport pair
         pair_address: A,
-        /// Address of the asset of interest
-        ///
-        /// NOTE: Spot price in intended for CW20 tokens. Terra native tokens should use Fixed or
-        /// Native price sources.
-        asset_address: A,
     },
-    /// Astroport TWAP price quoted in the other asset of the pair. E.g. For ANC-UST pair, if the
-    /// asset of interest is ANC, the price is quoted in the form or uusd per uANC.
+    /// Astroport TWAP price quoted in UST
+    ///
+    /// NOTE: `pair_address` must point to an astroport pair consists of the asset of intereset and UST
     AstroportTwap {
         /// Address of the Astroport pair
         pair_address: A,
@@ -32,8 +29,6 @@ pub enum PriceSource<A> {
         ///
         /// NOTE: Spot price in intended for CW20 tokens. Terra native tokens should use Fixed or
         /// Native price sources.
-        asset_address: A,
-        /// The desired amount of time (in seconds) over which the price is to be averaged
         window_size: u64,
         /// When calculating averaged price, we take the most recent TWAP snapshot and find a second
         /// snapshot in the range of window_size +/- tolerance. For example, if window size is 5 minutes
@@ -67,21 +62,17 @@ impl PriceSourceUnchecked {
             PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native {
                 denom: denom.clone(),
             },
-            PriceSourceUnchecked::AstroportSpot {
-                pair_address,
-                asset_address,
-            } => PriceSourceChecked::AstroportSpot {
-                pair_address: api.addr_validate(&pair_address)?,
-                asset_address: api.addr_validate(&asset_address)?,
-            },
+            PriceSourceUnchecked::AstroportSpot { pair_address } => {
+                PriceSourceChecked::AstroportSpot {
+                    pair_address: api.addr_validate(&pair_address)?,
+                }
+            }
             PriceSourceUnchecked::AstroportTwap {
                 pair_address,
-                asset_address,
                 window_size,
                 tolerance,
             } => PriceSourceChecked::AstroportTwap {
                 pair_address: api.addr_validate(&pair_address)?,
-                asset_address: api.addr_validate(&asset_address)?,
                 window_size: window_size.clone(),
                 tolerance: tolerance.clone(),
             },

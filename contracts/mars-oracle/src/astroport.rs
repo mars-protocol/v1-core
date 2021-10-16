@@ -29,8 +29,15 @@ pub mod pair {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
+        Pool {},
         Simulation { offer_asset: Asset },
         CumulativePrices {},
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct PoolResponse {
+        pub assets: [Asset; 2],
+        pub total_share: Uint128,
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
