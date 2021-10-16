@@ -41,30 +41,31 @@ pub enum PriceSource<A> {
     },
 }
 
+impl<A> PriceSource<A> {
+    /// Used for logging
+    pub fn label(&self) -> &str {
+        match self {
+            PriceSource::Fixed { .. } => "fixed",
+            PriceSource::Native { .. } => "native",
+            PriceSource::AstroportSpot { .. } => "astroport_spot",
+            PriceSource::AstroportTwap { .. } => "astroport_twap",
+        }
+    }
+}
+
 pub type PriceSourceUnchecked = PriceSource<String>;
 pub type PriceSourceChecked = PriceSource<Addr>;
 
 impl PriceSourceUnchecked {
-    pub fn to_label(&self) -> &str {
-        match self {
-            PriceSourceUnchecked::Fixed { .. } => "fixed",
-            PriceSourceUnchecked::Native { .. } => "native",
-            PriceSourceUnchecked::AstroportSpot { .. } => "astroport_spot",
-            PriceSourceUnchecked::AstroportTwap { .. } => "astroport_twap",
-        }
-    }
-
     pub fn to_checked(&self, api: &dyn Api) -> StdResult<PriceSourceChecked> {
         Ok(match self {
-            PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed {
-                price: price.clone(),
-            },
+            PriceSourceUnchecked::Fixed { price } => PriceSourceChecked::Fixed { price: *price },
             PriceSourceUnchecked::Native { denom } => PriceSourceChecked::Native {
                 denom: denom.clone(),
             },
             PriceSourceUnchecked::AstroportSpot { pair_address } => {
                 PriceSourceChecked::AstroportSpot {
-                    pair_address: api.addr_validate(&pair_address)?,
+                    pair_address: api.addr_validate(pair_address)?,
                 }
             }
             PriceSourceUnchecked::AstroportTwap {
@@ -72,9 +73,9 @@ impl PriceSourceUnchecked {
                 window_size,
                 tolerance,
             } => PriceSourceChecked::AstroportTwap {
-                pair_address: api.addr_validate(&pair_address)?,
-                window_size: window_size.clone(),
-                tolerance: tolerance.clone(),
+                pair_address: api.addr_validate(pair_address)?,
+                window_size: *window_size,
+                tolerance: *tolerance,
             },
         })
     }

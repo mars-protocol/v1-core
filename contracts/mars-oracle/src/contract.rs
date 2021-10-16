@@ -91,7 +91,7 @@ pub fn execute_set_asset(
     match &price_source {
         PriceSourceChecked::AstroportSpot { pair_address }
         | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
-            assert_astroport_pool_assets(&deps.querier, &asset, &pair_address)?;
+            assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
         }
         _ => (),
     }
@@ -105,7 +105,7 @@ pub fn execute_set_asset(
     Ok(Response::new()
         .add_attribute("action", "set_asset")
         .add_attribute("asset", asset_label)
-        .add_attribute("price_source", price_source_unchecked.to_label()))
+        .add_attribute("price_source", price_source_unchecked.label()))
 }
 
 /// Modified from
