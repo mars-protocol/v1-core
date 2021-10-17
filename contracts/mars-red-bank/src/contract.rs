@@ -7621,6 +7621,112 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_query_user_asset_debt() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = Addr::unchecked("user");
+
+        // Setup markets
+        let cw20_contract_addr_1 = Addr::unchecked("cw20_coin_1");
+        deps.querier
+            .set_cw20_symbol(cw20_contract_addr_1.clone(), "CW20C1".to_string());
+        let market_1_initial = th_init_market(
+            deps.as_mut(),
+            cw20_contract_addr_1.as_bytes(),
+            &Market {
+                asset_type: AssetType::Cw20,
+                borrow_index: Decimal::one(),
+                borrow_rate: Decimal::from_ratio(1u128, 2u128),
+                ..Default::default()
+            },
+        );
+
+        let _market_2_initial = th_init_market(
+            deps.as_mut(),
+            b"native_coin_1",
+            &Market {
+                borrow_index: Decimal::one(),
+                borrow_rate: Decimal::one(),
+                ..Default::default()
+            },
+        );
+
+        // Set first and third market as borrowing assets
+        let mut user = User::default();
+        set_bit(&mut user.borrowed_assets, market_1_initial.index).unwrap();
+        USERS
+            .save(deps.as_mut().storage, &user_addr, &user)
+            .unwrap();
+
+        let env = mock_env(MockEnvParams::default());
+
+        // Save debt for market 1
+        let debt_amount_1 = Uint128::new(1234567u128);
+        let debt_amount_scaled_1 =
+            get_scaled_debt_amount(debt_amount_1, &market_1_initial, env.block.time.seconds())
+                .unwrap();
+        let debt_1 = Debt {
+            amount_scaled: debt_amount_scaled_1,
+            uncollateralized: false,
+        };
+        DEBTS
+            .save(
+                deps.as_mut().storage,
+                (cw20_contract_addr_1.as_bytes(), &user_addr),
+                &debt_1,
+            )
+            .unwrap();
+
+        // Check asset with existing debt
+        {
+            let res = query_user_asset_debt(
+                deps.as_ref(),
+                env.clone(),
+                user_addr.clone(),
+                Asset::Cw20 {
+                    contract_addr: cw20_contract_addr_1.to_string(),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                res,
+                UserAssetDebtResponse {
+                    denom: "CW20C1".to_string(),
+                    asset_label: "cw20_coin_1".to_string(),
+                    asset_reference: cw20_contract_addr_1.as_bytes().to_vec(),
+                    asset_type: AssetType::Cw20,
+                    amount_scaled: debt_amount_scaled_1,
+                    amount: debt_amount_1
+                }
+            );
+        }
+
+        // Check asset with no debt
+        {
+            let res = query_user_asset_debt(
+                deps.as_ref(),
+                env,
+                user_addr,
+                Asset::Native {
+                    denom: "native_coin_1".to_string(),
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                res,
+                UserAssetDebtResponse {
+                    denom: "native_coin_1".to_string(),
+                    asset_label: "native_coin_1".to_string(),
+                    asset_reference: b"native_coin_1".to_vec(),
+                    asset_type: AssetType::Native,
+                    amount_scaled: Uint128::zero(),
+                    amount: Uint128::zero()
+                }
+            );
+        }
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
