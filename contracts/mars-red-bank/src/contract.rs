@@ -7500,6 +7500,127 @@ mod tests {
         assert!(res.collateral[1].enabled);
     }
 
+    #[test]
+    fn test_query_user_debt() {
+        let mut deps = th_setup(&[]);
+
+        let user_addr = Addr::unchecked("user");
+
+        // Setup markets
+        let cw20_contract_addr_1 = Addr::unchecked("cw20_coin_1");
+        deps.querier
+            .set_cw20_symbol(cw20_contract_addr_1.clone(), "CW20C1".to_string());
+        let market_1_initial = th_init_market(
+            deps.as_mut(),
+            cw20_contract_addr_1.as_bytes(),
+            &Market {
+                asset_type: AssetType::Cw20,
+                borrow_index: Decimal::one(),
+                borrow_rate: Decimal::one(),
+                ..Default::default()
+            },
+        );
+
+        let _market_2_initial = th_init_market(
+            deps.as_mut(),
+            b"native_coin_1",
+            &Market {
+                borrow_index: Decimal::one(),
+                borrow_rate: Decimal::one(),
+                ..Default::default()
+            },
+        );
+
+        let market_3_initial = th_init_market(
+            deps.as_mut(),
+            b"native_coin_2",
+            &Market {
+                borrow_index: Decimal::one(),
+                borrow_rate: Decimal::one(),
+                ..Default::default()
+            },
+        );
+
+        // Set first and third market as borrowing assets
+        let mut user = User::default();
+        set_bit(&mut user.borrowed_assets, market_1_initial.index).unwrap();
+        set_bit(&mut user.borrowed_assets, market_3_initial.index).unwrap();
+        USERS
+            .save(deps.as_mut().storage, &user_addr, &user)
+            .unwrap();
+
+        let env = mock_env(MockEnvParams::default());
+
+        // Save debt for market 1
+        let debt_amount_1 = Uint128::new(1234000u128);
+        let debt_amount_scaled_1 =
+            get_scaled_debt_amount(debt_amount_1, &market_1_initial, env.block.time.seconds())
+                .unwrap();
+        let debt_1 = Debt {
+            amount_scaled: debt_amount_scaled_1,
+            uncollateralized: false,
+        };
+        DEBTS
+            .save(
+                deps.as_mut().storage,
+                (cw20_contract_addr_1.as_bytes(), &user_addr),
+                &debt_1,
+            )
+            .unwrap();
+
+        // Save debt for market 3
+        let debt_amount_3 = Uint128::new(2221u128);
+        let debt_amount_scaled_3 =
+            get_scaled_debt_amount(debt_amount_3, &market_3_initial, env.block.time.seconds())
+                .unwrap();
+        let debt_3 = Debt {
+            amount_scaled: debt_amount_scaled_3,
+            uncollateralized: false,
+        };
+        DEBTS
+            .save(
+                deps.as_mut().storage,
+                (b"native_coin_2", &user_addr),
+                &debt_3,
+            )
+            .unwrap();
+
+        let res = query_user_debt(deps.as_ref(), env, user_addr).unwrap();
+        assert_eq!(
+            res.debts[0],
+            UserAssetDebtResponse {
+                denom: "CW20C1".to_string(),
+                asset_label: "cw20_coin_1".to_string(),
+                asset_reference: cw20_contract_addr_1.as_bytes().to_vec(),
+                asset_type: AssetType::Cw20,
+                amount_scaled: debt_amount_scaled_1,
+                amount: debt_amount_1
+            }
+        );
+        assert_eq!(
+            res.debts[1],
+            UserAssetDebtResponse {
+                denom: "native_coin_1".to_string(),
+                asset_label: "native_coin_1".to_string(),
+                asset_reference: b"native_coin_1".to_vec(),
+                asset_type: AssetType::Native,
+                amount_scaled: Uint128::zero(),
+                amount: Uint128::zero()
+            }
+        );
+        assert_eq!(
+            res.debts[2],
+            UserAssetDebtResponse {
+                denom: "native_coin_2".to_string(),
+                asset_label: "native_coin_2".to_string(),
+                asset_reference: b"native_coin_2".to_vec(),
+                asset_type: AssetType::Native,
+                amount_scaled: debt_amount_scaled_3,
+                amount: debt_amount_3
+            }
+        );
+    }
+
     // TEST HELPERS
 
     fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
