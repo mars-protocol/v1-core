@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use crate::math::decimal::Decimal;
 use crate::oracle::msg::QueryMsg;
-use crate::oracle::AssetPriceResponse;
 
 pub struct OracleQuerier {
     pub prices: HashMap<Vec<u8>, Decimal>,
@@ -32,11 +31,7 @@ impl OracleQuerier {
                 let option_price = self.prices.get(&asset_reference);
 
                 if let Some(price) = option_price {
-                    to_binary(&AssetPriceResponse {
-                        price: *price,
-                        last_updated: 0,
-                    })
-                    .into()
+                    to_binary(price).into()
                 } else {
                     Err(format!(
                         "[mock]: could not find oracle price for {}",
