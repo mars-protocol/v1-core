@@ -282,7 +282,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             let asset0_value = asset0_price * pool.assets[0].amount;
 
             let asset1: Asset = (&pool.assets[1].info).into();
-            let asset1_price = query_asset_price(deps, env.clone(), asset1.get_reference())?;
+            let asset1_price = query_asset_price(deps, env, asset1.get_reference())?;
             let asset1_value = asset1_price * pool.assets[1].amount;
 
             let price = Decimal::from_ratio(asset0_value + asset1_value, pool.total_share);
