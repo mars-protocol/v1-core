@@ -1,3 +1,5 @@
+use std::fmt;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -41,15 +43,15 @@ pub enum PriceSource<A> {
     },
 }
 
-impl<A> PriceSource<A> {
-    /// Used for logging
-    pub fn label(&self) -> &str {
-        match self {
+impl<A> fmt::Display for PriceSource<A> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let label = match self {
             PriceSource::Fixed { .. } => "fixed",
             PriceSource::Native { .. } => "native",
             PriceSource::AstroportSpot { .. } => "astroport_spot",
             PriceSource::AstroportTwap { .. } => "astroport_twap",
-        }
+        };
+        write!(f, "{}", label)
     }
 }
 

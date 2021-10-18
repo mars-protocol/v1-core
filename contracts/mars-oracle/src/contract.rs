@@ -105,7 +105,7 @@ pub fn execute_set_asset(
     Ok(Response::new()
         .add_attribute("action", "set_asset")
         .add_attribute("asset", asset_label)
-        .add_attribute("price_source", price_source_unchecked.label()))
+        .add_attribute("price_source", price_source_unchecked.to_string()))
 }
 
 /// Modified from
