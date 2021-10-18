@@ -1128,6 +1128,8 @@ mod tests {
         let ma_asset_user_balance = Uint128::new(10_000);
         let ma_zero_total_supply = Uint128::new(200_000);
         let ma_zero_user_balance = Uint128::new(10_000);
+        let ma_no_user_total_supply = Uint128::new(100_000);
+        let ma_no_user_total_balance = Uint128::zero();
         let time_start = 500_000_u64;
         let time_contract_call = 600_000_u64;
 
@@ -1145,6 +1147,8 @@ mod tests {
             .set_cw20_total_supply(ma_asset_address.clone(), ma_asset_total_supply);
         deps.querier
             .set_cw20_total_supply(ma_zero_address.clone(), ma_zero_total_supply);
+        deps.querier
+            .set_cw20_total_supply(ma_no_user_address.clone(), ma_no_user_total_supply);
         deps.querier.set_cw20_balances(
             ma_asset_address.clone(),
             &[(user_address.clone(), ma_asset_user_balance)],
@@ -1152,6 +1156,10 @@ mod tests {
         deps.querier.set_cw20_balances(
             ma_zero_address.clone(),
             &[(user_address.clone(), ma_zero_user_balance)],
+        );
+        deps.querier.set_cw20_balances(
+            ma_no_user_address.clone(),
+            &[(user_address.clone(), ma_no_user_total_balance)],
         );
 
         // incentives
@@ -1238,6 +1246,15 @@ mod tests {
         )
         .unwrap();
 
+        let expected_ma_no_user_incentive_index = asset_incentive_compute_index(
+            Decimal::one(),
+            Uint128::new(200),
+            ma_no_user_total_supply,
+            time_start,
+            time_contract_call,
+        )
+        .unwrap();
+
         let expected_accrued_rewards = previous_unclaimed_rewards
             + expected_ma_asset_accrued_rewards
             + expected_ma_zero_accrued_rewards;
@@ -1299,7 +1316,7 @@ mod tests {
             ]
         );
 
-        // ma_asset and ma_zero incentives get updated, ma_no_user does not
+        // asset incentives get updated
         let ma_asset_incentive = ASSET_INCENTIVES
             .load(deps.as_ref().storage, &ma_asset_address)
             .unwrap();
@@ -1315,10 +1332,13 @@ mod tests {
         let ma_no_user_incentive = ASSET_INCENTIVES
             .load(deps.as_ref().storage, &ma_no_user_address)
             .unwrap();
-        assert_eq!(ma_no_user_incentive.index, Decimal::one());
-        assert_eq!(ma_no_user_incentive.last_updated, time_start);
+        assert_eq!(
+            ma_no_user_incentive.index,
+            expected_ma_no_user_incentive_index
+        );
+        assert_eq!(ma_no_user_incentive.last_updated, time_contract_call);
 
-        // user's ma_asset and ma_zero indices are updated
+        // user's asset indices get updated
         let user_ma_asset_index = USER_ASSET_INDICES
             .load(deps.as_ref().storage, (&user_address, &ma_asset_address))
             .unwrap();
@@ -1329,11 +1349,10 @@ mod tests {
             .unwrap();
         assert_eq!(user_ma_zero_index, Decimal::one());
 
-        // user's ma_no_user does not get updated
         let user_ma_no_user_index = USER_ASSET_INDICES
-            .may_load(deps.as_ref().storage, (&user_address, &ma_no_user_address))
+            .load(deps.as_ref().storage, (&user_address, &ma_no_user_address))
             .unwrap();
-        assert_eq!(user_ma_no_user_index, None);
+        assert_eq!(user_ma_no_user_index, expected_ma_no_user_incentive_index);
 
         // user rewards are cleared
         let user_unclaimed_rewards = USER_UNCLAIMED_REWARDS
