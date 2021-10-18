@@ -406,7 +406,7 @@ fn execute_set_default_unlock_schedule(
     }
 
     // default unlocked schedule can only be set if it is currently `None`
-    if !config.default_unlock_schedule.is_none() {
+    if config.default_unlock_schedule.is_some() {
         return Err(
             StdError::generic_err("default unlocking schedule can only be set once").into(),
         );
