@@ -13,6 +13,7 @@ use mars_core::error::MarsError;
 
 use mars_core::address_provider::{self, MarsContract};
 use mars_core::staking::msg::ReceiveMsg as MarsStakingReceiveMsg;
+use mars_core::vesting::Schedule;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
 use crate::state::{CONFIG, CURRENT_STAKER, PARAMS, STATUS, VOTING_POWER_SNAPSHOTS};
@@ -53,6 +54,9 @@ pub fn execute(
         ExecuteMsg::Stake {} => execute_stake(deps, env, info),
         ExecuteMsg::Withdraw {} => execute_withdraw(deps, env, info),
         ExecuteMsg::Terminate {} => execute_terminate(deps, env, info),
+        ExecuteMsg::SetDefaultUnlockSchedule {
+            default_unlock_schedule,
+        } => execute_set_default_unlock_schedule(deps, env, info, default_unlock_schedule),
     }
 }
 
@@ -192,7 +196,7 @@ fn execute_stake(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response,
     let mars_vested = helpers::compute_vested_or_unlocked_amount(
         env.block.time.seconds(),
         params.amount,
-        &params.vest_schedule,
+        Some(params.vest_schedule),
     );
     let mars_to_stake = mars_vested - status.mars_staked - status.mars_withdrawn_as_mars;
 
@@ -346,8 +350,11 @@ fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Respo
     let protocol_admin_address = addresses_query.pop().unwrap();
 
     let timestamp = env.block.time.seconds();
-    let mars_vested =
-        helpers::compute_vested_or_unlocked_amount(timestamp, params.amount, &params.vest_schedule);
+    let mars_vested = helpers::compute_vested_or_unlocked_amount(
+        timestamp,
+        params.amount,
+        Some(params.vest_schedule),
+    );
 
     // Refund the unvested MARS tokens to protocol admin
     let mars_to_refund = params.amount - mars_vested;
@@ -376,6 +383,39 @@ fn execute_terminate(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Respo
             "new_vest_duration",
             format!("{}", params.vest_schedule.duration),
         ))
+}
+
+fn execute_set_default_unlock_schedule(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    default_unlock_schedule: Schedule,
+) -> Result<Response, MarsError> {
+    let mut config = CONFIG.load(deps.storage)?;
+
+    // only protocol admin can set default unlock schedule
+    let mut addresses_query = address_provider::helpers::query_addresses(
+        &deps.querier,
+        config.address_provider_address.clone(),
+        vec![MarsContract::ProtocolAdmin],
+    )?;
+    let protocol_admin_address = addresses_query.pop().unwrap();
+
+    if info.sender != protocol_admin_address {
+        return Err(MarsError::Unauthorized {});
+    }
+
+    // default unlocked schedule can only be set if it is currently `None`
+    if config.default_unlock_schedule.is_some() {
+        return Err(
+            StdError::generic_err("default unlocking schedule can only be set once").into(),
+        );
+    }
+
+    config.default_unlock_schedule = Some(default_unlock_schedule);
+    CONFIG.save(deps.storage, &config)?;
+
+    Ok(Response::default())
 }
 
 //----------------------------------------------------------------------------------------
@@ -471,8 +511,15 @@ mod helpers {
     pub fn compute_vested_or_unlocked_amount(
         timestamp: u64,
         amount: Uint128,
-        schedule: &Schedule,
+        schedule: Option<Schedule>,
     ) -> Uint128 {
+        // If the schedule is unset, we return zero
+        let schedule = if let Some(schedule) = schedule {
+            schedule
+        } else {
+            return Uint128::zero();
+        };
+
         // Before the end of cliff period, no token will be vested/unlocked
         if timestamp < schedule.start_time + schedule.cliff {
             Uint128::zero()
@@ -489,16 +536,18 @@ mod helpers {
         timestamp: u64,
         params: &AllocationParams,
         status: &mut AllocationStatus,
-        default_unlock_schedule: Schedule,
+        default_unlock_schedule: Option<Schedule>,
     ) -> SimulateWithdrawResponse {
+        // if the allocation has personalized unlocking schedule, we use it; otherwise, we use the
+        // global default unlocking schedule
         let unlock_schedule = match &params.unlock_schedule {
-            Some(schedule) => schedule,
-            None => &default_unlock_schedule,
+            Some(schedule) => Some(*schedule),
+            None => default_unlock_schedule,
         };
 
         // "Free" amount is the smaller between vested amount and unlocked amount
         let mars_vested =
-            compute_vested_or_unlocked_amount(timestamp, params.amount, &params.vest_schedule);
+            compute_vested_or_unlocked_amount(timestamp, params.amount, Some(params.vest_schedule));
         let mars_unlocked =
             compute_vested_or_unlocked_amount(timestamp, params.amount, unlock_schedule);
 
@@ -642,9 +691,41 @@ mod tests {
             value,
             Config {
                 address_provider_address: Addr::unchecked("address_provider"),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
+                default_unlock_schedule: None,
             }
         )
+    }
+
+    #[test]
+    fn test_set_default_unlock_schedule() {
+        let mut deps = th_setup();
+        let env = mock_env(MockEnvParams::default());
+
+        let msg = ExecuteMsg::SetDefaultUnlockSchedule {
+            default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
+        };
+
+        // non-admin cannot set default unlock schedule
+        let info = mock_info("non-admin");
+        let res = execute(deps.as_mut(), env.clone(), info, msg.clone());
+        assert_eq!(res, Err(MarsError::Unauthorized {}));
+
+        // admin can set default unlock schedule
+        let info = mock_info("protocol_admin");
+        execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap();
+
+        let res = query(deps.as_ref(), env.clone(), QueryMsg::Config {}).unwrap();
+        let value: Config<Addr> = from_binary(&res).unwrap();
+        assert_eq!(value.default_unlock_schedule, Some(DEFAULT_UNLOCK_SCHEDULE));
+
+        // default unlock schedule can only be set once
+        let res = execute(deps.as_mut(), env, info, msg);
+        assert_eq!(
+            res,
+            Err(MarsError::Std(StdError::generic_err(
+                "default unlocking schedule can only be set once"
+            )))
+        );
     }
 
     #[test]
@@ -916,6 +997,17 @@ mod tests {
     fn test_complex_vesting() {
         let mut deps = th_setup();
         let env = mock_env_at_block_height(10000);
+
+        // Set default unlocking schedule
+        execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("protocol_admin"),
+            ExecuteMsg::SetDefaultUnlockSchedule {
+                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
+            },
+        )
+        .unwrap();
 
         // Create allocation
         execute(
@@ -1442,6 +1534,17 @@ mod tests {
         let mut deps = th_setup();
         let env = mock_env(MockEnvParams::default());
 
+        // Set default unlocking schedule
+        execute(
+            deps.as_mut(),
+            env.clone(),
+            mock_info("protocol_admin"),
+            ExecuteMsg::SetDefaultUnlockSchedule {
+                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
+            },
+        )
+        .unwrap();
+
         // Create allocation
         execute(
             deps.as_mut(),
@@ -1651,7 +1754,7 @@ mod tests {
             info,
             InstantiateMsg {
                 address_provider_address: "address_provider".to_string(),
-                default_unlock_schedule: DEFAULT_UNLOCK_SCHEDULE,
+                default_unlock_schedule: None,
             },
         )
         .unwrap();
