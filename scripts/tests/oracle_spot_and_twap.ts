@@ -91,6 +91,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   console.log("deployer:", deployer.key.accAddress);
   console.log("alice:   ", alice.key.accAddress);
   console.log("bob:     ", bob.key.accAddress);
+  console.log("charlie: ", charlie.key.accAddress);
 
   process.stdout.write("deploying anchor token... ");
   const cw20CodeId = await uploadContract(
@@ -160,7 +161,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   astroportPair = result1.logs[0].eventsByType.from_contract.pair_contract_addr[0];
   console.log("success!");
 
-  process.stdout.write("creating astroport ANC-UST pair... ");
+  process.stdout.write("creating astroport LUNA-UST pair... ");
   const result2 = await executeContract(terra, deployer, astroportFactory, {
     create_pair: {
       pair_type: { xyk: {} },
@@ -324,7 +325,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
           pair_address: astroportPair,
           asset_address: anchorToken,
           window_size: 30,
-          tolerance: 10, // will calculate average price over 30 +/- 10 seconds
+          tolerance: 5, // will calculate average price over 30 +/- 5 seconds
         },
       },
     },

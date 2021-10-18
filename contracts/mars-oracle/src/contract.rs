@@ -139,13 +139,23 @@ pub fn execute_record_twap_snapshot(
             .load(deps.storage, &asset_reference)
             .unwrap_or_else(|_| vec![]);
 
-        // Query new price data
+        // A possible attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
+        // very big vector, and calculating the TWAP average price becomes very gas expensive. To
+        // deter this, we reject recording another snapshot if the most recent snapshot is less than
+        // `tolerance` seconds ago
         let timestamp = env.block.time.seconds();
+        if let Some(latest_snapshot) = snapshots.last() {
+            if timestamp - latest_snapshot.timestamp < tolerance {
+                return Err(StdError::generic_err("snapshot recorded too frequently"));
+            }
+        }
+
+        // Query new price data
         let price_cumulative = query_astroport_cumulative_price(&deps.querier, &pair_address)?;
 
         // Purge snapshots that are too old, i.e. more than [window_size + tolerance] away from the
-        // most recent update. These snapshots will never be used in the future for calculating average
-        // prices
+        // most recent update. These snapshots will never be used in the future for calculating
+        // average prices
         snapshots.retain(|snapshot| timestamp - snapshot.timestamp <= window_size + tolerance);
 
         snapshots.push(AstroportTwapSnapshot {
