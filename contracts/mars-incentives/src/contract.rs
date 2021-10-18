@@ -870,6 +870,7 @@ mod tests {
         let mut deps = th_setup(&[]);
         let user_address = Addr::unchecked("user");
 
+        // set cw20 balance for user
         let ma_asset_address = Addr::unchecked("ma_asset");
         let total_supply = Uint128::new(100_000);
         let user_balance = Uint128::new(10_000);
@@ -881,6 +882,7 @@ mod tests {
             &[(user_address.clone(), user_balance)],
         );
 
+        // set asset incentive
         let emission_per_second = Uint128::new(100);
         let asset_incentive_index = Decimal::zero();
         let time_last_updated = 500_000_u64;
@@ -897,18 +899,45 @@ mod tests {
             )
             .unwrap();
 
-        let time_contract_call = 600_000_u64;
-        // 100_000 s * 100 MARS/s * 1/10th cw20 supply
-        let expected_unclaimed_rewards = Uint128::new(1_000_000);
+        // first query
+        {
+            let time_contract_call = 600_000_u64;
+            // 100_000 s * 100 MARS/s * 1/10th cw20 supply
+            let expected_unclaimed_rewards = Uint128::new(1_000_000);
 
-        let env = mars_core::testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(time_contract_call),
-            ..Default::default()
-        });
+            let env = mars_core::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
 
-        let unclaimed_rewards =
-            query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
-        assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
+            let unclaimed_rewards =
+                query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
+            assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
+        }
+
+        // set a different cw20 balance for user
+        let user_balance = Uint128::new(25_000);
+
+        deps.querier.set_cw20_balances(
+            ma_asset_address.clone(),
+            &[(user_address.clone(), user_balance)],
+        );
+
+        // second query
+        {
+            let time_contract_call = 700_000_u64;
+            // 200_000 s * 100 MARS/s * 1/4 cw20 supply
+            let expected_unclaimed_rewards = Uint128::new(5_000_000);
+
+            let env = mars_core::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+
+            let unclaimed_rewards =
+                query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
+            assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
+        }
     }
 
     #[test]
