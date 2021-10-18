@@ -906,8 +906,8 @@ mod tests {
             ..Default::default()
         });
 
-        let (unclaimed_rewards, _) =
-            compute_user_unclaimed_rewards(deps.as_ref(), &env, &user_address).unwrap();
+        let unclaimed_rewards =
+            query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
         assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
     }
 
