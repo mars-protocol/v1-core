@@ -23,13 +23,10 @@ pub fn instantiate(
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
-    // initialize Config
     let config = Config {
         owner: deps.api.addr_validate(&msg.owner)?,
     };
-
     CONFIG.save(deps.storage, &config)?;
-
     Ok(Response::default())
 }
 
@@ -276,6 +273,21 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
 
             Ok(price)
         }
+
+        PriceSourceChecked::AstroportLiquidityToken { pair_address } => {
+            let pool = query_astroport_pool(&deps.querier, &pair_address)?;
+
+            let asset0: Asset = (&pool.assets[0].info).into();
+            let asset0_price = query_asset_price(deps, env.clone(), asset0.get_reference())?;
+            let asset0_value = asset0_price * pool.assets[0].amount;
+
+            let asset1: Asset = (&pool.assets[1].info).into();
+            let asset1_price = query_asset_price(deps, env.clone(), asset1.get_reference())?;
+            let asset1_value = asset1_price * pool.assets[1].amount;
+
+            let price = Decimal::from_ratio(asset0_value + asset1_value, pool.total_share);
+            Ok(price)
+        }
     }
 }
 
@@ -345,13 +357,9 @@ mod helpers {
         asset: &Asset,
         pair_address: &Addr,
     ) -> StdResult<()> {
-        let response: PoolResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: pair_address.to_string(),
-            msg: to_binary(&AstroportQueryMsg::Pool {})?,
-        }))?;
-
-        let asset0: Asset = (&response.assets[0].info).into();
-        let asset1: Asset = (&response.assets[1].info).into();
+        let pool = query_astroport_pool(querier, pair_address)?;
+        let asset0: Asset = (&pool.assets[0].info).into();
+        let asset1: Asset = (&pool.assets[1].info).into();
         let ust: Asset = (&ust()).into();
 
         if (asset0 == ust && &asset1 == asset) || (asset1 == ust && &asset0 == asset) {
@@ -359,6 +367,16 @@ mod helpers {
         } else {
             Err(StdError::generic_err("invalid pair"))
         }
+    }
+
+    pub fn query_astroport_pool(
+        querier: &QuerierWrapper,
+        pair_address: &Addr,
+    ) -> StdResult<PoolResponse> {
+        querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: pair_address.to_string(),
+            msg: to_binary(&AstroportQueryMsg::Pool {})?,
+        }))
     }
 
     /// When calculating Spot price, we simulate a swap by offering PROBE_AMOUNT of the asset of interest,

@@ -37,6 +37,7 @@ const charlie = terra.wallets.test4; // charlies is a bot who calls the function
 let anchorToken: string;
 let astroportFactory: string;
 let astroportPair: string;
+let astroportLiquidityToken: string;
 let oracle: string;
 
 // HELPERS
@@ -72,17 +73,17 @@ async function recordTwapSnapshot() {
   return { timestamp, cumulativePrice };
 }
 
-async function assertAnchorTokenPrice(expectedPrice: number) {
+async function assertOraclePrice(token: string, expectedPrice: string) {
   const price: string = await queryContract(terra, oracle, {
     asset_price: {
       asset: {
         cw20: {
-          contract_addr: anchorToken,
+          contract_addr: token,
         },
       },
     },
   });
-  strictEqual(parseFloat(price), expectedPrice);
+  strictEqual(price, expectedPrice);
 }
 
 // MAIN
@@ -159,6 +160,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
     },
   });
   astroportPair = result1.logs[0].eventsByType.from_contract.pair_contract_addr[0];
+  astroportLiquidityToken = result1.logs[0].eventsByType.from_contract.liquidity_token_addr[0];
   console.log("success!");
 
   process.stdout.write("creating astroport LUNA-UST pair... ");
@@ -237,7 +239,6 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
         price_source: {
           astroport_spot: {
             pair_address: astroportPair2, // we set price source for ANC but use the addr of LUNA-UST pair
-            asset_address: anchorToken,
           },
         },
       },
@@ -256,7 +257,40 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
       price_source: {
         astroport_spot: {
           pair_address: astroportPair,
-          asset_address: anchorToken,
+        },
+      },
+    },
+  });
+  console.log("success!");
+
+  process.stdout.write("configure UST price source... ");
+  await executeContract(terra, deployer, oracle, {
+    set_asset: {
+      asset: {
+        native: {
+          denom: "uusd",
+        },
+      },
+      price_source: {
+        fixed: {
+          price: "1",
+        },
+      },
+    },
+  });
+  console.log("success!");
+
+  process.stdout.write("configure liquidity token price source... ");
+  await executeContract(terra, deployer, oracle, {
+    set_asset: {
+      asset: {
+        cw20: {
+          contract_addr: astroportLiquidityToken,
+        },
+      },
+      price_source: {
+        astroport_liquidity_token: {
+          pair_address: astroportPair,
         },
       },
     },
@@ -272,7 +306,17 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   // spotPrice = returnAmount / probeAmount = 6000000 / 1000000 = 6
   // we see the spot price is slightly less than the simple quotient (420 / 69 = 6.087) due to slippage
   process.stdout.write("querying spot price... ");
-  await assertAnchorTokenPrice(6);
+  await assertOraclePrice(anchorToken, "6");
+  console.log("success!");
+
+  // uanc price: 6 uusd
+  // uanc depth = 69000000
+  // uusd price: 1 uusd
+  // uusd depth = 420000000
+  // liquidity token supply = sqrt(69000000 * 420000000) = 170235131
+  // liquidity token price = (6 * 69000000 + 1 * 420000000) / 170235131 = 4.89910628376700929(0)
+  process.stdout.write("querying liquidity token price... ");
+  await assertOraclePrice(astroportLiquidityToken, "4.89910628376700929");
   console.log("success!");
 
   // bob swap 1000000 uANC for uusd
@@ -309,7 +353,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   // = 5831240
   // spotPrice = returnAmount / probeAmount = 5831240 / 1000000 = 5.83124
   process.stdout.write("querying spot price... ");
-  await assertAnchorTokenPrice(5.83124);
+  await assertOraclePrice(anchorToken, "5.83124");
   console.log("success!");
 
   process.stdout.write("configuring TWAP price source... ");
@@ -340,7 +384,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
 
   // currently there is one snapshot, so querying price should fail
   process.stdout.write("expecting price query to fail... ");
-  await expectPromiseToFail(assertAnchorTokenPrice(0));
+  await expectPromiseToFail(assertOraclePrice(anchorToken, "0"));
   console.log("success!");
 
   process.stdout.write("recoding TWAP snapshot... ");
@@ -349,7 +393,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
 
   // currently there are two snapshots, but their timestamps are too close, so query should still fail
   process.stdout.write("expecting price query to fail... ");
-  await expectPromiseToFail(assertAnchorTokenPrice(0));
+  await expectPromiseToFail(assertOraclePrice(anchorToken, "0"));
   console.log("success!");
 
   // execute 3 swaps, and take a snapshot after each one
@@ -388,8 +432,11 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   // snapshots 4 & current: 15 seconds
   // snapshots 5 & current: 5 seconds
   // snapshots 6 & current: 0 seconds
+  //
   // blocks 1, 2, 3 are within the tolerable window (30 +/- 10), within which 2 and 3 have the smallest
   // deviation from the desired window size. in this case the older snapshot is used
+  //
+  // in experience, the correct result should be 1 uanc = 5.6 uusd
   snapshots.sort((a, b) => {
     let diffA = diff(snapshotEnd.timestamp - a.timestamp, 30);
     let diffB = diff(snapshotEnd.timestamp - b.timestamp, 30);
@@ -404,7 +451,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   const expectedPrice = cumPriceDelta / period;
 
   process.stdout.write("querying TWAP average price... ");
-  await assertAnchorTokenPrice(expectedPrice);
+  await assertOraclePrice(anchorToken, expectedPrice.toString());
   console.log("success!");
 
   console.log("OK");
