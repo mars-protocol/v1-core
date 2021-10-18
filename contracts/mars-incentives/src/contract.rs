@@ -121,7 +121,7 @@ pub fn execute_set_asset_incentive(
     ASSET_INCENTIVES.save(deps.storage, &ma_asset_address, &new_asset_incentive)?;
 
     let response = Response::new().add_attributes(vec![
-        attr("action", "set_asset_incentives"),
+        attr("action", "set_asset_incentive"),
         attr("ma_asset", ma_token_address),
         attr("emission_per_second", emission_per_second),
     ]);
@@ -561,7 +561,7 @@ mod tests {
         assert_eq!(
             res.attributes,
             vec![
-                attr("action", "set_asset_incentives"),
+                attr("action", "set_asset_incentive"),
                 attr("ma_asset", "ma_asset"),
                 attr("emission_per_second", "100"),
             ]
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(
             res.attributes,
             vec![
-                attr("action", "set_asset_incentives"),
+                attr("action", "set_asset_incentive"),
                 attr("ma_asset", "ma_asset"),
                 attr("emission_per_second", "200"),
             ]
