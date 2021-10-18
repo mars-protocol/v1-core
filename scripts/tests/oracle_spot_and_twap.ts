@@ -14,12 +14,6 @@ import { queryBalanceCw20, queryBalanceNative } from "./test_helpers.js";
 
 // TYPES
 
-// mars_core::oracle::AssetPriceResponse
-type AssetPriceResponse = {
-  price: string;
-  last_updated: number;
-};
-
 type Snapshot = {
   timestamp: number;
   cumulativePrice: number;
@@ -74,14 +68,12 @@ async function recordTwapSnapshot() {
     },
   });
   const timestamp = parseInt(result.logs[0].eventsByType.from_contract.timestamp[0]);
-  const cumulativePrice = parseInt(
-    result.logs[0].eventsByType.from_contract.price_cumulative[0]
-  );
+  const cumulativePrice = parseInt(result.logs[0].eventsByType.from_contract.price_cumulative[0]);
   return { timestamp, cumulativePrice };
 }
 
 async function assertAnchorTokenPrice(expectedPrice: number) {
-  const response: AssetPriceResponse = await queryContract(terra, oracle, {
+  const price: string = await queryContract(terra, oracle, {
     asset_price: {
       asset: {
         cw20: {
@@ -90,8 +82,7 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
       },
     },
   });
-  const price = parseFloat(response.price);
-  strictEqual(price, expectedPrice);
+  strictEqual(parseFloat(price), expectedPrice);
 }
 
 // MAIN
@@ -384,16 +375,20 @@ async function assertAnchorTokenPrice(expectedPrice: number) {
   snapshots.push(await recordTwapSnapshot());
   console.log("success!");
 
-  // we have taken 6 snapshots. Localterra uses ~5 seconds per block. therefore, snapshots 1-5 should
-  // have the following periods:
-  // snapshots 1 & 6: 40 seconds
-  // snapshots 2 & 6: 35 seconds (1 & 2 are in consecutive blocks, so 5 seconds apart)
-  // snapshots 3 & 6: 25 seconds (2 & 3 are 2 blocks apart so 10 seconds)
-  // snapshots 4 & 6: 15 seconds
-  // snapshots 5 & 6: 5 seconds
+  // we have taken 6 snapshots. we query the average price immediately after the 6th snapshot was
+  // taken, so the timestamp and cumulative price at the time of our query should be the same as the
+  // 6th snapshot
+  const snapshotEnd = snapshots[5];
+
+  // Localterra uses ~5 seconds per block. therefore, the snapshots should have the following periods:
+  // snapshots 1 & current: 40 seconds
+  // snapshots 2 & current: 35 seconds (1 & 2 are in consecutive blocks, so 5 seconds apart)
+  // snapshots 3 & current: 25 seconds (2 & 3 are 2 blocks apart so 10 seconds)
+  // snapshots 4 & current: 15 seconds
+  // snapshots 5 & current: 5 seconds
+  // snapshots 6 & current: 0 seconds
   // blocks 1, 2, 3 are within the tolerable window (30 +/- 10), within which 2 and 3 have the smallest
   // deviation from the desired window size. in this case the older snapshot is used
-  const snapshotEnd = snapshots.pop() as Snapshot;
   snapshots.sort((a, b) => {
     let diffA = diff(snapshotEnd.timestamp - a.timestamp, 30);
     let diffB = diff(snapshotEnd.timestamp - b.timestamp, 30);

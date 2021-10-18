@@ -10,10 +10,7 @@ use mars_core::math::decimal::Decimal;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{ASTROPORT_TWAP_SNAPSHOTS, CONFIG, PRICE_CONFIGS};
-use crate::{
-    AssetPriceResponse, AstroportTwapSnapshot, Config, PriceConfig, PriceSourceChecked,
-    PriceSourceUnchecked,
-};
+use crate::{AstroportTwapSnapshot, Config, PriceConfig, PriceSourceChecked, PriceSourceUnchecked};
 
 use self::helpers::*;
 
@@ -178,8 +175,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
         QueryMsg::AssetConfig { asset } => to_binary(&query_asset_config(deps, env, asset)?),
         QueryMsg::AssetPrice { asset } => {
-            let asset_reference = asset.get_reference();
-            to_binary(&query_asset_price(deps, env, asset_reference)?)
+            to_binary(&query_asset_price(deps, env, asset.get_reference())?)
         }
         QueryMsg::AssetPriceByReference { asset_reference } => {
             to_binary(&query_asset_price(deps, env, asset_reference)?)
@@ -196,18 +192,11 @@ fn query_asset_config(deps: Deps, _env: Env, asset: Asset) -> StdResult<PriceCon
     PRICE_CONFIGS.load(deps.storage, &asset_reference)
 }
 
-fn query_asset_price(
-    deps: Deps,
-    env: Env,
-    asset_reference: Vec<u8>,
-) -> StdResult<AssetPriceResponse> {
+fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResult<Decimal> {
     let price_config = PRICE_CONFIGS.load(deps.storage, &asset_reference)?;
 
     match price_config.price_source {
-        PriceSourceChecked::Fixed { price } => Ok(AssetPriceResponse {
-            price,
-            last_updated: env.block.time.seconds(),
-        }),
+        PriceSourceChecked::Fixed { price } => Ok(price),
 
         PriceSourceChecked::Native { denom } => {
             let terra_querier = TerraQuerier::new(&deps.querier);
@@ -221,87 +210,67 @@ fn query_asset_price(
                 .pop();
 
             match asset_prices_query {
-                Some(exchange_rate_item) => Ok(AssetPriceResponse {
-                    price: exchange_rate_item.exchange_rate.into(),
-                    last_updated: env.block.time.seconds(),
-                }),
+                Some(exchange_rate_item) => Ok(exchange_rate_item.exchange_rate.into()),
                 None => Err(StdError::generic_err("No native price found")),
             }
         }
 
-        // NOTE:
+        // NOTE: Spot price is defined as the amount of UST to be returned when swapping x amount of
+        // the asset of interest, divided by the amount. The said amount is defined by the
+        // `PROBE_AMOUNT` constant. In this implementation, PROBE_AMOUNT = 1,000,000. For example,
+        // for MARS-UST pair, if swapping 1,000,000 umars returns 1,200,000 uusd (return amount plus
+        // commission), then 1 MARS = 1.2 UST.
         //
-        // 1) Spot price is defined as the amount of the other asset in the pair to be
-        // returned when swapping x units of the asset, divided by x. In this implementation,
-        // x = 1,000,000. For example, for MARS-UST pair, if swapping 1,000,000 uMARS returns
-        // 1,200,000 uusd (return amount plus commission), then 1 MARS = 1.2 UST.
-        //
-        // 2) Why not just take the quotient of the two assets reserves, for example if the
-        // pool has 120 UST and 100 MARS, then 1 MARS = 1.2 UST? Because this only works for
-        // XY-K pools, not StableSwap pools.
-        //
-        // 3) The price is quoted in the other asset in the pair. For example, for MARS-UST
-        // pair, the price of MARS is quoted in UST; for bLUNA-LUNA pair, the price of bLUNA
-        // is quoted in LUNA.
+        // Why not just take the quotient of the two assets reserves, for example if the pool has
+        // 120 UST and 100 MARS, then 1 MARS = 1.2 UST? Because this only works for XYK pools, not
+        // StableSwap pools.
         PriceSourceChecked::AstroportSpot { pair_address } => {
-            let price = query_astroport_spot_price(&deps.querier, &pair_address)?;
-            Ok(AssetPriceResponse {
-                price: price.into(), // cast cosmwasm_std::Decimal to mars_core::math::decimal::Decimal
-                last_updated: env.block.time.seconds(),
-            })
+            query_astroport_spot_price(&deps.querier, &pair_address)
         }
 
         PriceSourceChecked::AstroportTwap {
+            pair_address,
             window_size,
             tolerance,
-            ..
         } => {
             let mut snapshots = ASTROPORT_TWAP_SNAPSHOTS.load(deps.storage, &asset_reference)?;
 
-            // First we grab the most recent snapshot and remove it from the vector
-            let latest_snapshot = snapshots.last().unwrap().clone();
-            snapshots.pop();
-
-            // Among the test, we find the ones that are within [window_size +/- tolerance] from the
-            // most recent snapshot
-            snapshots.retain(|snapshot| {
-                diff(latest_snapshot.timestamp - snapshot.timestamp, window_size) <= tolerance
-            });
-
-            if snapshots.is_empty() {
-                return Err(StdError::generic_err("no snapshot within tolerable window"));
-            }
-
-            // We then sort all snapshot by the difference between their period and the desired window
-            // and take the once whose difference is the smallest
-            snapshots.sort_by(|a, b| {
-                let diff_a = diff(latest_snapshot.timestamp - a.timestamp, window_size);
-                let diff_b = diff(latest_snapshot.timestamp - b.timestamp, window_size);
-                diff_a.cmp(&diff_b)
-            });
-            let earlier_snapshot = &snapshots[0];
-
-            // Handle the case if Astroport's cumulative price overflows. In this case, cumulative price
-            // of the latest snapshot warps back to zero
-            let period = latest_snapshot.timestamp - earlier_snapshot.timestamp;
-            let price = if latest_snapshot.price_cumulative >= earlier_snapshot.price_cumulative {
-                Decimal::from_ratio(
-                    latest_snapshot.price_cumulative - earlier_snapshot.price_cumulative,
-                    period,
-                )
-            } else {
-                Decimal::from_ratio(
-                    latest_snapshot
-                        .price_cumulative
-                        .checked_add(Uint128::MAX - earlier_snapshot.price_cumulative)?,
-                    period,
-                )
+            // First, query the current TWAP snapshot
+            let current_snapshot = AstroportTwapSnapshot {
+                timestamp: env.block.time.seconds(),
+                price_cumulative: query_astroport_cumulative_price(&deps.querier, &pair_address)?,
             };
 
-            Ok(AssetPriceResponse {
-                price,
-                last_updated: latest_snapshot.timestamp,
-            })
+            // We then sort all snapshot by the difference between their period and the desired
+            // window and take the one whose difference is the smallest
+            snapshots.sort_by(|a, b| {
+                let diff_a = diff(current_snapshot.timestamp - a.timestamp, window_size);
+                let diff_b = diff(current_snapshot.timestamp - b.timestamp, window_size);
+                diff_a.cmp(&diff_b)
+            });
+            let previous_snapshot = &snapshots[0];
+
+            // the selected snapshot must be within the tolerable window
+            let period = current_snapshot.timestamp - previous_snapshot.timestamp;
+            if diff(period, window_size) > tolerance {
+                return Err(StdError::generic_err("no TWAP snapshot within tolerance"));
+            }
+
+            // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
+            // price of the latest snapshot warps back to zero (same behavior as in Solidity)
+            //
+            // This assumes the cumulative price doesn't overflows more than once during the period,
+            // which in practice should never happen
+            let price_delta =
+                if current_snapshot.price_cumulative >= previous_snapshot.price_cumulative {
+                    current_snapshot.price_cumulative - previous_snapshot.price_cumulative
+                } else {
+                    current_snapshot
+                        .price_cumulative
+                        .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
+                };
+
+            Ok(Decimal::from_ratio(price_delta, period))
         }
     }
 }
@@ -310,10 +279,11 @@ fn query_asset_price(
 
 mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, Decimal, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128,
-        WasmQuery,
+        to_binary, Addr, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
     };
+
     use mars_core::asset::Asset;
+    use mars_core::math::decimal::Decimal;
 
     // Once astroport package is published on crates.io, update Cargo.toml and change these to
     // use astroport::asset::{...};
@@ -598,7 +568,7 @@ mod tests {
             .unwrap();
 
         let env = mock_env(MockEnvParams::default());
-        let response: AssetPriceResponse = from_binary(
+        let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
                 env,
@@ -610,7 +580,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(response.price, Decimal::from_ratio(3_u128, 2_u128));
+        assert_eq!(price, Decimal::from_ratio(3_u128, 2_u128));
     }
 
     #[test]
@@ -639,7 +609,7 @@ mod tests {
             .unwrap();
 
         let env = mock_env(MockEnvParams::default());
-        let response: AssetPriceResponse = from_binary(
+        let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
                 env,
@@ -651,7 +621,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(response.price, Decimal::from_ratio(4_u128, 1_u128));
+        assert_eq!(price, Decimal::from_ratio(4_u128, 1_u128));
     }
 
     // TEST_HELPERS
