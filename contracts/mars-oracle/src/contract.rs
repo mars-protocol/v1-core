@@ -110,6 +110,7 @@ pub fn execute_record_twap_snapshot(
     _info: MessageInfo,
     assets: Vec<Asset>,
 ) -> StdResult<Response> {
+    let timestamp = env.block.time.seconds();
     let mut attrs: Vec<Attribute> = vec![];
 
     for asset in assets {
@@ -140,7 +141,9 @@ pub fn execute_record_twap_snapshot(
         // very big vector, and calculating the TWAP average price becomes very gas expensive. To
         // deter this, we reject recording another snapshot if the most recent snapshot is less than
         // `tolerance` seconds ago
-        let timestamp = env.block.time.seconds();
+        //
+        // NOTE: adding this block causes LocalTerra gas estimation to fail with error 400, but if
+        // manually setting gas limit, the tx run just fine. ???
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
                 return Err(StdError::generic_err("snapshot taken too frequently"));
