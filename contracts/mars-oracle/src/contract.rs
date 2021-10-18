@@ -146,7 +146,7 @@ pub fn execute_record_twap_snapshot(
         let timestamp = env.block.time.seconds();
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
-                return Err(StdError::generic_err("snapshot recorded too frequently"));
+                return Err(StdError::generic_err("snapshot taken too frequently"));
             }
         }
 
@@ -243,7 +243,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             window_size,
             tolerance,
         } => {
-            let mut snapshots = ASTROPORT_TWAP_SNAPSHOTS.load(deps.storage, &asset_reference)?;
+            let snapshots = ASTROPORT_TWAP_SNAPSHOTS.load(deps.storage, &asset_reference)?;
 
             // First, query the current TWAP snapshot
             let current_snapshot = AstroportTwapSnapshot {
@@ -251,20 +251,12 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
                 price_cumulative: query_astroport_cumulative_price(&deps.querier, &pair_address)?,
             };
 
-            // We then sort all snapshot by the difference between their period and the desired
-            // window and take the one whose difference is the smallest
-            snapshots.sort_by(|a, b| {
-                let diff_a = diff(current_snapshot.timestamp - a.timestamp, window_size);
-                let diff_b = diff(current_snapshot.timestamp - b.timestamp, window_size);
-                diff_a.cmp(&diff_b)
-            });
-            let previous_snapshot = &snapshots[0];
-
-            // the selected snapshot must be within the tolerable window
-            let period = current_snapshot.timestamp - previous_snapshot.timestamp;
-            if diff(period, window_size) > tolerance {
-                return Err(StdError::generic_err("no TWAP snapshot within tolerance"));
-            }
+            // Find the first snapshot whose period from current snapshot is within the tolerable window
+            // We do this by a linear search, and quit as soon as we find one; otherwise throw error
+            let previous_snapshot = snapshots
+                .iter()
+                .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
+                .ok_or_else(|| StdError::generic_err("no TWAP snapshot within tolerance"))?;
 
             // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
             // price of the latest snapshot warps back to zero (same behavior as in Solidity)
@@ -279,8 +271,10 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
                         .price_cumulative
                         .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
                 };
+            let period = current_snapshot.timestamp - previous_snapshot.timestamp;
+            let price = Decimal::from_ratio(price_delta, period);
 
-            Ok(Decimal::from_ratio(price_delta, period))
+            Ok(price)
         }
     }
 }
@@ -294,6 +288,7 @@ mod helpers {
 
     use mars_core::asset::Asset;
     use mars_core::math::decimal::Decimal;
+    use mars_core::oracle::AstroportTwapSnapshot;
 
     // Once astroport package is published on crates.io, update Cargo.toml and change these to
     // use astroport::asset::{...};
@@ -313,6 +308,15 @@ mod helpers {
         } else {
             b - a
         }
+    }
+
+    // Calculate how much the period between two TWAP snapshots deviates from the desired window size
+    pub fn period_diff(
+        snapshot1: &AstroportTwapSnapshot,
+        snapshot2: &AstroportTwapSnapshot,
+        window_size: u64,
+    ) -> u64 {
+        diff(diff(snapshot1.timestamp, snapshot2.timestamp), window_size)
     }
 
     pub fn ust() -> AstroportAssetInfo {
