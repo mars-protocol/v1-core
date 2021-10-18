@@ -9,12 +9,18 @@ pub struct Config<T> {
     /// Address provider address
     pub address_provider_address: T,
     /// By default, unlocking starts at Mars launch, with a cliff of 6 months and a duration of 36 months.
-    /// If not specified, all allocations use this default schedule
-    pub default_unlock_schedule: Schedule,
+    ///
+    /// An allocation can have personalized unlocking schedule, but if that is not specified, will use
+    /// this global default schedule instead.
+    ///
+    /// If the global default schedule is not known at contract instantiation (e.g. if vesting contract
+    /// needs to be deployed earlier than the other components of the protocol), then set this to None
+    /// in `InstantiationMsg`.
+    pub default_unlock_schedule: Option<Schedule>,
 }
 
 // Parameters describing a typical vesting/unlocking schedule
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Schedule {
     /// Timestamp of when vesting/unlocking is to be started (in seconds)
     pub start_time: u64,
@@ -110,7 +116,7 @@ pub mod msg {
 
     use cw20::Cw20ReceiveMsg;
 
-    use super::{AllocationParams, Config};
+    use super::{AllocationParams, Config, Schedule};
 
     pub type InstantiateMsg = Config<String>;
 
@@ -125,6 +131,10 @@ pub mod msg {
         Withdraw {},
         /// Give up allocation, refund all unvested tokens to `config.fallback_recipient`
         Terminate {},
+        /// If the global default unlocking schedule is set to None at instantiation, the protocol
+        /// admin can update it. However, it the value is set, then it cannot be set again. In other
+        /// words, only None -> Some(..), not Some(..) -> Some(..)
+        SetDefaultUnlockSchedule { default_unlock_schedule: Schedule },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
