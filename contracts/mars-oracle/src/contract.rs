@@ -81,7 +81,7 @@ pub fn execute_set_asset(
     let price_source = price_source_unchecked.to_checked(deps.api)?;
 
     // for spot and TWAP sources, we must make sure: the astroport pair indicated by `pair_address`
-    // must consists of UST and the asset of interest
+    // consists of UST and the asset of interest
     match &price_source {
         PriceSourceChecked::AstroportSpot { pair_address }
         | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
@@ -118,9 +118,6 @@ pub fn execute_record_twap_snapshot(
         let price_config = PRICE_CONFIGS.load(deps.storage, &asset_reference)?;
 
         // Asset must be configured to use TWAP price source
-        //
-        // This block of code is really ugly because the same variable names are typed three times.
-        // Is there a cleaner syntax?
         let (pair_address, window_size, tolerance) = match price_config.price_source {
             PriceSourceChecked::AstroportTwap {
                 pair_address,
@@ -137,13 +134,13 @@ pub fn execute_record_twap_snapshot(
             .load(deps.storage, &asset_reference)
             .unwrap_or_else(|_| vec![]);
 
-        // A possible attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
-        // very big vector, and calculating the TWAP average price becomes very gas expensive. To
-        // deter this, we reject recording another snapshot if the most recent snapshot is less than
-        // `tolerance` seconds ago
+        // A potential attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
+        // very big vector, so that calculating the average price becomes extremely gas expensive.
+        // To deter this, we reject a new snapshot if the most recent snapshot is less than `tolerance`
+        // seconds ago
         //
         // NOTE: adding this block causes LocalTerra gas estimation to fail with error 400, but if
-        // manually setting gas limit, the tx run just fine. ???
+        // manually setting gas limit, the tx runs just fine. ???
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
                 return Err(StdError::generic_err("snapshot taken too frequently"));
@@ -153,8 +150,8 @@ pub fn execute_record_twap_snapshot(
         // Query new price data
         let price_cumulative = query_astroport_cumulative_price(&deps.querier, &pair_address)?;
 
-        // Purge snapshots that are too old, i.e. more than [window_size + tolerance] away from the
-        // most recent update. These snapshots will never be used in the future for calculating
+        // Purge snapshots that are too old, i.e. more than (window_size + tolerance) away from the
+        // current timestamp. These snapshots will never be used in the future for calculating
         // average prices
         snapshots.retain(|snapshot| timestamp - snapshot.timestamp <= window_size + tolerance);
 
@@ -225,15 +222,15 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             }
         }
 
-        // NOTE: Spot price is defined as the amount of UST to be returned when swapping x amount of
-        // the asset of interest, divided by the amount. The said amount is defined by the
-        // `PROBE_AMOUNT` constant. In this implementation, PROBE_AMOUNT = 1,000,000. For example,
-        // for MARS-UST pair, if swapping 1,000,000 umars returns 1,200,000 uusd (return amount plus
-        // commission), then 1 MARS = 1.2 UST.
+        // NOTE: Spot price is defined as the amount of UST to be returned when swapping `PROBE_AMOUNT`
+        // of the asset of interest, divided by `PROBE_AMOUNT`. In the current implementation,
+        // `PROBE_AMOUNT` is set to 1,000,000.
         //
-        // Why not just take the quotient of the two assets reserves, for example if the pool has
-        // 120 UST and 100 MARS, then 1 MARS = 1.2 UST? Because this only works for XYK pools, not
-        // StableSwap pools.
+        // For example, for MARS-UST pair, if swapping 1,000,000 umars returns 1,200,000 uusd (return
+        // amount plus commission), then 1 MARS = 1.2 UST.
+        //
+        // Why not just take the quotient of the two assets depths? (E.g. if the pool has 120 UST and
+        // 100 MARS, then 1 MARS = 1.2 UST) Because this only works for XYK pools, not StableSwap pools.
         PriceSourceChecked::AstroportSpot { pair_address } => {
             query_astroport_spot_price(&deps.querier, &pair_address)
         }
@@ -251,18 +248,19 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
                 price_cumulative: query_astroport_cumulative_price(&deps.querier, &pair_address)?,
             };
 
-            // Find the first snapshot whose period from current snapshot is within the tolerable window
-            // We do this by a linear search, and quit as soon as we find one; otherwise throw error
+            // Find the oldest snapshot whose period from current snapshot is within the tolerable window
+            // We do this using a linear search, and quit as soon as we find one; otherwise throw error
             let previous_snapshot = snapshots
                 .iter()
                 .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
                 .ok_or_else(|| StdError::generic_err("no TWAP snapshot within tolerance"))?;
 
             // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
-            // price of the latest snapshot warps back to zero (same behavior as in Solidity)
+            // price warps back to zero, resulting in more recent cum. prices being smaller than
+            // earlier ones. (same behavior as in Solidity)
             //
-            // This assumes the cumulative price doesn't overflows more than once during the period,
-            // which in practice should never happen
+            // Calculations below assumes the cumulative price doesn't overflows more than once during
+            // the period, which should always be the case in practice
             let price_delta =
                 if current_snapshot.price_cumulative >= previous_snapshot.price_cumulative {
                     current_snapshot.price_cumulative - previous_snapshot.price_cumulative
@@ -277,6 +275,10 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             Ok(price)
         }
 
+        // The value of each unit of the liquidity token is the total value of pool's two assets
+        // divided by the liquidity token's total supply
+        //
+        // NOTE: Price sources must exist for both assets in the pool
         PriceSourceChecked::AstroportLiquidityToken { pair_address } => {
             let pool = query_astroport_pool(&deps.querier, &pair_address)?;
 
@@ -305,7 +307,7 @@ mod helpers {
     use mars_core::math::decimal::Decimal;
     use mars_core::oracle::AstroportTwapSnapshot;
 
-    // Once astroport package is published on crates.io, update Cargo.toml and change these to
+    // Once astroport package is published on crates.io, update Cargo.toml and change these lines to
     // use astroport::asset::{...};
     // and
     // use astroport::pair::{...};
@@ -314,7 +316,6 @@ mod helpers {
         CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
     };
 
-    // See comments for `query_astroport_spot_price`
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
     pub fn diff(a: u64, b: u64) -> u64 {
@@ -325,7 +326,7 @@ mod helpers {
         }
     }
 
-    // Calculate how much the period between two TWAP snapshots deviates from the desired window size
+    /// Calculate how much the period between two TWAP snapshots deviates from the desired window size
     pub fn period_diff(
         snapshot1: &AstroportTwapSnapshot,
         snapshot2: &AstroportTwapSnapshot,
@@ -382,10 +383,6 @@ mod helpers {
         }))
     }
 
-    /// When calculating Spot price, we simulate a swap by offering PROBE_AMOUNT of the asset of interest,
-    /// the find the return amount
-    ///
-    /// The Spot price is defined as: (return_amount + commission) / PROBE_AMOUNT
     pub fn query_astroport_spot_price(
         querier: &QuerierWrapper,
         pair_address: &Addr,
@@ -395,11 +392,9 @@ mod helpers {
             msg: to_binary(&AstroportQueryMsg::Pool {})?,
         }))?;
 
-        // to calculate spot price, we offer one of the asset that is not UST, and the offer amount
-        // is PROBE_AMOUNT
-        //
-        // NOTE: here we assume one of the assets in the astroport pair must be UST. a check for this
-        // must be perform when configuring asset price sources
+        // During the configuration of the price source, we have asserted that the pool indeed consists
+        // of UST and the asset of interest
+        // Here,  we use the one asset in the pool that is *not* UST as `offer_asset` to simulate the swap
         let offer_asset_info = if response.assets[0].info == ust() {
             response.assets[1].info.clone()
         } else {
@@ -432,11 +427,9 @@ mod helpers {
                 msg: to_binary(&AstroportQueryMsg::CumulativePrices {})?,
             }))?;
 
-        // if asset0 is UST, we return the cumulative price of asset1; otherwise, return the cumulative
-        // price of asset0
-        //
-        // NOTE: here we assume one of the assets in the astroport pair must be UST. a check for this
-        // must be perform when configuring asset price sources
+        // during the configuration of the price source, we have asserted that the pool indeed consists
+        // of UST and the asset of interest.
+        // Here, we return cumulative price of the one asset in the pool that is *not* UST
         let price_cumulative = if response.assets[0].info == ust() {
             response.price1_cumulative_last
         } else {
