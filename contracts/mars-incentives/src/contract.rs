@@ -1129,7 +1129,7 @@ mod tests {
         let ma_zero_total_supply = Uint128::new(200_000);
         let ma_zero_user_balance = Uint128::new(10_000);
         let ma_no_user_total_supply = Uint128::new(100_000);
-        let ma_no_user_total_balance = Uint128::zero();
+        let ma_no_user_balance = Uint128::zero();
         let time_start = 500_000_u64;
         let time_contract_call = 600_000_u64;
 
@@ -1159,7 +1159,7 @@ mod tests {
         );
         deps.querier.set_cw20_balances(
             ma_no_user_address.clone(),
-            &[(user_address.clone(), ma_no_user_total_balance)],
+            &[(user_address.clone(), ma_no_user_balance)],
         );
 
         // incentives
