@@ -121,7 +121,7 @@ pub fn execute_set_asset_incentive(
     ASSET_INCENTIVES.save(deps.storage, &ma_asset_address, &new_asset_incentive)?;
 
     let response = Response::new().add_attributes(vec![
-        attr("action", "set_asset_incentives"),
+        attr("action", "set_asset_incentive"),
         attr("ma_asset", ma_token_address),
         attr("emission_per_second", emission_per_second),
     ]);
@@ -210,23 +210,23 @@ pub fn execute_claim_rewards(
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
     let user_address = info.sender;
-    let (total_unclaimed_rewards, asset_incentive_statuses) =
+    let (total_unclaimed_rewards, user_asset_incentive_statuses_to_update) =
         compute_user_unclaimed_rewards(deps.as_ref(), &env, &user_address)?;
 
     // Commit updated asset_incentives and user indexes
-    for asset_incentive_status in asset_incentive_statuses {
-        let asset_incentive_updated = asset_incentive_status.asset_incentive_updated;
+    for user_asset_incentive_status in user_asset_incentive_statuses_to_update {
+        let asset_incentive_updated = user_asset_incentive_status.asset_incentive_updated;
 
         ASSET_INCENTIVES.save(
             deps.storage,
-            &asset_incentive_status.ma_token_address,
+            &user_asset_incentive_status.ma_token_address,
             &asset_incentive_updated,
         )?;
 
-        if asset_incentive_updated.index != asset_incentive_status.user_index_current {
+        if asset_incentive_updated.index != user_asset_incentive_status.user_index_current {
             USER_ASSET_INDICES.save(
                 deps.storage,
-                (&user_address, &asset_incentive_status.ma_token_address),
+                (&user_address, &user_asset_incentive_status.ma_token_address),
                 &asset_incentive_updated.index,
             )?
         }
@@ -400,16 +400,13 @@ fn compute_user_unclaimed_rewards(
         .may_load(deps.storage, user_address)?
         .unwrap_or_else(Uint128::zero);
 
-    let result_user_asset_indices: StdResult<Vec<_>> = USER_ASSET_INDICES
-        .prefix(user_address)
+    let result_asset_incentives: StdResult<Vec<_>> = ASSET_INCENTIVES
         .range(deps.storage, None, None, Order::Ascending)
         .collect();
 
-    let mut user_asset_incentive_statuses: Vec<UserAssetIncentiveStatus> = vec![];
+    let mut user_asset_incentive_statuses_to_update: Vec<UserAssetIncentiveStatus> = vec![];
 
-    for result_kv_pair in result_user_asset_indices? {
-        let (ma_token_address_bytes, user_asset_index) = result_kv_pair;
-
+    for (ma_token_address_bytes, mut asset_incentive) in result_asset_incentives? {
         let ma_token_address = deps
             .api
             .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
@@ -423,14 +420,22 @@ fn compute_user_unclaimed_rewards(
                 })?,
             }))?;
 
-        // Get asset pending rewards
-        let mut asset_incentive = ASSET_INCENTIVES.load(deps.storage, &ma_token_address)?;
+        // If user's balance is 0 there should be no rewards to accrue, so we don't care about
+        // updating indexes. If the user's balance changes, the indexes will be updated correctly at
+        // that point in time.
+        if balance_and_total_supply.balance.is_zero() {
+            continue;
+        }
 
         asset_incentive_update_index(
             &mut asset_incentive,
             balance_and_total_supply.total_supply,
             env.block.time.seconds(),
         )?;
+
+        let user_asset_index = USER_ASSET_INDICES
+            .may_load(deps.storage, (user_address, &ma_token_address))?
+            .unwrap_or_else(Decimal::zero);
 
         if user_asset_index != asset_incentive.index {
             // Compute user accrued rewards and update user index
@@ -442,14 +447,17 @@ fn compute_user_unclaimed_rewards(
             total_unclaimed_rewards += asset_accrued_rewards;
         }
 
-        user_asset_incentive_statuses.push(UserAssetIncentiveStatus {
+        user_asset_incentive_statuses_to_update.push(UserAssetIncentiveStatus {
             ma_token_address,
             user_index_current: user_asset_index,
             asset_incentive_updated: asset_incentive,
         });
     }
 
-    Ok((total_unclaimed_rewards, user_asset_incentive_statuses))
+    Ok((
+        total_unclaimed_rewards,
+        user_asset_incentive_statuses_to_update,
+    ))
 }
 
 // QUERIES
@@ -563,7 +571,7 @@ mod tests {
         assert_eq!(
             res.attributes,
             vec![
-                attr("action", "set_asset_incentives"),
+                attr("action", "set_asset_incentive"),
                 attr("ma_asset", "ma_asset"),
                 attr("emission_per_second", "100"),
             ]
@@ -616,7 +624,7 @@ mod tests {
         assert_eq!(
             res.attributes,
             vec![
-                attr("action", "set_asset_incentives"),
+                attr("action", "set_asset_incentive"),
                 attr("ma_asset", "ma_asset"),
                 attr("emission_per_second", "200"),
             ]
@@ -868,6 +876,107 @@ mod tests {
     }
 
     #[test]
+    fn test_set_new_asset_incentive_user_non_zero_balance() {
+        let mut deps = th_setup(&[]);
+        let user_address = Addr::unchecked("user");
+
+        // set cw20 balance for user
+        let ma_asset_address = Addr::unchecked("ma_asset");
+        let total_supply = Uint128::new(100_000);
+        let user_balance = Uint128::new(10_000);
+
+        deps.querier
+            .set_cw20_total_supply(ma_asset_address.clone(), total_supply);
+        deps.querier.set_cw20_balances(
+            ma_asset_address.clone(),
+            &[(user_address.clone(), user_balance)],
+        );
+
+        // set asset incentive
+        {
+            let time_last_updated = 500_000_u64;
+            let emission_per_second = Uint128::new(100);
+            let asset_incentive_index = Decimal::zero();
+
+            ASSET_INCENTIVES
+                .save(
+                    deps.as_mut().storage,
+                    &ma_asset_address,
+                    &AssetIncentive {
+                        emission_per_second,
+                        index: asset_incentive_index,
+                        last_updated: time_last_updated,
+                    },
+                )
+                .unwrap();
+        }
+
+        // first query
+        {
+            let time_contract_call = 600_000_u64;
+
+            let env = mars_core::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+
+            let unclaimed_rewards =
+                query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
+            // 100_000 s * 100 MARS/s * 1/10th cw20 supply
+            let expected_unclaimed_rewards = Uint128::new(1_000_000);
+            assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
+        }
+
+        // increase user ma_asset balance
+        {
+            let time_contract_call = 700_000_u64;
+            let user_balance = Uint128::new(25_000);
+
+            deps.querier.set_cw20_balances(
+                ma_asset_address.clone(),
+                &[(user_address.clone(), user_balance)],
+            );
+
+            let env = mars_core::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+
+            let info = mock_info(&ma_asset_address.to_string(), &[]);
+
+            execute_balance_change(
+                deps.as_mut(),
+                env,
+                info,
+                user_address.clone(),
+                Uint128::new(10_000),
+                total_supply,
+            )
+            .unwrap();
+        }
+
+        // second query
+        {
+            let time_contract_call = 800_000_u64;
+
+            let env = mars_core::testing::mock_env(MockEnvParams {
+                block_time: Timestamp::from_seconds(time_contract_call),
+                ..Default::default()
+            });
+
+            let unclaimed_rewards =
+                query_user_unclaimed_rewards(deps.as_ref(), env, "user".to_string()).unwrap();
+            let expected_unclaimed_rewards = Uint128::new(
+                // 200_000 s * 100 MARS/s * 1/10th cw20 supply +
+                2_000_000 +
+                // 100_000 s * 100 MARS/s * 1/4 cw20 supply
+                2_500_000,
+            );
+            assert_eq!(unclaimed_rewards, expected_unclaimed_rewards);
+        }
+    }
+
+    #[test]
     fn test_balance_change_user_non_zero_balance() {
         let mut deps = th_setup(&[]);
         let ma_asset_address = Addr::unchecked("ma_asset");
@@ -1084,6 +1193,8 @@ mod tests {
         let ma_asset_user_balance = Uint128::new(10_000);
         let ma_zero_total_supply = Uint128::new(200_000);
         let ma_zero_user_balance = Uint128::new(10_000);
+        let ma_no_user_total_supply = Uint128::new(100_000);
+        let ma_no_user_balance = Uint128::zero();
         let time_start = 500_000_u64;
         let time_contract_call = 600_000_u64;
 
@@ -1101,6 +1212,8 @@ mod tests {
             .set_cw20_total_supply(ma_asset_address.clone(), ma_asset_total_supply);
         deps.querier
             .set_cw20_total_supply(ma_zero_address.clone(), ma_zero_total_supply);
+        deps.querier
+            .set_cw20_total_supply(ma_no_user_address.clone(), ma_no_user_total_supply);
         deps.querier.set_cw20_balances(
             ma_asset_address.clone(),
             &[(user_address.clone(), ma_asset_user_balance)],
@@ -1108,6 +1221,10 @@ mod tests {
         deps.querier.set_cw20_balances(
             ma_zero_address.clone(),
             &[(user_address.clone(), ma_zero_user_balance)],
+        );
+        deps.querier.set_cw20_balances(
+            ma_no_user_address.clone(),
+            &[(user_address.clone(), ma_no_user_balance)],
         );
 
         // incentives

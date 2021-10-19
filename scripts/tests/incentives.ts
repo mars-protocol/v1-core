@@ -44,7 +44,7 @@ async function setAssetIncentive(
   maTokenAddress: string,
   umarsEmissionRate: number,
 ) {
-  await executeContract(terra, wallet, incentives,
+  return await executeContract(terra, wallet, incentives,
     {
       set_asset_incentive: {
         ma_token_address: maTokenAddress,
@@ -253,20 +253,22 @@ function assertBalance(
 
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 
+  // TESTS
+
+  console.log("alice deposits uusd before any incentive is set for uusd")
+
+  await depositNative(terra, alice, redBank, "uusd", X)
+
   console.log("set incentives")
 
   await setAssetIncentive(terra, deployer, incentives, maUluna, ULUNA_UMARS_EMISSION_RATE)
-  await setAssetIncentive(terra, deployer, incentives, maUusd, UUSD_UMARS_EMISSION_RATE)
+  let result = await setAssetIncentive(terra, deployer, incentives, maUusd, UUSD_UMARS_EMISSION_RATE)
+  const uusdIncentiveStartTime = await getTxTimestamp(terra, result)
 
-  // TESTS
+  console.log("users deposit assets")
 
-  console.log("deposit assets")
-
-  let result = await depositNative(terra, alice, redBank, "uluna", X)
+  result = await depositNative(terra, alice, redBank, "uluna", X)
   const aliceLunaDepositTime = await getTxTimestamp(terra, result)
-
-  result = await depositNative(terra, alice, redBank, "uusd", X)
-  const aliceUsdDepositTime = await getTxTimestamp(terra, result)
 
   result = await depositNative(terra, bob, redBank, "uluna", X)
   const bobLunaDepositTime = await getTxTimestamp(terra, result)
@@ -283,7 +285,7 @@ function assertBalance(
     computeExpectedRewards(aliceLunaDepositTime, bobLunaDepositTime, ULUNA_UMARS_EMISSION_RATE) +
     computeExpectedRewards(bobLunaDepositTime, carolLunaDepositTime, ULUNA_UMARS_EMISSION_RATE / 2) +
     computeExpectedRewards(carolLunaDepositTime, aliceClaimRewardsTime, ULUNA_UMARS_EMISSION_RATE / 4) +
-    computeExpectedRewards(aliceUsdDepositTime, danUsdDepositTime, UUSD_UMARS_EMISSION_RATE) +
+    computeExpectedRewards(uusdIncentiveStartTime, danUsdDepositTime, UUSD_UMARS_EMISSION_RATE) +
     computeExpectedRewards(danUsdDepositTime, aliceClaimRewardsTime, UUSD_UMARS_EMISSION_RATE / 2)
   assertBalance(aliceXmarsBalance, expectedAliceXmarsBalance)
 
