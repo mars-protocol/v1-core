@@ -92,7 +92,6 @@ export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath:
   const contract = readFileSync(filepath, 'base64');
   const uploadMsg = new MsgStoreCode(wallet.key.accAddress, contract);
   let result = await performTransaction(terra, wallet, uploadMsg);
-  console.log(result.txhash)
   return Number(result.logs[0].eventsByType.store_code.code_id[0]) // code_id
 }
 
