@@ -223,7 +223,9 @@ pub fn execute_claim_rewards(
             &asset_incentive_updated,
         )?;
 
-        if asset_incentive_updated.index != asset_incentive_status.user_index_current {
+        if asset_incentive_updated.index != asset_incentive_status.user_index_current
+            || asset_incentive_status.ma_token_balance != Uint128::zero()
+        {
             USER_ASSET_INDICES.save(
                 deps.storage,
                 (&user_address, &asset_incentive_status.ma_token_address),
@@ -384,6 +386,8 @@ fn user_compute_accrued_rewards(
 struct UserAssetIncentiveStatus {
     /// Address of the ma token that's the incentives target
     ma_token_address: Addr,
+    /// Balance of the ma token that's the incentives target
+    ma_token_balance: Uint128,
     /// Current user index's value on the contract store (not updated by current asset index)
     user_index_current: Decimal,
     /// Asset incentive with values updated to the current block (not neccesarily commited
@@ -442,6 +446,7 @@ fn compute_user_unclaimed_rewards(
 
         user_asset_incentive_statuses.push(UserAssetIncentiveStatus {
             ma_token_address,
+            ma_token_balance: balance_and_total_supply.balance,
             user_index_current: user_asset_index,
             asset_incentive_updated: asset_incentive,
         });
