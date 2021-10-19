@@ -14,7 +14,19 @@ import 'dotenv/config.js'
 const CHAIN_ID = process.env.CHAIN_ID!
 const LCD_CLIENT_URL = process.env.LCD_CLIENT_URL!
 // Multisig details:
-const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!).split(",").map(x => new SimplePublicKey(x))
+const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!)
+  .split(",")
+  // terrad sorts keys of multisigs by comparing bytes of their address
+  .sort((a, b) => {
+    return Buffer.from(
+      new SimplePublicKey(a).rawAddress()
+    ).compare(
+      Buffer.from(
+        new SimplePublicKey(b).rawAddress()
+      )
+    )
+  })
+  .map(x => new SimplePublicKey(x))
 const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 // Transaction details:
 // The address that the tx will be sent to
@@ -34,6 +46,7 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
   const multisigPubKey = new LegacyAminoMultisigPublicKey(MULTISIG_THRESHOLD, MULTISIG_PUBLIC_KEYS)
 
   const multisigAddress = multisigPubKey.address()
+  console.log("multisig:", multisigAddress)
 
   const accInfo = await terra.auth.accountInfo(multisigAddress)
 
@@ -64,13 +77,14 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
   // Prints a command that should be run by the multisig key holders to generate signatures
   // TODO add Ledger support
   console.log(`
-# Instructions to sign a tx for multisig ${multisigAddress}
-# - Set \`multisig\` to the name of the multisig in terrad (check the name with \`terrad keys list\`)
-# - Set \`from\` to your address that is a key to the multisig
-
+# Instructions to sign a tx for multisig ${multisigAddress}:
+# - 1. set \`multisig\` to the name of the multisig in terrad (check the name with \`terrad keys list\`):
 multisig=...
+
+# - 2. set \`from\` to your address that is a key to the multisig, or its name in terrad:
 from=terra1...
 
+# - 3. run the signing command:
 terrad tx sign ${unsignedTx} \\
   --multisig \$multisig \\
   --from \$from \\
