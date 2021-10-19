@@ -1372,7 +1372,7 @@ mod tests {
             ]
         );
 
-        // asset incentives get updated
+        // ma_asset and ma_zero incentives get updated, ma_no_user does not
         let ma_asset_incentive = ASSET_INCENTIVES
             .load(deps.as_ref().storage, &ma_asset_address)
             .unwrap();
@@ -1391,7 +1391,7 @@ mod tests {
         assert_eq!(ma_no_user_incentive.index, Decimal::one());
         assert_eq!(ma_no_user_incentive.last_updated, time_start);
 
-        // user's asset indices get updated
+        // user's ma_asset and ma_zero indices are updated
         let user_ma_asset_index = USER_ASSET_INDICES
             .load(deps.as_ref().storage, (&user_address, &ma_asset_address))
             .unwrap();
@@ -1402,6 +1402,7 @@ mod tests {
             .unwrap();
         assert_eq!(user_ma_zero_index, Decimal::one());
 
+        // user's ma_no_user does not get updated
         let user_ma_no_user_index = USER_ASSET_INDICES
             .may_load(deps.as_ref().storage, (&user_address, &ma_no_user_address))
             .unwrap();
