@@ -29,6 +29,7 @@ import {
 
 // Required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
+
 // Multisig details:
 const MULTISIG_PUBLIC_KEYS = (process.env.MULTISIG_PUBLIC_KEYS!)
   .split(",")
@@ -107,9 +108,8 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
     multisigAddress
   )
 
-  console.log(await terra.wasm.contractInfo(proxyAddress))
-
   console.log("proxy:", proxyAddress)
+  console.log(await terra.wasm.contractInfo(proxyAddress))
   console.log(
     await queryContract(
       terra,
@@ -147,9 +147,8 @@ const TOKEN_LOGO = "https://marsprotocol.io/mars_logo_colored.svg";
     multisigAddress
   )
 
-  console.log(await terra.wasm.contractInfo(marsAddress))
-
   console.log("mars:", marsAddress)
+  console.log(await terra.wasm.contractInfo(marsAddress))
   console.log(
     await queryContract(
       terra,
