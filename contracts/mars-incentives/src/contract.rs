@@ -210,25 +210,23 @@ pub fn execute_claim_rewards(
     info: MessageInfo,
 ) -> Result<Response, ContractError> {
     let user_address = info.sender;
-    let (total_unclaimed_rewards, asset_incentive_statuses) =
+    let (total_unclaimed_rewards, user_asset_incentive_statuses_to_update) =
         compute_user_unclaimed_rewards(deps.as_ref(), &env, &user_address)?;
 
     // Commit updated asset_incentives and user indexes
-    for asset_incentive_status in asset_incentive_statuses {
-        let asset_incentive_updated = asset_incentive_status.asset_incentive_updated;
+    for user_asset_incentive_status in user_asset_incentive_statuses_to_update {
+        let asset_incentive_updated = user_asset_incentive_status.asset_incentive_updated;
 
         ASSET_INCENTIVES.save(
             deps.storage,
-            &asset_incentive_status.ma_token_address,
+            &user_asset_incentive_status.ma_token_address,
             &asset_incentive_updated,
         )?;
 
-        if asset_incentive_updated.index != asset_incentive_status.user_index_current
-            || asset_incentive_status.ma_token_balance != Uint128::zero()
-        {
+        if asset_incentive_updated.index != user_asset_incentive_status.user_index_current {
             USER_ASSET_INDICES.save(
                 deps.storage,
-                (&user_address, &asset_incentive_status.ma_token_address),
+                (&user_address, &user_asset_incentive_status.ma_token_address),
                 &asset_incentive_updated.index,
             )?
         }
@@ -386,8 +384,6 @@ fn user_compute_accrued_rewards(
 struct UserAssetIncentiveStatus {
     /// Address of the ma token that's the incentives target
     ma_token_address: Addr,
-    /// Balance of the ma token that's the incentives target
-    ma_token_balance: Uint128,
     /// Current user index's value on the contract store (not updated by current asset index)
     user_index_current: Decimal,
     /// Asset incentive with values updated to the current block (not neccesarily commited
@@ -408,7 +404,7 @@ fn compute_user_unclaimed_rewards(
         .range(deps.storage, None, None, Order::Ascending)
         .collect();
 
-    let mut user_asset_incentive_statuses: Vec<UserAssetIncentiveStatus> = vec![];
+    let mut user_asset_incentive_statuses_to_update: Vec<UserAssetIncentiveStatus> = vec![];
 
     for (ma_token_address_bytes, mut asset_incentive) in result_asset_incentives? {
         let ma_token_address = deps
@@ -423,6 +419,13 @@ fn compute_user_unclaimed_rewards(
                     address: user_address.to_string(),
                 })?,
             }))?;
+
+        // If user's balance is 0 there should be no rewards to accrue, so we don't care about
+        // updating indexes. If the user's balance changes, the indexes will be updated correctly at
+        // that point in time.
+        if balance_and_total_supply.balance.is_zero() {
+            continue;
+        }
 
         asset_incentive_update_index(
             &mut asset_incentive,
@@ -444,15 +447,17 @@ fn compute_user_unclaimed_rewards(
             total_unclaimed_rewards += asset_accrued_rewards;
         }
 
-        user_asset_incentive_statuses.push(UserAssetIncentiveStatus {
+        user_asset_incentive_statuses_to_update.push(UserAssetIncentiveStatus {
             ma_token_address,
-            ma_token_balance: balance_and_total_supply.balance,
             user_index_current: user_asset_index,
             asset_incentive_updated: asset_incentive,
         });
     }
 
-    Ok((total_unclaimed_rewards, user_asset_incentive_statuses))
+    Ok((
+        total_unclaimed_rewards,
+        user_asset_incentive_statuses_to_update,
+    ))
 }
 
 // QUERIES
@@ -1306,15 +1311,6 @@ mod tests {
         )
         .unwrap();
 
-        let expected_ma_no_user_incentive_index = asset_incentive_compute_index(
-            Decimal::one(),
-            Uint128::new(200),
-            ma_no_user_total_supply,
-            time_start,
-            time_contract_call,
-        )
-        .unwrap();
-
         let expected_accrued_rewards = previous_unclaimed_rewards
             + expected_ma_asset_accrued_rewards
             + expected_ma_zero_accrued_rewards;
@@ -1392,11 +1388,8 @@ mod tests {
         let ma_no_user_incentive = ASSET_INCENTIVES
             .load(deps.as_ref().storage, &ma_no_user_address)
             .unwrap();
-        assert_eq!(
-            ma_no_user_incentive.index,
-            expected_ma_no_user_incentive_index
-        );
-        assert_eq!(ma_no_user_incentive.last_updated, time_contract_call);
+        assert_eq!(ma_no_user_incentive.index, Decimal::one());
+        assert_eq!(ma_no_user_incentive.last_updated, time_start);
 
         // user's asset indices get updated
         let user_ma_asset_index = USER_ASSET_INDICES
@@ -1410,9 +1403,9 @@ mod tests {
         assert_eq!(user_ma_zero_index, Decimal::one());
 
         let user_ma_no_user_index = USER_ASSET_INDICES
-            .load(deps.as_ref().storage, (&user_address, &ma_no_user_address))
+            .may_load(deps.as_ref().storage, (&user_address, &ma_no_user_address))
             .unwrap();
-        assert_eq!(user_ma_no_user_index, expected_ma_no_user_incentive_index);
+        assert_eq!(user_ma_no_user_index, None);
 
         // user rewards are cleared
         let user_unclaimed_rewards = USER_UNCLAIMED_REWARDS
