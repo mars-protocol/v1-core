@@ -387,6 +387,26 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   await expectPromiseToFail(assertOraclePrice(anchorToken, "0"));
   console.log("success!");
 
+  // This line will probably fail, but it's not because of a smart contract bug, but rather of a
+  // particularity in the way Terra LCD works.
+  //
+  // The oracle contracts forbids recoding two snapshots that are too close to each other.
+  // Specifically, a new snapshot must be at least `tolerance` seconds apart from the latest
+  // existing snapshot. This is to deter a potential DDoS attack to the contract's storage.
+  //
+  // The problem is how LocalTerra LCD estimates a transaction's gas cost. Right after a block is
+  // included in the chain, there is a small delay in updating the context used to estimate gas.
+  // That is, if we send a transaction right after after block n is mined, although we expect the tx
+  // to be included in block n+1, the LCD will still use the context of block n to simulate the tx
+  // in order to estimate gas.
+  //
+  // For this test, we have just recorded a snapshot in the previous block; let's say it's timestamp
+  // is x. When estimating gas for the next snapshot, LCD still thinks the block timestamp is x,
+  // rather than x + 5 (LocalTerra's block time is 5 seconds). Therefore, the check on the DDoS
+  // fails, the transaction reverts, and LCD returns Error 400.
+  //
+  // The solution is simple: modify `createTransaction` function in helpers to explicitly feed in a
+  // gas limit, so that LCD does not need to estimate it. The transaction should be successful.
   process.stdout.write("recoding TWAP snapshot... ");
   snapshots.push(await recordTwapSnapshot());
   console.log("success!");
