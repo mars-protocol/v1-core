@@ -104,12 +104,6 @@ pub struct Config {
     pub owner: Addr,
 }
 
-/// Price source configuration for a given asset
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct PriceConfig {
-    pub price_source: PriceSourceChecked,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct AstroportTwapSnapshot {
     /// Timestamp of the most recent TWAP data update
@@ -147,13 +141,13 @@ pub mod msg {
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum QueryMsg {
-        /// Query contract config
+        /// Query contract config. Returns `Config`
         Config {},
-        /// Get asset's price config
-        AssetConfig { asset: Asset },
-        /// Query asset price given an asset; returns mars_core::math::decimal::Decimal
+        /// Get asset's price source. Returns `AssetConfigChecked`
+        AssetPriceSource { asset: Asset },
+        /// Query asset price given an asset; returns `mars_core::math::decimal::Decimal`
         AssetPrice { asset: Asset },
-        /// Query asset price given it's internal reference; returns mars_core::math::decimal::Decimal
+        /// Query asset price given it's internal reference; returns `mars_core::math::decimal::Decimal`
         ///
         /// NOTE: meant to be used by protocol contracts only
         AssetPriceByReference { asset_reference: Vec<u8> },

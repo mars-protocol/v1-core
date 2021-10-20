@@ -9,8 +9,8 @@ use mars_core::helpers::option_string_to_addr;
 use mars_core::math::decimal::Decimal;
 
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{ASTROPORT_TWAP_SNAPSHOTS, CONFIG, PRICE_CONFIGS};
-use crate::{AstroportTwapSnapshot, Config, PriceConfig, PriceSourceChecked, PriceSourceUnchecked};
+use crate::state::{ASTROPORT_TWAP_SNAPSHOTS, CONFIG, PRICE_SOURCES};
+use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchecked};
 
 use self::helpers::*;
 
@@ -79,6 +79,7 @@ pub fn execute_set_asset(
 
     let (asset_label, asset_reference, _) = asset.get_attributes();
     let price_source = price_source_unchecked.to_checked(deps.api)?;
+    PRICE_SOURCES.save(deps.storage, &asset_reference, &price_source)?;
 
     // for spot and TWAP sources, we must make sure: the astroport pair indicated by `pair_address`
     // consists of UST and the asset of interest
@@ -89,12 +90,6 @@ pub fn execute_set_asset(
         }
         _ => (),
     }
-
-    PRICE_CONFIGS.save(
-        deps.storage,
-        &asset_reference,
-        &PriceConfig { price_source },
-    )?;
 
     Ok(Response::new()
         .add_attribute("action", "set_asset")
@@ -115,10 +110,10 @@ pub fn execute_record_twap_snapshot(
 
     for asset in assets {
         let (asset_label, asset_reference, _) = asset.get_attributes();
-        let price_config = PRICE_CONFIGS.load(deps.storage, &asset_reference)?;
+        let price_source = PRICE_SOURCES.load(deps.storage, &asset_reference)?;
 
         // Asset must be configured to use TWAP price source
-        let (pair_address, window_size, tolerance) = match price_config.price_source {
+        let (pair_address, window_size, tolerance) = match price_source {
             PriceSourceChecked::AstroportTwap {
                 pair_address,
                 window_size,
@@ -180,7 +175,9 @@ pub fn execute_record_twap_snapshot(
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
-        QueryMsg::AssetConfig { asset } => to_binary(&query_asset_config(deps, env, asset)?),
+        QueryMsg::AssetPriceSource { asset } => {
+            to_binary(&query_asset_price_source(deps, env, asset)?)
+        }
         QueryMsg::AssetPrice { asset } => {
             to_binary(&query_asset_price(deps, env, asset.get_reference())?)
         }
@@ -194,15 +191,14 @@ fn query_config(deps: Deps, _env: Env) -> StdResult<Config> {
     CONFIG.load(deps.storage)
 }
 
-fn query_asset_config(deps: Deps, _env: Env, asset: Asset) -> StdResult<PriceConfig> {
-    let asset_reference = asset.get_reference();
-    PRICE_CONFIGS.load(deps.storage, &asset_reference)
+fn query_asset_price_source(deps: Deps, _env: Env, asset: Asset) -> StdResult<PriceSourceChecked> {
+    PRICE_SOURCES.load(deps.storage, &asset.get_reference())
 }
 
 fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResult<Decimal> {
-    let price_config = PRICE_CONFIGS.load(deps.storage, &asset_reference)?;
+    let price_source = PRICE_SOURCES.load(deps.storage, &asset_reference)?;
 
-    match price_config.price_source {
+    match price_source {
         PriceSourceChecked::Fixed { price } => Ok(price),
 
         PriceSourceChecked::Native { denom } => {
@@ -538,11 +534,11 @@ mod tests {
             };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-            let price_config = PRICE_CONFIGS
+            let price_source = PRICE_SOURCES
                 .load(&deps.storage, reference.as_slice())
                 .unwrap();
             assert_eq!(
-                price_config.price_source,
+                price_source,
                 PriceSourceChecked::Fixed {
                     price: Decimal::from_ratio(1_u128, 2_u128)
                 }
@@ -563,11 +559,11 @@ mod tests {
             };
             execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
 
-            let price_config = PRICE_CONFIGS
+            let price_source = PRICE_SOURCES
                 .load(&deps.storage, reference.as_slice())
                 .unwrap();
             assert_eq!(
-                price_config.price_source,
+                price_source,
                 PriceSourceChecked::Native {
                     denom: "luna".to_string()
                 }
@@ -583,14 +579,12 @@ mod tests {
         };
         let reference = asset.get_reference();
 
-        PRICE_CONFIGS
+        PRICE_SOURCES
             .save(
                 &mut deps.storage,
                 reference.as_slice(),
-                &PriceConfig {
-                    price_source: PriceSourceChecked::Fixed {
-                        price: Decimal::from_ratio(3_u128, 2_u128),
-                    },
+                &PriceSourceChecked::Fixed {
+                    price: Decimal::from_ratio(3_u128, 2_u128),
                 },
             )
             .unwrap();
@@ -624,14 +618,12 @@ mod tests {
             &[("uusd".to_string(), Decimal::from_ratio(4_u128, 1_u128))],
         );
 
-        PRICE_CONFIGS
+        PRICE_SOURCES
             .save(
                 &mut deps.storage,
                 reference.as_slice(),
-                &PriceConfig {
-                    price_source: PriceSourceChecked::Native {
-                        denom: "nativecoin".to_string(),
-                    },
+                &PriceSourceChecked::Native {
+                    denom: "nativecoin".to_string(),
                 },
             )
             .unwrap();
