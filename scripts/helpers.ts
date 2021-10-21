@@ -16,7 +16,7 @@ import {
 import { readFileSync } from 'fs';
 import { CustomError } from 'ts-custom-error'
 
-// Tequila lcd is load balanced, so txs can't be sent too fast, otherwise account sequence queries
+// LCD endpoints are load balanced, so txs can't be sent too fast, otherwise account sequence queries
 // may resolve an older state depending on which lcd you end up with. Generally 1000 ms is is enough
 // for all nodes to sync up.
 let TIMEOUT = 1000
@@ -27,6 +27,16 @@ export function setTimeoutDuration(t: number) {
 
 export function getTimeoutDuration() {
   return TIMEOUT
+}
+
+let GAS_ADJUSTMENT = 1.2
+
+export function setGasAdjustment(g: number) {
+  GAS_ADJUSTMENT = g
+}
+
+export function getGasAdjustment() {
+  return GAS_ADJUSTMENT
 }
 
 export async function sleep(timeout: number) {
@@ -44,7 +54,10 @@ export class TransactionError extends CustomError {
 }
 
 export async function createTransaction(wallet: Wallet, msg: Msg) {
-  return await wallet.createTx({ msgs: [msg] })
+  return await wallet.createTx({
+    msgs: [msg],
+    gasAdjustment: GAS_ADJUSTMENT,
+  })
 }
 
 export async function broadcastTransaction(terra: LCDClient, signedTx: Tx) {
