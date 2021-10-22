@@ -9,12 +9,10 @@ use cosmwasm_std::{Addr, Uint128};
 
 use crate::asset::AssetType;
 use crate::error::MarsError;
-use crate::helpers::{all_conditions_valid, zero_address};
+use crate::helpers::all_conditions_valid;
 use crate::math::decimal::Decimal;
 
-use self::interest_rate_models::{
-    DynamicInterestRate, InterestRateModel, InterestRateModelError, InterestRateStrategy,
-};
+use self::interest_rate_models::InterestRateModel;
 
 /// Global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -70,8 +68,8 @@ pub struct Market {
     /// Portion of the borrow rate that is kept as protocol rewards
     pub reserve_factor: Decimal,
 
-    /// Interest rate strategy to calculate borrow_rate and liquidity_rate
-    pub interest_rate_strategy: InterestRateStrategy,
+    /// model (params + internal state) that defines how interest rate behaves
+    pub interest_rate_model: InterestRateModel,
 
     /// Borrow index (Used to compute borrow interest)
     pub borrow_index: Decimal,
@@ -81,8 +79,8 @@ pub struct Market {
     pub borrow_rate: Decimal,
     /// Rate paid to depositors
     pub liquidity_rate: Decimal,
-    /// Timestamp (seconds) where indexes and rates where last updated
-    pub interests_last_updated: u64,
+    /// Timestamp (seconds) where indexes and where last updated
+    pub indexes_last_updated: u64,
 
     /// Total debt scaled for the market's currency
     pub debt_total_scaled: Uint128,
@@ -97,8 +95,6 @@ pub struct Market {
 
 impl Market {
     pub fn validate(&self) -> Result<(), MarketError> {
-        self.interest_rate_strategy.validate()?;
-
         // max_loan_to_value, reserve_factor, liquidation_threshold and liquidation_bonus should be less or equal 1
         let conditions_and_names = vec![
             (
@@ -129,45 +125,10 @@ impl Market {
     }
 }
 
-impl Default for Market {
-    fn default() -> Self {
-        let dynamic_ir = DynamicInterestRate {
-            min_borrow_rate: Decimal::zero(),
-            max_borrow_rate: Decimal::one(),
-            kp_1: Default::default(),
-            optimal_utilization_rate: Default::default(),
-            kp_augmentation_threshold: Default::default(),
-            kp_2: Default::default(),
-        };
-        Market {
-            index: 0,
-            ma_token_address: zero_address(),
-            liquidity_index: Default::default(),
-            borrow_index: Default::default(),
-            borrow_rate: Default::default(),
-            liquidity_rate: Default::default(),
-            max_loan_to_value: Default::default(),
-            reserve_factor: Default::default(),
-            interests_last_updated: 0,
-            debt_total_scaled: Default::default(),
-            asset_type: AssetType::Native,
-            liquidation_threshold: Decimal::one(),
-            liquidation_bonus: Decimal::zero(),
-            interest_rate_strategy: InterestRateStrategy::Dynamic(dynamic_ir),
-            active: true,
-            deposit_enabled: true,
-            borrow_enabled: true,
-        }
-    }
-}
-
 #[derive(Error, Debug, PartialEq)]
 pub enum MarketError {
     #[error("{0}")]
     Mars(#[from] MarsError),
-
-    #[error("{0}")]
-    InterestRateModel(#[from] InterestRateModelError),
 
     #[error("liquidation_threshold should be greater than max_loan_to_value. liquidation_threshold: {liquidation_threshold:?}, max_loan_to_value: {max_loan_to_value:?}")]
     InvalidLiquidationThreshold {

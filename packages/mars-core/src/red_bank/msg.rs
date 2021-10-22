@@ -8,7 +8,7 @@ use cw20::Cw20ReceiveMsg;
 use crate::asset::Asset;
 use crate::math::decimal::Decimal;
 
-use super::interest_rate_models::InterestRateStrategy;
+use super::interest_rate_models::InterestRateModelParams;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
@@ -180,7 +180,7 @@ pub struct InitOrUpdateAssetParams {
     pub liquidation_bonus: Option<Decimal>,
 
     /// Interest rate strategy to calculate borrow_rate and liquidity_rate
-    pub interest_rate_strategy: Option<InterestRateStrategy>,
+    pub interest_rate_model_params: Option<InterestRateModelParams>,
 
     /// If false cannot do any action (deposit/withdraw/borrow/repay/liquidate)
     pub active: Option<bool>,
