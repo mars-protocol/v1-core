@@ -2,13 +2,20 @@ export const testnet: Config = {
   councilInitMsg: {
     "config": {
       "address_provider_address": undefined,
-
-      "proposal_voting_period": 20, // 20 blocks = ~2.5 minutes (for internal testing) // 57600 blocks = ~5 days
+      "proposal_voting_period": 80, // 20 blocks = ~2.5 minutes (for internal testing) // 57600 blocks = ~5 days
       "proposal_effective_delay": 0, // 0 blocks = able to execute proposal immediately (for internal testing) // 11520 blocks = ~24 hours
       "proposal_expiration_period": 115200, // 115200 blocks = ~10 days
       "proposal_required_deposit": "100000000",
       "proposal_required_quorum": "0.1",
       "proposal_required_threshold": "0.5"
+    }
+  },
+  vestingInitMsg: {
+    "address_provider_address": undefined,
+    "default_unlock_schedule": {
+      "start_time": 1638316800,
+      "cliff": 15770000,
+      "duration": 94610000
     }
   },
   stakingInitMsg: {
@@ -121,30 +128,30 @@ export const testnet: Config = {
         borrow_enabled: true
       }
     },
-    // {
-    //   symbol: "ANC",
-    //   contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
-    //   init_params: {
-    //     initial_borrow_rate: "0.07",
-    //     max_loan_to_value: "0.35",
-    //     reserve_factor: "0.2",
-    //     liquidation_threshold: "0.45",
-    //     liquidation_bonus: "0.15",
-    //     interest_rate_strategy: {
-    //       "dynamic": {
-    //         min_borrow_rate: "0.0",
-    //         max_borrow_rate: "2.0",
-    //         kp_1: "0.02",
-    //         optimal_utilization_rate: "0.5",
-    //         kp_augmentation_threshold: "0.15",
-    //         kp_2: "0.05"
-    //       }
-    //     },
-    //     active: true,
-    //     deposit_enabled: true,
-    //     borrow_enabled: true
-    //   }
-    // },
+    {
+      symbol: "ANC",
+      contract_addr: "terra1747mad58h0w4y589y3sk84r5efqdev9q4r02pc",
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.35",
+        reserve_factor: "0.2",
+        liquidation_threshold: "0.45",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        },
+        active: true,
+        deposit_enabled: true,
+        borrow_enabled: true
+      }
+    },
     {
       symbol: "MARS",
       contract_addr: "terra1qs7h830ud0a4hj72yr8f7jmlppyx7z524f7gw6",
@@ -153,6 +160,30 @@ export const testnet: Config = {
         max_loan_to_value: "0.45",
         reserve_factor: "0.2",
         liquidation_threshold: "0.55",
+        liquidation_bonus: "0.15",
+        interest_rate_strategy: {
+          "dynamic": {
+            min_borrow_rate: "0.0",
+            max_borrow_rate: "2.0",
+            kp_1: "0.02",
+            optimal_utilization_rate: "0.5",
+            kp_augmentation_threshold: "0.15",
+            kp_2: "0.05"
+          }
+        },
+        active: true,
+        deposit_enabled: true,
+        borrow_enabled: true
+      }
+    },
+    {
+      symbol: "MINE",
+      contract_addr: "terra1lqm5tutr5xcw9d5vc4457exa3ghd4sr9mzwdex",
+      init_params: {
+        initial_borrow_rate: "0.07",
+        max_loan_to_value: "0.35",
+        reserve_factor: "0.2",
+        liquidation_threshold: "0.45",
         liquidation_bonus: "0.15",
         interest_rate_strategy: {
           "dynamic": {
@@ -190,6 +221,16 @@ export const local: Config = {
       "proposal_required_quorum": "0.1",
       "proposal_required_threshold": "0.5"
     }
+  },
+  vestingInitMsg: {
+    // "config": {
+    "address_provider_address": undefined,
+    "default_unlock_schedule": {
+      "start_time": 1638316800,
+      "cliff": 15770000,
+      "duration": 94610000
+    }
+    // }
   },
   stakingInitMsg: {
     "config": {

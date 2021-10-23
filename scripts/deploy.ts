@@ -108,6 +108,17 @@ async function main() {
   )
   console.log("Council set to MARS token minter admin role: ", await queryContract(terra, deployConfig.minterProxyContractAddress, { "admin_list": {} }))
 
+  /*************************************** Deploy Vesting Contract *****************************************/
+  console.log("Deploying vesting...")
+  deployConfig.vestingInitMsg.address_provider_address = addressProviderContractAddress
+  const vestingContractAddress = await deployContract(
+    terra,
+    wallet,
+    join(MARS_ARTIFACTS_PATH, 'mars_vesting.wasm'),
+    deployConfig.vestingInitMsg,
+  )
+  console.log("Vesting Contract Address: " + vestingContractAddress)
+
   /**************************************** Deploy Staking Contract *****************************************/
   console.log("Deploying Staking...")
   // TODO fix `astroport_factory_address` in LocalTerra
@@ -268,6 +279,7 @@ async function main() {
           "red_bank_address": redBankContractAddress,
           "staking_address": stakingContractAddress,
           "treasury_address": treasuryContractAddress,
+          "vesting_address": vestingContractAddress,
           "xmars_token_address": xMarsTokenContractAddress,
         }
       }

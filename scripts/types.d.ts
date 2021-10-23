@@ -10,6 +10,17 @@ interface CouncilInitMsg {
   }
 }
 
+interface VestingInitMsg {
+  address_provider_address?: string
+  default_unlock_schedule: Schedule
+}
+
+interface Schedule {
+  start_time: number
+  cliff: number
+  duration: number
+}
+
 interface StakingInitMsg {
   config: {
     owner?: string
@@ -94,6 +105,7 @@ interface Asset {
 
 interface Config {
   councilInitMsg: CouncilInitMsg
+  vestingInitMsg: VestingInitMsg
   stakingInitMsg: StakingInitMsg
   safetyFundInitMsg: SafetyFundInitMsg
   treasuryInitMsg: TreasuryInitMsg
