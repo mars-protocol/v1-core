@@ -22,7 +22,7 @@ export const testnet: Config = {
     "config": {
       "owner": undefined,
       "address_provider_address": undefined,
-      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_factory_address": "terra1q5fku2rf8mcdjz4ud9rsjf2srcd9mhz2d7mwxw",
       "astroport_max_spread": "0.05",
       "cooldown_duration": 90, // Seconds (for internal testing) // 864000 Seconds = 10 days
       "unstake_window": 300, // Seconds (for internal testing) // 172800 Seconds = 2 days
@@ -30,12 +30,12 @@ export const testnet: Config = {
   },
   safetyFundInitMsg: {
     "owner": undefined,
-    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_factory_address": "terra1q5fku2rf8mcdjz4ud9rsjf2srcd9mhz2d7mwxw",
     "astroport_max_spread": "0.05",
   },
   treasuryInitMsg: {
     "owner": undefined,
-    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_factory_address": "terra1q5fku2rf8mcdjz4ud9rsjf2srcd9mhz2d7mwxw",
     "astroport_max_spread": "0.05",
   },
   protocolRewardsCollectorInitMsg: {
@@ -44,7 +44,7 @@ export const testnet: Config = {
       "address_provider_address": undefined,
       "safety_fund_fee_share": "0.1",
       "treasury_fee_share": "0.2",
-      "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+      "astroport_factory_address": "terra1q5fku2rf8mcdjz4ud9rsjf2srcd9mhz2d7mwxw",
       "astroport_max_spread": "0.05",
     }
   },
@@ -206,7 +206,7 @@ export const testnet: Config = {
   marsFarmingStratContractAddress: undefined,
   minterProxyContractAddress: "terra1hfyg0tvuqd5kk4un4luqng2adc88lgt5skxmve",
   marsTokenContractAddress: "terra1qs7h830ud0a4hj72yr8f7jmlppyx7z524f7gw6",
-  oracleFactoryAddress: "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+  oracleFactoryAddress: "terra1q5fku2rf8mcdjz4ud9rsjf2srcd9mhz2d7mwxw",
 }
 
 export const local: Config = {
@@ -249,7 +249,7 @@ export const local: Config = {
   },
   treasuryInitMsg: {
     "owner": undefined,
-    "astroport_factory_address": "terra18qpjm4zkvqnpjpw0zn0tdr8gdzvt8au35v45xf",
+    "astroport_factory_address": undefined,
     "astroport_max_spread": "0.05",
   },
   protocolRewardsCollectorInitMsg: {
