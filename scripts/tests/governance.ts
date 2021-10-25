@@ -1,6 +1,7 @@
 import {
   LCDClient,
   LocalTerra,
+  MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
 import { join } from "path"
@@ -110,8 +111,8 @@ async function waitUntilBlockHeight(terra: LCDClient, blockHeight: number) {
   const bob = terra.wallets.test3
   const carol = terra.wallets.test4
   // mock contract address
-  const incentives = terra.wallets.test9.key.accAddress
-  const staking = terra.wallets.test10.key.accAddress
+  const incentives = new MnemonicKey().accAddress
+  const staking = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 

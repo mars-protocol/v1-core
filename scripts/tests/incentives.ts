@@ -1,6 +1,7 @@
 import {
   LCDClient,
   LocalTerra,
+  MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
@@ -94,7 +95,7 @@ function assertBalance(
   const carol = terra.wallets.test4
   const dan = terra.wallets.test5
   // mock contract addresses
-  const astroportFactory = terra.wallets.test10.key.accAddress
+  const astroportFactory = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 
