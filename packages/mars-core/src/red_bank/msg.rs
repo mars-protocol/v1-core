@@ -18,22 +18,14 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    /// Update contract config
-    UpdateConfig { config: CreateOrUpdateConfig },
-
     /// Implementation of cw20 receive msg
     Receive(Cw20ReceiveMsg),
 
-    /// Initialize an asset on the money market
-    InitAsset {
-        /// Asset related info
-        asset: Asset,
-        /// Asset parameters
-        asset_params: InitOrUpdateAssetParams,
-    },
+    /// Update contract config (only owner can call)
+    UpdateConfig { config: CreateOrUpdateConfig },
 
-    /// Update an asset on the money market
-    UpdateAsset {
+    /// Initialize an asset on the money market (only owner can call)
+    InitAsset {
         /// Asset related info
         asset: Asset,
         /// Asset parameters
@@ -47,11 +39,44 @@ pub enum ExecuteMsg {
         reference: Vec<u8>,
     },
 
+    /// Update an asset on the money market (only owner can call)
+    UpdateAsset {
+        /// Asset related info
+        asset: Asset,
+        /// Asset parameters
+        asset_params: InitOrUpdateAssetParams,
+    },
+
+    /// Update uncollateralized loan limit for a given user and asset.
+    /// Overrides previous value if any. A limit of zero means no
+    /// uncollateralized limit and the debt in that asset needs to be
+    /// collateralized (only owner can call)
+    UpdateUncollateralizedLoanLimit {
+        /// Address that receives the credit
+        user_address: String,
+        /// Asset the user receives the credit in
+        asset: Asset,
+        /// Limit for the uncolateralize loan.
+        new_limit: Uint128,
+    },
+
     /// Deposit Terra native coins. Deposited coins must be sent in the transaction
     /// this call is made
     DepositNative {
         /// Denom used in Terra (e.g: uluna, uusd)
         denom: String,
+    },
+
+    /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
+    /// If asset is a Terra native token, the amount sent to the user
+    /// is selected so that the sum of the transfered amount plus the stability tax
+    /// payed is equal to the withdrawn amount.
+    Withdraw {
+        /// Asset to withdraw
+        asset: Asset,
+        /// Amount to be withdrawn. If None is specified, the full maToken balance will be
+        /// burned in exchange for the equivalent asset amount.
+        amount: Option<Uint128>,
     },
 
     /// Borrow Terra native coins. If borrow allowed, amount is added to caller's debt
@@ -86,6 +111,14 @@ pub enum ExecuteMsg {
         receive_ma_token: bool,
     },
 
+    /// Update (enable / disable) asset as collateral for the caller
+    UpdateAssetCollateralStatus {
+        /// Asset to update status for
+        asset: Asset,
+        /// Option to enable (true) / disable (false) asset as collateral
+        enable: bool,
+    },
+
     /// Called by liquidity token (maToken). Validate liquidity token transfer is valid
     /// and update collateral status
     FinalizeLiquidityTokenTransfer {
@@ -101,39 +134,6 @@ pub enum ExecuteMsg {
         recipient_previous_balance: Uint128,
         /// Transfer amount
         amount: Uint128,
-    },
-
-    /// Update uncollateralized loan limit for a given user and asset.
-    /// Overrides previous value if any. A limit of zero means no
-    /// uncollateralized limit and the debt in that asset needs to be
-    /// collateralized.
-    UpdateUncollateralizedLoanLimit {
-        /// Address that receives the credit
-        user_address: String,
-        /// Asset the user receives the credit in
-        asset: Asset,
-        /// Limit for the uncolateralize loan.
-        new_limit: Uint128,
-    },
-
-    /// Update (enable / disable) asset as collateral for the caller
-    UpdateUserCollateralAssetStatus {
-        /// Asset to update status for
-        asset: Asset,
-        /// Option to enable (true) / disable (false) asset as collateral
-        enable: bool,
-    },
-
-    /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
-    /// If asset is a Terra native token, the amount sent to the user
-    /// is selected so that the sum of the transfered amount plus the stability tax
-    /// payed is equal to the withdrawn amount.
-    Withdraw {
-        /// Asset to withdraw
-        asset: Asset,
-        /// Amount to be withdrawn. If None is specified, the full maToken balance will be
-        /// burned in exchange for the equivalent asset amount.
-        amount: Option<Uint128>,
     },
 }
 
