@@ -289,6 +289,135 @@ pub fn linear_get_borrow_rate(
 mod tests {
     use super::*;
     use crate::math::decimal::Decimal;
+    use crate::testing::mock_env_at_block_time;
+
+    #[test]
+    fn test_dynamic_model_lifecycle() {
+        let optimal_utilization_rate = Decimal::percent(50);
+        let kp_1 = Decimal::from_ratio(4u128, 100u128);
+        let reserve_factor = Decimal::percent(10);
+
+        let interest_rate_model_params = DynamicInterestRateModelParams {
+            min_borrow_rate: Decimal::percent(0),
+            max_borrow_rate: Decimal::percent(300),
+
+            kp_1,
+            optimal_utilization_rate,
+            kp_augmentation_threshold: Decimal::percent(20),
+            kp_2: Decimal::from_ratio(3u128, 1u128),
+
+            update_threshold_txs: 2,
+            update_threshold_seconds: 1000,
+        };
+
+        let time_start = 1_634_710_268;
+
+        let interest_rate_model = init_interest_rate_model(
+            InterestRateModelParams::Dynamic(interest_rate_model_params),
+            time_start,
+        )
+        .unwrap();
+
+        let mut market = Market {
+            borrow_rate: Decimal::percent(10),
+            liquidity_rate: Decimal::percent(10),
+            reserve_factor: reserve_factor,
+            interest_rate_model,
+            ..Default::default()
+        };
+
+        // first update after 100 seconds borrow rate does not update
+        {
+            let diff = Decimal::percent(10);
+            let utilization_rate = optimal_utilization_rate - diff;
+            let previous_borrow_rate = market.borrow_rate;
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 100),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            assert_eq!(market.borrow_rate, previous_borrow_rate);
+            assert_eq!(
+                market.liquidity_rate,
+                previous_borrow_rate
+                    .checked_mul(utilization_rate)
+                    .unwrap()
+                    .checked_mul(Decimal::one() - reserve_factor)
+                    .unwrap()
+            );
+            if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
+                assert_eq!(state.borrow_rate_last_updated, time_start);
+                assert_eq!(state.txs_since_last_borrow_rate_update, 1);
+            } else {
+                panic!("Wrong interest rate model type");
+            }
+        }
+
+        // second update after 200 seconds borrow rate updates (because tx threshold is reached)
+        {
+            let diff = Decimal::percent(5);
+            let utilization_rate = optimal_utilization_rate - diff;
+            let previous_borrow_rate = market.borrow_rate;
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 200),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            let expected_borrow_rate = previous_borrow_rate - (kp_1.checked_mul(diff).unwrap());
+            assert_eq!(market.borrow_rate, expected_borrow_rate);
+            assert_eq!(
+                market.liquidity_rate,
+                expected_borrow_rate
+                    .checked_mul(utilization_rate)
+                    .unwrap()
+                    .checked_mul(Decimal::one() - reserve_factor)
+                    .unwrap()
+            );
+            if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
+                assert_eq!(state.borrow_rate_last_updated, time_start + 200);
+                assert_eq!(state.txs_since_last_borrow_rate_update, 0);
+            } else {
+                panic!("Wrong interest rate model type");
+            }
+        }
+
+        // third update after 1201 seconds borrow rate updates (because seconds threshold is reached)
+        {
+            let diff = Decimal::percent(15);
+            let utilization_rate = optimal_utilization_rate + diff;
+            let previous_borrow_rate = market.borrow_rate;
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 1201),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            let expected_borrow_rate = previous_borrow_rate + (kp_1.checked_mul(diff).unwrap());
+            assert_eq!(market.borrow_rate, expected_borrow_rate);
+            assert_eq!(
+                market.liquidity_rate,
+                expected_borrow_rate
+                    .checked_mul(utilization_rate)
+                    .unwrap()
+                    .checked_mul(Decimal::one() - reserve_factor)
+                    .unwrap()
+            );
+            if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
+                assert_eq!(state.borrow_rate_last_updated, time_start + 1201);
+                assert_eq!(state.txs_since_last_borrow_rate_update, 0);
+            } else {
+                panic!("Wrong interest rate model type");
+            }
+        }
+    }
 
     #[test]
     fn test_dynamic_borrow_rate_calculation() {
@@ -379,6 +508,61 @@ mod tests {
 
             assert_eq!(new_borrow_rate, expected_borrow_rate);
         }
+    }
+
+    #[test]
+    fn test_linear_model_lifecycle() {
+        let optimal_utilization_rate = Decimal::percent(80);
+        let reserve_factor = Decimal::percent(20);
+
+        let interest_rate_model_params = LinearInterestRateModelParams {
+            optimal_utilization_rate,
+            base: Decimal::from_ratio(0u128, 100u128),
+            slope_1: Decimal::from_ratio(7u128, 100u128),
+            slope_2: Decimal::from_ratio(45u128, 100u128),
+        };
+
+        let interest_rate_model = init_interest_rate_model(
+            InterestRateModelParams::Linear(interest_rate_model_params.clone()),
+            123,
+        )
+        .unwrap();
+
+        let mut market = Market {
+            borrow_rate: Decimal::percent(10),
+            liquidity_rate: Decimal::zero(),
+            reserve_factor: reserve_factor,
+            interest_rate_model,
+            ..Default::default()
+        };
+
+        let diff = Decimal::percent(10);
+        let utilization_rate = optimal_utilization_rate - diff;
+
+        update_market_interest_rates_with_model(
+            &mock_env_at_block_time(1234),
+            &mut market,
+            utilization_rate,
+        )
+        .unwrap();
+
+        let expected_borrow_rate = interest_rate_model_params.base
+            + interest_rate_model_params
+                .slope_1
+                .checked_mul(utilization_rate)
+                .unwrap()
+                .checked_div(interest_rate_model_params.optimal_utilization_rate)
+                .unwrap();
+
+        assert_eq!(market.borrow_rate, expected_borrow_rate);
+        assert_eq!(
+            market.liquidity_rate,
+            expected_borrow_rate
+                .checked_mul(utilization_rate)
+                .unwrap()
+                .checked_mul(Decimal::one() - reserve_factor)
+                .unwrap()
+        );
     }
 
     #[test]

@@ -125,6 +125,48 @@ impl Market {
     }
 }
 
+impl Default for Market {
+    fn default() -> Self {
+        let dynamic_ir_model = interest_rate_models::InterestRateModel::Dynamic {
+            params: interest_rate_models::DynamicInterestRateModelParams {
+                min_borrow_rate: Decimal::zero(),
+                max_borrow_rate: Decimal::one(),
+                kp_1: Default::default(),
+                optimal_utilization_rate: Default::default(),
+                kp_augmentation_threshold: Default::default(),
+                kp_2: Default::default(),
+
+                update_threshold_txs: 1,
+                update_threshold_seconds: 0,
+            },
+            state: interest_rate_models::DynamicInterestRateModelState {
+                txs_since_last_borrow_rate_update: 0,
+                borrow_rate_last_updated: 0,
+            },
+        };
+
+        Market {
+            index: 0,
+            ma_token_address: crate::helpers::zero_address(),
+            liquidity_index: Default::default(),
+            borrow_index: Default::default(),
+            borrow_rate: Default::default(),
+            liquidity_rate: Default::default(),
+            max_loan_to_value: Default::default(),
+            reserve_factor: Default::default(),
+            indexes_last_updated: 0,
+            debt_total_scaled: Default::default(),
+            asset_type: AssetType::Native,
+            liquidation_threshold: Decimal::one(),
+            liquidation_bonus: Decimal::zero(),
+            interest_rate_model: dynamic_ir_model,
+            active: true,
+            deposit_enabled: true,
+            borrow_enabled: true,
+        }
+    }
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum MarketError {
     #[error("{0}")]

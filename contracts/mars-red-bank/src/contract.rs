@@ -3246,7 +3246,7 @@ mod tests {
                 .unwrap(),
                 ma_token_address: ma_token_address,
                 interest_rate_model: linear_ir_model.clone(),
-                ..th_default_market()
+                ..Default::default()
             },
         );
 
@@ -3368,7 +3368,7 @@ mod tests {
             reserve_factor,
             debt_total_scaled: Uint128::new(10_000_000) * SCALING_FACTOR,
             indexes_last_updated: 10000000,
-            ..th_default_market()
+            ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -3462,7 +3462,7 @@ mod tests {
             debt_total_scaled: Uint128::new(10_000_000) * SCALING_FACTOR,
             indexes_last_updated: 10_000_000,
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), cw20_addr.as_bytes(), &mock_market);
 
@@ -3582,7 +3582,7 @@ mod tests {
             asset_type: AssetType::Native,
             active: false,
             deposit_enabled: true,
-            ..th_default_market()
+            ..Default::default()
         };
         th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -3610,7 +3610,7 @@ mod tests {
             asset_type: AssetType::Native,
             active: true,
             deposit_enabled: false,
-            ..th_default_market()
+            ..Default::default()
         };
         th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -3653,7 +3653,7 @@ mod tests {
             debt_total_scaled: Uint128::new(10_000_000) * SCALING_FACTOR,
             indexes_last_updated: 10000000,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let withdraw_amount = Uint128::from(20000u128);
         let seconds_elapsed = 2000u64;
@@ -3809,7 +3809,7 @@ mod tests {
             debt_total_scaled: Uint128::new(10_000_000) * SCALING_FACTOR,
             indexes_last_updated: 10000000,
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
         let withdraw_amount = Uint128::from(20000u128);
         let seconds_elapsed = 2000u64;
@@ -3932,7 +3932,7 @@ mod tests {
         let mock_market = Market {
             ma_token_address: Addr::unchecked("matoken"),
             liquidity_index: Decimal::from_ratio(15u128, 10u128),
-            ..th_default_market()
+            ..Default::default()
         };
 
         deps.querier.set_cw20_balances(
@@ -3969,7 +3969,7 @@ mod tests {
             active: false,
             deposit_enabled: true,
             borrow_enabled: true,
-            ..th_default_market()
+            ..Default::default()
         };
         let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -4012,7 +4012,7 @@ mod tests {
             max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(60u128, 100u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let ma_token_2_addr = Addr::unchecked("matoken2");
         let market_2 = Market {
@@ -4022,7 +4022,7 @@ mod tests {
             max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(80u128, 100u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let ma_token_3_addr = Addr::unchecked("matoken3");
         let market_3 = Market {
@@ -4032,7 +4032,7 @@ mod tests {
             max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(40u128, 100u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let market_1_initial = th_init_market(deps.as_mut(), b"token1", &market_1);
         let market_2_initial = th_init_market(deps.as_mut(), b"token2", &market_2);
@@ -4220,7 +4220,7 @@ mod tests {
             debt_total_scaled: Uint128::new(10_000_000) * SCALING_FACTOR,
             indexes_last_updated: 10000000,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let withdrawer_balance_scaled = Uint128::new(123_456) * SCALING_FACTOR;
         let seconds_elapsed = 2000u64;
@@ -4385,7 +4385,7 @@ mod tests {
         let market = Market {
             ma_token_address: Addr::unchecked("matoken"),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         th_init_market(deps.as_mut(), b"somecoin", &market);
 
@@ -4451,14 +4451,14 @@ mod tests {
             debt_total_scaled: Uint128::zero(),
             indexes_last_updated: 10000000,
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
         let mock_market_2 = Market {
             ma_token_address: Addr::unchecked("matoken2"),
             borrow_index: Decimal::one(),
             liquidity_index: Decimal::one(),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let mock_market_3 = Market {
             ma_token_address: Addr::unchecked("matoken3"),
@@ -4471,7 +4471,7 @@ mod tests {
             debt_total_scaled: Uint128::zero(),
             indexes_last_updated: 10000000,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
 
         // should get index 0
@@ -5047,7 +5047,7 @@ mod tests {
             active: false,
             deposit_enabled: true,
             borrow_enabled: true,
-            ..th_default_market()
+            ..Default::default()
         };
         let _market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -5084,7 +5084,7 @@ mod tests {
             debt_total_scaled: Uint128::zero(),
             indexes_last_updated: block_time,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"uusd", &mock_market);
 
@@ -5181,7 +5181,7 @@ mod tests {
             reserve_factor: Decimal::from_ratio(12u128, 100u128),
             indexes_last_updated: block_time,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"uusd", &mock_market);
 
@@ -5309,7 +5309,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
         let mock_market_2 = Market {
             ma_token_address: Addr::unchecked("matoken2"),
@@ -5318,7 +5318,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let mock_market_3 = Market {
             ma_token_address: Addr::unchecked("matoken3"),
@@ -5327,7 +5327,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::from_ratio(1u128, 2u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
 
         // should get index 0
@@ -5423,7 +5423,7 @@ mod tests {
             asset_type: AssetType::Native,
             active: false,
             borrow_enabled: true,
-            ..th_default_market()
+            ..Default::default()
         };
         th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -5454,7 +5454,7 @@ mod tests {
             asset_type: AssetType::Native,
             active: true,
             borrow_enabled: false,
-            ..th_default_market()
+            ..Default::default()
         };
         th_init_market(deps.as_mut(), b"somecoin", &mock_market);
 
@@ -5565,7 +5565,7 @@ mod tests {
             reserve_factor: Decimal::from_ratio(2u128, 100u128),
             asset_type: AssetType::Native,
             indexes_last_updated: 0,
-            ..th_default_market()
+            ..Default::default()
         };
 
         let cw20_debt_market = Market {
@@ -5579,7 +5579,7 @@ mod tests {
             asset_type: AssetType::Cw20,
             indexes_last_updated: 0,
             ma_token_address: Addr::unchecked("ma_cw20_debt"),
-            ..th_default_market()
+            ..Default::default()
         };
 
         let native_debt_market = Market {
@@ -5593,7 +5593,7 @@ mod tests {
             asset_type: AssetType::Native,
             indexes_last_updated: 0,
             ma_token_address: Addr::unchecked("ma_native_debt"),
-            ..th_default_market()
+            ..Default::default()
         };
 
         let collateral_market_initial =
@@ -6661,7 +6661,7 @@ mod tests {
             liquidity_index: Decimal::from_ratio(2u128, 1u128),
             borrow_index: Decimal::from_ratio(4u128, 1u128),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
 
         {
@@ -6709,7 +6709,7 @@ mod tests {
             liquidity_index: Decimal::from_ratio(8u128, 1u128),
             borrow_index: Decimal::from_ratio(6u128, 1u128),
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
 
         {
@@ -6787,7 +6787,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
         let debt_market = Market {
             ma_token_address: Addr::unchecked("debt"),
@@ -6796,7 +6796,7 @@ mod tests {
             liquidity_index: Decimal::one(),
             borrow_index: Decimal::one(),
             asset_type: AssetType::Cw20,
-            ..th_default_market()
+            ..Default::default()
         };
 
         // initialize markets
@@ -6896,12 +6896,12 @@ mod tests {
             ma_token_address: Addr::unchecked("masomecoin"),
             liquidity_index: Decimal::one(),
             liquidation_threshold: Decimal::from_ratio(5u128, 10u128),
-            ..th_default_market()
+            ..Default::default()
         };
         let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
         let debt_mock_market = Market {
             borrow_index: Decimal::one(),
-            ..th_default_market()
+            ..Default::default()
         };
         let debt_market = th_init_market(deps.as_mut(), b"debtcoin", &debt_mock_market);
 
@@ -7094,7 +7094,7 @@ mod tests {
             debt_total_scaled: Uint128::zero(),
             indexes_last_updated: 10000000,
             asset_type: AssetType::Native,
-            ..th_default_market()
+            ..Default::default()
         };
 
         // should get index 0
@@ -7287,7 +7287,7 @@ mod tests {
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(40u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(60u128, 100u128),
-            ..th_default_market()
+            ..Default::default()
         };
         let token_addr_2 = Addr::unchecked("depositedcoin2");
         let ma_token_addr_2 = Addr::unchecked("matoken2");
@@ -7298,7 +7298,7 @@ mod tests {
             borrow_index: Decimal::one(),
             max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(80u128, 100u128),
-            ..th_default_market()
+            ..Default::default()
         };
         let token_addr_3 = Addr::unchecked("depositedcoin3");
         let ma_token_addr_3 = Addr::unchecked("matoken3");
@@ -7309,7 +7309,7 @@ mod tests {
             borrow_index: Decimal::from_ratio(2u128, 1u128),
             max_loan_to_value: Decimal::from_ratio(20u128, 100u128),
             liquidation_threshold: Decimal::from_ratio(40u128, 100u128),
-            ..th_default_market()
+            ..Default::default()
         };
 
         let market_1_initial =
@@ -7509,7 +7509,7 @@ mod tests {
             cw20_contract_addr_1.as_bytes(),
             &Market {
                 asset_type: AssetType::Cw20,
-                ..th_default_market()
+                ..Default::default()
             },
         );
 
@@ -7518,7 +7518,7 @@ mod tests {
             deps.as_mut(),
             String::from("uusd").as_bytes(),
             &Market {
-                ..th_default_market()
+                ..Default::default()
             },
         );
 
@@ -7958,46 +7958,6 @@ mod tests {
         TestExpectedIndices {
             liquidity: expected_liquidity_index,
             borrow: expected_borrow_index,
-        }
-    }
-
-    fn th_default_market() -> Market {
-        let dynamic_ir_model = InterestRateModel::Dynamic {
-            params: DynamicInterestRateModelParams {
-                min_borrow_rate: Decimal::zero(),
-                max_borrow_rate: Decimal::one(),
-                kp_1: Default::default(),
-                optimal_utilization_rate: Default::default(),
-                kp_augmentation_threshold: Default::default(),
-                kp_2: Default::default(),
-
-                update_threshold_txs: 1,
-                update_threshold_seconds: 0,
-            },
-            state: DynamicInterestRateModelState {
-                txs_since_last_borrow_rate_update: 0,
-                borrow_rate_last_updated: 0,
-            },
-        };
-
-        Market {
-            index: 0,
-            ma_token_address: zero_address(),
-            liquidity_index: Default::default(),
-            borrow_index: Default::default(),
-            borrow_rate: Default::default(),
-            liquidity_rate: Default::default(),
-            max_loan_to_value: Default::default(),
-            reserve_factor: Default::default(),
-            indexes_last_updated: 0,
-            debt_total_scaled: Default::default(),
-            asset_type: AssetType::Native,
-            liquidation_threshold: Decimal::one(),
-            liquidation_bonus: Decimal::zero(),
-            interest_rate_model: dynamic_ir_model,
-            active: true,
-            deposit_enabled: true,
-            borrow_enabled: true,
         }
     }
 }
