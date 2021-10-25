@@ -5,7 +5,6 @@ import {
 } from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual } from "assert"
-import fetch from "node-fetch"
 import 'dotenv/config.js'
 import {
   deployContract,
@@ -28,10 +27,6 @@ import {
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 
-// there is no way to query the latest block height in terra.js, so we query the LocalTerra LCD
-// endpoint instead
-const LOCAL_TERRA_LCD_URL = "http://localhost:1317"
-
 const PROPOSAL_EFFECTIVE_DELAY = 5
 const PROPOSAL_REQUIRED_DEPOSIT = 100_000000
 const PROPOSAL_VOTING_PERIOD = 10
@@ -47,12 +42,6 @@ const BOB_PROPOSAL_DEPOSIT = PROPOSAL_REQUIRED_DEPOSIT + 5_000000
 const LUNA_USD_PRICE = 25
 
 // HELPERS
-
-async function getLatestBlockHeight() {
-  const response = await fetch(`${LOCAL_TERRA_LCD_URL}/blocks/latest`)
-  const obj: any = await response.json()
-  return parseInt(obj.block.header.height)
-}
 
 async function assertXmarsBalanceAt(
   terra: LCDClient,
@@ -82,12 +71,14 @@ async function castVote(
   )
 }
 
-async function waitUntilBlockHeight(blockHeight: number) {
+async function waitUntilBlockHeight(terra: LCDClient, blockHeight: number) {
   const maxTries = 10
   let tries = 0
   let backoff = 1
   while (true) {
-    const latestBlockHeight = await getLatestBlockHeight()
+    const latestBlock = await terra.tendermint.blockInfo()
+    const latestBlockHeight = parseInt(latestBlock.block.header.height)
+
     if (latestBlockHeight >= blockHeight) {
       break
     }
@@ -343,7 +334,7 @@ async function waitUntilBlockHeight(blockHeight: number) {
 
   console.log("wait for voting periods to end")
 
-  await waitUntilBlockHeight(Math.max(aliceProposalVotingPeriodEnd, bobProposalVotingPeriodEnd))
+  await waitUntilBlockHeight(terra, Math.max(aliceProposalVotingPeriodEnd, bobProposalVotingPeriodEnd))
 
   console.log("end proposals")
 
@@ -376,7 +367,7 @@ async function waitUntilBlockHeight(blockHeight: number) {
 
   console.log("wait for effective delay period to end")
 
-  await waitUntilBlockHeight(aliceProposalEffectiveDelayEnd)
+  await waitUntilBlockHeight(terra, aliceProposalEffectiveDelayEnd)
 
   console.log("execute proposal")
 
