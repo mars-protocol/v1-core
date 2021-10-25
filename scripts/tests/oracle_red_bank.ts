@@ -1,4 +1,12 @@
-import { LocalTerra } from "@terra-money/terra.js"
+/*
+LocalTerra requires >= 1500 ms block times for the native Terra oracle to work:
+
+```
+sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' $LOCAL_TERRA_REPO_PATH/config/config.toml
+```
+*/
+
+import { LCDClient, LocalTerra } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
@@ -18,7 +26,32 @@ import {
 // CONSTS
 
 // required environment variables:
-const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
+const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!
+
+// HELPERS
+
+async function waitUntilTerraOracleAvailable(terra: LCDClient) {
+  let tries = 0
+  const maxTries = 10
+  let backoff = 1
+  while (true) {
+    const activeDenoms = await terra.oracle.activeDenoms()
+    if (activeDenoms.includes("uusd")) {
+      break
+    }
+
+    // timeout
+    tries++
+    if (tries == maxTries) {
+      throw new Error(`Terra oracle not available after ${maxTries} tries`)
+    }
+
+    // exponential backoff
+    console.log(`Terra oracle not available, sleeping for ${backoff} s`)
+    await sleep(backoff * 1000)
+    backoff *= 2
+  }
+}
 
 // MAIN
 
@@ -26,6 +59,8 @@ const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
   setTimeoutDuration(0)
 
   const terra = new LocalTerra()
+
+  await waitUntilTerraOracleAvailable(terra)
 
   // addresses
   const deployer = terra.wallets.test1
@@ -183,6 +218,7 @@ const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
       { user_position: { user_address: alice.key.accAddress } }
     )
 
+    // 1 luna should be worth $25
     strictEqual(parseInt(userPosition.total_collateral_in_uusd), 25_000000)
   }
 
@@ -206,6 +242,7 @@ const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
       { user_position: { user_address: bob.key.accAddress } }
     )
 
+    // 1 luna should be worth $30
     approximateEqual(parseInt(userPosition.total_collateral_in_uusd), 30_000000, 100)
   }
 
@@ -255,7 +292,7 @@ const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
     )
 
     // wait until a twap snapshot can be recorded again
-    await sleep(1000 / 5) // TODO add note about LocalTerra block time
+    await sleep(1500)
 
     // record TWAP
     await executeContract(terra, deployer, oracle,
@@ -266,13 +303,33 @@ const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
       { user_position: { user_address: carol.key.accAddress } }
     )
 
+    // 1 luna should be worth $30
     strictEqual(parseInt(userPosition.total_collateral_in_uusd), 30_000000)
   }
 
   {
     console.log("- native")
 
-    // TODO
+    await executeContract(terra, deployer, oracle,
+      {
+        set_asset: {
+          asset: { native: { denom: "uluna" } },
+          price_source: { native: { denom: "uluna" } }
+        }
+      }
+    )
+
+    const dan = terra.wallets.test5
+
+    await depositNative(terra, dan, redBank, "uluna", 1_000000)
+
+    const userPosition = await queryContract(terra, redBank,
+      { user_position: { user_address: dan.key.accAddress } }
+    )
+
+    const lunaUsdPrice = await terra.oracle.exchangeRate("uusd")
+    const lunaUusdPrice = lunaUsdPrice?.amount.mul(1_000000).floor().toNumber()
+    strictEqual(parseInt(userPosition.total_collateral_in_uusd), lunaUusdPrice)
   }
 
   console.log("OK")
