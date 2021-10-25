@@ -784,7 +784,7 @@ async function testLiquidateCw20(env: Env) {
           reserve_factor: "0.2",
           liquidation_threshold: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
@@ -816,7 +816,7 @@ async function testLiquidateCw20(env: Env) {
           reserve_factor: "0.2",
           liquidation_threshold: "0.85",
           liquidation_bonus: String(LIQUIDATION_BONUS),
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
@@ -848,7 +848,7 @@ async function testLiquidateCw20(env: Env) {
           reserve_factor: "0.2",
           liquidation_threshold: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
@@ -880,7 +880,7 @@ async function testLiquidateCw20(env: Env) {
           reserve_factor: "0.2",
           liquidation_threshold: String(MAX_LTV + 0.001),
           liquidation_bonus: String(LIQUIDATION_BONUS),
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "0",
               base: String(INTEREST_RATE),
