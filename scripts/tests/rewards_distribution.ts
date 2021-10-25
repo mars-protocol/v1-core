@@ -15,6 +15,7 @@ import {
   executeContract,
   instantiateContract,
   queryContract,
+  setGasAdjustment,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
@@ -652,6 +653,9 @@ async function testLiquidateCw20(env: Env) {
 
 (async () => {
   setTimeoutDuration(0)
+  // gas is not correctly estimated in the repay_native method on the red bank,
+  // so any estimates need to be adjusted upwards
+  setGasAdjustment(2)
 
   const terra = new LocalTerra()
 
@@ -663,6 +667,7 @@ async function testLiquidateCw20(env: Env) {
   const staking = new MnemonicKey().accAddress
   const safetyFund = new MnemonicKey().accAddress
   const treasury = new MnemonicKey().accAddress
+  const astroportGenerator = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 
@@ -699,6 +704,7 @@ async function testLiquidateCw20(env: Env) {
   const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
+      generator_address: astroportGenerator,
       pair_configs: [
         {
           code_id: pairCodeID,

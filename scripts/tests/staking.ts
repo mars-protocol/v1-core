@@ -14,6 +14,7 @@ import {
   executeContract,
   performTransaction,
   queryContract,
+  setGasAdjustment,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
@@ -82,6 +83,7 @@ async function assertXmarsTotalSupplyAt(
 
 (async () => {
   setTimeoutDuration(0)
+  setGasAdjustment(2)
 
   const terra = new LocalTerra()
 
@@ -91,6 +93,8 @@ async function assertXmarsTotalSupplyAt(
   const bob = terra.wallets.test3
   const carol = terra.wallets.test4
   const dan = terra.wallets.test5
+  // mock contract addresses
+  const astroportGenerator = terra.wallets.test10.key.accAddress
 
   console.log("upload contracts")
 
@@ -103,6 +107,7 @@ async function assertXmarsTotalSupplyAt(
   const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
+      generator_address: astroportGenerator,
       pair_configs: [
         {
           code_id: pairCodeID,
@@ -407,7 +412,7 @@ async function assertXmarsTotalSupplyAt(
     const block = await getBlockHeight(terra, txResult)
 
     const claim = await queryContract(terra, staking, { claim: { user_address: bob.key.accAddress } })
-    assert(parseInt(claim.amount) > 0)
+    assert(parseInt(claim.claim.amount) > 0)
 
     // before unstaking
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, MARS_STAKE_AMOUNT / 2)
@@ -479,7 +484,7 @@ async function assertXmarsTotalSupplyAt(
     const block = await getBlockHeight(terra, txResult)
 
     const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
-    strictEqual(parseInt(claim.amount), bobMarsBalanceAfter - bobMarsBalanceBefore)
+    strictEqual(parseInt(claim.claim.amount), bobMarsBalanceAfter - bobMarsBalanceBefore)
 
     // before and after claiming are the same
     await assertXmarsBalanceAt(terra, xMars, bob.key.accAddress, block - 1, 0)
@@ -531,7 +536,7 @@ async function assertXmarsTotalSupplyAt(
     )
 
     const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
-    danClaimAmount = parseInt(claim.amount)
+    danClaimAmount = parseInt(claim.claim.amount)
     const expectedDanMarsBalance = Math.floor(unstakeAmount * (totalMarsForStakers / expectedXmarsTotalSupply))
     strictEqual(danClaimAmount, expectedDanMarsBalance)
   }
@@ -567,7 +572,7 @@ async function assertXmarsTotalSupplyAt(
     console.log("check that dan's claim has been slashed")
 
     const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
-    const danClaimAmountAfterSlashing = parseInt(claim.amount)
+    const danClaimAmountAfterSlashing = parseInt(claim.claim.amount)
     approximateEqual(danClaimAmount * 0.9, danClaimAmountAfterSlashing, 1)
   }
 

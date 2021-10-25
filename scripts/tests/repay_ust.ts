@@ -8,6 +8,7 @@ import {
   deployContract,
   executeContract,
   queryContract,
+  setGasAdjustment,
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
@@ -41,6 +42,9 @@ async function getDebt(
 
 (async () => {
   setTimeoutDuration(0)
+  // gas is not correctly estimated in the repay_native method on the red bank,
+  // so any estimates need to be adjusted upwards
+  setGasAdjustment(2)
 
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
@@ -159,6 +163,11 @@ async function getDebt(
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+
+  // TODO: making two deposits into the red bank for an asset is necessary for the second borrow of
+  // that asset to succeed. Remove these two deposits when this bug has been identified and fixed.
+  await depositNative(terra, deployer, redBank, "uusd", USD_COLLATERAL)
+  await depositNative(terra, deployer, redBank, "uusd", USD_COLLATERAL)
 
   // TESTS
 

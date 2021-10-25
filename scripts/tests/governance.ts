@@ -388,9 +388,9 @@ async function waitUntilBlockHeight(blockHeight: number) {
 
   // check that the asset has been initialised in the oracle contract
   const assetConfig = await queryContract(terra, oracle,
-    { asset_config: { asset: { native: { denom: "uluna" } } } }
+    { asset_price_source: { asset: { native: { denom: "uluna" } } } }
   )
-  strictEqual(parseInt(assetConfig.price_source.fixed.price), LUNA_USD_PRICE)
+  strictEqual(parseInt(assetConfig.fixed.price), LUNA_USD_PRICE)
 
   console.log("OK")
 })()
