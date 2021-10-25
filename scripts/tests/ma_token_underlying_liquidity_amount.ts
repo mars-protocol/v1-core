@@ -1,8 +1,4 @@
-import {
-  LCDClient,
-  LocalTerra,
-  Wallet
-} from "@terra-money/terra.js"
+import { LocalTerra } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import {
   deployContract,
@@ -16,16 +12,21 @@ import {
 import {
   borrowNative,
   depositNative,
+  getTxTimestamp,
   queryBalanceCw20,
   queryMaAssetAddress,
-  setAssetOraclePriceSource
+  setAssetOraclePriceSource,
 } from "./test_helpers.js"
 
 // CONSTS
 
 const USD_COLLATERAL = 1000_000000
 const LUNA_COLLATERAL = 1000_000000
-const USD_BORROW = 1000_000000;
+const USD_BORROW = 1000_000000
+
+const INTEREST_RATE = 0.25 // 25% pa
+
+const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
 
 // MAIN
 
@@ -136,7 +137,7 @@ const USD_BORROW = 1000_000000;
           interest_rate_strategy: {
             linear: {
               optimal_utilization_rate: "0",
-              base: "1000000",
+              base: String(INTEREST_RATE),
               slope_1: "0",
               slope_2: "0",
             }
@@ -178,7 +179,8 @@ const USD_BORROW = 1000_000000;
 
   console.log("borrow")
 
-  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
+  let result = await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
+  const borrowTime = await getTxTimestamp(terra, result)
 
   let prevUnderlyingLiquidityAmount = USD_COLLATERAL
   for (const i of Array(5).keys()) {
@@ -186,6 +188,7 @@ const USD_BORROW = 1000_000000;
 
     // underlying_liquidity_amount will be higher than the amount of uusd provided, due to interest accruing
     const maUusdBalance = await queryBalanceCw20(terra, provider.key.accAddress, maUusd)
+    const block = await terra.tendermint.blockInfo()
     const underlyingLiquidityAmount = parseInt(
       await queryContract(terra, redBank,
         {
@@ -198,11 +201,22 @@ const USD_BORROW = 1000_000000;
     )
     assert(underlyingLiquidityAmount > prevUnderlyingLiquidityAmount)
 
+    const blockTime = Math.floor(Date.parse(block.block.header.time) / 1000)
+    const elapsed = blockTime - borrowTime
+
+    console.log(`borrow time: ${borrowTime}, current block time: ${blockTime}, elapsed: ${elapsed}`)
+
     console.log(
       `deposit amount: ${USD_COLLATERAL}, ` +
       `maToken balance: ${maUusdBalance}, ` +
       `underlying_liquidity_amount: ${underlyingLiquidityAmount}`
     )
+
+    const amountWithInterest = USD_COLLATERAL * (1 + INTEREST_RATE * (elapsed / SECONDS_IN_YEAR))
+
+    console.log(`amount with interest: ${amountWithInterest}`)
+
+    console.log("")
 
     prevUnderlyingLiquidityAmount = underlyingLiquidityAmount
   }
