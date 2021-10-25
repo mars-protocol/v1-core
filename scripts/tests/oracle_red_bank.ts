@@ -178,23 +178,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   )
   const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
-  // provide liquidity such that the price of luna is $30
-  await executeContract(terra, deployer, ulunaUusdPair,
-    {
-      provide_liquidity: {
-        assets: [
-          {
-            info: { native_token: { denom: "uluna" } },
-            amount: String(1_000_000_000000)
-          }, {
-            info: { native_token: { denom: "uusd" } },
-            amount: String(30_000_000_000000),
-          }
-        ]
-      }
-    },
-    `1000000000000uluna,30000000000000uusd`,
-  )
+  // TESTS
 
   console.log("test oracle price sources")
 
@@ -237,6 +221,24 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     const bob = terra.wallets.test3
 
     await depositNative(terra, bob, redBank, "uluna", 1_000000)
+
+    // provide liquidity such that the price of luna is $30
+    await executeContract(terra, deployer, ulunaUusdPair,
+      {
+        provide_liquidity: {
+          assets: [
+            {
+              info: { native_token: { denom: "uluna" } },
+              amount: String(1_000_000_000000)
+            }, {
+              info: { native_token: { denom: "uusd" } },
+              amount: String(30_000_000_000000),
+            }
+          ]
+        }
+      },
+      `1000000000000uluna,30000000000000uusd`,
+    )
 
     const userPosition = await queryContract(terra, redBank,
       { user_position: { user_address: bob.key.accAddress } }
