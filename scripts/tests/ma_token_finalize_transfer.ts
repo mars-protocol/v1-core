@@ -10,11 +10,10 @@ import {
   setTimeoutDuration,
   uploadContract
 } from "../helpers.js"
-import { strict as assert, strictEqual } from "assert"
+import { strict as assert } from "assert"
 import {
   borrowNative,
   depositNative,
-  queryBalanceCw20,
   queryMaAssetAddress,
   setAssetOraclePriceSource,
   transferCw20
@@ -66,20 +65,6 @@ async function testHealthFactorChecks(
   console.log("borrower provides Luna")
 
   await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
-
-  // check underlying liquidity amount
-  const maLunaBalance = await queryBalanceCw20(terra, borrower.key.accAddress, maLuna)
-
-  const underlyingLiquidityAmount = await queryContract(terra, redBank,
-    {
-      underlying_liquidity_amount: {
-        ma_token_address: maLuna,
-        amount_scaled: String(maLunaBalance)
-      }
-    }
-  )
-
-  strictEqual(parseInt(underlyingLiquidityAmount), LUNA_COLLATERAL)
 
   console.log("borrower borrows USD")
 
