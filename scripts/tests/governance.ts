@@ -72,7 +72,10 @@ async function castVote(
   )
 }
 
-async function waitUntilBlockHeight(terra: LCDClient, blockHeight: number) {
+async function waitUntilBlockHeight(
+  terra: LCDClient,
+  blockHeight: number,
+) {
   const maxTries = 10
   let tries = 0
   let backoff = 1
