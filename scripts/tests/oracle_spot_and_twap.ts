@@ -1,4 +1,4 @@
-import { LocalTerra } from "@terra-money/terra.js";
+import { LocalTerra, MnemonicKey } from "@terra-money/terra.js";
 import { join } from "path";
 import { strictEqual } from "assert";
 import "dotenv/config.js";
@@ -37,6 +37,7 @@ const charlie = terra.wallets.test4; // charlies is a bot who calls the function
 let anchorToken: string;
 let astroportFactory: string;
 let astroportPair: string;
+let astroportGenerator: string;
 let astroportLiquidityToken: string;
 let oracle: string;
 
@@ -123,12 +124,14 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm")
   );
+  astroportGenerator = new MnemonicKey().accAddress
   astroportFactory = await deployContract(
     terra,
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: cw20CodeId,
+      generator_address: astroportGenerator,
       pair_configs: [
         {
           code_id: pairCodeId,

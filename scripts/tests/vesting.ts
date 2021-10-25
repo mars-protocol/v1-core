@@ -42,6 +42,8 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   const alice = terra.wallets.test2; // a user who creates a governance proposal
   const bob = terra.wallets.test3; // a person receiving a MARS token allocations
   const jv = terra.wallets.test4; // Mars JV
+  // mock contract addresses
+  const astroportGenerator = terra.wallets.test10.key.accAddress
 
   console.log("deployer:", deployer.key.accAddress);
   console.log("alice:   ", alice.key.accAddress);
@@ -66,6 +68,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
+      generator_address: astroportGenerator,
       pair_configs: [
         {
           code_id: pairCodeID,
