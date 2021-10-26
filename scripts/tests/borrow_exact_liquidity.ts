@@ -101,7 +101,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
           reserve_factor: "0.2",
           liquidation_threshold: "0.65",
           liquidation_bonus: "0.1",
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "1",
               base: "0",
@@ -133,7 +133,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
           reserve_factor: "0.2",
           liquidation_threshold: "0.85",
           liquidation_bonus: "0.1",
-          interest_rate_strategy: {
+          interest_rate_model_params: {
             linear: {
               optimal_utilization_rate: "1",
               base: "0",

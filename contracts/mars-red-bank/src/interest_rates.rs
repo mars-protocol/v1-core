@@ -10,7 +10,7 @@ use mars_core::asset::get_asset_balance;
 use mars_core::math::decimal::Decimal;
 
 use crate::error::ContractError;
-use crate::interest_rate_models::InterestRateModel;
+use crate::interest_rate_models::update_market_interest_rates_with_model;
 use crate::Market;
 
 /// Scaling factor used to keep more precision during division / multiplication by index.
@@ -27,7 +27,7 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 /// Note it does not save the market to store
 /// NOTE: For a given block, this function should be called before updating interest rates
 /// as it would apply the new interest rates instead of the ones that were valid during
-/// the period between interests_last_updated and current_block
+/// the period between indexes_last_updated and current_block
 pub fn apply_accumulated_interests(
     env: &Env,
     protocol_rewards_collector_address: Addr,
@@ -38,8 +38,8 @@ pub fn apply_accumulated_interests(
     let previous_borrow_index = market.borrow_index;
 
     // Update market indices
-    if market.interests_last_updated < current_timestamp {
-        let time_elapsed = current_timestamp - market.interests_last_updated;
+    if market.indexes_last_updated < current_timestamp {
+        let time_elapsed = current_timestamp - market.indexes_last_updated;
 
         if market.borrow_rate > Decimal::zero() {
             market.borrow_index = calculate_applied_linear_interest_rate(
@@ -55,7 +55,7 @@ pub fn apply_accumulated_interests(
                 time_elapsed,
             )?;
         }
-        market.interests_last_updated = current_timestamp;
+        market.indexes_last_updated = current_timestamp;
     }
 
     // Compute accrued protocol rewards
@@ -201,8 +201,8 @@ pub fn compute_underlying_amount(scaled_amount: Uint128, index: Decimal) -> StdR
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
 pub fn get_updated_borrow_index(market: &Market, timestamp: u64) -> StdResult<Decimal> {
-    if market.interests_last_updated < timestamp {
-        let time_elapsed = timestamp - market.interests_last_updated;
+    if market.indexes_last_updated < timestamp {
+        let time_elapsed = timestamp - market.indexes_last_updated;
 
         if market.borrow_rate > Decimal::zero() {
             let updated_index = calculate_applied_linear_interest_rate(
@@ -221,14 +221,14 @@ pub fn get_updated_borrow_index(market: &Market, timestamp: u64) -> StdResult<De
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
 pub fn get_updated_liquidity_index(market: &Market, timestamp: u64) -> StdResult<Decimal> {
-    if market.interests_last_updated > timestamp {
+    if market.indexes_last_updated > timestamp {
         return Err(StdError::generic_err(
-            format!("Cannot compute updated liquidity index for a timestamp: {} smaller than last updated timestamp for market: {}", timestamp, market.interests_last_updated)
+            format!("Cannot compute updated liquidity index for a timestamp: {} smaller than last updated timestamp for market: {}", timestamp, market.indexes_last_updated)
         ));
     }
 
-    if market.interests_last_updated < timestamp {
-        let time_elapsed = timestamp - market.interests_last_updated;
+    if market.indexes_last_updated < timestamp {
+        let time_elapsed = timestamp - market.indexes_last_updated;
 
         if market.liquidity_rate > Decimal::zero() {
             let updated_index = calculate_applied_linear_interest_rate(
@@ -256,18 +256,17 @@ pub fn update_interest_rates(
     asset_label: &str,
     mut response: Response,
 ) -> Result<Response, ContractError> {
+    // compute utilization rate
     let contract_current_balance = get_asset_balance(
         deps.as_ref(),
         env.contract.address.clone(),
         asset_label.to_string(),
         market.asset_type,
     )?;
-
     if contract_current_balance < liquidity_taken {
         return Err(ContractError::OperationExceedsAvailableLiquidity {});
     }
     let available_liquidity = contract_current_balance - liquidity_taken;
-
     let total_debt =
         get_underlying_debt_amount(market.debt_total_scaled, market, env.block.time.seconds())?;
     let current_utilization_rate = if total_debt > Uint128::zero() {
@@ -277,14 +276,7 @@ pub fn update_interest_rates(
         Decimal::zero()
     };
 
-    let (new_borrow_rate, new_liquidity_rate) =
-        market.interest_rate_strategy.get_updated_interest_rates(
-            current_utilization_rate,
-            market.borrow_rate,
-            market.reserve_factor,
-        )?;
-    market.borrow_rate = new_borrow_rate;
-    market.liquidity_rate = new_liquidity_rate;
+    update_market_interest_rates_with_model(env, market, current_utilization_rate)?;
 
     response = response.add_event(build_interests_updated_event(asset_label, market));
     Ok(response)

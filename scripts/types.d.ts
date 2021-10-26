@@ -65,18 +65,20 @@ interface RedBankInitMsg {
 }
 
 interface DynamicInterestRate {
-  "dynamic": {
+  dynamic: {
     min_borrow_rate: string
     max_borrow_rate: string
     kp_1: string
     optimal_utilization_rate: string
     kp_augmentation_threshold: string
     kp_2: string
+    update_threshold_txs: number
+    update_threshold_seconds: number
   }
 }
 
 interface LinearInterestRate {
-  "linear": {
+  linear: {
     optimal_utilization_rate: string
     base: string
     slope_1: string
@@ -90,7 +92,7 @@ interface InitOrUpdateAssetParams {
   reserve_factor: string
   liquidation_threshold: string
   liquidation_bonus: string
-  interest_rate_strategy: DynamicInterestRate | LinearInterestRate
+  interest_rate_model_params: DynamicInterestRate | LinearInterestRate
   active: boolean
   deposit_enabled: boolean
   borrow_enabled: boolean

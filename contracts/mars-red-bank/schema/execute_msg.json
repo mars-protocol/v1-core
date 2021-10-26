@@ -3,7 +3,20 @@
   "title": "ExecuteMsg",
   "anyOf": [
     {
-      "description": "Update contract config",
+      "description": "Implementation of cw20 receive msg",
+      "type": "object",
+      "required": [
+        "receive"
+      ],
+      "properties": {
+        "receive": {
+          "$ref": "#/definitions/Cw20ReceiveMsg"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Update contract config (only owner can call)",
       "type": "object",
       "required": [
         "update_config"
@@ -24,61 +37,13 @@
       "additionalProperties": false
     },
     {
-      "description": "Implementation of cw20 receive msg",
-      "type": "object",
-      "required": [
-        "receive"
-      ],
-      "properties": {
-        "receive": {
-          "$ref": "#/definitions/Cw20ReceiveMsg"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Initialize an asset on the money market",
+      "description": "Initialize an asset on the money market (only owner can call)",
       "type": "object",
       "required": [
         "init_asset"
       ],
       "properties": {
         "init_asset": {
-          "type": "object",
-          "required": [
-            "asset",
-            "asset_params"
-          ],
-          "properties": {
-            "asset": {
-              "description": "Asset related info",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "asset_params": {
-              "description": "Asset parameters",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/InitOrUpdateAssetParams"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Update an asset on the money market",
-      "type": "object",
-      "required": [
-        "update_asset"
-      ],
-      "properties": {
-        "update_asset": {
           "type": "object",
           "required": [
             "asset",
@@ -134,6 +99,81 @@
       "additionalProperties": false
     },
     {
+      "description": "Update an asset on the money market (only owner can call)",
+      "type": "object",
+      "required": [
+        "update_asset"
+      ],
+      "properties": {
+        "update_asset": {
+          "type": "object",
+          "required": [
+            "asset",
+            "asset_params"
+          ],
+          "properties": {
+            "asset": {
+              "description": "Asset related info",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
+            },
+            "asset_params": {
+              "description": "Asset parameters",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/InitOrUpdateAssetParams"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Update uncollateralized loan limit for a given user and asset. Overrides previous value if any. A limit of zero means no uncollateralized limit and the debt in that asset needs to be collateralized (only owner can call)",
+      "type": "object",
+      "required": [
+        "update_uncollateralized_loan_limit"
+      ],
+      "properties": {
+        "update_uncollateralized_loan_limit": {
+          "type": "object",
+          "required": [
+            "asset",
+            "new_limit",
+            "user_address"
+          ],
+          "properties": {
+            "asset": {
+              "description": "Asset the user receives the credit in",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
+            },
+            "new_limit": {
+              "description": "Limit for the uncolateralize loan.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                }
+              ]
+            },
+            "user_address": {
+              "description": "Address that receives the credit",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "Deposit Terra native coins. Deposited coins must be sent in the transaction this call is made",
       "type": "object",
       "required": [
@@ -149,6 +189,43 @@
             "denom": {
               "description": "Denom used in Terra (e.g: uluna, uusd)",
               "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Withdraw an amount of the asset burning an equivalent amount of maTokens. If asset is a Terra native token, the amount sent to the user is selected so that the sum of the transfered amount plus the stability tax payed is equal to the withdrawn amount.",
+      "type": "object",
+      "required": [
+        "withdraw"
+      ],
+      "properties": {
+        "withdraw": {
+          "type": "object",
+          "required": [
+            "asset"
+          ],
+          "properties": {
+            "amount": {
+              "description": "Amount to be withdrawn. If None is specified, the full maToken balance will be burned in exchange for the equivalent asset amount.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Uint128"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "asset": {
+              "description": "Asset to withdraw",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
             }
           }
         }
@@ -254,6 +331,37 @@
       "additionalProperties": false
     },
     {
+      "description": "Update (enable / disable) asset as collateral for the caller",
+      "type": "object",
+      "required": [
+        "update_asset_collateral_status"
+      ],
+      "properties": {
+        "update_asset_collateral_status": {
+          "type": "object",
+          "required": [
+            "asset",
+            "enable"
+          ],
+          "properties": {
+            "asset": {
+              "description": "Asset to update status for",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Asset"
+                }
+              ]
+            },
+            "enable": {
+              "description": "Option to enable (true) / disable (false) asset as collateral",
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
       "description": "Called by liquidity token (maToken). Validate liquidity token transfer is valid and update collateral status",
       "type": "object",
       "required": [
@@ -307,114 +415,6 @@
               "allOf": [
                 {
                   "$ref": "#/definitions/Uint128"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Update uncollateralized loan limit for a given user and asset. Overrides previous value if any. A limit of zero means no uncollateralized limit and the debt in that asset needs to be collateralized.",
-      "type": "object",
-      "required": [
-        "update_uncollateralized_loan_limit"
-      ],
-      "properties": {
-        "update_uncollateralized_loan_limit": {
-          "type": "object",
-          "required": [
-            "asset",
-            "new_limit",
-            "user_address"
-          ],
-          "properties": {
-            "asset": {
-              "description": "Asset the user receives the credit in",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "new_limit": {
-              "description": "Limit for the uncolateralize loan.",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                }
-              ]
-            },
-            "user_address": {
-              "description": "Address that receives the credit",
-              "type": "string"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Update (enable / disable) asset as collateral for the caller",
-      "type": "object",
-      "required": [
-        "update_user_collateral_asset_status"
-      ],
-      "properties": {
-        "update_user_collateral_asset_status": {
-          "type": "object",
-          "required": [
-            "asset",
-            "enable"
-          ],
-          "properties": {
-            "asset": {
-              "description": "Asset to update status for",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
-                }
-              ]
-            },
-            "enable": {
-              "description": "Option to enable (true) / disable (false) asset as collateral",
-              "type": "boolean"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "description": "Withdraw an amount of the asset burning an equivalent amount of maTokens. If asset is a Terra native token, the amount sent to the user is selected so that the sum of the transfered amount plus the stability tax payed is equal to the withdrawn amount.",
-      "type": "object",
-      "required": [
-        "withdraw"
-      ],
-      "properties": {
-        "withdraw": {
-          "type": "object",
-          "required": [
-            "asset"
-          ],
-          "properties": {
-            "amount": {
-              "description": "Amount to be withdrawn. If None is specified, the full maToken balance will be burned in exchange for the equivalent asset amount.",
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/Uint128"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "asset": {
-              "description": "Asset to withdraw",
-              "allOf": [
-                {
-                  "$ref": "#/definitions/Asset"
                 }
               ]
             }
@@ -537,8 +537,7 @@
       "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
       "type": "string"
     },
-    "DynamicInterestRate": {
-      "description": "Dynamic interest rate model",
+    "DynamicInterestRateModelParams": {
       "type": "object",
       "required": [
         "kp_1",
@@ -546,7 +545,9 @@
         "kp_augmentation_threshold",
         "max_borrow_rate",
         "min_borrow_rate",
-        "optimal_utilization_rate"
+        "optimal_utilization_rate",
+        "update_threshold_seconds",
+        "update_threshold_txs"
       ],
       "properties": {
         "kp_1": {
@@ -596,6 +597,18 @@
               "$ref": "#/definitions/Decimal"
             }
           ]
+        },
+        "update_threshold_seconds": {
+          "description": "Amount of seconds since last borrow rate update that will trigger the next borrow rate update when the next transaction involving the market's interest update happens",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "update_threshold_txs": {
+          "description": "Amount of transactions involving the market's interest update since last borrow rate update that will trigger the next borrow rate update",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
         }
       }
     },
@@ -634,11 +647,11 @@
             }
           ]
         },
-        "interest_rate_strategy": {
+        "interest_rate_model_params": {
           "description": "Interest rate strategy to calculate borrow_rate and liquidity_rate",
           "anyOf": [
             {
-              "$ref": "#/definitions/InterestRateStrategy"
+              "$ref": "#/definitions/InterestRateModelParams"
             },
             {
               "type": "null"
@@ -691,7 +704,7 @@
         }
       }
     },
-    "InterestRateStrategy": {
+    "InterestRateModelParams": {
       "anyOf": [
         {
           "type": "object",
@@ -700,7 +713,7 @@
           ],
           "properties": {
             "dynamic": {
-              "$ref": "#/definitions/DynamicInterestRate"
+              "$ref": "#/definitions/DynamicInterestRateModelParams"
             }
           },
           "additionalProperties": false
@@ -712,14 +725,14 @@
           ],
           "properties": {
             "linear": {
-              "$ref": "#/definitions/LinearInterestRate"
+              "$ref": "#/definitions/LinearInterestRateModelParams"
             }
           },
           "additionalProperties": false
         }
       ]
     },
-    "LinearInterestRate": {
+    "LinearInterestRateModelParams": {
       "description": "Linear interest rate model",
       "type": "object",
       "required": [

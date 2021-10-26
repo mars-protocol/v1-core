@@ -12,8 +12,8 @@
     "debt_total_scaled",
     "deposit_enabled",
     "index",
-    "interest_rate_strategy",
-    "interests_last_updated",
+    "indexes_last_updated",
+    "interest_rate_model",
     "liquidation_bonus",
     "liquidation_threshold",
     "liquidity_index",
@@ -73,19 +73,19 @@
       "format": "uint32",
       "minimum": 0.0
     },
-    "interest_rate_strategy": {
-      "description": "Interest rate strategy to calculate borrow_rate and liquidity_rate",
-      "allOf": [
-        {
-          "$ref": "#/definitions/InterestRateStrategy"
-        }
-      ]
-    },
-    "interests_last_updated": {
-      "description": "Timestamp (seconds) where indexes and rates where last updated",
+    "indexes_last_updated": {
+      "description": "Timestamp (seconds) where indexes and where last updated",
       "type": "integer",
       "format": "uint64",
       "minimum": 0.0
+    },
+    "interest_rate_model": {
+      "description": "model (params + internal state) that defines how interest rate behaves",
+      "allOf": [
+        {
+          "$ref": "#/definitions/InterestRateModel"
+        }
+      ]
     },
     "liquidation_bonus": {
       "description": "Bonus amount of collateral liquidator get when repaying user's debt (Will get collateral from user in an amount equal to debt repayed + bonus)",
@@ -160,8 +160,7 @@
       "description": "A fixed-point decimal value with 18 fractional digits, i.e. Decimal(1_000_000_000_000_000_000) == 1.0\n\nThe greatest possible value that can be represented is 340282366920938463463.374607431768211455 (which is (2^128 - 1) / 10^18)",
       "type": "string"
     },
-    "DynamicInterestRate": {
-      "description": "Dynamic interest rate model",
+    "DynamicInterestRateModelParams": {
       "type": "object",
       "required": [
         "kp_1",
@@ -169,7 +168,9 @@
         "kp_augmentation_threshold",
         "max_borrow_rate",
         "min_borrow_rate",
-        "optimal_utilization_rate"
+        "optimal_utilization_rate",
+        "update_threshold_seconds",
+        "update_threshold_txs"
       ],
       "properties": {
         "kp_1": {
@@ -219,10 +220,41 @@
               "$ref": "#/definitions/Decimal"
             }
           ]
+        },
+        "update_threshold_seconds": {
+          "description": "Amount of seconds since last borrow rate update that will trigger the next borrow rate update when the next transaction involving the market's interest update happens",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "update_threshold_txs": {
+          "description": "Amount of transactions involving the market's interest update since last borrow rate update that will trigger the next borrow rate update",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
         }
       }
     },
-    "InterestRateStrategy": {
+    "DynamicInterestRateModelState": {
+      "type": "object",
+      "required": [
+        "borrow_rate_last_updated",
+        "txs_since_last_borrow_rate_update"
+      ],
+      "properties": {
+        "borrow_rate_last_updated": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "txs_since_last_borrow_rate_update": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "InterestRateModel": {
       "anyOf": [
         {
           "type": "object",
@@ -231,7 +263,19 @@
           ],
           "properties": {
             "dynamic": {
-              "$ref": "#/definitions/DynamicInterestRate"
+              "type": "object",
+              "required": [
+                "params",
+                "state"
+              ],
+              "properties": {
+                "params": {
+                  "$ref": "#/definitions/DynamicInterestRateModelParams"
+                },
+                "state": {
+                  "$ref": "#/definitions/DynamicInterestRateModelState"
+                }
+              }
             }
           },
           "additionalProperties": false
@@ -243,14 +287,22 @@
           ],
           "properties": {
             "linear": {
-              "$ref": "#/definitions/LinearInterestRate"
+              "type": "object",
+              "required": [
+                "params"
+              ],
+              "properties": {
+                "params": {
+                  "$ref": "#/definitions/LinearInterestRateModelParams"
+                }
+              }
             }
           },
           "additionalProperties": false
         }
       ]
     },
-    "LinearInterestRate": {
+    "LinearInterestRateModelParams": {
       "description": "Linear interest rate model",
       "type": "object",
       "required": [

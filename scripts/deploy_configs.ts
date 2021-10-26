@@ -66,14 +66,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.85",
         liquidation_bonus: "0.1",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "1.0",
             kp_1: "0.04",
             optimal_utilization_rate: "0.9",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.07"
+            kp_2: "0.07",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,
@@ -89,14 +91,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.65",
         liquidation_bonus: "0.1",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "2.0",
             kp_1: "0.02",
             optimal_utilization_rate: "0.7",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
+            kp_2: "0.05",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,
@@ -113,14 +117,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "2.0",
             kp_1: "0.02",
             optimal_utilization_rate: "0.5",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
+            kp_2: "0.05",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,
@@ -137,14 +143,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.45",
         liquidation_bonus: "0.15",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "2.0",
             kp_1: "0.02",
             optimal_utilization_rate: "0.5",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
+            kp_2: "0.05",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,
@@ -161,14 +169,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.55",
         liquidation_bonus: "0.15",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "2.0",
             kp_1: "0.02",
             optimal_utilization_rate: "0.5",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
+            kp_2: "0.05",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,
@@ -185,14 +195,16 @@ export const testnet: Config = {
         reserve_factor: "0.2",
         liquidation_threshold: "0.45",
         liquidation_bonus: "0.15",
-        interest_rate_strategy: {
-          "dynamic": {
+        interest_rate_model_params: {
+          dynamic: {
             min_borrow_rate: "0.0",
             max_borrow_rate: "2.0",
             kp_1: "0.02",
             optimal_utilization_rate: "0.5",
             kp_augmentation_threshold: "0.15",
-            kp_2: "0.05"
+            kp_2: "0.05",
+            update_threshold_txs: 5,
+            update_threshold_seconds: 600,
           }
         },
         active: true,

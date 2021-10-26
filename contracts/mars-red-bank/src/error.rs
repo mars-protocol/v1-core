@@ -4,6 +4,7 @@ use cosmwasm_std::{OverflowError, StdError};
 
 use mars_core::error::MarsError;
 
+use crate::interest_rate_models::InterestRateModelError;
 use crate::MarketError;
 
 #[derive(Error, Debug, PartialEq)]
@@ -19,6 +20,9 @@ pub enum ContractError {
 
     #[error("{0}")]
     Market(#[from] MarketError),
+
+    #[error("{0}")]
+    InterestRateModel(#[from] InterestRateModelError),
 
     #[error("Price not found for asset: {label:?}")]
     PriceNotFound { label: String },
