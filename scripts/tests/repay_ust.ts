@@ -1,6 +1,7 @@
 import {
   LCDClient,
   LocalTerra,
+  MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
@@ -51,7 +52,7 @@ async function getDebt(
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
   // mock contract addresses
-  const protocolRewardsCollector = terra.wallets.test10.key.accAddress
+  const protocolRewardsCollector = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 

@@ -1,4 +1,7 @@
-import { LocalTerra } from "@terra-money/terra.js";
+import {
+  LocalTerra,
+  MnemonicKey
+} from "@terra-money/terra.js";
 import { join } from "path";
 import { strictEqual } from "assert";
 import "dotenv/config.js";
@@ -9,7 +12,11 @@ import {
   toEncodedBinary,
   uploadContract,
 } from "../helpers.js";
-import { getBlockHeight, mintCw20, queryBalanceCw20 } from "./test_helpers.js";
+import {
+  getBlockHeight,
+  mintCw20,
+  queryBalanceCw20
+} from "./test_helpers.js";
 
 // CONSTS
 
@@ -43,7 +50,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   const bob = terra.wallets.test3; // a person receiving a MARS token allocations
   const jv = terra.wallets.test4; // Mars JV
   // mock contract addresses
-  const astroportGenerator = terra.wallets.test10.key.accAddress
+  const astroportGenerator = new MnemonicKey().accAddress
 
   console.log("deployer:", deployer.key.accAddress);
   console.log("alice:   ", alice.key.accAddress);

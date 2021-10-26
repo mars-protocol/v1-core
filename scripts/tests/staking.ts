@@ -1,6 +1,7 @@
 import {
   LCDClient,
   LocalTerra,
+  MnemonicKey,
   MsgSend
 } from "@terra-money/terra.js"
 import {
@@ -94,7 +95,7 @@ async function assertXmarsTotalSupplyAt(
   const carol = terra.wallets.test4
   const dan = terra.wallets.test5
   // mock contract addresses
-  const astroportGenerator = terra.wallets.test10.key.accAddress
+  const astroportGenerator = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 

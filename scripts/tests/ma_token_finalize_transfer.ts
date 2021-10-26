@@ -1,6 +1,7 @@
 import {
   LCDClient,
   LocalTerra,
+  MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
 import {
@@ -173,7 +174,7 @@ async function testTransferCollateral(
   // addresses
   const deployer = terra.wallets.test1
   // mock contract addresses
-  const protocolRewardsCollector = terra.wallets.test10.key.accAddress
+  const protocolRewardsCollector = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 
