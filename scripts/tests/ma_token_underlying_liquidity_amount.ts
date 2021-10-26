@@ -24,6 +24,7 @@ const USD_COLLATERAL = 1000_000000
 const LUNA_COLLATERAL = 1000_000000
 const USD_BORROW = 1000_000000
 
+const RESERVE_FACTOR = 0.2 // 20%
 const INTEREST_RATE = 0.25 // 25% pa
 
 const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
@@ -31,7 +32,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
 // MAIN
 
 (async () => {
-  setTimeoutDuration(0)
+  setTimeoutDuration(100)
   // gas is not correctly estimated in the repay_native method on the red bank,
   // so any estimates need to be adjusted upwards
   setGasAdjustment(2)
@@ -129,7 +130,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
         asset_params: {
           initial_borrow_rate: "0.2",
           max_loan_to_value: "0.75",
-          reserve_factor: "0.2",
+          reserve_factor: String(RESERVE_FACTOR),
           liquidation_threshold: "0.85",
           liquidation_bonus: "0.1",
           interest_rate_model_params: {
@@ -180,13 +181,12 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   let result = await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
   const borrowTime = await getTxTimestamp(terra, result)
 
+  await sleep(1000)
+
+  // check interest accrues
   let prevUnderlyingLiquidityAmount = USD_COLLATERAL
   for (const i of Array(5).keys()) {
-    await sleep(1000)
-
-    // underlying_liquidity_amount will be higher than the amount of uusd provided, due to interest accruing
     const maUusdBalance = await queryBalanceCw20(terra, provider.key.accAddress, maUusd)
-    const block = await terra.tendermint.blockInfo()
     const underlyingLiquidityAmount = parseInt(
       await queryContract(terra, redBank,
         {
@@ -197,26 +197,23 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
         }
       )
     )
-    assert(underlyingLiquidityAmount > prevUnderlyingLiquidityAmount)
 
+    // manually calculate accrued interest
+    const block = await terra.tendermint.blockInfo()
     const blockTime = Math.floor(Date.parse(block.block.header.time) / 1000)
     const elapsed = blockTime - borrowTime
 
-    console.log(`borrow time: ${borrowTime}, current block time: ${blockTime}, elapsed: ${elapsed}`)
+    const utilizationRate = 1
+    const liquidityInterestRate = INTEREST_RATE * (elapsed / SECONDS_IN_YEAR) * utilizationRate * (1 - RESERVE_FACTOR)
+    const amountWithInterest = Math.floor(USD_COLLATERAL * (1 + liquidityInterestRate))
 
-    console.log(
-      `deposit amount: ${USD_COLLATERAL}, ` +
-      `maToken balance: ${maUusdBalance}, ` +
-      `underlying_liquidity_amount: ${underlyingLiquidityAmount}`
-    )
+    strictEqual(amountWithInterest, underlyingLiquidityAmount)
 
-    const amountWithInterest = USD_COLLATERAL * (1 + INTEREST_RATE * (elapsed / SECONDS_IN_YEAR))
-
-    console.log(`amount with interest: ${amountWithInterest}`)
-
-    console.log("")
-
+    // check underlying liquidity amount increases with time due to interest accruing
+    assert(underlyingLiquidityAmount > prevUnderlyingLiquidityAmount)
     prevUnderlyingLiquidityAmount = underlyingLiquidityAmount
+
+    await sleep(1000)
   }
 
   console.log("OK")
