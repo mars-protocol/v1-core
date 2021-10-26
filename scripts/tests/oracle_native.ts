@@ -1,3 +1,11 @@
+/*
+LocalTerra requires >= 1500 ms block times for the native Terra oracle to work:
+
+```
+sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/' $LOCAL_TERRA_REPO_PATH/config/config.toml
+```
+*/
+
 import {
   Dec,
   LCDClient,
