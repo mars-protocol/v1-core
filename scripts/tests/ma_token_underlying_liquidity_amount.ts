@@ -183,7 +183,8 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
 
   await sleep(1000)
 
-  // check interest accrues
+  console.log("check interest accrues")
+
   let prevUnderlyingLiquidityAmount = USD_COLLATERAL
   for (const i of Array(5).keys()) {
     const maUusdBalance = await queryBalanceCw20(terra, provider.key.accAddress, maUusd)
@@ -203,8 +204,9 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
     const blockTime = Math.floor(Date.parse(block.block.header.time) / 1000)
     const elapsed = blockTime - borrowTime
 
-    const utilizationRate = 1
-    const liquidityInterestRate = INTEREST_RATE * (elapsed / SECONDS_IN_YEAR) * utilizationRate * (1 - RESERVE_FACTOR)
+    const utilizationRate = USD_BORROW / USD_COLLATERAL
+    const fractionOfYear = elapsed / SECONDS_IN_YEAR
+    const liquidityInterestRate = INTEREST_RATE * fractionOfYear * utilizationRate * (1 - RESERVE_FACTOR)
     const amountWithInterest = Math.floor(USD_COLLATERAL * (1 + liquidityInterestRate))
 
     strictEqual(amountWithInterest, underlyingLiquidityAmount)
