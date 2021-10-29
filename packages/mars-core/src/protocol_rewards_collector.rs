@@ -81,7 +81,7 @@ pub mod msg {
 
     use cosmwasm_std::{CosmosMsg, Decimal as StdDecimal, Uint128};
 
-    use terraswap::asset::AssetInfo;
+    use crate::astroport::asset::AssetInfo;
 
     use crate::asset::Asset;
     use crate::math::decimal::Decimal;

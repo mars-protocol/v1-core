@@ -58,10 +58,10 @@ pub struct ClaimResponse {
 pub mod msg {
     use cosmwasm_std::{Decimal as StdDecimal, Uint128};
 
+    use crate::astroport::asset::AssetInfo;
     use cw20::Cw20ReceiveMsg;
     use schemars::JsonSchema;
     use serde::{Deserialize, Serialize};
-    use terraswap::asset::AssetInfo;
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     pub struct InstantiateMsg {

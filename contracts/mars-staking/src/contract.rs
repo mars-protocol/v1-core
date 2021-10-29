@@ -7,7 +7,7 @@ use cosmwasm_std::{
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
 
-use terraswap::asset::AssetInfo;
+use mars_core::astroport::asset::AssetInfo;
 
 use mars_core::error::MarsError;
 use mars_core::helpers::{
@@ -472,7 +472,7 @@ pub fn execute_swap_uusd_to_mars(
     )?;
 
     let ask_asset_info = AssetInfo::Token {
-        contract_addr: mars_token_address.to_string(),
+        contract_addr: mars_token_address,
     };
 
     let astroport_max_spread = Some(config.astroport_max_spread);
@@ -1339,7 +1339,7 @@ mod tests {
         // *
         let msg = ExecuteMsg::SwapAssetToUusd {
             offer_asset_info: AssetInfo::Token {
-                contract_addr: String::from("mars_token"),
+                contract_addr: Addr::unchecked("mars_token"),
             },
             amount: None,
         };

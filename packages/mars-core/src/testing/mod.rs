@@ -1,3 +1,4 @@
+mod astroport_factory_querier;
 mod astroport_pair_querier;
 mod cw20_querier;
 /// cosmwasm_std::testing overrides and custom test helpers

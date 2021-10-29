@@ -316,15 +316,19 @@ mod helpers {
     use mars_core::math::decimal::Decimal;
     use mars_core::oracle::AstroportTwapSnapshot;
 
+    use crate::error::ContractError;
+
     // Once astroport package is published on crates.io, update Cargo.toml and change these lines to
     // use astroport::asset::{...};
     // and
     // use astroport::pair::{...};
-    use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
-    use crate::astroport::pair::{
-        CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
+    use mars_core::astroport::{
+        asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo},
+        pair::{
+            CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg,
+            SimulationResponse,
+        },
     };
-    use crate::error::ContractError;
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
@@ -348,20 +352,6 @@ mod helpers {
     pub fn ust() -> AstroportAssetInfo {
         AstroportAssetInfo::NativeToken {
             denom: "uusd".to_string(),
-        }
-    }
-
-    // Cast astroport::asset::AssetInfo into mars_core::asset::Asset so that they can be compared
-    impl From<&AstroportAssetInfo> for Asset {
-        fn from(info: &AstroportAssetInfo) -> Self {
-            match info {
-                AstroportAssetInfo::Token { contract_addr } => Asset::Cw20 {
-                    contract_addr: contract_addr.to_string(),
-                },
-                AstroportAssetInfo::NativeToken { denom } => Asset::Native {
-                    denom: denom.clone(),
-                },
-            }
         }
     }
 
@@ -456,6 +446,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
+    use mars_core::astroport::{asset::AssetInfo, factory::PairType, pair::PairInfo};
     use mars_core::testing::{mock_dependencies, MarsMockQuerier};
 
     #[test]
@@ -577,6 +568,89 @@ mod tests {
                 price_source,
                 PriceSourceChecked::Native {
                     denom: "luna".to_string()
+                }
+            );
+        }
+
+        // Astroport spot
+        {
+            let offer_asset_info = AssetInfo::Token {
+                contract_addr: Addr::unchecked("token"),
+            };
+            let ask_asset_info = AssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            };
+
+            deps.querier.set_astroport_pair(PairInfo {
+                asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
+                contract_addr: Addr::unchecked("pair"),
+                liquidity_token: Addr::unchecked("lp"),
+                pair_type: PairType::Xyk {},
+            });
+
+            let asset = Asset::Cw20 {
+                contract_addr: "token".to_string(),
+            };
+            let reference = asset.get_reference();
+            let msg = ExecuteMsg::SetAsset {
+                asset: asset,
+                price_source: PriceSourceUnchecked::AstroportSpot {
+                    pair_address: "pair".to_string(),
+                },
+            };
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+            let price_source = PRICE_SOURCES
+                .load(&deps.storage, reference.as_slice())
+                .unwrap();
+            assert_eq!(
+                price_source,
+                PriceSourceChecked::AstroportSpot {
+                    pair_address: Addr::unchecked("pair")
+                }
+            );
+        }
+
+        // Astroport TWAP
+        {
+            let offer_asset_info = AssetInfo::Token {
+                contract_addr: Addr::unchecked("token"),
+            };
+            let ask_asset_info = AssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            };
+
+            deps.querier.set_astroport_pair(PairInfo {
+                asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
+                contract_addr: Addr::unchecked("pair"),
+                liquidity_token: Addr::unchecked("lp"),
+                pair_type: PairType::Xyk {},
+            });
+
+            let asset = Asset::Cw20 {
+                contract_addr: "token".to_string(),
+            };
+            let reference = asset.get_reference();
+            let msg = ExecuteMsg::SetAsset {
+                asset: asset,
+                price_source: PriceSourceUnchecked::AstroportTwap {
+                    pair_address: "pair".to_string(),
+                    window_size: 3600,
+                    tolerance: 600,
+                },
+            };
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+            let price_source = PRICE_SOURCES
+                .load(&deps.storage, reference.as_slice())
+                .unwrap();
+
+            assert_eq!(
+                price_source,
+                PriceSourceChecked::AstroportTwap {
+                    pair_address: Addr::unchecked("pair"),
+                    window_size: 3600,
+                    tolerance: 600,
                 }
             );
         }

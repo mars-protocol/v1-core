@@ -5,14 +5,21 @@ use cosmwasm_std::{
 };
 use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
-use terraswap::asset::PairInfo;
 
 use crate::{
-    address_provider, incentives, ma_token, oracle, testing::mock_address_provider, vesting,
-    xmars_token,
+    address_provider,
+    astroport::{
+        self,
+        asset::Asset,
+        pair::{PairInfo, PoolResponse},
+    },
+    incentives, ma_token, oracle,
+    testing::mock_address_provider,
+    vesting, xmars_token,
 };
 
 use super::{
+    astroport_factory_querier::AstroportFactoryQuerier,
     astroport_pair_querier::AstroportPairQuerier,
     cw20_querier::{mock_token_info_response, Cw20Querier},
     incentives_querier::IncentivesQuerier,
@@ -28,6 +35,7 @@ pub struct MarsMockQuerier {
     native_querier: NativeQuerier,
     cw20_querier: Cw20Querier,
     xmars_querier: XMarsQuerier,
+    astroport_factory_querier: AstroportFactoryQuerier,
     astroport_pair_querier: AstroportPairQuerier,
     oracle_querier: OracleQuerier,
     vesting_querier: VestingQuerier,
@@ -58,6 +66,7 @@ impl MarsMockQuerier {
             native_querier: NativeQuerier::default(),
             cw20_querier: Cw20Querier::default(),
             xmars_querier: XMarsQuerier::default(),
+            astroport_factory_querier: AstroportFactoryQuerier::default(),
             astroport_pair_querier: AstroportPairQuerier::default(),
             oracle_querier: OracleQuerier::default(),
             vesting_querier: VestingQuerier::default(),
@@ -151,8 +160,29 @@ impl MarsMockQuerier {
 
     pub fn set_astroport_pair(&mut self, pair_info: PairInfo) {
         let asset_infos = &pair_info.asset_infos;
+
+        // factory
         let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
-        self.astroport_pair_querier.pairs.insert(key, pair_info);
+        self.astroport_factory_querier
+            .pairs
+            .insert(key, pair_info.clone());
+
+        // pair
+        let pool_response = PoolResponse {
+            assets: [
+                Asset {
+                    info: asset_infos[0].clone(),
+                    amount: Uint128::zero(),
+                },
+                Asset {
+                    info: asset_infos[1].clone(),
+                    amount: Uint128::zero(),
+                },
+            ],
+            total_share: Uint128::zero(),
+        };
+        let key = pair_info.contract_addr.to_string();
+        self.astroport_pair_querier.pairs.insert(key, pool_response);
     }
 
     pub fn set_incentives_address(&mut self, address: Addr) {
@@ -215,10 +245,17 @@ impl MarsMockQuerier {
                 }
 
                 // Astroport Queries
-                let astroport_pair_query: StdResult<terraswap::factory::QueryMsg> =
+                let astroport_factory_query: StdResult<astroport::factory::QueryMsg> =
                     from_binary(msg);
+                if let Ok(factory_query) = astroport_factory_query {
+                    return self.astroport_factory_querier.handle_query(&factory_query);
+                }
+
+                let astroport_pair_query: StdResult<astroport::pair::QueryMsg> = from_binary(msg);
                 if let Ok(pair_query) = astroport_pair_query {
-                    return self.astroport_pair_querier.handle_query(&pair_query);
+                    return self
+                        .astroport_pair_querier
+                        .handle_query(&contract_addr, &pair_query);
                 }
 
                 // Incentives Queries

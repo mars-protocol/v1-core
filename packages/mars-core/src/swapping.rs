@@ -1,12 +1,14 @@
+use crate::astroport::{
+    asset::{Asset as AstroportAsset, AssetInfo},
+    pair::{ExecuteMsg as AstroportPairExecuteMsg, PairInfo},
+    querier::query_pair_info,
+};
 use crate::helpers::cw20_get_balance;
 use cosmwasm_std::{
     attr, to_binary, Addr, Coin, CosmosMsg, Decimal as StdDecimal, DepsMut, Empty, Env, Response,
     StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
-use terraswap::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
-use terraswap::pair::ExecuteMsg as AstroportPairExecuteMsg;
-use terraswap::querier::query_pair_info;
 
 /// Swap assets via Astroport
 pub fn execute_swap(
@@ -38,7 +40,7 @@ pub fn execute_swap(
             (
                 cw20_get_balance(
                     &deps.querier,
-                    deps.api.addr_validate(&contract_addr)?,
+                    deps.api.addr_validate(&contract_addr.to_string())?,
                     env.contract.address,
                 )?,
                 asset_label,
@@ -48,7 +50,7 @@ pub fn execute_swap(
 
     let ask_asset_label = match ask_asset_info.clone() {
         AssetInfo::NativeToken { denom } => denom,
-        AssetInfo::Token { contract_addr } => contract_addr,
+        AssetInfo::Token { contract_addr } => contract_addr.to_string(),
     };
 
     if contract_offer_asset_balance.is_zero() {
@@ -80,7 +82,8 @@ pub fn execute_swap(
         amount: amount_to_swap,
     };
     let send_msg = asset_into_swap_msg(
-        deps.api.addr_validate(&pair_info.contract_addr)?,
+        deps.api
+            .addr_validate(&pair_info.contract_addr.to_string())?,
         offer_asset,
         astroport_max_spread,
     )?;
@@ -116,7 +119,7 @@ fn asset_into_swap_msg(
             }],
         }),
         AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr,
+            contract_addr: contract_addr.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Send {
                 contract: pair_contract.to_string(),
                 amount: offer_asset.amount,
@@ -136,6 +139,7 @@ fn asset_into_swap_msg(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::astroport::factory::PairType;
     use crate::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, MockEnvParams,
     };
@@ -151,7 +155,7 @@ mod tests {
             (
                 "somecoin_addr",
                 AssetInfo::Token {
-                    contract_addr: String::from("somecoin_addr"),
+                    contract_addr: Addr::unchecked("somecoin_addr"),
                 },
             ),
             (
@@ -190,7 +194,7 @@ mod tests {
         );
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: cw20_contract_address.to_string(),
+            contract_addr: cw20_contract_address,
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -220,7 +224,7 @@ mod tests {
             denom: "somecoin".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: String::from("cw20_token"),
+            contract_addr: Addr::unchecked("cw20_token"),
         };
 
         let response = execute_swap(
@@ -251,16 +255,17 @@ mod tests {
         );
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: cw20_contract_address.to_string(),
+            contract_addr: cw20_contract_address.clone(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: String::from("mars"),
+            contract_addr: Addr::unchecked("mars"),
         };
 
         deps.querier.set_astroport_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: String::from("pair_cw20_mars"),
-            liquidity_token: String::from("lp_cw20_mars"),
+            contract_addr: Addr::unchecked("pair_cw20_mars"),
+            liquidity_token: Addr::unchecked("lp_cw20_mars"),
+            pair_type: PairType::Xyk {},
         });
 
         let res = execute_swap(
@@ -284,7 +289,7 @@ mod tests {
                     msg: to_binary(&AstroportPairExecuteMsg::Swap {
                         offer_asset: AstroportAsset {
                             info: AssetInfo::Token {
-                                contract_addr: cw20_contract_address.to_string(),
+                                contract_addr: cw20_contract_address.clone(),
                             },
                             amount: Uint128::new(999),
                         },
@@ -323,13 +328,14 @@ mod tests {
             denom: "uusd".to_string(),
         };
         let ask_asset_info = AssetInfo::Token {
-            contract_addr: String::from("mars"),
+            contract_addr: Addr::unchecked("mars"),
         };
 
         deps.querier.set_astroport_pair(PairInfo {
             asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
-            contract_addr: String::from("pair_uusd_mars"),
-            liquidity_token: String::from("lp_uusd_mars"),
+            contract_addr: Addr::unchecked("pair_uusd_mars"),
+            liquidity_token: Addr::unchecked("lp_uusd_mars"),
+            pair_type: PairType::Xyk {},
         });
 
         let res = execute_swap(

@@ -1,28 +1,27 @@
 use std::collections::HashMap;
 
-use cosmwasm_std::{to_binary, Binary, ContractResult, QuerierResult, SystemError};
-use terraswap::{asset::PairInfo, factory::QueryMsg};
+use cosmwasm_std::{to_binary, Addr, Binary, ContractResult, QuerierResult, SystemError};
+
+use crate::astroport::pair::{PoolResponse, QueryMsg};
 
 #[derive(Clone, Default)]
 pub struct AstroportPairQuerier {
-    pub pairs: HashMap<String, PairInfo>,
+    pub pairs: HashMap<String, PoolResponse>,
 }
 
 impl AstroportPairQuerier {
-    pub fn handle_query(&self, request: &terraswap::factory::QueryMsg) -> QuerierResult {
+    pub fn handle_query(&self, contract_addr: &Addr, request: &QueryMsg) -> QuerierResult {
+        let key = contract_addr.to_string();
         let ret: ContractResult<Binary> = match &request {
-            QueryMsg::Pair { asset_infos } => {
-                let key = format!("{}-{}", asset_infos[0], asset_infos[1]);
-                match self.pairs.get(&key) {
-                    Some(pair_info) => to_binary(&pair_info).into(),
-                    None => Err(SystemError::InvalidRequest {
-                        error: format!("PairInfo is not found for {}", key),
-                        request: Default::default(),
-                    })
-                    .into(),
-                }
-            }
-            _ => panic!("[mock]: Unsupported Astroport Pair query"),
+            QueryMsg::Pool {} => match self.pairs.get(&key) {
+                Some(pool_response) => to_binary(&pool_response).into(),
+                None => Err(SystemError::InvalidRequest {
+                    error: format!("PoolResponse is not found for {}", key),
+                    request: Default::default(),
+                })
+                .into(),
+            },
+            _ => panic!("[mock]: Unsupported Astroport pair query"),
         };
 
         Ok(ret).into()
