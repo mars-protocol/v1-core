@@ -1,13 +1,15 @@
 use cosmwasm_std::{
-    attr, entry_point, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response,
-    StdError, StdResult, Uint128,
+    entry_point, to_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response, StdResult,
+    Uint128,
 };
+use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
 
 use mars_core::asset::Asset;
 use mars_core::helpers::option_string_to_addr;
 use mars_core::math::decimal::Decimal;
 
+use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{ASTROPORT_TWAP_SNAPSHOTS, CONFIG, PRICE_SOURCES};
 use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchecked};
@@ -33,7 +35,12 @@ pub fn instantiate(
 // HANDLERS
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
         ExecuteMsg::SetAsset {
@@ -51,11 +58,10 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let mut config = CONFIG.load(deps.storage)?;
-
     if info.sender != config.owner {
-        return Err(StdError::generic_err("Only owner can update config"));
+        return Err(MarsError::Unauthorized {}.into());
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
@@ -71,10 +77,10 @@ pub fn execute_set_asset(
     info: MessageInfo,
     asset: Asset,
     price_source_unchecked: PriceSourceUnchecked,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     if info.sender != config.owner {
-        return Err(StdError::generic_err("Only owner can set asset"));
+        return Err(MarsError::Unauthorized {}.into());
     }
 
     let (asset_label, asset_reference, _) = asset.get_attributes();
@@ -104,9 +110,9 @@ pub fn execute_record_twap_snapshot(
     env: Env,
     _info: MessageInfo,
     assets: Vec<Asset>,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let timestamp = env.block.time.seconds();
-    let mut attrs: Vec<Attribute> = vec![];
+    let mut events: Vec<Event> = vec![];
 
     for asset in assets {
         let (asset_label, asset_reference, _) = asset.get_attributes();
@@ -120,7 +126,7 @@ pub fn execute_record_twap_snapshot(
                 tolerance,
             } => (pair_address, window_size, tolerance),
             _ => {
-                return Err(StdError::generic_err("price source is not TWAP"));
+                return Err(ContractError::PriceSourceNotTwap {});
             }
         };
 
@@ -132,13 +138,13 @@ pub fn execute_record_twap_snapshot(
         // A potential attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
         // very big vector, so that calculating the average price becomes extremely gas expensive.
         // To deter this, we reject a new snapshot if the most recent snapshot is less than `tolerance`
-        // seconds ago
+        // seconds ago.
         //
         // NOTE: adding this block causes LocalTerra gas estimation to fail with error 400, but if
         // manually setting gas limit, the tx runs just fine. ???
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
-                return Err(StdError::generic_err("snapshot taken too frequently"));
+                continue;
             }
         }
 
@@ -157,32 +163,35 @@ pub fn execute_record_twap_snapshot(
 
         ASTROPORT_TWAP_SNAPSHOTS.save(deps.storage, &asset_reference, &snapshots)?;
 
-        attrs.extend(vec![
-            attr("asset", asset_label),
-            attr("timestamp", timestamp.to_string()),
-            attr("price_cumulative", price_cumulative),
-        ]);
+        events.push(
+            // This creates an event in the logs named `wasm-asset-<ASSET_LABEL>`
+            Event::new(format!("asset-{}", asset_label))
+                .add_attribute("price_cumulative", price_cumulative),
+        );
     }
 
     Ok(Response::new()
         .add_attribute("action", "record_twap_snapshot")
-        .add_attributes(attrs))
+        .add_attribute("timestamp", timestamp.to_string())
+        .add_events(events))
 }
 
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
+        QueryMsg::Config {} => Ok(to_binary(&query_config(deps, env)?)?),
         QueryMsg::AssetPriceSource { asset } => {
-            to_binary(&query_asset_price_source(deps, env, asset)?)
+            Ok(to_binary(&query_asset_price_source(deps, env, asset)?)?)
         }
-        QueryMsg::AssetPrice { asset } => {
-            to_binary(&query_asset_price(deps, env, asset.get_reference())?)
-        }
+        QueryMsg::AssetPrice { asset } => Ok(to_binary(&query_asset_price(
+            deps,
+            env,
+            asset.get_reference(),
+        )?)?),
         QueryMsg::AssetPriceByReference { asset_reference } => {
-            to_binary(&query_asset_price(deps, env, asset_reference)?)
+            Ok(to_binary(&query_asset_price(deps, env, asset_reference)?)?)
         }
     }
 }
@@ -195,7 +204,11 @@ fn query_asset_price_source(deps: Deps, _env: Env, asset: Asset) -> StdResult<Pr
     PRICE_SOURCES.load(deps.storage, &asset.get_reference())
 }
 
-fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResult<Decimal> {
+fn query_asset_price(
+    deps: Deps,
+    env: Env,
+    asset_reference: Vec<u8>,
+) -> Result<Decimal, ContractError> {
     let price_source = PRICE_SOURCES.load(deps.storage, &asset_reference)?;
 
     match price_source {
@@ -214,7 +227,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
 
             match asset_prices_query {
                 Some(exchange_rate_item) => Ok(exchange_rate_item.exchange_rate.into()),
-                None => Err(StdError::generic_err("No native price found")),
+                None => Err(ContractError::NativePriceNotFound {}),
             }
         }
 
@@ -249,7 +262,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             let previous_snapshot = snapshots
                 .iter()
                 .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
-                .ok_or_else(|| StdError::generic_err("no TWAP snapshot within tolerance"))?;
+                .ok_or_else(|| ContractError::NoSnapshotWithinTolerance {})?;
 
             // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
             // price warps back to zero, resulting in more recent cum. prices being smaller than
@@ -296,7 +309,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
 
 mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
+        to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, Uint128, WasmQuery,
     };
 
     use mars_core::asset::Asset;
@@ -311,6 +324,7 @@ mod helpers {
     use crate::astroport::pair::{
         CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
     };
+    use crate::error::ContractError;
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
@@ -356,7 +370,7 @@ mod helpers {
         querier: &QuerierWrapper,
         asset: &Asset,
         pair_address: &Addr,
-    ) -> StdResult<()> {
+    ) -> Result<(), ContractError> {
         let pool = query_astroport_pool(querier, pair_address)?;
         let asset0: Asset = (&pool.assets[0].info).into();
         let asset1: Asset = (&pool.assets[1].info).into();
@@ -365,7 +379,7 @@ mod helpers {
         if (asset0 == ust && &asset1 == asset) || (asset1 == ust && &asset0 == asset) {
             Ok(())
         } else {
-            Err(StdError::generic_err("invalid pair"))
+            Err(ContractError::InvalidPair {})
         }
     }
 
@@ -382,7 +396,7 @@ mod helpers {
     pub fn query_astroport_spot_price(
         querier: &QuerierWrapper,
         pair_address: &Addr,
-    ) -> StdResult<Decimal> {
+    ) -> Result<Decimal, ContractError> {
         let response: PoolResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: pair_address.to_string(),
             msg: to_binary(&AstroportQueryMsg::Pool {})?,
@@ -440,9 +454,9 @@ mod helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_info, MockApi, MockStorage};
+    use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars_core::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
+    use mars_core::testing::{mock_dependencies, MarsMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -453,8 +467,7 @@ mod tests {
         };
         let info = mock_info("owner", &[]);
 
-        let res =
-            instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         let config = CONFIG.load(&deps.storage).unwrap();
@@ -464,7 +477,6 @@ mod tests {
     #[test]
     fn test_update_config() {
         let mut deps = th_setup();
-        let env = mock_env(MockEnvParams::default());
 
         // only owner can update
         {
@@ -472,15 +484,15 @@ mod tests {
                 owner: Some(String::from("new_owner")),
             };
             let info = mock_info("another_one", &[]);
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, StdError::generic_err("Only owner can update config"));
+            let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+            assert_eq!(err, MarsError::Unauthorized {}.into());
         }
 
         let info = mock_info("owner", &[]);
         // no change
         {
             let msg = ExecuteMsg::UpdateConfig { owner: None };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
             let config = CONFIG.load(&deps.storage).unwrap();
             assert_eq!(config.owner, Addr::unchecked("owner"));
@@ -491,7 +503,7 @@ mod tests {
             let msg = ExecuteMsg::UpdateConfig {
                 owner: Some(String::from("new_owner")),
             };
-            execute(deps.as_mut(), env, info, msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
             let config = CONFIG.load(&deps.storage).unwrap();
             assert_eq!(config.owner, Addr::unchecked("new_owner"));
@@ -501,7 +513,6 @@ mod tests {
     #[test]
     fn test_set_asset() {
         let mut deps = th_setup();
-        let env = mock_env(MockEnvParams::default());
 
         // only owner can set asset
         {
@@ -514,8 +525,8 @@ mod tests {
                 },
             };
             let info = mock_info("another_one", &[]);
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, StdError::generic_err("Only owner can set asset"));
+            let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+            assert_eq!(err, MarsError::Unauthorized {}.into());
         }
 
         let info = mock_info("owner", &[]);
@@ -532,7 +543,7 @@ mod tests {
                     price: Decimal::from_ratio(1_u128, 2_u128),
                 },
             };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
             let price_source = PRICE_SOURCES
                 .load(&deps.storage, reference.as_slice())
@@ -557,7 +568,7 @@ mod tests {
                     denom: "luna".to_string(),
                 },
             };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
             let price_source = PRICE_SOURCES
                 .load(&deps.storage, reference.as_slice())
@@ -589,11 +600,10 @@ mod tests {
             )
             .unwrap();
 
-        let env = mock_env(MockEnvParams::default());
         let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
-                env,
+                mock_env(),
                 QueryMsg::AssetPriceByReference {
                     asset_reference: Addr::unchecked("cw20token").as_bytes().to_vec(),
                 },
@@ -628,11 +638,10 @@ mod tests {
             )
             .unwrap();
 
-        let env = mock_env(MockEnvParams::default());
         let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
-                env,
+                mock_env(),
                 QueryMsg::AssetPriceByReference {
                     asset_reference: b"nativecoin".to_vec(),
                 },
@@ -652,7 +661,7 @@ mod tests {
             owner: String::from("owner"),
         };
         let info = mock_info("owner", &[]);
-        instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         deps
     }
