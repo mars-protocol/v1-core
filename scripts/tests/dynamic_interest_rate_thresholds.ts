@@ -2,7 +2,6 @@ import {
   LCDClient,
   LocalTerra,
   MnemonicKey,
-  Wallet
 } from "@terra-money/terra.js"
 import { strictEqual, notStrictEqual } from "assert"
 import {
@@ -14,6 +13,7 @@ import {
   uploadContract
 } from "../helpers.js"
 import {
+  Asset,
   borrowNative,
   depositNative,
   setAssetOraclePriceSource
@@ -22,8 +22,7 @@ import {
 // CONSTS
 
 // Adjust the timeout_* config items in LocalTerra/config/config.toml to 250ms to make the test run faster.
-// Real 1 second is equal to 4 seconds in LocalTerra.
-const SECONDS_FACTOR = 4
+const BLOCK_TIME = 0.25
 
 const USD_COLLATERAL = 100_000_000_000000
 const LUNA_COLLATERAL = 100_000_000_000000
@@ -33,7 +32,7 @@ const LUNA_COLLATERAL = 100_000_000_000000
 async function queryBorrowRate(
   terra: LCDClient,
   redBank: string,
-  asset: any,
+  asset: Asset,
 ) {
   const market = await queryContract(terra, redBank, { market: { asset } })
   return parseFloat(market.borrow_rate)
@@ -187,7 +186,8 @@ async function queryBorrowRate(
     strictEqual(uusdBorrowRate, uusdCurrentBorrowRate)
   }
 
-  /*const localTerraSec = uusdUpdateThresholdSeconds / SECONDS_FACTOR
+  // TODO: Test threshold seconds if `sleep` works on LocalTerra. Currently we get `Generic error: addr_validate errored`
+  /*const localTerraSec = uusdUpdateThresholdSeconds * BLOCK_TIME
   const timoutInMs = localTerraSec * 1000
   console.log("Wait ~", localTerraSec, " seconds")
   await sleep(timoutInMs + 10)*/
