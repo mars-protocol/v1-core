@@ -529,7 +529,7 @@ mod tests {
         let info = mock_info("owner", &[]);
 
         let asset = Asset::Cw20 {
-            contract_addr: String::from("token"),
+            contract_addr: String::from("cw20token"),
         };
         let reference = asset.get_reference();
         let msg = ExecuteMsg::SetAsset {
@@ -585,7 +585,7 @@ mod tests {
         let info = mock_info("owner", &[]);
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("token"),
+            contract_addr: Addr::unchecked("cw20token"),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -599,7 +599,7 @@ mod tests {
         });
 
         let asset = Asset::Cw20 {
-            contract_addr: "token".to_string(),
+            contract_addr: "cw20token".to_string(),
         };
         let reference = asset.get_reference();
         let msg = ExecuteMsg::SetAsset {
@@ -627,7 +627,7 @@ mod tests {
         let info = mock_info("owner", &[]);
 
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("token"),
+            contract_addr: Addr::unchecked("cw20token"),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -641,7 +641,7 @@ mod tests {
         });
 
         let asset = Asset::Cw20 {
-            contract_addr: "token".to_string(),
+            contract_addr: "cw20token".to_string(),
         };
         let reference = asset.get_reference();
         let msg = ExecuteMsg::SetAsset {
@@ -677,7 +677,7 @@ mod tests {
         let tolerance = 600;
 
         let asset = Asset::Cw20 {
-            contract_addr: "token".to_string(),
+            contract_addr: "cw20token".to_string(),
         };
         let reference = asset.get_reference();
 
@@ -696,7 +696,7 @@ mod tests {
 
         // set cumulative price
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("token"),
+            contract_addr: Addr::unchecked("cw20token"),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -724,9 +724,9 @@ mod tests {
             .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
 
         // record first snapshot
-        let t0 = 100_000;
+        let snapshot_time = 100_000;
         let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(t0),
+            block_time: Timestamp::from_seconds(snapshot_time),
             ..Default::default()
         });
 
@@ -736,7 +736,7 @@ mod tests {
 
         let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
         let event = &response.events[0];
-        assert_eq!(event.ty, "asset-token");
+        assert_eq!(event.ty, "asset-cw20token");
         assert_eq!(event.attributes[0].value, "1000000000");
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
@@ -744,7 +744,7 @@ mod tests {
             .unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].price_cumulative, Uint128::new(1_000_000000));
-        assert_eq!(snapshots[0].timestamp, t0);
+        assert_eq!(snapshots[0].timestamp, snapshot_time);
 
         // update the cumulative price
         cumulative_prices.price0_cumulative_last = Uint128::new(2_000_000000);
@@ -752,9 +752,9 @@ mod tests {
             .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
 
         // try to record a second snapshot within `tolerance` seconds
-        let t1 = t0 + tolerance - 1;
+        let snapshot_too_soon_time = snapshot_time + tolerance - 1;
         let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(t1),
+            block_time: Timestamp::from_seconds(snapshot_too_soon_time),
             ..Default::default()
         });
 
@@ -762,15 +762,15 @@ mod tests {
         assert!(response.events.len() == 0);
 
         // record a second snapshot
-        let t2 = t0 + tolerance;
+        let second_snapshot_time = snapshot_time + tolerance;
         let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(t2),
+            block_time: Timestamp::from_seconds(second_snapshot_time),
             ..Default::default()
         });
 
         let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
         let event = &response.events[0];
-        assert_eq!(event.ty, "asset-token");
+        assert_eq!(event.ty, "asset-cw20token");
         assert_eq!(event.attributes[0].value, "2000000000");
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
@@ -778,12 +778,12 @@ mod tests {
             .unwrap();
         assert_eq!(snapshots.len(), 2);
         assert_eq!(snapshots[1].price_cumulative, Uint128::new(2_000_000000));
-        assert_eq!(snapshots[1].timestamp, t2);
+        assert_eq!(snapshots[1].timestamp, second_snapshot_time);
 
-        // check that old snapshots, whose timestamps are `> window_size + tolerance` seconds ago, are removed from state
-        let t3 = t2 + window_size + tolerance + 1;
+        // record a third snapshot and check that old snapshots are removed from state
+        let third_snapshot_time = second_snapshot_time + window_size + tolerance + 1;
         let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(t3),
+            block_time: Timestamp::from_seconds(third_snapshot_time),
             ..Default::default()
         });
 
@@ -794,26 +794,26 @@ mod tests {
             .unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(snapshots[0].price_cumulative, Uint128::new(2_000_000000));
-        assert_eq!(snapshots[0].timestamp, t3);
+        assert_eq!(snapshots[0].timestamp, third_snapshot_time);
     }
 
     #[test]
     fn test_query_asset_price_source() {
         let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
         let asset = Asset::Cw20 {
             contract_addr: String::from("cw20token"),
         };
-        let asset_reference = asset.get_reference();
 
-        PRICE_SOURCES
-            .save(
-                &mut deps.storage,
-                asset_reference.as_slice(),
-                &PriceSourceChecked::Fixed {
-                    price: Decimal::from_ratio(3_u128, 2_u128),
-                },
-            )
-            .unwrap();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset.clone(),
+            price_source: PriceSourceUnchecked::Fixed {
+                price: Decimal::from_ratio(1_u128, 2_u128),
+            },
+        };
+
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         let price_source: PriceSourceChecked = from_binary(
             &query(
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(
             price_source,
             PriceSourceChecked::Fixed {
-                price: Decimal::from_ratio(3_u128, 2_u128),
+                price: Decimal::from_ratio(1_u128, 2_u128),
             },
         );
     }
@@ -904,7 +904,7 @@ mod tests {
     fn test_query_asset_price_astroport_spot() {
         let mut deps = th_setup();
         let asset = Asset::Native {
-            denom: String::from("token"),
+            denom: String::from("cw20token"),
         };
         let asset_reference = asset.get_reference();
 
@@ -921,7 +921,7 @@ mod tests {
 
         // set astroport pair info
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("token"),
+            contract_addr: Addr::unchecked("cw20token"),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
@@ -965,7 +965,7 @@ mod tests {
         let info = mock_info("anyone", &[]);
 
         let asset = Asset::Native {
-            denom: String::from("token"),
+            denom: String::from("cw20token"),
         };
         let asset_reference = asset.get_reference();
 
@@ -987,7 +987,7 @@ mod tests {
 
         // set astroport pair info
         let offer_asset_info = AssetInfo::Token {
-            contract_addr: Addr::unchecked("token"),
+            contract_addr: Addr::unchecked("cw20token"),
         };
         let ask_asset_info = AssetInfo::NativeToken {
             denom: "uusd".to_string(),
