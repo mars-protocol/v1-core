@@ -445,9 +445,14 @@ mod helpers {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
-    use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars_core::astroport::{asset::AssetInfo, factory::PairType, pair::PairInfo};
-    use mars_core::testing::{mock_dependencies, MarsMockQuerier};
+    use cosmwasm_std::{from_binary, Addr, OwnedDeps, Timestamp};
+    use mars_core::astroport::pair::CumulativePricesResponse;
+    use mars_core::astroport::{
+        asset::{Asset as AstroportAsset, AssetInfo},
+        factory::PairType,
+        pair::PairInfo,
+    };
+    use mars_core::testing::{self, mock_dependencies, MarsMockQuerier, MockEnvParams};
 
     #[test]
     fn test_proper_initialization() {
@@ -661,6 +666,135 @@ mod tests {
                 tolerance: 600,
             }
         );
+    }
+
+    #[test]
+    fn test_record_twap_snapshot() {
+        let mut deps = th_setup();
+        let info = mock_info("anyone", &[]);
+
+        let window_size = 3600;
+        let tolerance = 600;
+
+        let asset = Asset::Cw20 {
+            contract_addr: "token".to_string(),
+        };
+        let reference = asset.get_reference();
+
+        // set price source to astroport TWAP
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                reference.as_slice(),
+                &PriceSourceChecked::AstroportTwap {
+                    pair_address: Addr::unchecked("pair"),
+                    window_size,
+                    tolerance,
+                },
+            )
+            .unwrap();
+
+        // set cumulative price
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        let mut cumulative_prices = CumulativePricesResponse {
+            assets: [
+                AstroportAsset {
+                    info: offer_asset_info,
+                    amount: Uint128::zero(),
+                },
+                AstroportAsset {
+                    info: ask_asset_info,
+                    amount: Uint128::zero(),
+                },
+            ],
+            total_share: Uint128::zero(),
+            price0_cumulative_last: Uint128::zero(), // token
+            price1_cumulative_last: Uint128::zero(), // uusd
+        };
+
+        // set the cumulative price
+        cumulative_prices.price0_cumulative_last = Uint128::new(1_000_000000);
+        deps.querier
+            .set_astroport_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        // record first snapshot
+        let t0 = 100_000;
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(t0),
+            ..Default::default()
+        });
+
+        let msg = ExecuteMsg::RecordTwapSnapshot {
+            assets: vec![asset.clone()],
+        };
+
+        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        let event = &response.events[0];
+        assert_eq!(event.ty, "asset-token");
+        assert_eq!(event.attributes[0].value, "1000000000");
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].price_cumulative, Uint128::new(1_000_000000));
+        assert_eq!(snapshots[0].timestamp, t0);
+
+        // update the cumulative price
+        cumulative_prices.price0_cumulative_last = Uint128::new(2_000_000000);
+        deps.querier
+            .set_astroport_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        // try to record a second snapshot within `tolerance` seconds
+        let t1 = t0 + tolerance - 1;
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(t1),
+            ..Default::default()
+        });
+
+        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        assert!(response.events.len() == 0);
+
+        // record a second snapshot
+        let t2 = t0 + tolerance;
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(t2),
+            ..Default::default()
+        });
+
+        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        let event = &response.events[0];
+        assert_eq!(event.ty, "asset-token");
+        assert_eq!(event.attributes[0].value, "2000000000");
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[1].price_cumulative, Uint128::new(2_000_000000));
+        assert_eq!(snapshots[1].timestamp, t2);
+
+        // check that old snapshots, whose timestamps are `> window_size + tolerance` seconds ago, are removed from state
+        let t3 = t2 + window_size + tolerance + 1;
+        let env = testing::mock_env(MockEnvParams {
+            block_time: Timestamp::from_seconds(t3),
+            ..Default::default()
+        });
+
+        execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].price_cumulative, Uint128::new(2_000_000000));
+        assert_eq!(snapshots[0].timestamp, t3);
     }
 
     #[test]

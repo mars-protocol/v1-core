@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use cosmwasm_std::{to_binary, Addr, Binary, ContractResult, QuerierResult, SystemError};
 
-use crate::astroport::pair::{PoolResponse, QueryMsg};
+use crate::astroport::pair::{CumulativePricesResponse, PoolResponse, QueryMsg};
 
 #[derive(Clone, Default)]
 pub struct AstroportPairQuerier {
     pub pairs: HashMap<String, PoolResponse>,
+    pub cumulative_prices: HashMap<String, CumulativePricesResponse>,
 }
 
 impl AstroportPairQuerier {
@@ -17,6 +18,14 @@ impl AstroportPairQuerier {
                 Some(pool_response) => to_binary(&pool_response).into(),
                 None => Err(SystemError::InvalidRequest {
                     error: format!("PoolResponse is not found for {}", key),
+                    request: Default::default(),
+                })
+                .into(),
+            },
+            QueryMsg::CumulativePrices {} => match self.cumulative_prices.get(&key) {
+                Some(cumulative_prices_response) => to_binary(&cumulative_prices_response).into(),
+                None => Err(SystemError::InvalidRequest {
+                    error: format!("CumulativePricesResponse is not found for {}", key),
                     request: Default::default(),
                 })
                 .into(),
