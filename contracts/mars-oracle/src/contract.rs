@@ -262,7 +262,7 @@ fn query_asset_price(
             let previous_snapshot = snapshots
                 .iter()
                 .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
-                .ok_or_else(|| ContractError::NoSnapshotWithinTolerance {})?;
+                .ok_or(ContractError::NoSnapshotWithinTolerance {})?;
 
             // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
             // price warps back to zero, resulting in more recent cum. prices being smaller than
