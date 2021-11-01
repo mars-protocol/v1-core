@@ -11,7 +11,7 @@ use crate::{
     astroport::{
         self,
         asset::Asset,
-        pair::{CumulativePricesResponse, PairInfo, PoolResponse},
+        pair::{CumulativePricesResponse, PairInfo, PoolResponse, SimulationResponse},
     },
     incentives, ma_token, oracle,
     testing::mock_address_provider,
@@ -185,7 +185,7 @@ impl MarsMockQuerier {
         self.astroport_pair_querier.pairs.insert(key, pool_response);
     }
 
-    pub fn set_astroport_cumulative_prices(
+    pub fn set_astroport_pair_cumulative_prices(
         &mut self,
         contract_addr: String,
         cumulative_prices: CumulativePricesResponse,
@@ -193,6 +193,16 @@ impl MarsMockQuerier {
         self.astroport_pair_querier
             .cumulative_prices
             .insert(contract_addr, cumulative_prices);
+    }
+
+    pub fn set_astroport_pair_simulation(
+        &mut self,
+        contract_addr: String,
+        simulation: SimulationResponse,
+    ) {
+        self.astroport_pair_querier
+            .simulations
+            .insert(contract_addr, simulation);
     }
 
     pub fn set_incentives_address(&mut self, address: Addr) {
