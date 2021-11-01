@@ -798,6 +798,42 @@ mod tests {
     }
 
     #[test]
+    fn test_query_asset_price_source() {
+        let mut deps = th_setup();
+        let asset = Asset::Cw20 {
+            contract_addr: String::from("cw20token"),
+        };
+        let asset_reference = asset.get_reference();
+
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
+                &PriceSourceChecked::Fixed {
+                    price: Decimal::from_ratio(3_u128, 2_u128),
+                },
+            )
+            .unwrap();
+
+        let price_source: PriceSourceChecked = from_binary(
+            &query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::AssetPriceSource { asset },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::Fixed {
+                price: Decimal::from_ratio(3_u128, 2_u128),
+            },
+        );
+    }
+
+    #[test]
     fn test_query_asset_price_fixed() {
         let mut deps = th_setup();
         let asset = Asset::Cw20 {
