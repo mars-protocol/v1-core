@@ -290,7 +290,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
     // record TWAP
     await executeContract(terra, deployer, oracle,
-      { record_twap_snapshot: { assets: [{ native: { denom: "uluna" } }] } }
+      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }
     )
 
     // wait until a twap snapshot can be recorded again
@@ -298,7 +298,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
     // record TWAP
     await executeContract(terra, deployer, oracle,
-      { record_twap_snapshot: { assets: [{ native: { denom: "uluna" } }] } }
+      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }
     )
 
     const userPosition = await queryContract(terra, redBank,

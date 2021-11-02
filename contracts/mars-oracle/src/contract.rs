@@ -1,13 +1,15 @@
 use cosmwasm_std::{
     attr, entry_point, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response,
-    StdError, StdResult, Uint128,
+    StdResult, Uint128,
 };
+use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
 
 use mars_core::asset::Asset;
 use mars_core::helpers::option_string_to_addr;
 use mars_core::math::decimal::Decimal;
 
+use crate::error::ContractError;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{ASTROPORT_TWAP_SNAPSHOTS, CONFIG, PRICE_SOURCES};
 use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchecked};
@@ -33,15 +35,20 @@ pub fn instantiate(
 // HANDLERS
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
+pub fn execute(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: ExecuteMsg,
+) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::UpdateConfig { owner } => execute_update_config(deps, env, info, owner),
         ExecuteMsg::SetAsset {
             asset,
             price_source,
         } => execute_set_asset(deps, env, info, asset, price_source),
-        ExecuteMsg::RecordTwapSnapshot { assets } => {
-            execute_record_twap_snapshot(deps, env, info, assets)
+        ExecuteMsg::RecordTwapSnapshots { assets } => {
+            execute_record_twap_snapshots(deps, env, info, assets)
         }
     }
 }
@@ -51,11 +58,10 @@ pub fn execute_update_config(
     _env: Env,
     info: MessageInfo,
     owner: Option<String>,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let mut config = CONFIG.load(deps.storage)?;
-
     if info.sender != config.owner {
-        return Err(StdError::generic_err("Only owner can update config"));
+        return Err(MarsError::Unauthorized {}.into());
     };
 
     config.owner = option_string_to_addr(deps.api, owner, config.owner)?;
@@ -71,10 +77,10 @@ pub fn execute_set_asset(
     info: MessageInfo,
     asset: Asset,
     price_source_unchecked: PriceSourceUnchecked,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
     if info.sender != config.owner {
-        return Err(StdError::generic_err("Only owner can set asset"));
+        return Err(MarsError::Unauthorized {}.into());
     }
 
     let (asset_label, asset_reference, _) = asset.get_attributes();
@@ -99,12 +105,12 @@ pub fn execute_set_asset(
 
 /// Modified from
 /// https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/examples/ExampleOracleSimple.sol
-pub fn execute_record_twap_snapshot(
+pub fn execute_record_twap_snapshots(
     deps: DepsMut,
     env: Env,
     _info: MessageInfo,
     assets: Vec<Asset>,
-) -> StdResult<Response> {
+) -> Result<Response, ContractError> {
     let timestamp = env.block.time.seconds();
     let mut attrs: Vec<Attribute> = vec![];
 
@@ -120,7 +126,7 @@ pub fn execute_record_twap_snapshot(
                 tolerance,
             } => (pair_address, window_size, tolerance),
             _ => {
-                return Err(StdError::generic_err("price source is not TWAP"));
+                return Err(ContractError::PriceSourceNotTwap {});
             }
         };
 
@@ -129,16 +135,13 @@ pub fn execute_record_twap_snapshot(
             .load(deps.storage, &asset_reference)
             .unwrap_or_else(|_| vec![]);
 
-        // A potential attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
+        // A potential attack is to repeatly call `RecordTwapSnapshots` so that `snapshots` becomes a
         // very big vector, so that calculating the average price becomes extremely gas expensive.
         // To deter this, we reject a new snapshot if the most recent snapshot is less than `tolerance`
-        // seconds ago
-        //
-        // NOTE: adding this block causes LocalTerra gas estimation to fail with error 400, but if
-        // manually setting gas limit, the tx runs just fine. ???
+        // seconds ago.
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
-                return Err(StdError::generic_err("snapshot taken too frequently"));
+                continue;
             }
         }
 
@@ -159,30 +162,32 @@ pub fn execute_record_twap_snapshot(
 
         attrs.extend(vec![
             attr("asset", asset_label),
-            attr("timestamp", timestamp.to_string()),
             attr("price_cumulative", price_cumulative),
         ]);
     }
 
     Ok(Response::new()
-        .add_attribute("action", "record_twap_snapshot")
+        .add_attribute("action", "record_twap_snapshots")
+        .add_attribute("timestamp", timestamp.to_string())
         .add_attributes(attrs))
 }
 
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
+        QueryMsg::Config {} => Ok(to_binary(&query_config(deps, env)?)?),
         QueryMsg::AssetPriceSource { asset } => {
-            to_binary(&query_asset_price_source(deps, env, asset)?)
+            Ok(to_binary(&query_asset_price_source(deps, env, asset)?)?)
         }
-        QueryMsg::AssetPrice { asset } => {
-            to_binary(&query_asset_price(deps, env, asset.get_reference())?)
-        }
+        QueryMsg::AssetPrice { asset } => Ok(to_binary(&query_asset_price(
+            deps,
+            env,
+            asset.get_reference(),
+        )?)?),
         QueryMsg::AssetPriceByReference { asset_reference } => {
-            to_binary(&query_asset_price(deps, env, asset_reference)?)
+            Ok(to_binary(&query_asset_price(deps, env, asset_reference)?)?)
         }
     }
 }
@@ -195,7 +200,11 @@ fn query_asset_price_source(deps: Deps, _env: Env, asset: Asset) -> StdResult<Pr
     PRICE_SOURCES.load(deps.storage, &asset.get_reference())
 }
 
-fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResult<Decimal> {
+fn query_asset_price(
+    deps: Deps,
+    env: Env,
+    asset_reference: Vec<u8>,
+) -> Result<Decimal, ContractError> {
     let price_source = PRICE_SOURCES.load(deps.storage, &asset_reference)?;
 
     match price_source {
@@ -214,7 +223,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
 
             match asset_prices_query {
                 Some(exchange_rate_item) => Ok(exchange_rate_item.exchange_rate.into()),
-                None => Err(StdError::generic_err("No native price found")),
+                None => Err(ContractError::NativePriceNotFound {}),
             }
         }
 
@@ -249,7 +258,7 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
             let previous_snapshot = snapshots
                 .iter()
                 .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
-                .ok_or_else(|| StdError::generic_err("no TWAP snapshot within tolerance"))?;
+                .ok_or(ContractError::NoSnapshotWithinTolerance {})?;
 
             // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
             // price warps back to zero, resulting in more recent cum. prices being smaller than
@@ -296,20 +305,25 @@ fn query_asset_price(deps: Deps, env: Env, asset_reference: Vec<u8>) -> StdResul
 
 mod helpers {
     use cosmwasm_std::{
-        to_binary, Addr, QuerierWrapper, QueryRequest, StdError, StdResult, Uint128, WasmQuery,
+        to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, Uint128, WasmQuery,
     };
 
     use mars_core::asset::Asset;
     use mars_core::math::decimal::Decimal;
     use mars_core::oracle::AstroportTwapSnapshot;
 
+    use crate::error::ContractError;
+
     // Once astroport package is published on crates.io, update Cargo.toml and change these lines to
     // use astroport::asset::{...};
     // and
     // use astroport::pair::{...};
-    use crate::astroport::asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo};
-    use crate::astroport::pair::{
-        CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg, SimulationResponse,
+    use mars_core::astroport::{
+        asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo},
+        pair::{
+            CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg,
+            SimulationResponse,
+        },
     };
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
@@ -337,26 +351,12 @@ mod helpers {
         }
     }
 
-    // Cast astroport::asset::AssetInfo into mars_core::asset::Asset so that they can be compared
-    impl From<&AstroportAssetInfo> for Asset {
-        fn from(info: &AstroportAssetInfo) -> Self {
-            match info {
-                AstroportAssetInfo::Token { contract_addr } => Asset::Cw20 {
-                    contract_addr: contract_addr.to_string(),
-                },
-                AstroportAssetInfo::NativeToken { denom } => Asset::Native {
-                    denom: denom.clone(),
-                },
-            }
-        }
-    }
-
     /// Assert the astroport pair indicated by `pair_address` consists of UST and `asset`
     pub fn assert_astroport_pool_assets(
         querier: &QuerierWrapper,
         asset: &Asset,
         pair_address: &Addr,
-    ) -> StdResult<()> {
+    ) -> Result<(), ContractError> {
         let pool = query_astroport_pool(querier, pair_address)?;
         let asset0: Asset = (&pool.assets[0].info).into();
         let asset1: Asset = (&pool.assets[1].info).into();
@@ -365,7 +365,7 @@ mod helpers {
         if (asset0 == ust && &asset1 == asset) || (asset1 == ust && &asset0 == asset) {
             Ok(())
         } else {
-            Err(StdError::generic_err("invalid pair"))
+            Err(ContractError::InvalidPair {})
         }
     }
 
@@ -382,7 +382,7 @@ mod helpers {
     pub fn query_astroport_spot_price(
         querier: &QuerierWrapper,
         pair_address: &Addr,
-    ) -> StdResult<Decimal> {
+    ) -> Result<Decimal, ContractError> {
         let response: PoolResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: pair_address.to_string(),
             msg: to_binary(&AstroportQueryMsg::Pool {})?,
@@ -440,9 +440,14 @@ mod helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_info, MockApi, MockStorage};
+    use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars_core::testing::{mock_dependencies, mock_env, MarsMockQuerier, MockEnvParams};
+    use mars_core::astroport::{
+        asset::{Asset as AstroportAsset, AssetInfo},
+        factory::PairType,
+        pair::{CumulativePricesResponse, PairInfo, SimulationResponse},
+    };
+    use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -453,8 +458,7 @@ mod tests {
         };
         let info = mock_info("owner", &[]);
 
-        let res =
-            instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(0, res.messages.len());
 
         let config = CONFIG.load(&deps.storage).unwrap();
@@ -464,7 +468,6 @@ mod tests {
     #[test]
     fn test_update_config() {
         let mut deps = th_setup();
-        let env = mock_env(MockEnvParams::default());
 
         // only owner can update
         {
@@ -472,15 +475,15 @@ mod tests {
                 owner: Some(String::from("new_owner")),
             };
             let info = mock_info("another_one", &[]);
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, StdError::generic_err("Only owner can update config"));
+            let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+            assert_eq!(err, MarsError::Unauthorized {}.into());
         }
 
         let info = mock_info("owner", &[]);
         // no change
         {
             let msg = ExecuteMsg::UpdateConfig { owner: None };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
             let config = CONFIG.load(&deps.storage).unwrap();
             assert_eq!(config.owner, Addr::unchecked("owner"));
@@ -491,7 +494,7 @@ mod tests {
             let msg = ExecuteMsg::UpdateConfig {
                 owner: Some(String::from("new_owner")),
             };
-            execute(deps.as_mut(), env, info, msg).unwrap();
+            execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
             let config = CONFIG.load(&deps.storage).unwrap();
             assert_eq!(config.owner, Addr::unchecked("new_owner"));
@@ -501,102 +504,383 @@ mod tests {
     #[test]
     fn test_set_asset() {
         let mut deps = th_setup();
-        let env = mock_env(MockEnvParams::default());
 
-        // only owner can set asset
-        {
-            let msg = ExecuteMsg::SetAsset {
-                asset: Asset::Native {
-                    denom: "luna".to_string(),
-                },
-                price_source: PriceSourceUnchecked::Native {
-                    denom: "luna".to_string(),
-                },
-            };
-            let info = mock_info("another_one", &[]);
-            let err = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(err, StdError::generic_err("Only owner can set asset"));
-        }
-
-        let info = mock_info("owner", &[]);
-
-        // Fixed
-        {
-            let asset = Asset::Cw20 {
-                contract_addr: String::from("token"),
-            };
-            let reference = asset.get_reference();
-            let msg = ExecuteMsg::SetAsset {
-                asset: asset,
-                price_source: PriceSourceUnchecked::Fixed {
-                    price: Decimal::from_ratio(1_u128, 2_u128),
-                },
-            };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-            let price_source = PRICE_SOURCES
-                .load(&deps.storage, reference.as_slice())
-                .unwrap();
-            assert_eq!(
-                price_source,
-                PriceSourceChecked::Fixed {
-                    price: Decimal::from_ratio(1_u128, 2_u128)
-                }
-            );
-        }
-
-        // Native
-        {
-            let asset = Asset::Native {
-                denom: String::from("luna"),
-            };
-            let reference = asset.get_reference();
-            let msg = ExecuteMsg::SetAsset {
-                asset: asset,
-                price_source: PriceSourceUnchecked::Native {
-                    denom: "luna".to_string(),
-                },
-            };
-            execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap();
-
-            let price_source = PRICE_SOURCES
-                .load(&deps.storage, reference.as_slice())
-                .unwrap();
-            assert_eq!(
-                price_source,
-                PriceSourceChecked::Native {
-                    denom: "luna".to_string()
-                }
-            );
-        }
+        let msg = ExecuteMsg::SetAsset {
+            asset: Asset::Native {
+                denom: "luna".to_string(),
+            },
+            price_source: PriceSourceUnchecked::Native {
+                denom: "luna".to_string(),
+            },
+        };
+        let info = mock_info("another_one", &[]);
+        let err = execute(deps.as_mut(), mock_env(), info, msg).unwrap_err();
+        assert_eq!(err, MarsError::Unauthorized {}.into());
     }
 
     #[test]
-    fn test_query_price_fixed() {
+    fn test_set_asset_fixed() {
         let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
         let asset = Asset::Cw20 {
             contract_addr: String::from("cw20token"),
         };
         let reference = asset.get_reference();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset,
+            price_source: PriceSourceUnchecked::Fixed {
+                price: Decimal::from_ratio(1_u128, 2_u128),
+            },
+        };
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
+        let price_source = PRICE_SOURCES
+            .load(&deps.storage, reference.as_slice())
+            .unwrap();
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::Fixed {
+                price: Decimal::from_ratio(1_u128, 2_u128)
+            }
+        );
+    }
+
+    #[test]
+    fn test_set_asset_native() {
+        let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
+        let asset = Asset::Native {
+            denom: String::from("luna"),
+        };
+        let reference = asset.get_reference();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset,
+            price_source: PriceSourceUnchecked::Native {
+                denom: "luna".to_string(),
+            },
+        };
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let price_source = PRICE_SOURCES
+            .load(&deps.storage, reference.as_slice())
+            .unwrap();
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::Native {
+                denom: "luna".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_set_asset_astroport_spot() {
+        let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
+            contract_addr: Addr::unchecked("pair"),
+            liquidity_token: Addr::unchecked("lp"),
+            pair_type: PairType::Xyk {},
+        });
+
+        let asset = Asset::Cw20 {
+            contract_addr: "cw20token".to_string(),
+        };
+        let reference = asset.get_reference();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset,
+            price_source: PriceSourceUnchecked::AstroportSpot {
+                pair_address: "pair".to_string(),
+            },
+        };
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let price_source = PRICE_SOURCES
+            .load(&deps.storage, reference.as_slice())
+            .unwrap();
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::AstroportSpot {
+                pair_address: Addr::unchecked("pair")
+            }
+        );
+    }
+
+    #[test]
+    fn test_set_asset_astroport_twap() {
+        let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
+            contract_addr: Addr::unchecked("pair"),
+            liquidity_token: Addr::unchecked("lp"),
+            pair_type: PairType::Xyk {},
+        });
+
+        let asset = Asset::Cw20 {
+            contract_addr: "cw20token".to_string(),
+        };
+        let reference = asset.get_reference();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset,
+            price_source: PriceSourceUnchecked::AstroportTwap {
+                pair_address: "pair".to_string(),
+                window_size: 3600,
+                tolerance: 600,
+            },
+        };
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let price_source = PRICE_SOURCES
+            .load(&deps.storage, reference.as_slice())
+            .unwrap();
+
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::AstroportTwap {
+                pair_address: Addr::unchecked("pair"),
+                window_size: 3600,
+                tolerance: 600,
+            }
+        );
+    }
+
+    #[test]
+    fn test_record_twap_snapshots() {
+        let mut deps = th_setup();
+        let info = mock_info("anyone", &[]);
+
+        let window_size = 3600;
+        let tolerance = 600;
+
+        let asset = Asset::Cw20 {
+            contract_addr: "cw20token".to_string(),
+        };
+        let reference = asset.get_reference();
+
+        // set price source to astroport TWAP
         PRICE_SOURCES
             .save(
                 &mut deps.storage,
                 reference.as_slice(),
+                &PriceSourceChecked::AstroportTwap {
+                    pair_address: Addr::unchecked("pair"),
+                    window_size,
+                    tolerance,
+                },
+            )
+            .unwrap();
+
+        // set cumulative price
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        let mut cumulative_prices = CumulativePricesResponse {
+            assets: [
+                AstroportAsset {
+                    info: offer_asset_info,
+                    amount: Uint128::zero(),
+                },
+                AstroportAsset {
+                    info: ask_asset_info,
+                    amount: Uint128::zero(),
+                },
+            ],
+            total_share: Uint128::zero(),
+            price0_cumulative_last: Uint128::zero(), // token
+            price1_cumulative_last: Uint128::zero(), // uusd
+        };
+
+        // set the cumulative price
+        cumulative_prices.price0_cumulative_last = Uint128::new(1_000_000000);
+        deps.querier
+            .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        // record first snapshot
+        let snapshot_time = 100_000;
+
+        let msg = ExecuteMsg::RecordTwapSnapshots {
+            assets: vec![asset.clone()],
+        };
+
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100000"),
+                attr("asset", "cw20token"),
+                attr("price_cumulative", "1000000000"),
+            ]
+        );
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].price_cumulative, Uint128::new(1_000_000000));
+        assert_eq!(snapshots[0].timestamp, snapshot_time);
+
+        // update the cumulative price
+        cumulative_prices.price0_cumulative_last = Uint128::new(2_000_000000);
+        deps.querier
+            .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        // try to record a second snapshot within `tolerance` seconds
+        let snapshot_too_soon_time = snapshot_time + tolerance - 1;
+
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_too_soon_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100599"),
+            ]
+        );
+        assert!(response.events.len() == 0);
+
+        // record a second snapshot
+        let second_snapshot_time = snapshot_time + tolerance;
+
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(second_snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100600"),
+                attr("asset", "cw20token"),
+                attr("price_cumulative", "2000000000"),
+            ]
+        );
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(snapshots[1].price_cumulative, Uint128::new(2_000_000000));
+        assert_eq!(snapshots[1].timestamp, second_snapshot_time);
+
+        // record a third snapshot and check that old snapshots are removed from state
+        let third_snapshot_time = second_snapshot_time + window_size + tolerance + 1;
+
+        execute(
+            deps.as_mut(),
+            mock_env_at_block_time(third_snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
+
+        let snapshots = ASTROPORT_TWAP_SNAPSHOTS
+            .load(deps.as_ref().storage, &reference)
+            .unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].price_cumulative, Uint128::new(2_000_000000));
+        assert_eq!(snapshots[0].timestamp, third_snapshot_time);
+    }
+
+    #[test]
+    fn test_query_asset_price_source() {
+        let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
+        let asset = Asset::Cw20 {
+            contract_addr: String::from("cw20token"),
+        };
+
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset.clone(),
+            price_source: PriceSourceUnchecked::Fixed {
+                price: Decimal::from_ratio(1_u128, 2_u128),
+            },
+        };
+
+        execute(deps.as_mut(), mock_env(), info, msg).unwrap();
+
+        let price_source: PriceSourceChecked = from_binary(
+            &query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::AssetPriceSource { asset },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::Fixed {
+                price: Decimal::from_ratio(1_u128, 2_u128),
+            },
+        );
+    }
+
+    #[test]
+    fn test_query_asset_price_fixed() {
+        let mut deps = th_setup();
+        let asset = Asset::Cw20 {
+            contract_addr: String::from("cw20token"),
+        };
+        let asset_reference = asset.get_reference();
+
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
                 &PriceSourceChecked::Fixed {
                     price: Decimal::from_ratio(3_u128, 2_u128),
                 },
             )
             .unwrap();
 
-        let env = mock_env(MockEnvParams::default());
         let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
-                env,
-                QueryMsg::AssetPriceByReference {
-                    asset_reference: Addr::unchecked("cw20token").as_bytes().to_vec(),
-                },
+                mock_env(),
+                QueryMsg::AssetPriceByReference { asset_reference },
             )
             .unwrap(),
         )
@@ -606,12 +890,12 @@ mod tests {
     }
 
     #[test]
-    fn test_query_price_native() {
+    fn test_query_asset_price_native() {
         let mut deps = th_setup();
         let asset = Asset::Native {
             denom: String::from("nativecoin"),
         };
-        let reference = asset.get_reference();
+        let asset_reference = asset.get_reference();
 
         deps.querier.set_native_exchange_rates(
             "nativecoin".to_string(),
@@ -621,27 +905,203 @@ mod tests {
         PRICE_SOURCES
             .save(
                 &mut deps.storage,
-                reference.as_slice(),
+                asset_reference.as_slice(),
                 &PriceSourceChecked::Native {
                     denom: "nativecoin".to_string(),
                 },
             )
             .unwrap();
 
-        let env = mock_env(MockEnvParams::default());
         let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
-                env,
-                QueryMsg::AssetPriceByReference {
-                    asset_reference: b"nativecoin".to_vec(),
-                },
+                mock_env(),
+                QueryMsg::AssetPriceByReference { asset_reference },
             )
             .unwrap(),
         )
         .unwrap();
 
         assert_eq!(price, Decimal::from_ratio(4_u128, 1_u128));
+    }
+
+    #[test]
+    fn test_query_asset_price_astroport_spot() {
+        let mut deps = th_setup();
+        let asset = Asset::Native {
+            denom: String::from("cw20token"),
+        };
+        let asset_reference = asset.get_reference();
+
+        // set price source
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
+                &PriceSourceChecked::AstroportSpot {
+                    pair_address: Addr::unchecked("pair"),
+                },
+            )
+            .unwrap();
+
+        // set astroport pair info
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [offer_asset_info.clone(), ask_asset_info.clone()],
+            contract_addr: Addr::unchecked("pair"),
+            liquidity_token: Addr::unchecked("lp"),
+            pair_type: PairType::Xyk {},
+        });
+
+        // set astroport spot price and query it
+        deps.querier.set_astroport_pair_simulation(
+            "pair".to_string(),
+            SimulationResponse {
+                return_amount: Uint128::new(9_000000),
+                commission_amount: Uint128::new(1_000000),
+                spread_amount: Uint128::zero(),
+            },
+        );
+
+        let price: Decimal = from_binary(
+            &query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::AssetPriceByReference {
+                    asset_reference: asset_reference.clone(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(price, Decimal::from_ratio(10_u128, 1_u128));
+    }
+
+    #[test]
+    fn test_query_asset_price_astroport_twap() {
+        let mut deps = th_setup();
+        let info = mock_info("anyone", &[]);
+
+        let asset = Asset::Native {
+            denom: String::from("cw20token"),
+        };
+        let asset_reference = asset.get_reference();
+
+        let window_size = 3600;
+        let tolerance = 600;
+
+        // set price source
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
+                &PriceSourceChecked::AstroportTwap {
+                    pair_address: Addr::unchecked("pair"),
+                    window_size,
+                    tolerance,
+                },
+            )
+            .unwrap();
+
+        // set astroport pair info
+        let offer_asset_info = AssetInfo::Token {
+            contract_addr: Addr::unchecked("cw20token"),
+        };
+        let ask_asset_info = AssetInfo::NativeToken {
+            denom: "uusd".to_string(),
+        };
+
+        let mut cumulative_prices = CumulativePricesResponse {
+            assets: [
+                AstroportAsset {
+                    info: offer_asset_info.clone(),
+                    amount: Uint128::zero(),
+                },
+                AstroportAsset {
+                    info: ask_asset_info.clone(),
+                    amount: Uint128::zero(),
+                },
+            ],
+            total_share: Uint128::zero(),
+            price0_cumulative_last: Uint128::zero(), // token
+            price1_cumulative_last: Uint128::zero(), // uusd
+        };
+
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [offer_asset_info, ask_asset_info],
+            contract_addr: Addr::unchecked("pair"),
+            liquidity_token: Addr::unchecked("lp"),
+            pair_type: PairType::Xyk {},
+        });
+
+        // record snapshot
+        let snapshot_time = 100_000;
+
+        let snapshot_time_cumulative_price = 10_000_000000;
+        cumulative_prices.price0_cumulative_last = Uint128::new(snapshot_time_cumulative_price);
+        deps.querier
+            .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        let msg = ExecuteMsg::RecordTwapSnapshots {
+            assets: vec![asset.clone()],
+        };
+
+        execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
+
+        // query price when no snapshot was taken within the tolerable window
+        let query_error_time = snapshot_time + window_size - tolerance - 1;
+
+        let error = query(
+            deps.as_ref(),
+            mock_env_at_block_time(query_error_time),
+            QueryMsg::AssetPriceByReference {
+                asset_reference: asset_reference.clone(),
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error, ContractError::NoSnapshotWithinTolerance {});
+
+        // query price when a snapshot was taken within the tolerable window
+        let query_time = snapshot_time + window_size;
+
+        let query_time_cumulative_price = 20_000_000000;
+        cumulative_prices.price0_cumulative_last = Uint128::new(query_time_cumulative_price);
+        deps.querier
+            .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
+
+        let price: Decimal = from_binary(
+            &query(
+                deps.as_ref(),
+                mock_env_at_block_time(query_time),
+                QueryMsg::AssetPriceByReference {
+                    asset_reference: asset_reference.clone(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            price,
+            Decimal::from_ratio(
+                query_time_cumulative_price - snapshot_time_cumulative_price,
+                query_time - snapshot_time
+            )
+        );
     }
 
     // TEST_HELPERS
@@ -652,7 +1112,7 @@ mod tests {
             owner: String::from("owner"),
         };
         let info = mock_info("owner", &[]);
-        instantiate(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap();
+        instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         deps
     }

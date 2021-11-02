@@ -13,6 +13,9 @@ pub mod treasury;
 pub mod vesting;
 pub mod xmars_token;
 
+// To be removed once Astroport package is published on crates.io
+pub mod astroport;
+
 // Types
 pub mod asset;
 pub mod math;

@@ -13,7 +13,6 @@ backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
 terra-cosmwasm = "2.2.0"
-terraswap = "2.4.0"
 
 cw2 = "0.9.0"
 cw20 = "0.9.0"
