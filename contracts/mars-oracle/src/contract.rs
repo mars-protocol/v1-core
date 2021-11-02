@@ -161,7 +161,7 @@ pub fn execute_record_twap_snapshots(
         ASTROPORT_TWAP_SNAPSHOTS.save(deps.storage, &asset_reference, &snapshots)?;
 
         events.push(
-            Event::new("record-twap-snapshot")
+            Event::new("record_twap_snapshot")
                 .add_attribute("asset", asset_label)
                 .add_attribute("timestamp", timestamp.to_string())
                 .add_attribute("price_cumulative", price_cumulative),
@@ -737,7 +737,7 @@ mod tests {
 
         assert_eq!(
             response.events[0],
-            Event::new("record-twap-snapshot".to_string())
+            Event::new("record_twap_snapshot".to_string())
                 .add_attribute("asset", "cw20token")
                 .add_attribute("timestamp", "100000")
                 .add_attribute("price_cumulative", "1000000000")
@@ -780,7 +780,7 @@ mod tests {
 
         assert_eq!(
             response.events[0],
-            Event::new("record-twap-snapshot".to_string())
+            Event::new("record_twap_snapshot".to_string())
                 .add_attribute("asset", "cw20token")
                 .add_attribute("timestamp", "100600")
                 .add_attribute("price_cumulative", "2000000000")
