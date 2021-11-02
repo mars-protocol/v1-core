@@ -95,15 +95,11 @@ pub fn update_market_interest_rates_with_model(
                 >= params.update_threshold_txs)
                 || (seconds_since_last_borrow_rate_update >= params.update_threshold_seconds);
 
-            println!("th {}", threshold_is_met);
-
             // don't allow more than one update in the same block
             // this prevents calling the contract multiple times to set interest to min or max
             // on a single block.
             let should_update_borrow_rate =
                 threshold_is_met && (seconds_since_last_borrow_rate_update != 0);
-
-            println!("should {}", should_update_borrow_rate);
 
             if should_update_borrow_rate {
                 market.borrow_rate =
