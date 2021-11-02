@@ -71,7 +71,7 @@ async function recordTwapSnapshots() {
     },
   });
   const timestamp = parseInt(result.logs[0].eventsByType.from_contract.timestamp[0]);
-  const cumulativePrice = parseInt(result.logs[0].eventsByType["wasm-record-twap-snapshot"].price_cumulative[0]);
+  const cumulativePrice = parseInt(result.logs[0].eventsByType.wasm.price_cumulative[0]);
   return { timestamp, cumulativePrice };
 }
 
