@@ -139,9 +139,6 @@ pub fn execute_record_twap_snapshots(
         // very big vector, so that calculating the average price becomes extremely gas expensive.
         // To deter this, we reject a new snapshot if the most recent snapshot is less than `tolerance`
         // seconds ago.
-        //
-        // NOTE: adding this block causes LocalTerra gas estimation to fail with error 400, but if
-        // manually setting gas limit, the tx runs just fine. ???
         if let Some(latest_snapshot) = snapshots.last() {
             if timestamp - latest_snapshot.timestamp < tolerance {
                 continue;
