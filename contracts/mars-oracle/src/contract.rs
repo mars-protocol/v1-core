@@ -446,13 +446,14 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::{from_binary, Addr, OwnedDeps, Timestamp};
-    use mars_core::astroport::pair::{CumulativePricesResponse, SimulationResponse};
     use mars_core::astroport::{
         asset::{Asset as AstroportAsset, AssetInfo},
         factory::PairType,
-        pair::PairInfo,
+        pair::{CumulativePricesResponse, PairInfo, SimulationResponse},
     };
-    use mars_core::testing::{self, mock_dependencies, MarsMockQuerier, MockEnvParams};
+    use mars_core::testing::{
+        self, mock_dependencies, mock_env_at_block_time, MarsMockQuerier, MockEnvParams,
+    };
 
     #[test]
     fn test_proper_initialization() {
@@ -725,16 +726,18 @@ mod tests {
 
         // record first snapshot
         let snapshot_time = 100_000;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(snapshot_time),
-            ..Default::default()
-        });
 
         let msg = ExecuteMsg::RecordTwapSnapshot {
             assets: vec![asset.clone()],
         };
 
-        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
         let event = &response.events[0];
         assert_eq!(event.ty, "asset-cw20token");
         assert_eq!(event.attributes[0].value, "1000000000");
@@ -753,22 +756,26 @@ mod tests {
 
         // try to record a second snapshot within `tolerance` seconds
         let snapshot_too_soon_time = snapshot_time + tolerance - 1;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(snapshot_too_soon_time),
-            ..Default::default()
-        });
 
-        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_too_soon_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
         assert!(response.events.len() == 0);
 
         // record a second snapshot
         let second_snapshot_time = snapshot_time + tolerance;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(second_snapshot_time),
-            ..Default::default()
-        });
 
-        let response = execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        let response = execute(
+            deps.as_mut(),
+            mock_env_at_block_time(second_snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
         let event = &response.events[0];
         assert_eq!(event.ty, "asset-cw20token");
         assert_eq!(event.attributes[0].value, "2000000000");
@@ -782,12 +789,14 @@ mod tests {
 
         // record a third snapshot and check that old snapshots are removed from state
         let third_snapshot_time = second_snapshot_time + window_size + tolerance + 1;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(third_snapshot_time),
-            ..Default::default()
-        });
 
-        execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        execute(
+            deps.as_mut(),
+            mock_env_at_block_time(third_snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
             .load(deps.as_ref().storage, &reference)
@@ -1018,10 +1027,6 @@ mod tests {
 
         // record snapshot
         let snapshot_time = 100_000;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(snapshot_time),
-            ..Default::default()
-        });
 
         let snapshot_time_cumulative_price = 10_000_000000;
         cumulative_prices.price0_cumulative_last = Uint128::new(snapshot_time_cumulative_price);
@@ -1032,18 +1037,20 @@ mod tests {
             assets: vec![asset.clone()],
         };
 
-        execute(deps.as_mut(), env, info.clone(), msg.clone()).unwrap();
+        execute(
+            deps.as_mut(),
+            mock_env_at_block_time(snapshot_time),
+            info.clone(),
+            msg.clone(),
+        )
+        .unwrap();
 
         // query price when no snapshot was taken within the tolerable window
         let query_error_time = snapshot_time + window_size - tolerance - 1;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(query_error_time),
-            ..Default::default()
-        });
 
         let error = query(
             deps.as_ref(),
-            env,
+            mock_env_at_block_time(query_error_time),
             QueryMsg::AssetPriceByReference {
                 asset_reference: asset_reference.clone(),
             },
@@ -1054,10 +1061,6 @@ mod tests {
 
         // query price when a snapshot was taken within the tolerable window
         let query_time = snapshot_time + window_size;
-        let env = testing::mock_env(MockEnvParams {
-            block_time: Timestamp::from_seconds(query_time),
-            ..Default::default()
-        });
 
         let query_time_cumulative_price = 20_000_000000;
         cumulative_prices.price0_cumulative_last = Uint128::new(query_time_cumulative_price);
@@ -1067,7 +1070,7 @@ mod tests {
         let price: Decimal = from_binary(
             &query(
                 deps.as_ref(),
-                env,
+                mock_env_at_block_time(query_time),
                 QueryMsg::AssetPriceByReference {
                     asset_reference: asset_reference.clone(),
                 },
