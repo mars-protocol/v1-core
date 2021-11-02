@@ -97,7 +97,7 @@ pub fn update_market_interest_rates_with_model(
 
             println!("th {}", threshold_is_met);
 
-            // don't allow to do two updates on the same block
+            // don't allow more than one update in the same block
             // this prevents calling the contract multiple times to set interest to min or max
             // on a single block.
             let should_update_borrow_rate =
