@@ -2743,7 +2743,8 @@ mod tests {
     #[test]
     fn test_update_asset() {
         let mut deps = mock_dependencies(&[]);
-        let env = mock_env(MockEnvParams::default());
+        let start_time = 100000000;
+        let env = mock_env_at_block_time(start_time);
 
         let config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
@@ -2982,7 +2983,7 @@ mod tests {
                 InterestRateModel::Dynamic {
                     params: dynamic_ir_params,
                     state: DynamicInterestRateModelState {
-                        txs_since_last_borrow_rate_update: 0,
+                        txs_since_last_borrow_rate_update: 1,
                         borrow_rate_last_updated: env.block.time.seconds(),
                     }
                 },
@@ -3077,7 +3078,7 @@ mod tests {
                     market_dynamic_ir_params.update_threshold_seconds
                 );
 
-                assert_eq!(0, market_dynamic_ir_state.txs_since_last_borrow_rate_update);
+                assert_eq!(1, market_dynamic_ir_state.txs_since_last_borrow_rate_update);
                 assert_eq!(
                     env.block.time.seconds(),
                     market_dynamic_ir_state.borrow_rate_last_updated

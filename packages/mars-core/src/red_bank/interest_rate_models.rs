@@ -91,9 +91,15 @@ pub fn update_market_interest_rates_with_model(
             let seconds_since_last_borrow_rate_update =
                 current_block_time - state.borrow_rate_last_updated;
 
-            let should_update_borrow_rate = (state.txs_since_last_borrow_rate_update
+            let threshold_is_met = (state.txs_since_last_borrow_rate_update
                 >= params.update_threshold_txs)
                 || (seconds_since_last_borrow_rate_update >= params.update_threshold_seconds);
+
+            // don't allow more than one update in the same block
+            // this prevents calling the contract multiple times to set interest to min or max
+            // on a single block.
+            let should_update_borrow_rate =
+                threshold_is_met && (seconds_since_last_borrow_rate_update != 0);
 
             if should_update_borrow_rate {
                 market.borrow_rate =
@@ -412,6 +418,83 @@ mod tests {
             );
             if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
                 assert_eq!(state.borrow_rate_last_updated, time_start + 1201);
+                assert_eq!(state.txs_since_last_borrow_rate_update, 0);
+            } else {
+                panic!("Wrong interest rate model type");
+            }
+        }
+
+        //  do three after 1201 seconds, borrow rate does not update (because even though txs are
+        //  reached, it is on the same block)
+        {
+            let diff = Decimal::percent(10);
+            let utilization_rate = optimal_utilization_rate + diff;
+            let previous_borrow_rate = market.borrow_rate;
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 1201),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 1201),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 1201),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            let expected_borrow_rate = previous_borrow_rate;
+            assert_eq!(market.borrow_rate, expected_borrow_rate);
+            assert_eq!(
+                market.liquidity_rate,
+                expected_borrow_rate
+                    .checked_mul(utilization_rate)
+                    .unwrap()
+                    .checked_mul(Decimal::one() - reserve_factor)
+                    .unwrap()
+            );
+            if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
+                assert_eq!(state.borrow_rate_last_updated, time_start + 1201);
+                assert_eq!(state.txs_since_last_borrow_rate_update, 3);
+            } else {
+                panic!("Wrong interest rate model type");
+            }
+        }
+
+        // Updating after that works
+        {
+            let diff = Decimal::percent(15);
+            let utilization_rate = optimal_utilization_rate + diff;
+            let previous_borrow_rate = market.borrow_rate;
+
+            update_market_interest_rates_with_model(
+                &mock_env_at_block_time(time_start + 1208),
+                &mut market,
+                utilization_rate,
+            )
+            .unwrap();
+
+            let expected_borrow_rate = previous_borrow_rate + (kp_1.checked_mul(diff).unwrap());
+            assert_eq!(market.borrow_rate, expected_borrow_rate);
+            assert_eq!(
+                market.liquidity_rate,
+                expected_borrow_rate
+                    .checked_mul(utilization_rate)
+                    .unwrap()
+                    .checked_mul(Decimal::one() - reserve_factor)
+                    .unwrap()
+            );
+            if let InterestRateModel::Dynamic { ref state, .. } = market.interest_rate_model {
+                assert_eq!(state.borrow_rate_last_updated, time_start + 1208);
                 assert_eq!(state.txs_since_last_borrow_rate_update, 0);
             } else {
                 panic!("Wrong interest rate model type");

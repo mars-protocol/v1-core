@@ -373,7 +373,7 @@ pub fn execute_end_proposal(
     // Determine proposal result
     let (new_proposal_status, log_proposal_result, messages) = if proposal_quorum
         >= config.proposal_required_quorum
-        && proposal_threshold >= config.proposal_required_threshold
+        && proposal_threshold > config.proposal_required_threshold
     {
         // if quorum and threshold are met then proposal passes
         // refund deposit amount to submitter
