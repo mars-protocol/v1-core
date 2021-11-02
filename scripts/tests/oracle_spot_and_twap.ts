@@ -57,9 +57,9 @@ async function expectPromiseToFail(promise: Promise<any>) {
   }
 }
 
-async function recordTwapSnapshot() {
+async function recordTwapSnapshots() {
   const result = await executeContract(terra, charlie, oracle, {
-    record_twap_snapshot: {
+    record_twap_snapshots: {
       assets: [
         {
           cw20: {
@@ -382,7 +382,7 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   let snapshots: Snapshot[] = [];
 
   process.stdout.write("recoding TWAP snapshot... ");
-  snapshots.push(await recordTwapSnapshot());
+  snapshots.push(await recordTwapSnapshots());
   console.log("success!");
 
   // currently there is one snapshot, so querying price should fail
@@ -411,7 +411,7 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   // The solution is simple: modify `createTransaction` function in helpers to explicitly feed in a
   // gas limit, so that LCD does not need to estimate it. The transaction should be successful.
   process.stdout.write("recoding TWAP snapshot... ");
-  snapshots.push(await recordTwapSnapshot());
+  snapshots.push(await recordTwapSnapshots());
   console.log("success!");
 
   // currently there are two snapshots, but their timestamps are too close, so query should still fail
@@ -434,13 +434,13 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
     console.log("success!");
 
     process.stdout.write("recoding TWAP snapshot... ");
-    snapshots.push(await recordTwapSnapshot());
+    snapshots.push(await recordTwapSnapshots());
     console.log("success!");
   }
 
   // take a final snapshot
   process.stdout.write("recoding TWAP snapshot... ");
-  snapshots.push(await recordTwapSnapshot());
+  snapshots.push(await recordTwapSnapshots());
   console.log("success!");
 
   // we have taken 6 snapshots. we query the average price immediately after the 6th snapshot was

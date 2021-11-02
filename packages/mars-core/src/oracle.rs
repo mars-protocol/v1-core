@@ -134,8 +134,8 @@ pub mod msg {
             asset: Asset,
             price_source: PriceSourceUnchecked,
         },
-        /// Fetch cumulative price from Astroport pair and record in contract storage
-        RecordTwapSnapshot { assets: Vec<Asset> },
+        /// Fetch cumulative prices from Astroport pairs and record in contract storage
+        RecordTwapSnapshots { assets: Vec<Asset> },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

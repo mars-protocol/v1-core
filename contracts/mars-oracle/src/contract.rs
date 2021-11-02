@@ -47,8 +47,8 @@ pub fn execute(
             asset,
             price_source,
         } => execute_set_asset(deps, env, info, asset, price_source),
-        ExecuteMsg::RecordTwapSnapshot { assets } => {
-            execute_record_twap_snapshot(deps, env, info, assets)
+        ExecuteMsg::RecordTwapSnapshots { assets } => {
+            execute_record_twap_snapshots(deps, env, info, assets)
         }
     }
 }
@@ -105,7 +105,7 @@ pub fn execute_set_asset(
 
 /// Modified from
 /// https://github.com/Uniswap/uniswap-v2-periphery/blob/master/contracts/examples/ExampleOracleSimple.sol
-pub fn execute_record_twap_snapshot(
+pub fn execute_record_twap_snapshots(
     deps: DepsMut,
     env: Env,
     _info: MessageInfo,
@@ -135,7 +135,7 @@ pub fn execute_record_twap_snapshot(
             .load(deps.storage, &asset_reference)
             .unwrap_or_else(|_| vec![]);
 
-        // A potential attack is to repeatly call `RecordTwapSnapshot` so that `snapshots` becomes a
+        // A potential attack is to repeatly call `RecordTwapSnapshots` so that `snapshots` becomes a
         // very big vector, so that calculating the average price becomes extremely gas expensive.
         // To deter this, we reject a new snapshot if the most recent snapshot is less than `tolerance`
         // seconds ago.
@@ -164,14 +164,15 @@ pub fn execute_record_twap_snapshot(
         ASTROPORT_TWAP_SNAPSHOTS.save(deps.storage, &asset_reference, &snapshots)?;
 
         events.push(
-            // This creates an event in the logs named `wasm-asset-<ASSET_LABEL>`
-            Event::new(format!("asset-{}", asset_label))
+            Event::new("record-twap-snapshot")
+                .add_attribute("asset", asset_label)
+                .add_attribute("timestamp", timestamp.to_string())
                 .add_attribute("price_cumulative", price_cumulative),
         );
     }
 
     Ok(Response::new()
-        .add_attribute("action", "record_twap_snapshot")
+        .add_attribute("action", "record_twap_snapshots")
         .add_attribute("timestamp", timestamp.to_string())
         .add_events(events))
 }
@@ -445,15 +446,13 @@ mod helpers {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
-    use cosmwasm_std::{from_binary, Addr, OwnedDeps, Timestamp};
+    use cosmwasm_std::{from_binary, Addr, OwnedDeps};
     use mars_core::astroport::{
         asset::{Asset as AstroportAsset, AssetInfo},
         factory::PairType,
         pair::{CumulativePricesResponse, PairInfo, SimulationResponse},
     };
-    use mars_core::testing::{
-        self, mock_dependencies, mock_env_at_block_time, MarsMockQuerier, MockEnvParams,
-    };
+    use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
     #[test]
     fn test_proper_initialization() {
@@ -670,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn test_record_twap_snapshot() {
+    fn test_record_twap_snapshots() {
         let mut deps = th_setup();
         let info = mock_info("anyone", &[]);
 
@@ -727,7 +726,7 @@ mod tests {
         // record first snapshot
         let snapshot_time = 100_000;
 
-        let msg = ExecuteMsg::RecordTwapSnapshot {
+        let msg = ExecuteMsg::RecordTwapSnapshots {
             assets: vec![asset.clone()],
         };
 
@@ -738,9 +737,14 @@ mod tests {
             msg.clone(),
         )
         .unwrap();
-        let event = &response.events[0];
-        assert_eq!(event.ty, "asset-cw20token");
-        assert_eq!(event.attributes[0].value, "1000000000");
+
+        assert_eq!(
+            response.events[0],
+            Event::new("record-twap-snapshot".to_string())
+                .add_attribute("asset", "cw20token")
+                .add_attribute("timestamp", "100000")
+                .add_attribute("price_cumulative", "1000000000")
+        );
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
             .load(deps.as_ref().storage, &reference)
@@ -776,9 +780,14 @@ mod tests {
             msg.clone(),
         )
         .unwrap();
-        let event = &response.events[0];
-        assert_eq!(event.ty, "asset-cw20token");
-        assert_eq!(event.attributes[0].value, "2000000000");
+
+        assert_eq!(
+            response.events[0],
+            Event::new("record-twap-snapshot".to_string())
+                .add_attribute("asset", "cw20token")
+                .add_attribute("timestamp", "100600")
+                .add_attribute("price_cumulative", "2000000000")
+        );
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
             .load(deps.as_ref().storage, &reference)
@@ -1033,7 +1042,7 @@ mod tests {
         deps.querier
             .set_astroport_pair_cumulative_prices("pair".to_string(), cumulative_prices.clone());
 
-        let msg = ExecuteMsg::RecordTwapSnapshot {
+        let msg = ExecuteMsg::RecordTwapSnapshots {
             assets: vec![asset.clone()],
         };
 
