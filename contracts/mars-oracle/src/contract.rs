@@ -1,6 +1,6 @@
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Response, StdResult,
-    Uint128,
+    attr, entry_point, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response,
+    StdResult, Uint128,
 };
 use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
@@ -112,7 +112,7 @@ pub fn execute_record_twap_snapshots(
     assets: Vec<Asset>,
 ) -> Result<Response, ContractError> {
     let timestamp = env.block.time.seconds();
-    let mut events: Vec<Event> = vec![];
+    let mut attrs: Vec<Attribute> = vec![];
 
     for asset in assets {
         let (asset_label, asset_reference, _) = asset.get_attributes();
@@ -160,18 +160,16 @@ pub fn execute_record_twap_snapshots(
 
         ASTROPORT_TWAP_SNAPSHOTS.save(deps.storage, &asset_reference, &snapshots)?;
 
-        events.push(
-            Event::new("record_twap_snapshot")
-                .add_attribute("asset", asset_label)
-                .add_attribute("timestamp", timestamp.to_string())
-                .add_attribute("price_cumulative", price_cumulative),
-        );
+        attrs.extend(vec![
+            attr("asset", asset_label),
+            attr("price_cumulative", price_cumulative),
+        ]);
     }
 
     Ok(Response::new()
         .add_attribute("action", "record_twap_snapshots")
         .add_attribute("timestamp", timestamp.to_string())
-        .add_events(events))
+        .add_attributes(attrs))
 }
 
 // QUERIES
@@ -736,11 +734,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            response.events[0],
-            Event::new("record_twap_snapshot".to_string())
-                .add_attribute("asset", "cw20token")
-                .add_attribute("timestamp", "100000")
-                .add_attribute("price_cumulative", "1000000000")
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100000"),
+                attr("asset", "cw20token"),
+                attr("price_cumulative", "1000000000"),
+            ]
         );
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
@@ -765,6 +765,14 @@ mod tests {
             msg.clone(),
         )
         .unwrap();
+
+        assert_eq!(
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100599"),
+            ]
+        );
         assert!(response.events.len() == 0);
 
         // record a second snapshot
@@ -779,11 +787,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            response.events[0],
-            Event::new("record_twap_snapshot".to_string())
-                .add_attribute("asset", "cw20token")
-                .add_attribute("timestamp", "100600")
-                .add_attribute("price_cumulative", "2000000000")
+            response.attributes,
+            vec![
+                attr("action", "record_twap_snapshots"),
+                attr("timestamp", "100600"),
+                attr("asset", "cw20token"),
+                attr("price_cumulative", "2000000000"),
+            ]
         );
 
         let snapshots = ASTROPORT_TWAP_SNAPSHOTS
