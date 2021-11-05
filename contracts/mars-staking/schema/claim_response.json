@@ -1,11 +1,11 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ClaimResponse",
-  "description": "Response to a Claim query",
+  "description": "Response to Claim query",
   "type": "object",
   "properties": {
     "claim": {
-      "description": "Existing claim for the user, will return None if it doesn't exist",
+      "description": "Existing claim for a given address. Will return None if it doesn't exist",
       "anyOf": [
         {
           "$ref": "#/definitions/Claim"

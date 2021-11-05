@@ -49,13 +49,13 @@
       "additionalProperties": false
     },
     {
-      "description": "Fetch cumulative price from Astroport pair and record in contract storage",
+      "description": "Fetch cumulative prices from Astroport pairs and record in contract storage",
       "type": "object",
       "required": [
-        "update_astroport_twap_data"
+        "record_twap_snapshots"
       ],
       "properties": {
-        "update_astroport_twap_data": {
+        "record_twap_snapshots": {
           "type": "object",
           "required": [
             "assets"
@@ -168,7 +168,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Astroport spot price quoted in the other asset of the pair",
+          "description": "Astroport spot price quoted in UST\n\nNOTE: `pair_address` must point to an astroport pair consists of the asset of intereset and UST",
           "type": "object",
           "required": [
             "astroport_spot"
@@ -177,14 +177,11 @@
             "astroport_spot": {
               "type": "object",
               "required": [
-                "asset_address",
                 "pair_address"
               ],
               "properties": {
-                "asset_address": {
-                  "type": "string"
-                },
                 "pair_address": {
+                  "description": "Address of the Astroport pair",
                   "type": "string"
                 }
               }
@@ -193,7 +190,7 @@
           "additionalProperties": false
         },
         {
-          "description": "Astroport TWAP price quoted in the other asset of the pair",
+          "description": "Astroport TWAP price quoted in UST\n\nNOTE: `pair_address` must point to an astroport pair consists of the asset of intereset and UST",
           "type": "object",
           "required": [
             "astroport_twap"
@@ -202,21 +199,47 @@
             "astroport_twap": {
               "type": "object",
               "required": [
-                "asset_address",
-                "min_period",
-                "pair_address"
+                "pair_address",
+                "tolerance",
+                "window_size"
               ],
               "properties": {
-                "asset_address": {
+                "pair_address": {
+                  "description": "Address of the Astroport pair",
                   "type": "string"
                 },
-                "min_period": {
-                  "description": "Minimum time (in seconds) required to pass between two TWAP data updates. E.g. if set to 300, then prices will be averaged over periods of no less than 5 minutes.",
+                "tolerance": {
+                  "description": "When calculating averaged price, we take the most recent TWAP snapshot and find a second snapshot in the range of window_size +/- tolerance. For example, if window size is 5 minutes and tolerance is 1 minute, we look for snapshots that are 4 - 6 minutes back in time from the most recent snapshot.\n\nIf there are multiple snapshots within the range, we take the one that is closest to the desired window size.",
                   "type": "integer",
                   "format": "uint64",
                   "minimum": 0.0
                 },
+                "window_size": {
+                  "description": "Address of the asset of interest\n\nNOTE: Spot price in intended for CW20 tokens. Terra native tokens should use Fixed or Native price sources.",
+                  "type": "integer",
+                  "format": "uint64",
+                  "minimum": 0.0
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Astroport liquidity token\n\nNOTE: Astroport's pair contract does not have a query command to check the address of the LP token associated with a pair. Therefore, we can't implement relevant checks in the contract. The owner must make sure the addresses supplied are accurate",
+          "type": "object",
+          "required": [
+            "astroport_liquidity_token"
+          ],
+          "properties": {
+            "astroport_liquidity_token": {
+              "type": "object",
+              "required": [
+                "pair_address"
+              ],
+              "properties": {
                 "pair_address": {
+                  "description": "Address of the asset of interest",
                   "type": "string"
                 }
               }

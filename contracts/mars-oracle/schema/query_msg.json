@@ -3,7 +3,7 @@
   "title": "QueryMsg",
   "anyOf": [
     {
-      "description": "Query contract config",
+      "description": "Query contract config. Returns `Config`",
       "type": "object",
       "required": [
         "config"
@@ -16,13 +16,13 @@
       "additionalProperties": false
     },
     {
-      "description": "Get asset's price config",
+      "description": "Get asset's price source. Returns `AssetConfigChecked`",
       "type": "object",
       "required": [
-        "asset_config"
+        "asset_price_source"
       ],
       "properties": {
-        "asset_config": {
+        "asset_price_source": {
           "type": "object",
           "required": [
             "asset"
@@ -37,7 +37,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Query asset price given an asset",
+      "description": "Query asset price given an asset; returns `mars_core::math::decimal::Decimal`",
       "type": "object",
       "required": [
         "asset_price"
@@ -58,7 +58,7 @@
       "additionalProperties": false
     },
     {
-      "description": "Query asset price given it's internal reference (meant to be used by protocol contracts only)",
+      "description": "Query asset price given it's internal reference; returns `mars_core::math::decimal::Decimal`\n\nNOTE: meant to be used by protocol contracts only",
       "type": "object",
       "required": [
         "asset_price_by_reference"
