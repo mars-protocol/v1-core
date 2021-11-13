@@ -101,6 +101,7 @@ Required environment variables (can be set in `scripts/.env`):
 ```sh
 CW_PLUS_ARTIFACTS_PATH # path to cw-plus artifacts (example cw20-base.wasm)
 ASTROPORT_ARTIFACTS_PATH # path to astroport artifacts
+MARS_MOCKS_ARTIFACTS_PATH # path to mars-mocks artifacts
 ```
 
 #### Running a single integration test
