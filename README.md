@@ -8,20 +8,35 @@ This repository contains the source code for the core smart contracts of Mars Pr
 Follow these instructions to verify that the smart contracts that exist on chain correspond to a particular version of the contract's source code:
 
 - Find the code ID of the contract you wish to verify. This can be found on the smart contract's page on [Terra Finder](https://finder.terra.money/). For example, the code ID of the MARS token contract [terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h](https://finder.terra.money/columbus-5/address/terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h) is `610`.
-- Download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum. For example, the checksum of code ID `610` (the MARS token contract) is `1cca9c6dbfcb876212ee21250b1352df6e0041a5a13b7c1bc562f0f001455977`, which can be calculated using this code:
+- Get the SHA256 checksum of the code ID's wasm binary:
+  - One way to do this is to get the checksum directly from the blockchain. For example, the checksum of code ID `610` (the MARS token contract) is `1cca9c6dbfcb876212ee21250b1352df6e0041a5a13b7c1bc562f0f001455977`, which can be calculated using this code:
+
+```
+CODE_ID=610
+
+curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}" \
+  | jq ".code_info.code_hash" \
+  | tr -d \" \
+  | base64 -d \
+  | hexdump -v -e '/1 "%02x"'
+```
+
+  - Alternatively, download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum:
 
 ```
 CODE_ID=610
 
 curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}/byte_code" \
-  | jq .byte_code \
+  | jq ".byte_code" \
   | tr -d \" \
   | base64 -d \
   | shasum -a 256
 ```
 
-- Verify that the checksum is identical to the checksum listed on the [releases](https://github.com/mars-protocol/mars-core/releases) page.
-- Alternatively, clone this repo, checkout a particular release, compile the smart contracts using the same version of [rust-optimizer](https://github.com/CosmWasm/rust-optimizer) (see below for instructions), and verify the checksum in `artifacts/checksums.txt`.
+- Get the SHA256 checksum of a smart contract's wasm binary built from source code:
+  - Get the checksum directly from the [releases](https://github.com/mars-protocol/mars-core/releases) page.
+  - Alternatively, calculate the checksum yourself: clone this repo, checkout a particular release, compile the smart contracts using the same version of [rust-optimizer](https://github.com/CosmWasm/rust-optimizer) (see below for instructions), and verify the checksum in `artifacts/checksums.txt`.
+- Finally, verify that the two checksum's are identical.
 
 ## Building
 
