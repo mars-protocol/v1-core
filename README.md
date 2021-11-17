@@ -147,5 +147,3 @@ cd scripts
 3. Add the env variable REDBANK_ADDRESS=[your_deployed_red_bank_contract_address]
 4. Run `node --loader ts-node/esm whitelist.ts`
 5. Check the whitelists folder for [NETWORK].json output
-
-
