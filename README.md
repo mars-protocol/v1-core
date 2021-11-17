@@ -8,7 +8,7 @@ This repository contains the source code for the core smart contracts of Mars Pr
 Follow these instructions to verify that the smart contracts that exist on chain correspond to a particular version of the contract's source code:
 
 - Find the code ID of the contract you wish to verify. This can be found on the smart contract's page on [Terra Finder](https://finder.terra.money/). For example, the code ID of the MARS token contract [terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h](https://finder.terra.money/columbus-5/address/terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h) is `610`.
-- Download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum. For example, the checksum of code ID `610` (the MARS token contract) is:
+- Download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum. For example, the checksum of code ID `610` (the MARS token contract) is `1cca9c6dbfcb876212ee21250b1352df6e0041a5a13b7c1bc562f0f001455977`, which can be calculated using this code:
 
 ```
 CODE_ID=610
