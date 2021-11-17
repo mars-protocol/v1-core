@@ -1,6 +1,28 @@
 # Mars Protocol
 This repository contains the source code for the core smart contracts of Mars Protocol. Smart contracts are meant to be compiled to `.wasm` files and uploaded to the [Terra](https://www.terra.money/) blockchain.
 
+## Verify contracts
+
+> Don't trust. Verify.
+
+Follow these instructions to verify that the smart contracts that exist on chain correspond to a particular version of the contract's source code:
+
+- Find the code ID of the contract you wish to verify. This can be found on the smart contract's page on [Terra Finder](https://finder.terra.money/). For example, the code ID of the MARS token contract [terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h](https://finder.terra.money/columbus-5/address/terra1a7zxk56c72elupp7p44hn4k94fsvavnhylhr6h) is `610`.
+- Download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum. For example, the checksum of code ID `610` (the MARS token contract) is:
+
+```
+CODE_ID=610
+
+curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}/byte_code" \
+  | jq .byte_code \
+  | tr -d \" \
+  | base64 -d \
+  | shasum -a 256
+```
+
+- Verify that the checksum is identical to the checksum listed on the [releases](https://github.com/mars-protocol/mars-core/releases) page.
+- Alternatively, clone this repo, checkout a particular release, compile the smart contracts using the same version of [rust-optimizer](https://github.com/CosmWasm/rust-optimizer) (see below for instructions), and verify the checksum in `artifacts/checksums.txt`.
+
 ## Building
 
 ### Smart contracts
@@ -125,3 +147,5 @@ cd scripts
 3. Add the env variable REDBANK_ADDRESS=[your_deployed_red_bank_contract_address]
 4. Run `node --loader ts-node/esm whitelist.ts`
 5. Check the whitelists folder for [NETWORK].json output
+
+
