@@ -11,27 +11,27 @@ Follow these instructions to verify that the smart contracts that exist on chain
 - Get the SHA256 checksum of the code ID's wasm binary:
   - One way to do this is to get the checksum directly from the blockchain. For example, the checksum of code ID `610` (the MARS token contract) is `1cca9c6dbfcb876212ee21250b1352df6e0041a5a13b7c1bc562f0f001455977`, which can be calculated using this code:
 
-```
-CODE_ID=610
+  ```
+  CODE_ID=610
 
-curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}" \
-  | jq ".code_info.code_hash" \
-  | tr -d \" \
-  | base64 -d \
-  | hexdump -v -e '/1 "%02x"'
-```
+  curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}" \
+    | jq ".code_info.code_hash" \
+    | tr -d \" \
+    | base64 -d \
+    | hexdump -v -e '/1 "%02x"'
+  ```
 
   - Alternatively, download the wasm byte code relating to the code ID from the blockchain and calculate its SHA256 checksum:
 
-```
-CODE_ID=610
+  ```
+  CODE_ID=610
 
-curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}/byte_code" \
-  | jq ".byte_code" \
-  | tr -d \" \
-  | base64 -d \
-  | shasum -a 256
-```
+  curl "https://fcd.terra.dev/terra/wasm/v1beta1/codes/${CODE_ID}/byte_code" \
+    | jq ".byte_code" \
+    | tr -d \" \
+    | base64 -d \
+    | shasum -a 256
+  ```
 
 - Get the SHA256 checksum of a smart contract's wasm binary built from source code:
   - Get the checksum directly from the [releases](https://github.com/mars-protocol/mars-core/releases) page.
