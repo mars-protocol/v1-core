@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Deps, StdError, StdResult, Uint128};
+use mars_core::cosmwasm_std::{Addr, Deps, StdError, StdResult, Uint128};
 
 use mars_core::asset::AssetType;
 use mars_core::helpers::cw20_get_balance;

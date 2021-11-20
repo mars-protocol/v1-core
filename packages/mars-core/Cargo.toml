@@ -14,11 +14,16 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 terra-cosmwasm = "2.2.0"
 
-cw2 = "0.9.0"
 cw20 = "0.9.0"
+#cw20 = { path = "/Users/piobab/Development/Projekty/DelphiDigital/cw-plus/packages/cw20", version = "0.9.0" }
 cw20-base = { version = "0.9.0", features = ["library"] }
+#cw20-base = { path = "/Users/piobab/Development/Projekty/DelphiDigital/cw-plus/contracts/cw20-base", version = "0.9.0", features = ["library"] }
+cw-storage-plus = "0.9.0"
+#cw-storage-plus = { path = "/Users/piobab/Development/Projekty/DelphiDigital/cw-plus/packages/storage-plus", version = "0.9.0" }
 
 cosmwasm-std = "0.16.2"
+#cosmwasm-std = { path = "/Users/piobab/Development/Projekty/DelphiDigital/cosmwasm/packages/std", version = "0.16.2" }
+#cosmwasm-std = { git = "https://github.com/CosmWasm/cosmwasm", tag = "v0.16.2" }
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }

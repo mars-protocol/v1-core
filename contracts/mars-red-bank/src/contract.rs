@@ -1,14 +1,14 @@
 use std::str;
 
 #[cfg(not(feature = "library"))]
-use cosmwasm_std::entry_point;
-use cosmwasm_std::{
+use mars_core::cosmwasm_std::entry_point;
+use mars_core::cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo,
     Order, Response, StdError, StdResult, Uint128, WasmMsg,
 };
-use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
-use cw20_base::msg::InstantiateMarketingInfo;
-use cw_storage_plus::U32Key;
+use mars_core::cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
+use mars_core::cw20_base::msg::InstantiateMarketingInfo;
+use mars_core::cw_storage_plus::U32Key;
 
 use mars_core::address_provider::{self, MarsContract};
 use mars_core::ma_token;

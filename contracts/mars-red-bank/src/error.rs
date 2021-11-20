@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use cosmwasm_std::{OverflowError, StdError};
+use mars_core::cosmwasm_std::{OverflowError, StdError};
 
 use mars_core::error::MarsError;
 

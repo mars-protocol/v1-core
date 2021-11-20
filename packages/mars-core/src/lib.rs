@@ -28,3 +28,8 @@ pub mod tax;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod testing;
+
+pub use cw20;
+pub use cw20_base;
+pub use cw_storage_plus;
+pub use cosmwasm_std;

@@ -1,10 +1,10 @@
 use std::str;
 
-use cosmwasm_std::{
+use mars_core::cosmwasm_std::{
     to_binary, Addr, CosmosMsg, DepsMut, Env, Event, Response, StdError, StdResult, Uint128,
     WasmMsg,
 };
-use cw20::Cw20ExecuteMsg;
+use mars_core::cw20::Cw20ExecuteMsg;
 
 use mars_core::asset::get_asset_balance;
 use mars_core::math::decimal::Decimal;

@@ -1,5 +1,5 @@
-use cosmwasm_std::{Addr, Uint128};
-use cw_storage_plus::{Item, Map, U32Key};
+use mars_core::cosmwasm_std::{Addr, Uint128};
+use mars_core::cw_storage_plus::{Item, Map, U32Key};
 
 use crate::{Config, Debt, GlobalState, Market, User};
 
