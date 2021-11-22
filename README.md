@@ -3,8 +3,6 @@ This repository contains the source code for the core smart contracts of Mars Pr
 
 ## Verify contracts
 
-> Don't trust. Verify.
-
 Follow these instructions to verify that the smart contracts that exist on chain correspond to a particular version of the contract's source code:
 
 1. Find the code ID of the contract you wish to verify.
@@ -37,10 +35,8 @@ Follow these instructions to verify that the smart contracts that exist on chain
 
     For example, the checksum of code ID `610` (the MARS token contract) is `1cca9c6dbfcb876212ee21250b1352df6e0041a5a13b7c1bc562f0f001455977`.
 
-3. Get the SHA256 checksum of a smart contract's wasm binary built from source code:
-    - Get the checksum directly from the [releases](https://github.com/mars-protocol/mars-core/releases) page.
-    - Alternatively, calculate the checksum yourself: clone this repo, checkout a particular release, compile the smart contracts using the same version of [rust-optimizer](https://github.com/CosmWasm/rust-optimizer) (see below for instructions), and verify the checksum in `artifacts/checksums.txt`.
-4. Finally, verify that the two checksum's are identical.
+3. Get the SHA256 checksum of a smart contract's wasm binary built from source code. To do this, first clone this repo, checkout a particular release, compile the smart contracts using the same version of [rust-optimizer](https://github.com/CosmWasm/rust-optimizer) listed in the [releases](https://github.com/mars-protocol/mars-core/releases), and verify the checksum written to `artifacts/checksums.txt`.
+4. Finally, verify that the two checksums are identical.
 
 ## Building
 
