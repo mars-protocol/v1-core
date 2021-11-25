@@ -34,7 +34,7 @@ pub enum ExecuteMsg {
         asset_params: InitOrUpdateAssetParams,
         /// Asset symbol to be used in maToken name and description. If non is provided,
         /// denom will be used for native and token symbol will be used for cw20. Mostly
-        /// useful for native assets since it's denom (e.g.: uluna, uusd) doesn not match it's
+        /// useful for native assets since it's denom (e.g.: uluna, uusd) does not match it's
         /// user facing symbol (LUNA, UST) which should be used in maToken's attributes
         /// for the sake of consistency
         asset_symbol: Option<String>,
