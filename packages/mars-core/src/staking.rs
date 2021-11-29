@@ -126,6 +126,8 @@ pub mod msg {
         Config {},
         /// Get contract global state
         GlobalState {},
+        /// Get the ratio between xMars and Mars. Returns `mars_core::math::decimal::Decimal`
+        MarsPerXMars {},
         /// Get open claim for given user. If claim exists, slash events are applied to the amount
         /// so actual amount of Mars received is given.
         Claim { user_address: String },

@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdResult, Storage, Uint128, WasmMsg,
+    Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
@@ -186,7 +186,7 @@ pub fn execute_stake(
 ) -> Result<Response, ContractError> {
     // check stake is valid
     let config = CONFIG.load(deps.storage)?;
-    let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
+    let (mars_token_address, xmars_token_address) = get_token_addresses(deps.as_ref(), &config)?;
 
     // Has to send Mars tokens
     if info.sender != mars_token_address {
@@ -246,7 +246,7 @@ pub fn execute_unstake(
 ) -> Result<Response, ContractError> {
     // check if unstake is valid
     let config = CONFIG.load(deps.storage)?;
-    let (mars_token_address, xmars_token_address) = get_token_addresses(&deps, &config)?;
+    let (mars_token_address, xmars_token_address) = get_token_addresses(deps.as_ref(), &config)?;
     if info.sender != xmars_token_address {
         return Err(MarsError::Unauthorized {}.into());
     }
@@ -495,6 +495,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::GlobalState {} => to_binary(&query_global_state(deps)?),
+        QueryMsg::MarsPerXMars {} => to_binary(&query_mars_per_xmars(deps, env)?),
         QueryMsg::Claim { user_address } => to_binary(&query_claim(deps, env, user_address)?),
     }
 }
@@ -507,6 +508,26 @@ fn query_config(deps: Deps) -> StdResult<Config> {
 fn query_global_state(deps: Deps) -> StdResult<GlobalState> {
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     Ok(global_state)
+}
+
+fn query_mars_per_xmars(deps: Deps, env: Env) -> StdResult<Decimal> {
+    let config = CONFIG.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+
+    let (mars_token_address, xmars_token_address) = get_token_addresses(deps, &config)
+        .map_err(|_| StdError::generic_err("Failed to query token addresses"))?;
+
+    let total_mars_in_staking_contract =
+        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
+    let total_mars_for_stakers =
+        total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
+
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
+
+    Ok(Decimal::from_ratio(
+        total_mars_for_stakers,
+        total_xmars_supply,
+    ))
 }
 
 fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResult<ClaimResponse> {
@@ -526,7 +547,7 @@ fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResu
 // HELPERS
 
 /// Gets mars and xmars token addresses from address provider and returns them in a tuple.
-fn get_token_addresses(deps: &DepsMut, config: &Config) -> Result<(Addr, Addr), ContractError> {
+fn get_token_addresses(deps: Deps, config: &Config) -> Result<(Addr, Addr), ContractError> {
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address.clone(),
