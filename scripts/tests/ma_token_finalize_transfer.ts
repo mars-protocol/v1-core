@@ -1,15 +1,9 @@
 import {
-  LCDClient,
-  LocalTerra,
   MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setTimeoutDuration,
-  uploadContract
 } from "../helpers.js"
 import { strict as assert } from "assert"
 import {
@@ -19,6 +13,7 @@ import {
   setAssetOraclePriceSource,
   transferCw20
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -30,13 +25,13 @@ const MA_TOKEN_SCALING_FACTOR = 1_000_000
 // HELPERS
 
 async function checkCollateral(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   denom: string,
   enabled: boolean,
 ) {
-  const collateral = await queryContract(terra, redBank,
+  const collateral = await terra.queryContract(redBank,
     { user_collateral: { user_address: wallet.key.accAddress } }
   )
 
@@ -51,7 +46,7 @@ async function checkCollateral(
 // TESTS
 
 async function testHealthFactorChecks(
-  terra: LocalTerra,
+  terra: LocalTerraWithLogging,
   redBank: string,
   maLuna: string,
 ) {
@@ -94,7 +89,7 @@ async function testHealthFactorChecks(
 }
 
 async function testCollateralStatusChanges(
-  terra: LocalTerra,
+  terra: LocalTerraWithLogging,
   redBank: string,
   maLuna: string,
 ) {
@@ -117,7 +112,7 @@ async function testCollateralStatusChanges(
 }
 
 async function testTransferCollateral(
-  terra: LocalTerra,
+  terra: LocalTerraWithLogging,
   redBank: string,
   maLuna: string,
 ) {
@@ -142,7 +137,7 @@ async function testTransferCollateral(
   assert(await checkCollateral(terra, borrower, redBank, "uluna", true))
 
   await assert.rejects(
-    executeContract(terra, borrower, redBank,
+    terra.executeContract(borrower, redBank,
       {
         update_asset_collateral_status: {
           asset: { native: { denom: "uluna" } },
@@ -169,7 +164,7 @@ async function testTransferCollateral(
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -178,24 +173,24 @@ async function testTransferCollateral(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -208,7 +203,7 @@ async function testTransferCollateral(
     }
   )
 
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -226,7 +221,7 @@ async function testTransferCollateral(
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -262,7 +257,7 @@ async function testTransferCollateral(
   )
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -311,4 +306,6 @@ async function testTransferCollateral(
   await testTransferCollateral(terra, redBank, maLuna)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

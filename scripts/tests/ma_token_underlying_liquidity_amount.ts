@@ -1,13 +1,8 @@
-import { LocalTerra } from "@terra-money/terra.js"
 import { strictEqual, strict as assert } from "assert"
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setGasAdjustment,
   setTimeoutDuration,
   sleep,
-  uploadContract
 } from "../helpers.js"
 import {
   borrowNative,
@@ -17,6 +12,7 @@ import {
   queryMaAssetAddress,
   setAssetOraclePriceSource,
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -37,7 +33,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   // so any estimates need to be adjusted upwards
   setGasAdjustment(2)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
   const deployer = terra.wallets.test1
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
@@ -46,24 +42,24 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -76,7 +72,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
     }
   )
 
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -94,7 +90,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -123,7 +119,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -161,7 +157,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   // underlying_liquidity_amount will be the same as the amount of uusd provided
   const maUusdBalance = await queryBalanceCw20(terra, provider.key.accAddress, maUusd)
   const underlyingLiquidityAmount = parseInt(
-    await queryContract(terra, redBank,
+    await terra.queryContract(redBank,
       {
         underlying_liquidity_amount: {
           ma_token_address: maUusd,
@@ -189,7 +185,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   for (const i of Array(5).keys()) {
     const maUusdBalance = await queryBalanceCw20(terra, provider.key.accAddress, maUusd)
     const underlyingLiquidityAmount = parseInt(
-      await queryContract(terra, redBank,
+      await terra.queryContract(redBank,
         {
           underlying_liquidity_amount: {
             ma_token_address: maUusd,
@@ -219,4 +215,6 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
   }
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

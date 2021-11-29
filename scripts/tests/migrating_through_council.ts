@@ -1,24 +1,20 @@
 import {
   LCDClient,
-  LocalTerra,
   Wallet
 } from "@terra-money/terra.js"
 import { join } from "path"
 import { strictEqual } from "assert"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract, instantiateContract,
-  queryContract,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
-  uploadContract
 } from "../helpers.js"
 import {
   getBlockHeight,
   mintCw20,
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -37,13 +33,13 @@ const JOHN_PROPOSAL_DEPOSIT = PROPOSAL_REQUIRED_DEPOSIT
 // HELPERS
 
 async function castVote(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   council: string,
   proposalId: number,
   vote: string,
 ) {
-  return await executeContract(terra, wallet, council,
+  return await terra.executeContract(wallet, council,
     {
       cast_vote: {
         proposal_id: proposalId,
@@ -87,7 +83,7 @@ async function waitUntilBlockHeight(
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -95,11 +91,11 @@ async function waitUntilBlockHeight(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const council = await deployContract(terra, deployer, "../artifacts/mars_council.wasm",
+  const council = await terra.deployContract(deployer, "../artifacts/mars_council.wasm",
     {
       config: {
         address_provider_address: addressProvider,
@@ -113,7 +109,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const vesting = await deployContract(terra, deployer, "../artifacts/mars_vesting.wasm",
+  const vesting = await terra.deployContract(deployer, "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
       default_unlock_schedule: {
@@ -124,7 +120,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -134,7 +130,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
+  const xMars = await terra.deployContract(deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
@@ -145,7 +141,7 @@ async function waitUntilBlockHeight(
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -164,28 +160,28 @@ async function waitUntilBlockHeight(
   await mintCw20(terra, deployer, xMars, john.key.accAddress, JOHN_XMARS_BALANCE)
 
   // deploy `counter_version_one` with admin set to council
-  const counterVer1CodeId = await uploadContract(terra, deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_one.wasm"))
-  const counterVer1 = await instantiateContract(terra, deployer, counterVer1CodeId, { owner: deployer.key.accAddress }, council)
+  const counterVer1CodeId = await terra.uploadContract(deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_one.wasm"))
+  const counterVer1 = await terra.instantiateContract(deployer, counterVer1CodeId, { owner: deployer.key.accAddress }, council)
 
   // upload `counter_version_two`
-  const counterVer2CodeId = await uploadContract(terra, deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_two.wasm"))
+  const counterVer2CodeId = await terra.uploadContract(deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_two.wasm"))
 
   // TESTS
 
   console.log("verify first version of `counter` contract")
 
-  await executeContract(terra, deployer, counterVer1, { increment: {}})
-  await executeContract(terra, deployer, counterVer1, { increment: {}})
+  await terra.executeContract(deployer, counterVer1, { increment: {}})
+  await terra.executeContract(deployer, counterVer1, { increment: {}})
 
-  const countResponse = await queryContract(terra, counterVer1, {get_count: {}})
+  const countResponse = await terra.queryContract(counterVer1, {get_count: {}})
   strictEqual(countResponse.count, 2)
 
-  const versionResponse = await queryContract(terra, counterVer1, {get_version: {}})
+  const versionResponse = await terra.queryContract(counterVer1, {get_version: {}})
   strictEqual(versionResponse.version, "one")
 
   console.log("john submits a proposal to initialise `counter` contract migration")
 
-  let txResult = await executeContract(terra, john, mars,
+  let txResult = await terra.executeContract(john, mars,
     {
       send: {
         contract: council,
@@ -229,9 +225,9 @@ async function waitUntilBlockHeight(
 
   console.log("end proposal")
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: johnProposalId } })
+  await terra.executeContract(deployer, council, { end_proposal: { proposal_id: johnProposalId } })
 
-  const johnProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: johnProposalId } })
+  const johnProposalStatus = await terra.queryContract(council, { proposal: { proposal_id: johnProposalId } })
   strictEqual(johnProposalStatus.status, "passed")
 
   console.log("wait for effective delay period to end")
@@ -240,17 +236,19 @@ async function waitUntilBlockHeight(
 
   console.log("execute proposal")
 
-  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: johnProposalId } })
+  await terra.executeContract(deployer, council, { execute_proposal: { proposal_id: johnProposalId } })
 
   console.log("verify second version of `counter` contract")
 
-  await executeContract(terra, deployer, counterVer1, { increment: {}})
+  await terra.executeContract(deployer, counterVer1, { increment: {}})
 
-  const countResponse2 = await queryContract(terra, counterVer1, {get_count: {}})
+  const countResponse2 = await terra.queryContract(counterVer1, {get_count: {}})
   strictEqual(countResponse2.count, 3)
 
-  const versionResponse2 = await queryContract(terra, counterVer1, {get_version: {}})
+  const versionResponse2 = await terra.queryContract(counterVer1, {get_version: {}})
   strictEqual(versionResponse2.version, "two")
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

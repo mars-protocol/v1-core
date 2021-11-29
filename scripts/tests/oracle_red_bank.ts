@@ -11,17 +11,14 @@ import { strictEqual } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setTimeoutDuration,
   sleep,
-  uploadContract
 } from "../helpers.js"
 import {
   approximateEqual,
   depositNative,
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -58,7 +55,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   await waitUntilTerraOracleAvailable(terra)
 
@@ -70,24 +67,24 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -100,7 +97,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     }
   )
 
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -118,7 +115,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -148,9 +145,9 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
   console.log("setup astroport pair")
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
-  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
+  const tokenCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await terra.deployContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
       generator_address: astroportGenerator,
@@ -165,7 +162,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     }
   )
 
-  let result = await executeContract(terra, deployer, astroportFactory,
+  let result = await terra.executeContract(deployer, astroportFactory,
     {
       create_pair: {
         pair_type: { xyk: {} },
@@ -185,7 +182,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   {
     console.log("- fixed")
 
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       {
         set_asset: {
           asset: { native: { denom: "uluna" } },
@@ -198,7 +195,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
     await depositNative(terra, alice, redBank, "uluna", 1_000000)
 
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: alice.key.accAddress } }
     )
 
@@ -209,7 +206,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   {
     console.log("- astroport spot")
 
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       {
         set_asset: {
           asset: { native: { denom: "uluna" } },
@@ -223,7 +220,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     await depositNative(terra, bob, redBank, "uluna", 1_000000)
 
     // provide liquidity such that the price of luna is $30
-    await executeContract(terra, deployer, ulunaUusdPair,
+    await terra.executeContract(deployer, ulunaUusdPair,
       {
         provide_liquidity: {
           assets: [
@@ -240,7 +237,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
       `1000000000000uluna,30000000000000uusd`,
     )
 
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: bob.key.accAddress } }
     )
 
@@ -251,7 +248,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   {
     console.log("- astroport twap")
 
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       {
         set_asset: {
           asset: { native: { denom: "uluna" } },
@@ -271,7 +268,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     await depositNative(terra, carol, redBank, "uluna", 1_000000)
 
     // trigger cumulative prices to be updated
-    await executeContract(terra, deployer, ulunaUusdPair,
+    await terra.executeContract(deployer, ulunaUusdPair,
       {
         provide_liquidity: {
           assets: [
@@ -289,7 +286,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     )
 
     // record TWAP
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }
     )
 
@@ -297,11 +294,11 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
     await sleep(1500)
 
     // record TWAP
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }
     )
 
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: carol.key.accAddress } }
     )
 
@@ -312,7 +309,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   {
     console.log("- native")
 
-    await executeContract(terra, deployer, oracle,
+    await terra.executeContract(deployer, oracle,
       {
         set_asset: {
           asset: { native: { denom: "uluna" } },
@@ -325,7 +322,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
     await depositNative(terra, dan, redBank, "uluna", 1_000000)
 
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: dan.key.accAddress } }
     )
 
@@ -335,4 +332,6 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
   }
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

@@ -10,11 +10,10 @@ import {
   strict as assert
 } from "assert"
 import {
-  executeContract,
-  queryContract,
   sleep,
   toEncodedBinary
 } from "../helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // assets
 
@@ -27,22 +26,22 @@ export type Asset = Native | CW20
 // cw20
 
 export async function queryBalanceCw20(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   userAddress: string,
   contractAddress: string,
 ) {
-  const result = await queryContract(terra, contractAddress, { balance: { address: userAddress } })
+  const result = await terra.queryContract(contractAddress, { balance: { address: userAddress } })
   return parseInt(result.balance)
 }
 
 export async function mintCw20(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   contract: string,
   recipient: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, contract,
+  return await terra.executeContract(wallet, contract,
     {
       mint: {
         recipient,
@@ -53,13 +52,13 @@ export async function mintCw20(
 }
 
 export async function transferCw20(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   contract: string,
   recipient: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, contract,
+  return await terra.executeContract(wallet, contract,
     {
       transfer: {
         amount: String(amount),
@@ -110,13 +109,13 @@ export async function deductTax(
 // red bank
 
 export async function setAssetOraclePriceSource(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   oracle: string,
   asset: Asset,
   price: number,
 ) {
-  await executeContract(terra, wallet, oracle,
+  await terra.executeContract(wallet, oracle,
     {
       set_asset: {
         asset: asset,
@@ -127,35 +126,35 @@ export async function setAssetOraclePriceSource(
 }
 
 export async function queryMaAssetAddress(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   redBank: string,
   asset: Asset,
 ): Promise<string> {
-  const market = await queryContract(terra, redBank, { market: { asset } })
+  const market = await terra.queryContract(redBank, { market: { asset } })
   return market.ma_token_address
 }
 
 export async function depositNative(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   denom: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, redBank,
+  return await terra.executeContract(wallet, redBank,
     { deposit_native: { denom } },
     `${amount}${denom}`
   )
 }
 
 export async function depositCw20(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   contract: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, contract,
+  return await terra.executeContract(wallet, contract,
     {
       send: {
         contract: redBank,
@@ -166,15 +165,14 @@ export async function depositCw20(
   )
 }
 
-// TODO merge borrow functions into one
 export async function borrowNative(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   denom: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, redBank,
+  return await terra.executeContract(wallet, redBank,
     {
       borrow: {
         asset: { native: { denom: denom } },
@@ -185,13 +183,13 @@ export async function borrowNative(
 }
 
 export async function borrowCw20(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   contract: string,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, redBank,
+  return await terra.executeContract(wallet, redBank,
     {
       borrow: {
         asset: { cw20: { contract_addr: contract } },
@@ -202,13 +200,13 @@ export async function borrowCw20(
 }
 
 export async function withdraw(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   redBank: string,
   asset: Asset,
   amount: number,
 ) {
-  return await executeContract(terra, wallet, redBank,
+  return await terra.executeContract(wallet, redBank,
     {
       withdraw: {
         asset,

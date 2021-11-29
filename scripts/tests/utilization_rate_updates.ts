@@ -2,8 +2,6 @@
 Tests that market utilization rates update when funds are sent to/from the red bank
 */
 import {
-  LCDClient,
-  LocalTerra,
   Wallet
 } from "@terra-money/terra.js"
 import { join } from "path"
@@ -13,17 +11,14 @@ import {
 } from "assert"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setTimeoutDuration,
   toEncodedBinary,
-  uploadContract
 } from "../helpers.js"
 import {
   approximateEqual,
   queryMaAssetAddress
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -46,7 +41,7 @@ const BOB_MARS_COLLATERAL = 100_000_000000
 // TYPES
 
 interface Env {
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   redBank: string,
   mars: string,
   maUusd: string,
@@ -58,11 +53,11 @@ interface Env {
 // HELPERS
 
 async function queryBorrowRate(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   redBank: string,
   asset: any,
 ) {
-  const market = await queryContract(terra, redBank, { market: { asset } })
+  const market = await terra.queryContract(redBank, { market: { asset } })
   return parseFloat(market.borrow_rate)
 }
 
@@ -73,14 +68,14 @@ async function testLinearInterestRate(env: Env) {
 
   console.log("alice deposits uusd")
 
-  await executeContract(terra, alice, redBank,
+  await terra.executeContract(alice, redBank,
     { deposit_native: { denom: "uusd" } },
     `${ALICE_UUSD_COLLATERAL}uusd`
   )
 
   console.log("bob deposits mars")
 
-  await executeContract(terra, bob, mars,
+  await terra.executeContract(bob, mars,
     {
       send: {
         contract: redBank,
@@ -92,7 +87,7 @@ async function testLinearInterestRate(env: Env) {
 
   console.log("bob borrows uusd")
 
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     {
       borrow: {
         asset: { native: { denom: "uusd" } },
@@ -109,7 +104,7 @@ async function testLinearInterestRate(env: Env) {
 
   console.log("alice deposits uusd")
 
-  await executeContract(terra, alice, redBank,
+  await terra.executeContract(alice, redBank,
     { deposit_native: { denom: "uusd" } },
     `${3 * ALICE_UUSD_COLLATERAL}uusd`
   )
@@ -121,7 +116,7 @@ async function testLinearInterestRate(env: Env) {
 
   console.log("alice withdraws uusd")
 
-  await executeContract(terra, alice, redBank,
+  await terra.executeContract(alice, redBank,
     {
       withdraw: {
         asset: { native: { denom: "uusd" } },
@@ -136,7 +131,7 @@ async function testLinearInterestRate(env: Env) {
 
   console.log("bob repays uusd")
 
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     { repay_native: { denom: "uusd" } },
     `${0.8 * ALICE_UUSD_COLLATERAL}uusd`
   )
@@ -147,23 +142,23 @@ async function testLinearInterestRate(env: Env) {
   approximateEqual(uusdBorrowRate, UUSD_LINEAR_INTEREST_RATE_SLOPE_1 / 5, 0.01)
 
   // withdraw all liquidity to reset the red-bank before the next test
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     { repay_native: { denom: "uusd" } },
     `${10 * ALICE_UUSD_COLLATERAL}uusd`
   )
 
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     { withdraw: { asset: { cw20: { contract_addr: mars } } } }
   )
 
-  await executeContract(terra, alice, redBank,
+  await terra.executeContract(alice, redBank,
     { withdraw: { asset: { native: { denom: "uusd" } } } }
   )
 
-  const maUusdTokenInfo = await queryContract(terra, maUusd, { token_info: {} })
+  const maUusdTokenInfo = await terra.queryContract(maUusd, { token_info: {} })
   strictEqual(parseInt(maUusdTokenInfo.total_supply), 0)
 
-  const maMarsTokenInfo = await queryContract(terra, maMars, { token_info: {} })
+  const maMarsTokenInfo = await terra.queryContract(maMars, { token_info: {} })
   strictEqual(parseInt(maMarsTokenInfo.total_supply), 0)
 }
 
@@ -172,7 +167,7 @@ async function testDynamicInterestRate(env: Env) {
 
   console.log("alice deposits mars")
 
-  await executeContract(terra, alice, mars,
+  await terra.executeContract(alice, mars,
     {
       send: {
         contract: redBank,
@@ -184,14 +179,14 @@ async function testDynamicInterestRate(env: Env) {
 
   console.log("bob deposits uusd")
 
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     { deposit_native: { denom: "uusd" } },
     `${BOB_UUSD_COLLATERAL}uusd`
   )
 
   console.log("bob borrows mars")
 
-  await executeContract(terra, bob, redBank,
+  await terra.executeContract(bob, redBank,
     {
       borrow: {
         asset: { cw20: { contract_addr: mars } },
@@ -204,7 +199,7 @@ async function testDynamicInterestRate(env: Env) {
 
   console.log("alice deposits mars")
 
-  await executeContract(terra, alice, mars,
+  await terra.executeContract(alice, mars,
     {
       send: {
         contract: redBank,
@@ -223,7 +218,7 @@ async function testDynamicInterestRate(env: Env) {
 
   marsBorrowRateBefore = marsBorrowRateAfter
 
-  await executeContract(terra, alice, redBank,
+  await terra.executeContract(alice, redBank,
     {
       withdraw: {
         asset: { cw20: { contract_addr: mars } },
@@ -241,7 +236,7 @@ async function testDynamicInterestRate(env: Env) {
 
   marsBorrowRateBefore = marsBorrowRateAfter
 
-  await executeContract(terra, bob, mars,
+  await terra.executeContract(bob, mars,
     {
       send: {
         contract: redBank,
@@ -262,7 +257,7 @@ async function testDynamicInterestRate(env: Env) {
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -271,24 +266,24 @@ async function testDynamicInterestRate(env: Env) {
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -301,7 +296,7 @@ async function testDynamicInterestRate(env: Env) {
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -314,7 +309,7 @@ async function testDynamicInterestRate(env: Env) {
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -332,7 +327,7 @@ async function testDynamicInterestRate(env: Env) {
   console.log("init assets")
 
   // mars
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: mars } },
@@ -362,7 +357,7 @@ async function testDynamicInterestRate(env: Env) {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
+  await terra.executeContract(deployer, oracle,
     {
       set_asset: {
         asset: { cw20: { contract_addr: mars } },
@@ -374,7 +369,7 @@ async function testDynamicInterestRate(env: Env) {
   const maMars = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: mars } })
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -400,7 +395,7 @@ async function testDynamicInterestRate(env: Env) {
     }
   )
 
-  await executeContract(terra, deployer, oracle,
+  await terra.executeContract(deployer, oracle,
     {
       set_asset: {
         asset: { native: { denom: "uusd" } },
@@ -420,4 +415,6 @@ async function testDynamicInterestRate(env: Env) {
   await testDynamicInterestRate(env)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

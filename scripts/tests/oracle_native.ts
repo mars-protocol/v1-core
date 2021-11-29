@@ -9,17 +9,14 @@ sed -E -i .bak '/timeout_(propose|prevote|precommit|commit)/s/[0-9]+m?s/1500ms/'
 import {
   Dec,
   LCDClient,
-  LocalTerra,
   Wallet
 } from "@terra-money/terra.js"
 import { strictEqual } from "assert"
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setTimeoutDuration,
   sleep
 } from "../helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // HELPERS
 
@@ -49,13 +46,13 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 // TESTS
 
 async function testLunaPrice(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   deployer: Wallet,
   oracle: string,
 ) {
   console.log("testLunaPrice")
 
-  await executeContract(terra, deployer, oracle,
+  await terra.executeContract(deployer, oracle,
     {
       set_asset: {
         asset: { native: { denom: "uluna" } },
@@ -64,7 +61,7 @@ async function testLunaPrice(
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle,
+  const marsOraclePrice = await terra.queryContract(oracle,
     { asset_price: { asset: { native: { denom: "uluna" } } } }
   )
   const terraOraclePrice = await terra.oracle.exchangeRate("uusd")
@@ -73,14 +70,14 @@ async function testLunaPrice(
 }
 
 async function testNativeTokenPrice(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   deployer: Wallet,
   oracle: string,
   denom: string,
 ) {
   console.log("testNativeTokenPrice:", denom)
 
-  await executeContract(terra, deployer, oracle,
+  await terra.executeContract(deployer, oracle,
     {
       set_asset: {
         asset: { native: { denom } },
@@ -89,7 +86,7 @@ async function testNativeTokenPrice(
     }
   )
 
-  const marsOraclePrice = await queryContract(terra, oracle,
+  const marsOraclePrice = await terra.queryContract(oracle,
     { asset_price: { asset: { native: { denom } } } }
   )
   const terraOraclePrice = await terra.oracle.exchangeRate(denom)
@@ -106,14 +103,14 @@ async function testNativeTokenPrice(
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
   const deployer = terra.wallets.test1
 
   await waitUntilTerraOracleAvailable(terra)
 
   console.log("upload contracts")
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
@@ -124,4 +121,6 @@ async function testNativeTokenPrice(
   await testNativeTokenPrice(terra, deployer, oracle, "ukrw")
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

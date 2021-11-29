@@ -1,6 +1,4 @@
 import {
-  LCDClient,
-  LocalTerra,
   MnemonicKey,
   MsgSend
 } from "@terra-money/terra.js"
@@ -11,15 +9,11 @@ import {
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
   performTransaction,
-  queryContract,
   setGasAdjustment,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
-  uploadContract
 } from "../helpers.js"
 import {
   approximateEqual,
@@ -29,6 +23,7 @@ import {
   queryBalanceNative,
   transferCw20
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -50,7 +45,7 @@ const MARS_UUSD_PAIR_UUSD_LP_AMOUNT = MARS_UUSD_PAIR_MARS_LP_AMOUNT * MARS_USD_P
 // HELPERS
 
 async function assertXmarsBalance(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   xMars: string,
   address: string,
   expectedBalance: number,
@@ -60,23 +55,23 @@ async function assertXmarsBalance(
 }
 
 async function assertXmarsBalanceAt(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   xMars: string,
   address: string,
   block: number,
   expectedBalance: number,
 ) {
-  const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
+  const xMarsBalance = await terra.queryContract(xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
 async function assertXmarsTotalSupplyAt(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   xMars: string,
   block: number,
   expectedTotalSupply: number,
 ) {
-  const expectedXmarsTotalSupply = await queryContract(terra, xMars, { total_supply_at: { block } })
+  const expectedXmarsTotalSupply = await terra.queryContract(xMars, { total_supply_at: { block } })
   strictEqual(parseInt(expectedXmarsTotalSupply.total_supply), expectedTotalSupply)
 }
 
@@ -86,7 +81,7 @@ async function assertXmarsTotalSupplyAt(
   setTimeoutDuration(0)
   setGasAdjustment(2)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -99,13 +94,13 @@ async function assertXmarsTotalSupplyAt(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
-  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
+  const tokenCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await terra.deployContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
       generator_address: astroportGenerator,
@@ -120,7 +115,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  const staking = await deployContract(terra, deployer, "../artifacts/mars_staking.wasm",
+  const staking = await terra.deployContract(deployer, "../artifacts/mars_staking.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -132,7 +127,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -142,7 +137,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
+  const xMars = await terra.deployContract(deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
@@ -153,7 +148,7 @@ async function assertXmarsTotalSupplyAt(
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -169,7 +164,7 @@ async function assertXmarsTotalSupplyAt(
 
   // astroport pairs
 
-  let result = await executeContract(terra, deployer, astroportFactory,
+  let result = await terra.executeContract(deployer, astroportFactory,
     {
       create_pair: {
         pair_type: { xyk: {} },
@@ -182,7 +177,7 @@ async function assertXmarsTotalSupplyAt(
   )
   const marsUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
-  result = await executeContract(terra, deployer, astroportFactory,
+  result = await terra.executeContract(deployer, astroportFactory,
     {
       create_pair: {
         pair_type: { xyk: {} },
@@ -195,7 +190,7 @@ async function assertXmarsTotalSupplyAt(
   )
   const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
-  await executeContract(terra, deployer, ulunaUusdPair,
+  await terra.executeContract(deployer, ulunaUusdPair,
     {
       provide_liquidity: {
         assets: [
@@ -214,7 +209,7 @@ async function assertXmarsTotalSupplyAt(
 
   await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT)
 
-  await executeContract(terra, deployer, mars,
+  await terra.executeContract(deployer, mars,
     {
       increase_allowance: {
         spender: marsUusdPair,
@@ -223,7 +218,7 @@ async function assertXmarsTotalSupplyAt(
     }
   )
 
-  await executeContract(terra, deployer, marsUusdPair,
+  await terra.executeContract(deployer, marsUusdPair,
     {
       provide_liquidity: {
         assets: [
@@ -249,7 +244,7 @@ async function assertXmarsTotalSupplyAt(
 
     await mintCw20(terra, deployer, mars, alice.key.accAddress, MARS_STAKE_AMOUNT)
 
-    const txResult = await executeContract(terra, alice, mars,
+    const txResult = await terra.executeContract(alice, mars,
       {
         send: {
           contract: staking,
@@ -276,7 +271,7 @@ async function assertXmarsTotalSupplyAt(
 
     await mintCw20(terra, deployer, mars, bob.key.accAddress, MARS_STAKE_AMOUNT)
 
-    const txResult = await executeContract(terra, bob, mars,
+    const txResult = await terra.executeContract(bob, mars,
       {
         send: {
           contract: staking,
@@ -329,7 +324,7 @@ async function assertXmarsTotalSupplyAt(
     // swap luna to usd
     const uusdBalanceBeforeSwapToUusd = await queryBalanceNative(terra, staking, "uusd")
 
-    await executeContract(terra, deployer, staking,
+    await terra.executeContract(deployer, staking,
       {
         swap_asset_to_uusd: {
           offer_asset_info: { native_token: { denom: "uluna" } },
@@ -351,7 +346,7 @@ async function assertXmarsTotalSupplyAt(
     // don't swap the entire uusd balance, otherwise there won't be enough to pay the tx fee
     const uusdSwapAmount = uusdBalanceAfterSwapToUusd - 10_000000
 
-    await executeContract(terra, deployer, staking,
+    await terra.executeContract(deployer, staking,
       { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } }
     )
 
@@ -367,7 +362,7 @@ async function assertXmarsTotalSupplyAt(
 
     await mintCw20(terra, deployer, mars, carol.key.accAddress, MARS_STAKE_AMOUNT)
 
-    const txResult = await executeContract(terra, carol, mars,
+    const txResult = await terra.executeContract(carol, mars,
       {
         send: {
           contract: staking,
@@ -401,7 +396,7 @@ async function assertXmarsTotalSupplyAt(
     const cooldownStart = Date.now()
     bobCooldownEnd = cooldownStart + COOLDOWN_DURATION_SECONDS * 1000 // ms
 
-    const txResult = await executeContract(terra, bob, xMars,
+    const txResult = await terra.executeContract(bob, xMars,
       {
         send: {
           contract: staking,
@@ -412,7 +407,7 @@ async function assertXmarsTotalSupplyAt(
     )
     const block = await getBlockHeight(terra, txResult)
 
-    const claim = await queryContract(terra, staking, { claim: { user_address: bob.key.accAddress } })
+    const claim = await terra.queryContract(staking, { claim: { user_address: bob.key.accAddress } })
     assert(parseInt(claim.claim.amount) > 0)
 
     // before unstaking
@@ -428,7 +423,7 @@ async function assertXmarsTotalSupplyAt(
     console.log("claiming before cooldown has ended fails")
 
     await assert.rejects(
-      executeContract(terra, bob, staking, { claim: {} }),
+      terra.executeContract(bob, staking, { claim: {} }),
       (error: any) => {
         return error.response.data.message.includes("Cooldown has not ended")
       }
@@ -441,11 +436,11 @@ async function assertXmarsTotalSupplyAt(
     await mintCw20(terra, deployer, mars, dan.key.accAddress, MARS_STAKE_AMOUNT)
 
     const stakingMarsBalance = await queryBalanceCw20(terra, staking, mars)
-    const globalState = await queryContract(terra, staking, { global_state: {} })
+    const globalState = await terra.queryContract(staking, { global_state: {} })
     const totalMarsForClaimers = parseInt(globalState.total_mars_for_claimers)
     const totalMarsForStakers = stakingMarsBalance - totalMarsForClaimers
 
-    const txResult = await executeContract(terra, dan, mars,
+    const txResult = await terra.executeContract(dan, mars,
       {
         send: {
           contract: staking,
@@ -477,11 +472,11 @@ async function assertXmarsTotalSupplyAt(
     const cooldownRemaining = Math.max(bobCooldownEnd - Date.now(), 0)
     await sleep(cooldownRemaining)
 
-    const claim = await queryContract(terra, staking, { claim: { user_address: bob.key.accAddress } })
+    const claim = await terra.queryContract(staking, { claim: { user_address: bob.key.accAddress } })
 
     const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
 
-    const txResult = await executeContract(terra, bob, staking, { claim: {} })
+    const txResult = await terra.executeContract(bob, staking, { claim: {} })
     const block = await getBlockHeight(terra, txResult)
 
     const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
@@ -500,7 +495,7 @@ async function assertXmarsTotalSupplyAt(
     const carolXmarsBalance = await queryBalanceCw20(terra, carol.key.accAddress, xMars)
     const unstakeAmount = carolXmarsBalance
 
-    await executeContract(terra, carol, xMars,
+    await terra.executeContract(carol, xMars,
       {
         send: {
           contract: staking,
@@ -519,14 +514,14 @@ async function assertXmarsTotalSupplyAt(
     console.log("check that claimed Mars is not used in the Mars/xMars exchange rate when dan unstakes xMars")
 
     const stakingMarsBalance = await queryBalanceCw20(terra, staking, mars)
-    const globalState = await queryContract(terra, staking, { global_state: {} })
+    const globalState = await terra.queryContract(staking, { global_state: {} })
     const totalMarsForClaimers = parseInt(globalState.total_mars_for_claimers)
     const totalMarsForStakers = stakingMarsBalance - totalMarsForClaimers
 
     const danXmarsBalance = await queryBalanceCw20(terra, dan.key.accAddress, xMars)
     const unstakeAmount = danXmarsBalance
 
-    await executeContract(terra, dan, xMars,
+    await terra.executeContract(dan, xMars,
       {
         send: {
           contract: staking,
@@ -536,7 +531,7 @@ async function assertXmarsTotalSupplyAt(
       }
     )
 
-    const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
+    const claim = await terra.queryContract(staking, { claim: { user_address: dan.key.accAddress } })
     danClaimAmount = parseInt(claim.claim.amount)
     const expectedDanMarsBalance = Math.floor(unstakeAmount * (totalMarsForStakers / expectedXmarsTotalSupply))
     strictEqual(danClaimAmount, expectedDanMarsBalance)
@@ -551,7 +546,7 @@ async function assertXmarsTotalSupplyAt(
     // slash 10% of the Mars balance
     const transferMarsAmount = Math.floor(stakingMarsBalanceBefore / 10)
 
-    const txResult = await executeContract(terra, deployer, staking,
+    const txResult = await terra.executeContract(deployer, staking,
       {
         transfer_mars: {
           recipient: deployer.key.accAddress,
@@ -572,10 +567,12 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("check that dan's claim has been slashed")
 
-    const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
+    const claim = await terra.queryContract(staking, { claim: { user_address: dan.key.accAddress } })
     const danClaimAmountAfterSlashing = parseInt(claim.claim.amount)
     approximateEqual(danClaimAmount * 0.9, danClaimAmountAfterSlashing, 1)
   }
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

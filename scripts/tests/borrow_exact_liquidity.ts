@@ -1,11 +1,7 @@
-import { LocalTerra } from "@terra-money/terra.js"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
   setTimeoutDuration,
-  uploadContract
 } from "../helpers.js"
 import {
   borrowNative,
@@ -13,6 +9,7 @@ import {
   depositNative,
   setAssetOraclePriceSource
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -27,31 +24,31 @@ const MARS_COLLATERAL = 100_000_000_000000;
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
   const deployer = terra.wallets.test1
   const provider = terra.wallets.test2
   const borrower = terra.wallets.test3
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -64,7 +61,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -73,7 +70,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
     }
   )
 
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -91,7 +88,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
   console.log("init assets")
 
   // mars
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: mars } },
@@ -123,7 +120,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
   )
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -169,4 +166,6 @@ const MARS_COLLATERAL = 100_000_000_000000;
   await borrowNative(terra, borrower, redBank, "uusd", UUSD_COLLATERAL)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

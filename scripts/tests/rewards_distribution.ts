@@ -1,6 +1,5 @@
 import {
   Coin,
-  LocalTerra,
   MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
@@ -11,15 +10,10 @@ import {
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
-  instantiateContract,
-  queryContract,
   setGasAdjustment,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
-  uploadContract
 } from "../helpers.js"
 import {
   borrowCw20,
@@ -34,6 +28,7 @@ import {
   setAssetOraclePriceSource,
   approximateEqual
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -70,7 +65,7 @@ const CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT = CW20_TOKEN_1_UUSD_PAIR_UUS
 // TYPES
 
 interface Env {
-  terra: LocalTerra
+  terra: LocalTerraWithLogging
   deployer: Wallet
   provider: Wallet
   borrower: Wallet
@@ -128,7 +123,7 @@ async function testNative(env: Env) {
 
     const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
 
-    await executeContract(terra, borrower, redBank,
+    await terra.executeContract(borrower, redBank,
       { repay_native: { denom: "uusd" } },
       `${Math.floor(USD_BORROW_AMOUNT)}uusd`
     )
@@ -142,7 +137,7 @@ async function testNative(env: Env) {
 
     const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
 
-    await executeContract(terra, provider, redBank,
+    await terra.executeContract(provider, redBank,
       {
         withdraw: {
           asset: { native: { denom: "uusd" } },
@@ -164,7 +159,7 @@ async function testNative(env: Env) {
     const uusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
 
     // withdraw half of the deposited balance
-    await executeContract(terra, deployer, protocolRewardsCollector,
+    await terra.executeContract(deployer, protocolRewardsCollector,
       {
         withdraw_from_red_bank: {
           asset: { native: { denom: "uusd" } },
@@ -185,7 +180,7 @@ async function testNative(env: Env) {
     const uusdBalanceBefore = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
 
     // withdraw remaining balance
-    let result = await executeContract(terra, deployer, protocolRewardsCollector,
+    let result = await terra.executeContract(deployer, protocolRewardsCollector,
       { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }
     )
 
@@ -202,7 +197,7 @@ async function testNative(env: Env) {
   console.log("try to distribute uusd rewards")
 
   await assert.rejects(
-    executeContract(terra, deployer, protocolRewardsCollector,
+    terra.executeContract(deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     ),
     (error: any) => {
@@ -212,7 +207,7 @@ async function testNative(env: Env) {
 
   console.log("enable uusd for distribution")
 
-  await executeContract(terra, deployer, protocolRewardsCollector,
+  await terra.executeContract(deployer, protocolRewardsCollector,
     {
       update_asset_config: {
         asset: { native: { denom: "uusd" } },
@@ -229,7 +224,7 @@ async function testNative(env: Env) {
     const safetyFundUusdBalanceBefore = await queryBalanceNative(terra, safetyFund, "uusd")
     const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
-    await executeContract(terra, deployer, protocolRewardsCollector,
+    await terra.executeContract(deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     )
 
@@ -319,7 +314,7 @@ async function testCw20(env: Env) {
 
     const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
 
-    await executeContract(terra, borrower, cw20Token1,
+    await terra.executeContract(borrower, cw20Token1,
       {
         send: {
           contract: redBank,
@@ -338,7 +333,7 @@ async function testCw20(env: Env) {
 
     const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
 
-    await executeContract(terra, provider, redBank,
+    await terra.executeContract(provider, redBank,
       {
         withdraw: {
           asset: { cw20: { contract_addr: cw20Token1 } },
@@ -360,7 +355,7 @@ async function testCw20(env: Env) {
     const cwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw half of the deposited balance
-    await executeContract(terra, deployer, protocolRewardsCollector,
+    await terra.executeContract(deployer, protocolRewardsCollector,
       {
         withdraw_from_red_bank: {
           asset: { cw20: { contract_addr: cw20Token1 } },
@@ -381,7 +376,7 @@ async function testCw20(env: Env) {
     const cwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, cw20Token1)
 
     // withdraw remaining balance
-    const result = await executeContract(terra, deployer, protocolRewardsCollector,
+    const result = await terra.executeContract(deployer, protocolRewardsCollector,
       { withdraw_from_red_bank: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     )
 
@@ -398,7 +393,7 @@ async function testCw20(env: Env) {
   console.log("try to distribute cw20 token 1 rewards")
 
   await assert.rejects(
-    executeContract(terra, deployer, protocolRewardsCollector,
+    terra.executeContract(deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { cw20: { contract_addr: cw20Token1 } } } }
     ),
     (error: any) => {
@@ -408,13 +403,13 @@ async function testCw20(env: Env) {
 
   console.log("swap cw20 token 1 to uusd")
 
-  await executeContract(terra, deployer, protocolRewardsCollector,
+  await terra.executeContract(deployer, protocolRewardsCollector,
     { swap_asset_to_uusd: { offer_asset_info: { token: { contract_addr: cw20Token1 } } } }
   )
 
   console.log("enable uusd for distribution")
 
-  await executeContract(terra, deployer, protocolRewardsCollector,
+  await terra.executeContract(deployer, protocolRewardsCollector,
     {
       update_asset_config: {
         asset: { native: { denom: "uusd" } },
@@ -431,7 +426,7 @@ async function testCw20(env: Env) {
     const safetyFundUusdBalanceBefore = await queryBalanceNative(terra, safetyFund, "uusd")
     const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
-    await executeContract(terra, deployer, protocolRewardsCollector,
+    await terra.executeContract(deployer, protocolRewardsCollector,
       { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }
     )
 
@@ -514,7 +509,7 @@ async function testLiquidateNative(env: Env) {
   let backoff = 1
 
   while (true) {
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: borrower.key.accAddress } }
     )
     const healthFactor = parseFloat(userPosition.health_status.borrowing)
@@ -538,7 +533,7 @@ async function testLiquidateNative(env: Env) {
   const maUusdBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
   const maUlunaBalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maUluna)
 
-  await executeContract(terra, liquidator, redBank,
+  await terra.executeContract(liquidator, redBank,
     {
       liquidate_native: {
         collateral_asset: { native: { denom: "uluna" } },
@@ -602,7 +597,7 @@ async function testLiquidateCw20(env: Env) {
   let backoff = 1
 
   while (true) {
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: borrower.key.accAddress } }
     )
     const healthFactor = parseFloat(userPosition.health_status.borrowing)
@@ -626,7 +621,7 @@ async function testLiquidateCw20(env: Env) {
   const maCwToken1BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
   const maCwToken2BalanceBefore = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token2)
 
-  await executeContract(terra, liquidator, cw20Token1,
+  await terra.executeContract(liquidator, cw20Token1,
     {
       send: {
         contract: redBank,
@@ -657,7 +652,7 @@ async function testLiquidateCw20(env: Env) {
   // so any estimates need to be adjusted upwards
   setGasAdjustment(2)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -671,24 +666,24 @@ async function testLiquidateCw20(env: Env) {
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -699,9 +694,9 @@ async function testLiquidateCw20(env: Env) {
     }
   )
 
-  const tokenCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
-  const pairCodeID = await uploadContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
-  const astroportFactory = await deployContract(terra, deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
+  const tokenCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm"))
+  const pairCodeID = await terra.uploadContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm"))
+  const astroportFactory = await terra.deployContract(deployer, join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
       token_code_id: tokenCodeID,
       generator_address: astroportGenerator,
@@ -716,7 +711,7 @@ async function testLiquidateCw20(env: Env) {
     }
   )
 
-  const protocolRewardsCollector = await deployContract(terra, deployer, "../artifacts/mars_protocol_rewards_collector.wasm",
+  const protocolRewardsCollector = await terra.deployContract(deployer, "../artifacts/mars_protocol_rewards_collector.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -730,7 +725,7 @@ async function testLiquidateCw20(env: Env) {
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -749,9 +744,9 @@ async function testLiquidateCw20(env: Env) {
   )
 
   // cw20 tokens
-  const cw20CodeId = await uploadContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
+  const cw20CodeId = await terra.uploadContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
 
-  const cw20Token1 = await instantiateContract(terra, deployer, cw20CodeId,
+  const cw20Token1 = await terra.instantiateContract(deployer, cw20CodeId,
     {
       name: "cw20 Token 1",
       symbol: "ONE",
@@ -761,7 +756,7 @@ async function testLiquidateCw20(env: Env) {
     }
   )
 
-  const cw20Token2 = await instantiateContract(terra, deployer, cw20CodeId,
+  const cw20Token2 = await terra.instantiateContract(deployer, cw20CodeId,
     {
       name: "cw20 Token 2",
       symbol: "TWO",
@@ -774,7 +769,7 @@ async function testLiquidateCw20(env: Env) {
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -806,7 +801,7 @@ async function testLiquidateCw20(env: Env) {
   const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -838,7 +833,7 @@ async function testLiquidateCw20(env: Env) {
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 
   // cw20token1
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: cw20Token1 } },
@@ -870,7 +865,7 @@ async function testLiquidateCw20(env: Env) {
   const maCw20Token1 = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: cw20Token1 } })
 
   // cw20token2
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: cw20Token2 } },
@@ -903,7 +898,7 @@ async function testLiquidateCw20(env: Env) {
 
   // astroport pair
 
-  let result = await executeContract(terra, deployer, astroportFactory,
+  let result = await terra.executeContract(deployer, astroportFactory,
     {
       create_pair: {
         pair_type: { xyk: {} },
@@ -918,7 +913,7 @@ async function testLiquidateCw20(env: Env) {
 
   await mintCw20(terra, deployer, cw20Token1, deployer.key.accAddress, CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT)
 
-  await executeContract(terra, deployer, cw20Token1,
+  await terra.executeContract(deployer, cw20Token1,
     {
       increase_allowance: {
         spender: cw20Token1UusdPair,
@@ -927,7 +922,7 @@ async function testLiquidateCw20(env: Env) {
     }
   )
 
-  await executeContract(terra, deployer, cw20Token1UusdPair,
+  await terra.executeContract(deployer, cw20Token1UusdPair,
     {
       provide_liquidity: {
         assets: [
@@ -985,4 +980,6 @@ async function testLiquidateCw20(env: Env) {
   await testLiquidateCw20(env)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

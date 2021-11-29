@@ -10,14 +10,9 @@ import {
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
-  instantiateContract,
-  queryContract,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
-  uploadContract,
 } from "../helpers.js"
 import {
   borrowCw20,
@@ -32,6 +27,7 @@ import {
   queryBalanceNative,
   setAssetOraclePriceSource
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -60,7 +56,7 @@ const CW20_TOKEN_1_BORROW_AMOUNT = CW20_TOKEN_2_COLLATERAL_AMOUNT * MAX_LTV
 
 // TYPES
 interface Env {
-  terra: LocalTerra,
+  terra: LocalTerraWithLogging,
   redBank: string,
   deployer: Wallet,
   maUluna: string,
@@ -112,7 +108,7 @@ async function testCollateralizedNativeLoan(
   let uusdAmountLiquidated = uusdAmountBorrowed
   // should fail because the borrower's health factor is > 1
   await assert.rejects(
-    executeContract(terra, liquidator, redBank,
+    terra.executeContract(liquidator, redBank,
       {
         liquidate_native: {
           collateral_asset: { native: { denom: "uluna" } },
@@ -150,7 +146,7 @@ async function testCollateralizedNativeLoan(
   let backoff = 1
 
   while (true) {
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: borrower.key.accAddress } }
     )
     const healthFactor = parseFloat(userPosition.health_status.borrowing)
@@ -177,7 +173,7 @@ async function testCollateralizedNativeLoan(
 
   // liquidate the borrower
   uusdAmountLiquidated = Math.floor(totalUusdAmountBorrowed * borrowFraction)
-  txResult = await executeContract(terra, liquidator, redBank,
+  txResult = await terra.executeContract(liquidator, redBank,
     {
       liquidate_native: {
         collateral_asset: { native: { denom: "uluna" } },
@@ -318,7 +314,7 @@ async function testCollateralizedCw20Loan(
   let cw20Token1AmountLiquidated = cw20Token1AmountBorrowed
   // should fail because the borrower's health factor is > 1
   await assert.rejects(
-    executeContract(terra, liquidator, cw20Token1,
+    terra.executeContract(liquidator, cw20Token1,
       {
         send: {
           contract: redBank,
@@ -360,7 +356,7 @@ async function testCollateralizedCw20Loan(
   let backoff = 1
 
   while (true) {
-    const userPosition = await queryContract(terra, redBank,
+    const userPosition = await terra.queryContract(redBank,
       { user_position: { user_address: borrower.key.accAddress } }
     )
     const healthFactor = parseFloat(userPosition.health_status.borrowing)
@@ -387,7 +383,7 @@ async function testCollateralizedCw20Loan(
 
   // liquidate the borrower
   cw20Token1AmountLiquidated = Math.floor(totalCw20Token1AmountBorrowed * borrowFraction)
-  txResult = await executeContract(terra, liquidator, cw20Token1,
+  txResult = await terra.executeContract(liquidator, cw20Token1,
     {
       send: {
         contract: redBank,
@@ -478,7 +474,7 @@ async function testUncollateralizedNativeLoan(
 
   console.log("set uncollateralized loan limit for borrower")
 
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       update_uncollateralized_loan_limit: {
         user_address: borrower.key.accAddress,
@@ -508,7 +504,7 @@ async function testUncollateralizedNativeLoan(
   const liquidator = deployer
 
   // check user position
-  const userPositionT1 = await queryContract(terra, redBank,
+  const userPositionT1 = await terra.queryContract(redBank,
     { user_position: { user_address: borrower.key.accAddress } }
   )
   strictEqual(userPositionT1.health_status, "not_borrowing")
@@ -516,7 +512,7 @@ async function testUncollateralizedNativeLoan(
 
   // should fail because there are no collateralized loans
   await assert.rejects(
-    executeContract(terra, liquidator, redBank,
+    terra.executeContract(liquidator, redBank,
       {
         liquidate_native: {
           collateral_asset: { native: { denom: "uluna" } },
@@ -534,7 +530,7 @@ async function testUncollateralizedNativeLoan(
     }
   )
 
-  const userPositionT2 = await queryContract(terra, redBank,
+  const userPositionT2 = await terra.queryContract(redBank,
     { user_position: { user_address: borrower.key.accAddress } }
   )
   strictEqual(userPositionT1.total_collateralized_debt_in_uusd, userPositionT2.total_collateralized_debt_in_uusd)
@@ -546,29 +542,29 @@ async function testUncollateralizedNativeLoan(
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
   const deployer = terra.wallets.test1
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -582,7 +578,7 @@ async function testUncollateralizedNativeLoan(
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -597,9 +593,9 @@ async function testUncollateralizedNativeLoan(
   )
 
   // cw20 tokens
-  const cw20CodeId = await uploadContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
+  const cw20CodeId = await terra.uploadContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"))
 
-  const cw20Token1 = await instantiateContract(terra, deployer, cw20CodeId,
+  const cw20Token1 = await terra.instantiateContract(deployer, cw20CodeId,
     {
       name: "cw20 Token 1",
       symbol: "ONE",
@@ -609,7 +605,7 @@ async function testUncollateralizedNativeLoan(
     }
   )
 
-  const cw20Token2 = await instantiateContract(terra, deployer, cw20CodeId,
+  const cw20Token2 = await terra.instantiateContract(deployer, cw20CodeId,
     {
       name: "cw20 Token 2",
       symbol: "TWO",
@@ -622,7 +618,7 @@ async function testUncollateralizedNativeLoan(
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -656,7 +652,7 @@ async function testUncollateralizedNativeLoan(
   const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -688,7 +684,7 @@ async function testUncollateralizedNativeLoan(
   )
 
   // cw20token1
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: cw20Token1 } },
@@ -720,7 +716,7 @@ async function testUncollateralizedNativeLoan(
   )
 
   // cw20token2
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { cw20: { contract_addr: cw20Token2 } },
@@ -772,4 +768,6 @@ async function testUncollateralizedNativeLoan(
   await testUncollateralizedNativeLoan(env, terra.wallets.test10)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

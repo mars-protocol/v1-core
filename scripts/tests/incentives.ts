@@ -1,6 +1,5 @@
 import {
   LCDClient,
-  LocalTerra,
   MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
@@ -8,10 +7,7 @@ import { strictEqual } from "assert"
 import { join } from "path"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
   setTimeoutDuration,
-  uploadContract
 } from "../helpers.js"
 import {
   depositNative,
@@ -22,6 +18,7 @@ import {
   transferCw20,
   withdraw
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -39,13 +36,13 @@ const X = 10_000_000000
 // HELPERS
 
 async function setAssetIncentive(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   incentives: string,
   maTokenAddress: string,
   umarsEmissionRate: number,
 ) {
-  return await executeContract(terra, wallet, incentives,
+  return await terra.executeContract(wallet, incentives,
     {
       set_asset_incentive: {
         ma_token_address: maTokenAddress,
@@ -56,11 +53,11 @@ async function setAssetIncentive(
 }
 
 async function claimRewards(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   incentives: string,
 ) {
-  const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} })
+  const result = await terra.executeContract(wallet, incentives, { claim_rewards: {} })
   return await getTxTimestamp(terra, result)
 }
 
@@ -86,7 +83,7 @@ function assertBalance(
 
   setTimeoutDuration(100)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -99,24 +96,24 @@ function assertBalance(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const incentives = await deployContract(terra, deployer, "../artifacts/mars_incentives.wasm",
+  const incentives = await terra.deployContract(deployer, "../artifacts/mars_incentives.wasm",
     {
       owner: deployer.key.accAddress,
       address_provider_address: addressProvider
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -129,7 +126,7 @@ function assertBalance(
     }
   )
 
-  const staking = await deployContract(terra, deployer, "../artifacts/mars_staking.wasm",
+  const staking = await terra.deployContract(deployer, "../artifacts/mars_staking.wasm",
     {
       config: {
         owner: deployer.key.accAddress,
@@ -142,7 +139,7 @@ function assertBalance(
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -152,7 +149,7 @@ function assertBalance(
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
+  const xMars = await terra.deployContract(deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
@@ -163,7 +160,7 @@ function assertBalance(
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -183,7 +180,7 @@ function assertBalance(
   console.log("init assets")
 
   // uluna
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uluna" } },
@@ -221,7 +218,7 @@ function assertBalance(
   const maUluna = await queryMaAssetAddress(terra, redBank, { native: { denom: "uluna" } })
 
   // uusd
-  await executeContract(terra, deployer, redBank,
+  await terra.executeContract(deployer, redBank,
     {
       init_asset: {
         asset: { native: { denom: "uusd" } },
@@ -313,7 +310,7 @@ function assertBalance(
 
   console.log("turn off uluna incentives")
 
-  result = await executeContract(terra, deployer, incentives,
+  result = await terra.executeContract(deployer, incentives,
     {
       set_asset_incentive: {
         ma_token_address: maUluna,

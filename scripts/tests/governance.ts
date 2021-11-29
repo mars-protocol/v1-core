@@ -1,6 +1,5 @@
 import {
   LCDClient,
-  LocalTerra,
   MnemonicKey,
   Wallet
 } from "@terra-money/terra.js"
@@ -8,13 +7,9 @@ import { join } from "path"
 import { strictEqual } from "assert"
 import 'dotenv/config.js'
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   setTimeoutDuration,
   sleep,
   toEncodedBinary,
-  uploadContract
 } from "../helpers.js"
 import {
   getBlockHeight,
@@ -22,6 +17,7 @@ import {
   queryBalanceCw20,
   transferCw20
 } from "./test_helpers.js"
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -45,24 +41,24 @@ const LUNA_USD_PRICE = 25
 // HELPERS
 
 async function assertXmarsBalanceAt(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   xMars: string,
   address: string,
   block: number,
   expectedBalance: number,
 ) {
-  const xMarsBalance = await queryContract(terra, xMars, { balance_at: { address, block } })
+  const xMarsBalance = await terra.queryContract(xMars, { balance_at: { address, block } })
   strictEqual(parseInt(xMarsBalance.balance), expectedBalance)
 }
 
 async function castVote(
-  terra: LCDClient,
+  terra: LocalTerraWithLogging,
   wallet: Wallet,
   council: string,
   proposalId: number,
   vote: string,
 ) {
-  return await executeContract(terra, wallet, council,
+  return await terra.executeContract(wallet, council,
     {
       cast_vote: {
         proposal_id: proposalId,
@@ -106,7 +102,7 @@ async function waitUntilBlockHeight(
 (async () => {
   setTimeoutDuration(0)
 
-  const terra = new LocalTerra()
+  const terra = new LocalTerraWithLogging()
 
   // addresses
   const deployer = terra.wallets.test1
@@ -119,11 +115,11 @@ async function waitUntilBlockHeight(
 
   console.log("upload contracts")
 
-  const addressProvider = await deployContract(terra, deployer, "../artifacts/mars_address_provider.wasm",
+  const addressProvider = await terra.deployContract(deployer, "../artifacts/mars_address_provider.wasm",
     { owner: deployer.key.accAddress }
   )
 
-  const council = await deployContract(terra, deployer, "../artifacts/mars_council.wasm",
+  const council = await terra.deployContract(deployer, "../artifacts/mars_council.wasm",
     {
       config: {
         address_provider_address: addressProvider,
@@ -137,13 +133,13 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const oracle = await deployContract(terra, deployer, "../artifacts/mars_oracle.wasm",
+  const oracle = await terra.deployContract(deployer, "../artifacts/mars_oracle.wasm",
     { owner: council }
   )
 
-  const maTokenCodeId = await uploadContract(terra, deployer, "../artifacts/mars_ma_token.wasm")
+  const maTokenCodeId = await terra.uploadContract(deployer, "../artifacts/mars_ma_token.wasm")
 
-  const redBank = await deployContract(terra, deployer, "../artifacts/mars_red_bank.wasm",
+  const redBank = await terra.deployContract(deployer, "../artifacts/mars_red_bank.wasm",
     {
       config: {
         owner: council,
@@ -156,7 +152,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const vesting = await deployContract(terra, deployer, "../artifacts/mars_vesting.wasm",
+  const vesting = await terra.deployContract(deployer, "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
       default_unlock_schedule: {
@@ -167,7 +163,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const mars = await deployContract(terra, deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
+  const mars = await terra.deployContract(deployer, join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
       name: "Mars",
       symbol: "MARS",
@@ -177,7 +173,7 @@ async function waitUntilBlockHeight(
     }
   )
 
-  const xMars = await deployContract(terra, deployer, "../artifacts/mars_xmars_token.wasm",
+  const xMars = await terra.deployContract(deployer, "../artifacts/mars_xmars_token.wasm",
     {
       name: "xMars",
       symbol: "xMARS",
@@ -188,7 +184,7 @@ async function waitUntilBlockHeight(
   )
 
   // update address provider
-  await executeContract(terra, deployer, addressProvider,
+  await terra.executeContract(deployer, addressProvider,
     {
       update_config: {
         config: {
@@ -217,7 +213,7 @@ async function waitUntilBlockHeight(
 
   console.log("alice submits a proposal to initialise a new asset in the red bank")
 
-  let txResult = await executeContract(terra, alice, mars,
+  let txResult = await terra.executeContract(alice, mars,
     {
       send: {
         contract: council,
@@ -298,7 +294,7 @@ async function waitUntilBlockHeight(
 
   console.log("bob submits a proposal that will fail")
 
-  txResult = await executeContract(terra, bob, mars,
+  txResult = await terra.executeContract(bob, mars,
     {
       send: {
         contract: council,
@@ -348,9 +344,9 @@ async function waitUntilBlockHeight(
 
   const aliceMarsBalanceBefore = await queryBalanceCw20(terra, alice.key.accAddress, mars)
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: aliceProposalId } })
+  await terra.executeContract(deployer, council, { end_proposal: { proposal_id: aliceProposalId } })
 
-  const aliceProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: aliceProposalId } })
+  const aliceProposalStatus = await terra.queryContract(council, { proposal: { proposal_id: aliceProposalId } })
   strictEqual(aliceProposalStatus.status, "passed")
 
   const aliceMarsBalanceAfter = await queryBalanceCw20(terra, alice.key.accAddress, mars)
@@ -361,9 +357,9 @@ async function waitUntilBlockHeight(
   const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
   const stakingContractMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: bobProposalId } })
+  await terra.executeContract(deployer, council, { end_proposal: { proposal_id: bobProposalId } })
 
-  const bobProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: bobProposalId } })
+  const bobProposalStatus = await terra.queryContract(council, { proposal: { proposal_id: bobProposalId } })
   strictEqual(bobProposalStatus.status, "rejected")
 
   const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
@@ -377,17 +373,19 @@ async function waitUntilBlockHeight(
 
   console.log("execute proposal")
 
-  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: aliceProposalId } })
+  await terra.executeContract(deployer, council, { execute_proposal: { proposal_id: aliceProposalId } })
 
   // check that the asset has been initialised on the red bank
-  const marketsList = await queryContract(terra, redBank, { markets_list: {} })
+  const marketsList = await terra.queryContract(redBank, { markets_list: {} })
   strictEqual(marketsList.markets_list[0].denom, "uluna")
 
   // check that the asset has been initialised in the oracle contract
-  const assetConfig = await queryContract(terra, oracle,
+  const assetConfig = await terra.queryContract(oracle,
     { asset_price_source: { asset: { native: { denom: "uluna" } } } }
   )
   strictEqual(parseInt(assetConfig.fixed.price), LUNA_USD_PRICE)
 
   console.log("OK")
+
+  terra.showGasConsumption()
 })()

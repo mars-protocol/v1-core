@@ -1,22 +1,18 @@
 import {
-  LocalTerra,
   MnemonicKey
 } from "@terra-money/terra.js";
 import { join } from "path";
 import { strictEqual } from "assert";
 import "dotenv/config.js";
 import {
-  deployContract,
-  executeContract,
-  queryContract,
   toEncodedBinary,
-  uploadContract,
 } from "../helpers.js";
 import {
   getBlockHeight,
   mintCw20,
   queryBalanceCw20
 } from "./test_helpers.js";
+import {LocalTerraWithLogging} from "./localterra_logging.js";
 
 // CONSTS
 
@@ -42,7 +38,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 // MAIN
 
 (async () => {
-  const terra = new LocalTerra();
+  const terra = new LocalTerraWithLogging();
 
   // addresses
   const deployer = terra.wallets.test1;
@@ -59,18 +55,15 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying astroport... ");
 
-  const tokenCodeID = await uploadContract(
-    terra,
+  const tokenCodeID = await terra.uploadContract(
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_token.wasm")
   );
-  const pairCodeID = await uploadContract(
-    terra,
+  const pairCodeID = await terra.uploadContract(
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_pair.wasm")
   );
-  const astroportFactory = await deployContract(
-    terra,
+  const astroportFactory = await terra.deployContract(
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
@@ -91,8 +84,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying address provider... ");
 
-  const addressProvider = await deployContract(
-    terra,
+  const addressProvider = await terra.deployContract(
     deployer,
     "../artifacts/mars_address_provider.wasm",
     {
@@ -104,8 +96,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying council... ");
 
-  const council = await deployContract(
-    terra,
+  const council = await terra.deployContract(
     deployer,
     "../artifacts/mars_council.wasm",
     {
@@ -125,8 +116,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying staking... ");
 
-  const staking = await deployContract(
-    terra,
+  const staking = await terra.deployContract(
     deployer,
     "../artifacts/mars_staking.wasm",
     {
@@ -144,8 +134,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying vesting... ");
 
-  const vesting = await deployContract(
-    terra,
+  const vesting = await terra.deployContract(
     deployer,
     "../artifacts/mars_vesting.wasm",
     {
@@ -162,8 +151,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying mars token... ");
 
-  const mars = await deployContract(
-    terra,
+  const mars = await terra.deployContract(
     deployer,
     join(CW_PLUS_ARTIFACTS_PATH, "cw20_base.wasm"),
     {
@@ -179,8 +167,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("deploying xmars token... ");
 
-  const xMars = await deployContract(
-    terra,
+  const xMars = await terra.deployContract(
     deployer,
     "../artifacts/mars_xmars_token.wasm",
     {
@@ -196,7 +183,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
   process.stdout.write("updating address provider... ");
 
-  await executeContract(terra, deployer, addressProvider, {
+  await terra.executeContract(deployer, addressProvider, {
     update_config: {
       config: {
         owner: deployer.key.accAddress,
@@ -227,7 +214,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
       "bob stakes Mars available in his wallet and receives the same amount of xMars... "
     );
 
-    await executeContract(terra, bob, mars, {
+    await terra.executeContract(bob, mars, {
       send: {
         contract: staking,
         amount: String(BOB_WALLET_MARS_BALANCE),
@@ -241,7 +228,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   {
     process.stdout.write("JV creates an allocation for bob... ");
 
-    await executeContract(terra, jv, mars, {
+    await terra.executeContract(jv, mars, {
       send: {
         contract: vesting,
         amount: String(BOB_VESTING_MARS_BALANCE),
@@ -274,7 +261,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
       "bob stakes Mars through vesting contract and receives the same amount of xMars... "
     );
 
-    const txResult = await executeContract(terra, bob, vesting, {
+    const txResult = await terra.executeContract(bob, vesting, {
       stake: {},
     });
 
@@ -288,7 +275,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     const height = await getBlockHeight(terra, txResult);
 
     // before the height, bob should have 0 voting power
-    const votingPowerBefore: string = await queryContract(terra, vesting, {
+    const votingPowerBefore: string = await terra.queryContract(vesting, {
       voting_power_at: {
         account: bob.key.accAddress,
         block: height - 1,
@@ -297,7 +284,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     strictEqual(votingPowerBefore, "0");
 
     // at or after the height, bob should have `BOB_VESTING_MARS_BALANCE` voting power
-    const votingPowerAfter: string = await queryContract(terra, vesting, {
+    const votingPowerAfter: string = await terra.queryContract(vesting, {
       voting_power_at: {
         account: bob.key.accAddress,
         block: height,
@@ -311,7 +298,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   {
     process.stdout.write("alice submits a governance proposal... ");
 
-    const submitProposalResult = await executeContract(terra, alice, mars, {
+    const submitProposalResult = await terra.executeContract(alice, mars, {
       send: {
         contract: council,
         amount: String(ALICE_MARS_BALANCE),
@@ -333,7 +320,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
     process.stdout.write("bob votes for the governance proposal... ");
 
-    const castVoteResult = await executeContract(terra, bob, council, {
+    const castVoteResult = await terra.executeContract(bob, council, {
       cast_vote: {
         proposal_id: proposalId,
         vote: "for",
@@ -355,7 +342,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   {
     process.stdout.write("bob withdraws xMars... ");
 
-    await executeContract(terra, bob, vesting, {
+    await terra.executeContract(bob, vesting, {
       withdraw: {},
     });
 
