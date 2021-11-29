@@ -116,7 +116,10 @@ pub mod msg {
 
         /// Burn xMars and initiate a cooldown period on which the underlying Mars
         /// will be claimable. Only one open claim per address is allowed.
-        Unstake {},
+        Unstake {
+            /// Address to claim the Mars tokens after cooldown. Set to sender is not specified
+            recipient: Option<String>,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

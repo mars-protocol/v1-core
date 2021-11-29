@@ -128,8 +128,8 @@ pub fn execute_receive_cw20(
             execute_stake(deps, env, info, cw20_msg.sender, recipient, cw20_msg.amount)
         }
 
-        ReceiveMsg::Unstake {} => {
-            execute_unstake(deps, env, info, cw20_msg.sender, cw20_msg.amount)
+        ReceiveMsg::Unstake { recipient } => {
+            execute_unstake(deps, env, info, cw20_msg.sender, recipient, cw20_msg.amount)
         }
     }
 }
@@ -242,6 +242,7 @@ pub fn execute_unstake(
     env: Env,
     info: MessageInfo,
     staker: String,
+    option_recipient: Option<String>,
     burn_amount: Uint128,
 ) -> Result<Response, ContractError> {
     // check if unstake is valid
@@ -252,12 +253,6 @@ pub fn execute_unstake(
     }
     if burn_amount.is_zero() {
         return Err(ContractError::UnstakeAmountZero {});
-    }
-
-    let staker_addr = deps.api.addr_validate(&staker)?;
-
-    if CLAIMS.may_load(deps.storage, &staker_addr)?.is_some() {
-        return Err(ContractError::UnstakeActiveClaim {});
     }
 
     let total_mars_in_staking_contract =
@@ -278,7 +273,13 @@ pub fn execute_unstake(
         amount: claimable_amount,
     };
 
-    CLAIMS.save(deps.storage, &staker_addr, &claim)?;
+    let recipient = option_recipient.unwrap_or_else(|| staker.clone());
+    let recipient_addr = deps.api.addr_validate(&recipient)?;
+
+    if CLAIMS.may_load(deps.storage, &recipient_addr)?.is_some() {
+        return Err(ContractError::UnstakeActiveClaim {});
+    }
+    CLAIMS.save(deps.storage, &recipient_addr, &claim)?;
 
     global_state.total_mars_for_claimers = global_state
         .total_mars_for_claimers
@@ -522,7 +523,7 @@ fn query_mars_per_xmars(deps: Deps, env: Env) -> StdResult<Decimal> {
     let total_mars_for_stakers =
         total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
 
-    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address)?;
 
     Ok(Decimal::from_ratio(
         total_mars_for_stakers,
@@ -876,7 +877,10 @@ mod tests {
         // unstake other token -> Unauthorized
         {
             let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-                msg: to_binary(&ReceiveMsg::Unstake {}).unwrap(),
+                msg: to_binary(&ReceiveMsg::Unstake {
+                    recipient: Some(String::from("recipient")),
+                })
+                .unwrap(),
                 sender: String::from("staker"),
                 amount: unstake_amount,
             });
@@ -888,7 +892,10 @@ mod tests {
         // valid unstake
         {
             let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-                msg: to_binary(&ReceiveMsg::Unstake {}).unwrap(),
+                msg: to_binary(&ReceiveMsg::Unstake {
+                    recipient: Some(String::from("recipient")),
+                })
+                .unwrap(),
                 sender: String::from("staker"),
                 amount: unstake_amount,
             });
@@ -923,7 +930,7 @@ mod tests {
             );
 
             let claim = CLAIMS
-                .load(&deps.storage, &Addr::unchecked("staker"))
+                .load(&deps.storage, &Addr::unchecked("recipient"))
                 .unwrap();
 
             assert_eq!(
@@ -942,10 +949,13 @@ mod tests {
             );
         }
 
-        // cannot unstake again (there's an open claim)
+        // cannot unstake again (recipient has an open claim)
         {
             let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
-                msg: to_binary(&ReceiveMsg::Unstake {}).unwrap(),
+                msg: to_binary(&ReceiveMsg::Unstake {
+                    recipient: Some(String::from("recipient")),
+                })
+                .unwrap(),
                 sender: String::from("staker"),
                 amount: unstake_amount,
             });
