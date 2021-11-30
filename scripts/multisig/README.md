@@ -47,6 +47,14 @@ terrad keys add <name> --recover
 # Then enter your 24 word mnemonic
 ```
 
+- Or use a private key on a Ledger hardware device
+
+```sh
+terrad keys add <name> \
+  --ledger \
+  --account <account> # The 0th account is used by Terra Station
+```
+
 - Check the key was added and export the public key (`pubkey` JSON object)
 
 ```sh
@@ -76,20 +84,30 @@ You will be sent:
 - An unsigned transaction file (`unsigned_tx.json`)
 - A signing command that will look similar to this:
 
-```sh
-# Instructions to sign a tx for multisig terra1...:
-# - 1. set `multisig` to the name of the multisig in terrad (check the name with `terrad keys list`):
-multisig=...
-
-# - 2. set `from` to your address that is a key to the multisig, or its name in terrad:
-from=terra1...
-
-# - 3. run the signing command:
-terrad tx sign unsigned_tx.json \
-  --multisig $multisig \
-  --from $from \
-  ...
-```
+> Instructions to sign a tx for multisig terra1...:
+>
+> - Set `from` to your address that is a key to the multisig:
+>
+>```
+>from=terra1...
+>```
+>
+>- Run the signing command:
+>
+>```
+>terrad tx sign unsigned_tx.json \
+>   --multisig terra18ztz4t3cjkkpyl5wplsmg2q5vpz5uv7smqkshx \
+>   --from $from \
+>   ...
+>```
+>
+>Optionally add the `--ledger` flag if your address's private key is on a
+>Ledger hardware device. The Terra app must be open on your Ledger when you run
+>the command.
+>
+>```
+>terrad tx sign ... --ledger
+>```
 
 You need to:
 - Open a terminal
@@ -101,7 +119,7 @@ cd path/to/directory
 
 - Inspect the messages to be executed in the unsigned transaction.
 
-:warning: **Do not blindly sign transactions** :warning:
+:warning: **Do not sign transactions blindly** :warning:
 
 ```sh
 # For messages executed on a contract:
@@ -111,26 +129,7 @@ jq ".body.messages[0].execute_msg" unsigned_tx.json
 jq ".body.messages[0].execute_msg.execute.msgs[0].wasm.execute.msg" unsigned_tx.json | tr -d '\"' | base64 -d
 ```
 
-- Set `multisig` to the name of the multisig in terrad (check the name with `terrad keys list`). If the name of your multisig is `mars_multisig`, then do:
-
-```sh
-multisig=mars_multisig
-```
-
-- Replace `terra1...` in the signing command with your address. If your address is `terra1youraddress`, then do:
-
-```sh
-from=terra1youraddress
-```
-
-- Run the signing command:
-
-```sh
-terrad tx sign unsigned_tx.json \
-  --multisig=$multisig \
-  --from=$from \
-  ...
-```
+- Follow the signing command instructions that were sent to you.
 
 Enter your login password if prompted to do so. You may be prompted multiple times.
 
