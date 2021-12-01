@@ -9,10 +9,7 @@ import { SignatureV2 } from "@terra-money/terra.js/dist/core/SignatureV2.js"
 import { MultiSignature } from "@terra-money/terra.js/dist/core/MultiSignature.js"
 import { readFileSync } from "fs"
 import 'dotenv/config.js'
-import {
-  broadcastTransaction,
-  transactionErrorFromResult
-} from "../helpers.js"
+import { transactionErrorFromResult } from "../helpers.js"
 
 // Required environment variables:
 // Terra network details:
@@ -73,7 +70,7 @@ const SIGNATURES = (process.env.SIGNATURES!).split(",");
   ])
 
   // Broadcast the tx
-  const result = await broadcastTransaction(terra, tx)
+  const result = await terra.tx.broadcast(tx)
   if (isTxError(result)) {
     throw transactionErrorFromResult(result)
   }
