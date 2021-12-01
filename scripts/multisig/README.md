@@ -82,32 +82,7 @@ You will be provided with a set of commands that adds the following as accounts 
 
 You will be sent:
 - An unsigned transaction file (`unsigned_tx.json`)
-- A signing command that will look similar to this:
-
-> Instructions to sign a tx for multisig terra1...:
->
-> - Set `from` to your address that is a key to the multisig:
->
->```
->from=terra1...
->```
->
->- Run the signing command:
->
->```
->terrad tx sign unsigned_tx.json \
->   --multisig terra18ztz4t3cjkkpyl5wplsmg2q5vpz5uv7smqkshx \
->   --from $from \
->   ...
->```
->
->Optionally add the `--ledger` flag if your address's private key is on a
->Ledger hardware device. The Terra app must be open on your Ledger when you run
->the command.
->
->```
->terrad tx sign ... --ledger
->```
+- Signing instructions
 
 You need to:
 - Open a terminal
@@ -129,7 +104,7 @@ jq ".body.messages[0].execute_msg" unsigned_tx.json
 jq ".body.messages[0].execute_msg.execute.msgs[0].wasm.execute.msg" unsigned_tx.json | tr -d '\"' | base64 -d
 ```
 
-- Follow the signing command instructions that were sent to you.
+- Follow the signing instructions that were sent to you.
 
 Enter your login password if prompted to do so. You may be prompted multiple times.
 

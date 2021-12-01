@@ -31,6 +31,8 @@ const MULTISIG_THRESHOLD = parseInt(process.env.MULTISIG_THRESHOLD!)
 // Transaction details:
 // The address that the tx will be sent to
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS!
+// A description of the transaction
+const TRANSACTION_DESCRIPTION = process.env.TRANSACTION_DESCRIPTION!
 // A JSON object of the operation to be executed on the contract
 const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
 
@@ -70,31 +72,37 @@ const EXECUTE_MSG = JSON.parse(process.env.EXECUTE_MSG!);
   )
 
   // The unsigned tx file should be distributed to the multisig key holders
-  const unsignedTx = "unsigned_tx.json"
+  const unsignedTxFilename = `${TRANSACTION_DESCRIPTION}_unsigned.json`
 
-  writeFileSync(unsignedTx, JSON.stringify(tx.toData()))
+  writeFileSync(unsignedTxFilename, JSON.stringify(tx.toData()))
 
   // Prints a command that should be run by the multisig key holders to generate signatures
   console.log(`
-Instructions to sign a tx for multisig ${multisigAddress}:
+Instructions to sign ${TRANSACTION_DESCRIPTION}:
 
-- Set \`from\` to your address that is a key to the multisig:
+- Set \`from\` to your address that is a key to the multisig ${multisigAddress}:
 
 \`\`\`
 from=terra1...
 \`\`\`
 
+- Set \`first_name\` to your first name:
+
+\`\`\`
+first_name=...
+\`\`\`
+
 - Run the signing command:
 
 \`\`\`
-terrad tx sign ${unsignedTx} \\
+terrad tx sign ${unsignedTxFilename} \\
   --multisig ${multisigAddress} \\
   --from \$from \\
   --chain-id ${terra.config.chainID} \\
   --offline \\
   --account-number ${accInfo.getAccountNumber()} \\
   --sequence ${accInfo.getSequenceNumber()} \\
-  --output-document \${from}_sig.json
+  --output-document ${TRANSACTION_DESCRIPTION}_signed_\${first_name}.json
 \`\`\`
 
 Optionally add the \`--ledger\` flag if your address's private key is on a
