@@ -187,11 +187,9 @@ pub fn execute_withdraw(
     snapshots.push((env.block.height, allocation.xmars_minted_amount));
     VOTING_POWER_SNAPSHOTS.save(deps.storage, &info.sender, &snapshots)?;
 
-    let response = Response::new();
-    let response = if xmars_unstake_amount.is_zero() {
-        response
-    } else {
-        response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+    let mut response = Response::new();
+    if !xmars_unstake_amount.is_zero() {
+        response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: xmars_token_address.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Send {
                 contract: staking_address.to_string(),
@@ -201,19 +199,17 @@ pub fn execute_withdraw(
                 })?,
             })?,
             funds: vec![],
-        }))
-    };
-    let response = if xmars_burn_amount.is_zero() {
-        response
-    } else {
-        response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+        }));
+    }
+    if !xmars_burn_amount.is_zero() {
+        response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: xmars_token_address.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Burn {
                 amount: xmars_burn_amount,
             })?,
             funds: vec![],
-        }))
-    };
+        }));
+    }
 
     Ok(response
         .add_attribute("action", "withdraw")
