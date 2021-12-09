@@ -129,7 +129,11 @@ pub mod msg {
         Config {},
         /// Get contract global state
         GlobalState {},
-        /// Get the ratio between xMars and Mars. Returns `Option<mars_core::math::decimal::Decimal>`
+        /// Compute the amount of xMars token to be minted by staking 1 unit of Mars token.
+        /// The ratio may be undefined, in which case we return `Ok(None)`
+        XMarsPerMars {},
+        /// Compute the amount of Mars token to be claimed by burning 1 unit of xMars token.
+        /// The ratio may be undefined, in which case we return `Ok(None)`
         MarsPerXMars {},
         /// Get open claim for given user. If claim exists, slash events are applied to the amount
         /// so actual amount of Mars received is given.

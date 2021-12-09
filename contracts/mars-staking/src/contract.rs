@@ -491,6 +491,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps)?),
         QueryMsg::GlobalState {} => to_binary(&query_global_state(deps)?),
+        QueryMsg::XMarsPerMars {} => to_binary(&query_xmars_per_mars(deps, env)?),
         QueryMsg::MarsPerXMars {} => to_binary(&query_mars_per_xmars(deps, env)?),
         QueryMsg::Claim { user_address } => to_binary(&query_claim(deps, env, user_address)?),
     }
@@ -504,6 +505,23 @@ fn query_config(deps: Deps) -> StdResult<Config> {
 fn query_global_state(deps: Deps) -> StdResult<GlobalState> {
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     Ok(global_state)
+}
+
+fn query_xmars_per_mars(deps: Deps, env: Env) -> StdResult<Option<Decimal>> {
+    let config = CONFIG.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
+
+    let (mars_token_address, xmars_token_address) = get_token_addresses(deps, &config)
+        .map_err(|_| StdError::generic_err("Failed to query token addresses"))?;
+
+    compute_xmars_per_mars(
+        deps,
+        &env,
+        &global_state,
+        mars_token_address,
+        xmars_token_address,
+        Uint128::zero(),
+    )
 }
 
 fn query_mars_per_xmars(deps: Deps, env: Env) -> StdResult<Option<Decimal>> {
@@ -644,6 +662,7 @@ fn check_for_mars_for_claimers_overflow(
         mars_token_address,
         env.contract.address.clone(),
     )?;
+
     if global_state.total_mars_for_claimers > total_mars_in_staking_contract {
         Err(ContractError::MarsForClaimersOverflow {})
     } else {

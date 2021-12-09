@@ -3,9 +3,8 @@ use std::str::FromStr;
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, Fraction,
-    MessageInfo, QueryRequest, Reply, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
-    WasmQuery,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo,
+    QueryRequest, Reply, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg, WasmQuery,
 };
 
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -161,11 +160,12 @@ pub fn execute_withdraw(
     // staked Mars amount
     // only the amount of xMars corresponding to the initially staked Mars will be sent to the user.
     // the rest will be burned, effectively return the earned reward to the staking pool
-    let mars_per_xmars: Decimal = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: staking_address.to_string(),
-        msg: to_binary(&mars_staking::QueryMsg::MarsPerXMars {})?,
-    }))?;
-    let xmars_per_mars = mars_per_xmars.inv().expect("xMars exchange ratio is zero");
+    let xmars_per_mars_option: Option<Decimal> =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: staking_address.to_string(),
+            msg: to_binary(&mars_staking::QueryMsg::XMarsPerMars {})?,
+        }))?;
+    let xmars_per_mars = xmars_per_mars_option.expect("xmars/mars ratio is undefined");
     let xmars_unstake_amount = mars_withdrawable_amount * xmars_per_mars;
     let xmars_burn_amount = xmars_withdrawable_amount - xmars_unstake_amount;
 
@@ -213,7 +213,6 @@ pub fn execute_withdraw(
         .add_attribute("xmars_unstaked", xmars_unstake_amount)
         .add_attribute("xmars_burned", xmars_burn_amount)
         .add_attribute("xmars_withdrawable", xmars_withdrawable_amount)
-        .add_attribute("mars_per_xmars", mars_per_xmars.to_string())
         .add_attribute("xmars_per_mars", xmars_per_mars.to_string()))
 }
 
