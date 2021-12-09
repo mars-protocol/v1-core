@@ -953,6 +953,7 @@ mod tests {
             block_time: Timestamp::from_seconds(unstake_time),
         });
         let initial_mars_for_claimers = Uint128::new(700_000);
+        let mut mars_for_claimers = initial_mars_for_claimers;
 
         deps.querier.set_cw20_balances(
             Addr::unchecked("mars_token"),
@@ -1041,11 +1042,11 @@ mod tests {
                 }
             );
 
+            mars_for_claimers += expected_claimable_mars;
+
             let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
-            assert_eq!(
-                global_state.total_mars_for_claimers,
-                initial_mars_for_claimers + expected_claimable_mars
-            );
+
+            assert_eq!(global_state.total_mars_for_claimers, mars_for_claimers);
         }
 
         // cannot unstake again (recipient has an open claim)
@@ -1060,9 +1061,48 @@ mod tests {
             });
             let info = mock_info("xmars_token", &[]);
 
-            let err = execute(deps.as_mut(), env, info, msg.clone()).unwrap_err();
+            let err = execute(deps.as_mut(), env.clone(), info, msg.clone()).unwrap_err();
 
             assert_eq!(err, ContractError::UnstakeActiveClaim {});
+        }
+
+        // unstake again, but use `None` as recipient
+        // recipient should default to staker, which does not have an open claim
+        {
+            let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
+                msg: to_binary(&ReceiveMsg::Unstake { recipient: None }).unwrap(),
+                sender: String::from("staker"),
+                amount: unstake_amount,
+            });
+            let info = mock_info("xmars_token", &[]);
+
+            let res = execute(deps.as_mut(), env, info, msg.clone()).unwrap();
+
+            assert_eq!(attr("recipient", String::from("staker")), res.attributes[2]);
+
+            let expected_claimable_mars = unstake_amount.multiply_ratio(
+                unstake_mars_in_contract - mars_for_claimers,
+                unstake_xmars_supply,
+            );
+
+            let claim = CLAIMS
+                .load(&deps.storage, &Addr::unchecked("staker"))
+                .unwrap();
+
+            assert_eq!(
+                claim,
+                Claim {
+                    created_at_block: unstake_height,
+                    cooldown_end_timestamp: unstake_time + TEST_COOLDOWN_DURATION,
+                    amount: expected_claimable_mars,
+                }
+            );
+
+            mars_for_claimers += expected_claimable_mars;
+
+            let global_state = GLOBAL_STATE.load(&deps.storage).unwrap();
+
+            assert_eq!(global_state.total_mars_for_claimers, mars_for_claimers);
         }
     }
 
