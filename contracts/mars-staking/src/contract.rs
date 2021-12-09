@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdError, StdResult, Storage, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Fraction, MessageInfo,
+    Order, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
@@ -186,6 +186,7 @@ pub fn execute_stake(
 ) -> Result<Response, ContractError> {
     // check stake is valid
     let config = CONFIG.load(deps.storage)?;
+    let global_state = GLOBAL_STATE.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(deps.as_ref(), &config)?;
 
     // Has to send Mars tokens
@@ -196,25 +197,19 @@ pub fn execute_stake(
         return Err(ContractError::StakeAmountZero {});
     }
 
-    let total_mars_in_staking_contract =
-        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
+    let xmars_per_mars_option = compute_xmars_per_mars(
+        deps.as_ref(),
+        &env,
+        &global_state,
+        mars_token_address,
+        xmars_token_address.clone(),
+        stake_amount,
+    )?;
 
-    // The math needs to be done with MARS amount before the stake transaction.
-    // The staked mars are already in the contract's balance as part of the send call.
-    // That amount needs to be deducted
-    let net_total_mars_in_staking_contract =
-        total_mars_in_staking_contract.checked_sub(stake_amount)?;
-
-    let global_state = GLOBAL_STATE.load(deps.storage)?;
-    let total_mars_for_stakers =
-        net_total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
-
-    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
-
-    let mint_amount = if total_mars_for_stakers.is_zero() || total_xmars_supply.is_zero() {
-        stake_amount
+    let mint_amount = if let Some(xmars_per_mars) = xmars_per_mars_option {
+        stake_amount * xmars_per_mars
     } else {
-        stake_amount.multiply_ratio(total_xmars_supply, total_mars_for_stakers)
+        stake_amount
     };
 
     let recipient = option_recipient.unwrap_or_else(|| staker.clone());
@@ -247,7 +242,9 @@ pub fn execute_unstake(
 ) -> Result<Response, ContractError> {
     // check if unstake is valid
     let config = CONFIG.load(deps.storage)?;
+    let mut global_state = GLOBAL_STATE.load(deps.storage)?;
     let (mars_token_address, xmars_token_address) = get_token_addresses(deps.as_ref(), &config)?;
+
     if info.sender != xmars_token_address {
         return Err(MarsError::Unauthorized {}.into());
     }
@@ -255,17 +252,19 @@ pub fn execute_unstake(
         return Err(ContractError::UnstakeAmountZero {});
     }
 
-    let total_mars_in_staking_contract =
-        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
+    let mars_per_xmars_option = compute_mars_per_xmars(
+        deps.as_ref(),
+        &env,
+        &global_state,
+        mars_token_address.clone(),
+        xmars_token_address.clone(),
+    )?;
 
-    let mut global_state = GLOBAL_STATE.load(deps.storage)?;
-
-    let total_mars_for_stakers =
-        total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
-
-    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address.clone())?;
-
-    let claimable_amount = burn_amount.multiply_ratio(total_mars_for_stakers, total_xmars_supply);
+    let claimable_amount = if let Some(mars_per_xmars) = mars_per_xmars_option {
+        burn_amount * mars_per_xmars
+    } else {
+        return Err(StdError::generic_err("mars/xmars ratio is undefined").into());
+    };
 
     let claim = Claim {
         created_at_block: env.block.height,
@@ -285,12 +284,7 @@ pub fn execute_unstake(
         .total_mars_for_claimers
         .checked_add(claimable_amount)?;
 
-    // Total Mars for claimers should never be higher than total Mars, if it is
-    // there's some logical inconsistency in the contract
-    if global_state.total_mars_for_claimers > total_mars_in_staking_contract {
-        return Err(ContractError::MarsForClaimersOverflow {});
-    }
-
+    check_for_mars_for_claimers_overflow(deps.as_ref(), &env, &global_state, mars_token_address)?;
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
     let res = Response::new()
@@ -512,24 +506,20 @@ fn query_global_state(deps: Deps) -> StdResult<GlobalState> {
     Ok(global_state)
 }
 
-fn query_mars_per_xmars(deps: Deps, env: Env) -> StdResult<Decimal> {
+fn query_mars_per_xmars(deps: Deps, env: Env) -> StdResult<Option<Decimal>> {
     let config = CONFIG.load(deps.storage)?;
     let global_state = GLOBAL_STATE.load(deps.storage)?;
 
     let (mars_token_address, xmars_token_address) = get_token_addresses(deps, &config)
         .map_err(|_| StdError::generic_err("Failed to query token addresses"))?;
 
-    let total_mars_in_staking_contract =
-        cw20_get_balance(&deps.querier, mars_token_address, env.contract.address)?;
-    let total_mars_for_stakers =
-        total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
-
-    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address)?;
-
-    Ok(Decimal::from_ratio(
-        total_mars_for_stakers,
-        total_xmars_supply,
-    ))
+    compute_mars_per_xmars(
+        deps,
+        &env,
+        &global_state,
+        mars_token_address,
+        xmars_token_address,
+    )
 }
 
 fn query_claim(deps: Deps, _env: Env, user_address_unchecked: String) -> StdResult<ClaimResponse> {
@@ -571,6 +561,94 @@ fn apply_slash_events_to_claim(storage: &dyn Storage, claim: &mut Claim) -> StdR
         claim.amount = claim.amount * (Decimal::one() - slash_event.slash_percentage);
     }
     Ok(())
+}
+
+/// Compute the ratio between xMars and Mars token in terms of how many xMars token will be minted
+/// by staking 1 Mars token.
+fn compute_xmars_per_mars(
+    deps: Deps,
+    env: &Env,
+    global_state: &GlobalState,
+    mars_token_address: Addr,
+    xmars_token_address: Addr,
+    stake_amount: Uint128,
+) -> StdResult<Option<Decimal>> {
+    let total_mars_in_staking_contract = cw20_get_balance(
+        &deps.querier,
+        mars_token_address,
+        env.contract.address.clone(),
+    )?;
+
+    // The math needs to be done with MARS amount before the stake transaction.
+    // The staked mars are already in the contract's balance as part of the send call.
+    // That amount needs to be deducted
+    let net_total_mars_in_staking_contract =
+        total_mars_in_staking_contract.checked_sub(stake_amount)?;
+
+    let total_mars_for_stakers =
+        net_total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
+
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address)?;
+
+    // Mars/xMars ratio is undefined if either `total_mars_for_stakers` or `total_xmars_supply` is zero
+    // in this case, we return None
+    if total_mars_for_stakers.is_zero() || total_xmars_supply.is_zero() {
+        Ok(None)
+    } else {
+        Ok(Some(Decimal::from_ratio(
+            total_xmars_supply,
+            total_mars_for_stakers,
+        )))
+    }
+}
+
+/// Compute the ratio between Mars and xMars in terms of how many Mars tokens can be claimed by
+/// burning 1 xMars token.
+///
+/// This is calculated by simply taking the inversion of `xmars_per_mars`.
+fn compute_mars_per_xmars(
+    deps: Deps,
+    env: &Env,
+    global_state: &GlobalState,
+    mars_token_address: Addr,
+    xmars_token_address: Addr,
+) -> StdResult<Option<Decimal>> {
+    let mars_per_xmars_option = compute_xmars_per_mars(
+        deps,
+        env,
+        global_state,
+        mars_token_address,
+        xmars_token_address,
+        Uint128::zero(),
+    )?;
+
+    if let Some(mars_per_xmars) = mars_per_xmars_option {
+        Ok(mars_per_xmars.inv())
+    } else {
+        Ok(None)
+    }
+}
+
+/// Assert that `mars_for_claimers` is lower than the total amount of Mars tokens held by contract.
+///
+/// Total Mars for claimers should never be higher than total Mars, if it is there's some logical
+/// inconsistency in the contract.
+fn check_for_mars_for_claimers_overflow(
+    deps: Deps,
+    env: &Env,
+    global_state: &GlobalState,
+    mars_token_address: Addr,
+) -> Result<(), ContractError> {
+    let total_mars_in_staking_contract = cw20_get_balance(
+        &deps.querier,
+        mars_token_address,
+        env.contract.address.clone(),
+    )?;
+    if global_state.total_mars_for_claimers > total_mars_in_staking_contract {
+        Err(ContractError::MarsForClaimersOverflow {})
+    } else {
+        Ok(())
+    }
 }
 
 // TESTS
