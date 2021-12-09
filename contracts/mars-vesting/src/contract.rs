@@ -142,7 +142,7 @@ pub fn execute_withdraw(
     let staking_address = addresses_query.pop().unwrap();
 
     // withdrawable amount is the amount unlocked minus the amount already withdrawn
-    let mars_unlocked_amount = _compute_unlocked_amount(
+    let mars_unlocked_amount = compute_unlocked_amount(
         &config,
         env.block.time.seconds(),
         allocation.mars_allocated_amount,
@@ -216,7 +216,7 @@ pub fn execute_withdraw(
         .add_attribute("xmars_per_mars", xmars_per_mars.to_string()))
 }
 
-fn _compute_unlocked_amount(config: &Config<Addr>, timestamp: u64, amount: Uint128) -> Uint128 {
+fn compute_unlocked_amount(config: &Config<Addr>, timestamp: u64, amount: Uint128) -> Uint128 {
     // Before the end of cliff period, no token will be unlocked
     if timestamp < config.unlock_start_time + config.unlock_cliff {
         Uint128::zero()
