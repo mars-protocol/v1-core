@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{OverflowError, StdError};
 use thiserror::Error;
 
 use mars_core::error::MarsError;
@@ -10,6 +10,9 @@ pub enum ContractError {
 
     #[error("{0}")]
     Mars(#[from] MarsError),
+
+    #[error("{0}")]
+    Overflow(#[from] OverflowError),
 
     #[error("Only Mars token can be deposited")]
     InvalidTokenDeposit {},

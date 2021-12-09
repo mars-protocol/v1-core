@@ -1,3 +1,4 @@
+use std::cmp;
 use std::str::FromStr;
 
 #[cfg(not(feature = "library"))]
@@ -156,18 +157,25 @@ pub fn execute_withdraw(
         allocation.mars_staked_amount,
     );
 
-    // since xMars accrues staking reward, the withdrawable xMars now worths more than the initially
-    // staked Mars amount
-    // only the amount of xMars corresponding to the initially staked Mars will be sent to the user.
-    // the rest will be burned, effectively return the earned reward to the staking pool
+    // query the xmars-mars ratio
     let xmars_per_mars_option: Option<Decimal> =
         deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: staking_address.to_string(),
             msg: to_binary(&mars_staking::QueryMsg::XMarsPerMars {})?,
         }))?;
     let xmars_per_mars = xmars_per_mars_option.expect("xmars/mars ratio is undefined");
-    let xmars_unstake_amount = mars_withdrawable_amount * xmars_per_mars;
-    let xmars_burn_amount = xmars_withdrawable_amount - xmars_unstake_amount;
+
+    // if 1 xMars > 1 Mars (in normal circumstances, if staking rewards are accrued), the staker
+    // only gets the initially staked Mars. the rest of xMars are burned, effectively returning the
+    // staking reward back to others
+    //
+    // if 1 xMars < 1 Mars (in case there is a shortfall event), we unstall all and burn nothing.
+    // in this case, the staker takes the loss
+    let xmars_unstake_amount = cmp::min(
+        mars_withdrawable_amount * xmars_per_mars,
+        xmars_withdrawable_amount,
+    );
+    let xmars_burn_amount = xmars_withdrawable_amount.checked_sub(xmars_unstake_amount)?;
 
     // update allocation
     allocation.mars_withdrawn_amount += mars_withdrawable_amount;
@@ -585,7 +593,7 @@ mod tests {
         // Mars withdrawable amount = 33333333 - 0 = 33333333
         //
         // xMars withdrawable amount = 90909090 * 33333333 / 100000000 = 30303029
-        // xMars release amount = 33333333 / 1.2 = 27777777
+        // xMars unstake amount = 33333333 / 1.2 = 27777777
         // xMars burn amount = 30303029 - 27777777 = 2525252
         deps.querier
             .set_staking_mars_per_xmars(Decimal::from_ratio(12u128, 10u128));
@@ -647,7 +655,7 @@ mod tests {
         // Mars withdrawable amount = 100000000 - 33333333 = 66666667
         //
         // xMars withdrawable amount = 60606061 * 66666667 / 66666667 = 60606061
-        // xMars release amount = 66666667 / 1.3 = 51282051
+        // xMars unstake amount = 66666667 / 1.3 = 51282051
         // xMars burn amount = 60606061 - 51282051 = 9324010
         deps.querier
             .set_staking_mars_per_xmars(Decimal::from_ratio(13u128, 10u128));
@@ -694,6 +702,92 @@ mod tests {
             mars_withdrawn_amount: Uint128::new(100000000),
             mars_staked_amount: Uint128::new(0),
             xmars_minted_amount: Uint128::new(0),
+        };
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn withdrawing_at_loss() {
+        // deploy contract
+        let mut deps = th_setup();
+
+        // create an allocatin for alice
+        //------------------------------
+        // 2023-01-01
+        // timestamp: 1640995200
+        // block number: 10000
+        // 1 xMars = 1.1 Mars
+        TEMP_DATA
+            .save(deps.as_mut().storage, &Addr::unchecked("alice"))
+            .unwrap();
+
+        let event = Event::new("from_contract")
+            .add_attribute("action", "stake")
+            .add_attribute("mars_staked", "100000000")
+            .add_attribute("xmars_minted", "90909090");
+        let _reply = Reply {
+            id: 0,
+            result: ContractResult::Ok(SubMsgExecutionResponse {
+                events: vec![event],
+                data: None,
+            }),
+        };
+        let env = mock_env(MockEnvParams {
+            block_height: 10000,
+            block_time: Timestamp::from_seconds(1640995200),
+        });
+        reply(deps.as_mut(), env, _reply).unwrap();
+
+        //------------------------------
+        // 2023-01-01
+        // timestamp: 1672531200
+        // 31536000 seconds since unlock started
+        //
+        // assume a shortfall event occurred, and xMars is now worth less than 1 Mars
+        // Mars per xMars = 0.8
+        //
+        // Mars unlocked amount = 100000000 * 31536000 / 94608000 = 33333333
+        // Mars withdrawn amount = 0
+        // Mars withdrawable amount = 33333333 - 0 = 33333333
+        //
+        // xMars withdrawable amount = 90909090 * 33333333 / 100000000 = 30303029
+        // xMars unstake amount = min(33333333 / 0.8, 30303029) = 30303029
+        // xMars burn amount = 30303029 - 30303029 = 0
+        deps.querier
+            .set_staking_mars_per_xmars(Decimal::from_ratio(8u128, 10u128));
+
+        let env = mock_env_at_block_time(1672531200);
+        let msg = ExecuteMsg::Withdraw {};
+        let res = execute(deps.as_mut(), env.clone(), mock_info("alice"), msg).unwrap();
+        assert_eq!(res.messages.len(), 1);
+
+        let expected = CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: "xmars_token".to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: "staking".to_string(),
+                amount: Uint128::new(30303029),
+                msg: to_binary(&mars_staking::ReceiveMsg::Unstake {
+                    recipient: Some("alice".to_string()),
+                })
+                .unwrap(),
+            })
+            .unwrap(),
+            funds: vec![],
+        });
+        assert_eq!(res.messages[0].msg, expected);
+
+        // Mars withdrawn amount = 0 + 33333333 = 33333333
+        // Mars staked amount = 100000000 - 33333333 = 66666667
+        // xMars minted amount = 90909090 - 30303029 = 60606061
+        let msg = QueryMsg::Allocation {
+            account: "alice".to_string(),
+        };
+        let res: Allocation = query_helper(deps.as_ref(), env, msg);
+        let expected = Allocation {
+            mars_allocated_amount: Uint128::new(100000000),
+            mars_withdrawn_amount: Uint128::new(33333333),
+            mars_staked_amount: Uint128::new(66666667),
+            xmars_minted_amount: Uint128::new(60606061),
         };
         assert_eq!(res, expected);
     }
