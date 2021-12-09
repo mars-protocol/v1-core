@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Fraction, MessageInfo,
-    Order, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
+    from_binary, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
+    Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw_storage_plus::{Bound, U64Key};
@@ -631,19 +631,26 @@ fn compute_mars_per_xmars(
     mars_token_address: Addr,
     xmars_token_address: Addr,
 ) -> StdResult<Option<Decimal>> {
-    let mars_per_xmars_option = compute_xmars_per_mars(
-        deps,
-        env,
-        global_state,
+    let net_total_mars_in_staking_contract = cw20_get_balance(
+        &deps.querier,
         mars_token_address,
-        xmars_token_address,
-        Uint128::zero(),
+        env.contract.address.clone(),
     )?;
 
-    if let Some(mars_per_xmars) = mars_per_xmars_option {
-        Ok(mars_per_xmars.inv())
-    } else {
+    let total_mars_for_stakers =
+        net_total_mars_in_staking_contract.checked_sub(global_state.total_mars_for_claimers)?;
+
+    let total_xmars_supply = cw20_get_total_supply(&deps.querier, xmars_token_address)?;
+
+    // Mars/xMars ratio is undefined if either `total_mars_for_stakers` or `total_xmars_supply` is zero
+    // in this case, we return None
+    if total_mars_for_stakers.is_zero() || total_xmars_supply.is_zero() {
         Ok(None)
+    } else {
+        Ok(Some(Decimal::from_ratio(
+            total_mars_for_stakers,
+            total_xmars_supply,
+        )))
     }
 }
 
