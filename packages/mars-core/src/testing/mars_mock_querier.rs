@@ -1,7 +1,8 @@
 use cosmwasm_std::{
     from_binary, from_slice,
     testing::{MockQuerier, MOCK_CONTRACT_ADDR},
-    Addr, Coin, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128, WasmQuery,
+    Addr, Coin, Fraction, Querier, QuerierResult, QueryRequest, StdResult, SystemError, Uint128,
+    WasmQuery,
 };
 use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
@@ -137,8 +138,14 @@ impl MarsMockQuerier {
         self.oracle_querier.prices.insert(asset_reference, price);
     }
 
+    pub fn set_staking_xmars_per_mars(&mut self, xmars_per_mars: Decimal) {
+        self.staking_querier.xmars_per_mars = xmars_per_mars;
+        self.staking_querier.mars_per_xmars = xmars_per_mars.inv().unwrap();
+    }
+
     pub fn set_staking_mars_per_xmars(&mut self, mars_per_xmars: Decimal) {
         self.staking_querier.mars_per_xmars = mars_per_xmars;
+        self.staking_querier.xmars_per_mars = mars_per_xmars.inv().unwrap();
     }
 
     pub fn set_xmars_address(&mut self, address: Addr) {

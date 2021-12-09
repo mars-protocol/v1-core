@@ -4,12 +4,14 @@ use crate::math::decimal::Decimal;
 use crate::staking::msg::QueryMsg;
 
 pub struct StakingQuerier {
+    pub xmars_per_mars: Decimal,
     pub mars_per_xmars: Decimal,
 }
 
 impl Default for StakingQuerier {
     fn default() -> Self {
         StakingQuerier {
+            xmars_per_mars: Decimal::one(),
             mars_per_xmars: Decimal::one(),
         }
     }
@@ -26,6 +28,7 @@ impl StakingQuerier {
         }
 
         let ret: ContractResult<Binary> = match query {
+            QueryMsg::XMarsPerMars {} => to_binary(&self.xmars_per_mars).into(),
             QueryMsg::MarsPerXMars {} => to_binary(&self.mars_per_xmars).into(),
             _ => Err("[mock]: Unsupported staking query").into(),
         };
