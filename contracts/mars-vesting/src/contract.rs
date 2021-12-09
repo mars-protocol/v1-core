@@ -334,34 +334,27 @@ fn _event_contains_attribute(event: &Event, key: &str, value: &str) -> bool {
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
-        QueryMsg::Allocation { user_address } => {
-            to_binary(&query_allocation(deps, env, user_address)?)
-        }
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Allocation { user_address } => to_binary(&query_allocation(deps, user_address)?),
         QueryMsg::VotingPowerAt {
             user_address,
             block,
-        } => to_binary(&query_voting_power_at(deps, env, user_address, block)?),
+        } => to_binary(&query_voting_power_at(deps, user_address, block)?),
     }
 }
 
-pub fn query_config(deps: Deps, _env: Env) -> StdResult<Config<String>> {
+pub fn query_config(deps: Deps) -> StdResult<Config<String>> {
     Ok(CONFIG.load(deps.storage)?.into())
 }
 
-pub fn query_allocation(deps: Deps, _env: Env, user_address: String) -> StdResult<Allocation> {
+pub fn query_allocation(deps: Deps, user_address: String) -> StdResult<Allocation> {
     let address = deps.api.addr_validate(&user_address)?;
     ALLOCATIONS.load(deps.storage, &address)
 }
 
-pub fn query_voting_power_at(
-    deps: Deps,
-    _env: Env,
-    user_address: String,
-    block: u64,
-) -> StdResult<Uint128> {
+pub fn query_voting_power_at(deps: Deps, user_address: String, block: u64) -> StdResult<Uint128> {
     let address = deps.api.addr_validate(&user_address)?;
     match VOTING_POWER_SNAPSHOTS.may_load(deps.storage, &address) {
         // An allocation exists for the address and is loaded successfully
