@@ -17,8 +17,8 @@ pub enum ContractError {
     #[error("Only Mars token can be deposited")]
     InvalidTokenDeposit {},
 
-    #[error("Data already exists for account: {account}")]
-    DataAlreadyExists { account: String },
+    #[error("Data already exists for user: {user_address}")]
+    DataAlreadyExists { user_address: String },
 
     #[error("Cannot find attribute: {key}")]
     ReplyParseFailed { key: String },

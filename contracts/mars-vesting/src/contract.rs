@@ -56,12 +56,12 @@ fn receive_cw20(
 ) -> Result<Response, ContractError> {
     let api = deps.api;
     match from_binary(&cw20_msg.msg)? {
-        ReceiveMsg::CreateAllocation { account } => execute_create_allocation(
+        ReceiveMsg::CreateAllocation { user_address } => execute_create_allocation(
             deps,
             env,
             info.sender,
             api.addr_validate(&cw20_msg.sender)?,
-            api.addr_validate(&account)?,
+            api.addr_validate(&user_address)?,
             cw20_msg.amount,
         ),
     }
@@ -72,7 +72,7 @@ pub fn execute_create_allocation(
     env: Env,
     token: Addr,
     creator: Addr,
-    account: Addr,
+    user_address: Addr,
     amount: Uint128,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
@@ -101,7 +101,7 @@ pub fn execute_create_allocation(
     }
 
     // save the staker's address as temporary data so that it can be accessed when handling reply
-    TEMP_DATA.save(deps.storage, &account)?;
+    TEMP_DATA.save(deps.storage, &user_address)?;
 
     // create submsg to stake deposited Mars tokens
     // reply will be handled by `after_staking`
@@ -121,7 +121,7 @@ pub fn execute_create_allocation(
             0,
         ))
         .add_attribute("action", "create_allocation")
-        .add_attribute("account", account)
+        .add_attribute("user", user_address)
         .add_attribute("mars_received", amount))
 }
 
@@ -217,7 +217,7 @@ pub fn execute_withdraw(
 
     Ok(response
         .add_attribute("action", "withdraw")
-        .add_attribute("account", &info.sender)
+        .add_attribute("user", &info.sender)
         .add_attribute("xmars_unstaked", xmars_unstake_amount)
         .add_attribute("xmars_burned", xmars_burn_amount)
         .add_attribute("xmars_withdrawable", xmars_withdrawable_amount)
@@ -299,7 +299,7 @@ pub fn after_staking(
         }
         Some(_) => {
             return Err(ContractError::DataAlreadyExists {
-                account: staker.to_string(),
+                user_address: staker.to_string(),
             })
         }
     }
@@ -312,7 +312,7 @@ pub fn after_staking(
         }
         Some(_) => {
             return Err(ContractError::DataAlreadyExists {
-                account: staker.to_string(),
+                user_address: staker.to_string(),
             })
         }
     }
@@ -337,10 +337,13 @@ fn _event_contains_attribute(event: &Event, key: &str, value: &str) -> bool {
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
-        QueryMsg::Allocation { account } => to_binary(&query_allocation(deps, env, account)?),
-        QueryMsg::VotingPowerAt { account, block } => {
-            to_binary(&query_voting_power_at(deps, env, account, block)?)
+        QueryMsg::Allocation { user_address } => {
+            to_binary(&query_allocation(deps, env, user_address)?)
         }
+        QueryMsg::VotingPowerAt {
+            user_address,
+            block,
+        } => to_binary(&query_voting_power_at(deps, env, user_address, block)?),
     }
 }
 
@@ -348,23 +351,24 @@ pub fn query_config(deps: Deps, _env: Env) -> StdResult<Config<String>> {
     Ok(CONFIG.load(deps.storage)?.into())
 }
 
-pub fn query_allocation(deps: Deps, _env: Env, account: String) -> StdResult<Allocation> {
-    let account_addr = deps.api.addr_validate(&account)?;
-    ALLOCATIONS.load(deps.storage, &account_addr)
+pub fn query_allocation(deps: Deps, _env: Env, user_address: String) -> StdResult<Allocation> {
+    let address = deps.api.addr_validate(&user_address)?;
+    ALLOCATIONS.load(deps.storage, &address)
 }
 
 pub fn query_voting_power_at(
     deps: Deps,
     _env: Env,
-    account: String,
+    user_address: String,
     block: u64,
 ) -> StdResult<Uint128> {
-    match VOTING_POWER_SNAPSHOTS.may_load(deps.storage, &deps.api.addr_validate(&account)?) {
-        // An allocation exists for the account and is loaded successfully
+    let address = deps.api.addr_validate(&user_address)?;
+    match VOTING_POWER_SNAPSHOTS.may_load(deps.storage, &address) {
+        // An allocation exists for the address and is loaded successfully
         Ok(Some(snapshots)) => Ok(_binary_search(&snapshots, block)),
-        // No allocation exists for this account, return zero
+        // No allocation exists for this address, return zero
         Ok(None) => Ok(Uint128::zero()),
-        // An allocation exists for this account, but failed to parse. Throw error in this case
+        // An allocation exists for this address, but failed to parse. Throw error in this case
         Err(err) => Err(err),
     }
 }
@@ -460,7 +464,7 @@ mod tests {
             amount: Uint128::new(100000000), // 100 Mars
             sender: "protocol_admin".to_string(),
             msg: to_binary(&ReceiveMsg::CreateAllocation {
-                account: "alice".to_string(),
+                user_address: "alice".to_string(),
             })
             .unwrap(),
         });
@@ -513,7 +517,7 @@ mod tests {
 
         // allocation data for alice should have been created
         let msg = QueryMsg::Allocation {
-            account: "alice".to_string(),
+            user_address: "alice".to_string(),
         };
         let res: Allocation = query_helper(deps.as_ref(), env.clone(), msg);
         let expected = Allocation {
@@ -531,7 +535,7 @@ mod tests {
 
         let res = reply(deps.as_mut(), env.clone(), _reply);
         let expected = Err(ContractError::DataAlreadyExists {
-            account: "alice".to_string(),
+            user_address: "alice".to_string(),
         });
         assert_eq!(res, expected);
 
@@ -540,7 +544,7 @@ mod tests {
             amount: Uint128::new(100000000), // 100 Mars
             sender: "not_protocol_admin".to_string(),
             msg: to_binary(&ReceiveMsg::CreateAllocation {
-                account: "bob".to_string(),
+                user_address: "bob".to_string(),
             })
             .unwrap(),
         });
@@ -632,7 +636,7 @@ mod tests {
         // Mars staked amount = 100000000 - 33333333 = 66666667
         // xMars minted amount = 90909090 - 30303029 = 60606061
         let msg = QueryMsg::Allocation {
-            account: "alice".to_string(),
+            user_address: "alice".to_string(),
         };
         let res: Allocation = query_helper(deps.as_ref(), env, msg);
         let expected = Allocation {
@@ -694,7 +698,7 @@ mod tests {
         // Mars staked amount = 0
         // xMars minted amount = 0
         let msg = QueryMsg::Allocation {
-            account: "alice".to_string(),
+            user_address: "alice".to_string(),
         };
         let res: Allocation = query_helper(deps.as_ref(), env, msg);
         let expected = Allocation {
@@ -780,7 +784,7 @@ mod tests {
         // Mars staked amount = 100000000 - 33333333 = 66666667
         // xMars minted amount = 90909090 - 30303029 = 60606061
         let msg = QueryMsg::Allocation {
-            account: "alice".to_string(),
+            user_address: "alice".to_string(),
         };
         let res: Allocation = query_helper(deps.as_ref(), env, msg);
         let expected = Allocation {
@@ -889,7 +893,7 @@ mod tests {
             deps,
             mock_env(MockEnvParams::default()),
             QueryMsg::VotingPowerAt {
-                account: "alice".to_string(),
+                user_address: "alice".to_string(),
                 block: height,
             },
         )

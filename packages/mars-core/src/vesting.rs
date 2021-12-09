@@ -76,7 +76,7 @@ pub mod msg {
     #[serde(rename_all = "snake_case")]
     pub enum ReceiveMsg {
         /// Create a new allocation for a recipeint
-        CreateAllocation { account: String },
+        CreateAllocation { user_address: String },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -85,8 +85,8 @@ pub mod msg {
         /// Config of this contract. Returns `Config<String>`
         Config {},
         /// Status of an allocation. Returns `Allocation`
-        Allocation { account: String },
+        Allocation { user_address: String },
         /// Total amount of xMARS owned by a recipient at a certain height
-        VotingPowerAt { account: String, block: u64 },
+        VotingPowerAt { user_address: String, block: u64 },
     }
 }
