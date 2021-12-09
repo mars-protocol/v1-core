@@ -22,4 +22,7 @@ pub enum ContractError {
 
     #[error("Cannot find attribute: {key}")]
     ReplyParseFailed { key: String },
+
+    #[error("Mars/xMars ratio is undefined")]
+    XMarsRatioUndefined {},
 }

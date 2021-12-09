@@ -163,7 +163,7 @@ pub fn execute_withdraw(
             contract_addr: staking_address.to_string(),
             msg: to_binary(&mars_staking::QueryMsg::XMarsPerMars {})?,
         }))?;
-    let xmars_per_mars = xmars_per_mars_option.expect("xmars/mars ratio is undefined");
+    let xmars_per_mars = xmars_per_mars_option.ok_or(ContractError::XMarsRatioUndefined {})?;
 
     // if 1 xMars > 1 Mars (in normal circumstances, if staking rewards are accrued), the staker
     // only gets the initially staked Mars. the rest of xMars are burned, effectively returning the
