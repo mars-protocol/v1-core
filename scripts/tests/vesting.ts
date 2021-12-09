@@ -237,7 +237,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   }
 
   {
-    process.stdout.write("JV creates an allocation for bob... ");
+    process.stdout.write("admin creates an allocation for bob... ");
 
     // `BOB_VESTING_MARS_BALANCE` of Mars tokens are staked; same amount of xMars should be minted
     const txResult = await executeContract(terra, admin, mars, {
