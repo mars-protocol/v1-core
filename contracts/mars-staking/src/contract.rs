@@ -303,8 +303,9 @@ pub fn execute_unstake(
         }))
         .add_attribute("action", "unstake")
         .add_attribute("staker", staker)
-        .add_attribute("mars_claimable", claimable_amount)
-        .add_attribute("xmars_burned", burn_amount);
+        .add_attribute("recipient", recipient)
+        .add_attribute("xmars_burned", burn_amount)
+        .add_attribute("mars_claimable", claimable_amount);
     Ok(res)
 }
 
@@ -923,8 +924,9 @@ mod tests {
                 vec![
                     attr("action", "unstake"),
                     attr("staker", String::from("staker")),
-                    attr("mars_claimable", expected_claimable_mars),
+                    attr("recipient", String::from("recipient")),
                     attr("xmars_burned", unstake_amount),
+                    attr("mars_claimable", expected_claimable_mars),
                 ],
                 res.attributes
             );
