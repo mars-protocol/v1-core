@@ -246,7 +246,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         amount: String(BOB_VESTING_MARS_BALANCE),
         msg: toEncodedBinary({
           create_allocation: {
-            account: bob.key.accAddress
+            user_address: bob.key.accAddress
           },
         }),
       },
@@ -258,7 +258,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     // before the height, bob should have 0 locked voting power
     const votingPowerBefore: string = await queryContract(terra, vesting, {
       voting_power_at: {
-        account: bob.key.accAddress,
+        user_address: bob.key.accAddress,
         block: height - 1,
       },
     });
@@ -267,7 +267,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     // at or after the height, bob should have `BOB_VESTING_MARS_BALANCE` voting power
     const votingPowerAfter: string = await queryContract(terra, vesting, {
       voting_power_at: {
-        account: bob.key.accAddress,
+        user_address: bob.key.accAddress,
         block: height,
       },
     });
