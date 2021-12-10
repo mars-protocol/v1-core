@@ -74,6 +74,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     deployer,
     join(ASTROPORT_ARTIFACTS_PATH, "astroport_factory.wasm"),
     {
+      owner: deployer.key.accAddress,
       token_code_id: tokenCodeID,
       generator_address: astroportGenerator,
       pair_configs: [
