@@ -10,7 +10,7 @@ import {
   strict as assert
 } from "assert"
 import {
-  executeContract,
+  executeContract, Logger,
   queryContract,
   sleep,
   toEncodedBinary
@@ -41,6 +41,7 @@ export async function mintCw20(
   contract: string,
   recipient: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, contract,
     {
@@ -48,7 +49,9 @@ export async function mintCw20(
         recipient,
         amount: String(amount)
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -58,6 +61,7 @@ export async function transferCw20(
   contract: string,
   recipient: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, contract,
     {
@@ -65,7 +69,9 @@ export async function transferCw20(
         amount: String(amount),
         recipient
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -115,6 +121,7 @@ export async function setAssetOraclePriceSource(
   oracle: string,
   asset: Asset,
   price: number,
+  logger?: Logger
 ) {
   await executeContract(terra, wallet, oracle,
     {
@@ -122,7 +129,9 @@ export async function setAssetOraclePriceSource(
         asset: asset,
         price_source: { fixed: { price: String(price) } }
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -141,10 +150,12 @@ export async function depositNative(
   redBank: string,
   denom: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, redBank,
     { deposit_native: { denom } },
-    `${amount}${denom}`
+    `${amount}${denom}`,
+    logger
   )
 }
 
@@ -154,6 +165,7 @@ export async function depositCw20(
   redBank: string,
   contract: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, contract,
     {
@@ -162,7 +174,9 @@ export async function depositCw20(
         amount: String(amount),
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -173,6 +187,7 @@ export async function borrowNative(
   redBank: string,
   denom: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, redBank,
     {
@@ -180,7 +195,9 @@ export async function borrowNative(
         asset: { native: { denom: denom } },
         amount: String(amount)
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -190,6 +207,7 @@ export async function borrowCw20(
   redBank: string,
   contract: string,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, redBank,
     {
@@ -197,7 +215,9 @@ export async function borrowCw20(
         asset: { cw20: { contract_addr: contract } },
         amount: String(amount)
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 
@@ -207,6 +227,7 @@ export async function withdraw(
   redBank: string,
   asset: Asset,
   amount: number,
+  logger?: Logger
 ) {
   return await executeContract(terra, wallet, redBank,
     {
@@ -214,7 +235,9 @@ export async function withdraw(
         asset,
         amount: String(amount),
       }
-    }
+    },
+    undefined,
+    logger
   )
 }
 

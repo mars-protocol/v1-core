@@ -7,7 +7,7 @@ import {
 import { strictEqual } from "assert"
 import {
   deployContract,
-  executeContract,
+  executeContract, Logger,
   queryContract,
   setGasAdjustment,
   setTimeoutDuration,
@@ -46,6 +46,8 @@ async function getDebt(
   // gas is not correctly estimated in the repay_native method on the red bank,
   // so any estimates need to be adjusted upwards
   setGasAdjustment(2)
+
+  const logger = new Logger()
 
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
@@ -98,7 +100,9 @@ async function getDebt(
           protocol_admin_address: deployer.key.accAddress,
         }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
   console.log("init assets")
@@ -131,10 +135,12 @@ async function getDebt(
           borrow_enabled: true
         }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25)
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25, logger)
 
   // uusd
   await executeContract(terra, deployer, redBank,
@@ -164,24 +170,26 @@ async function getDebt(
           borrow_enabled: true
         }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
-  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1)
+  await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1, logger)
 
   // TESTS
 
   console.log("provide usd")
 
-  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL)
+  await depositNative(terra, provider, redBank, "uusd", USD_COLLATERAL, logger)
 
   console.log("provide luna")
 
-  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL)
+  await depositNative(terra, borrower, redBank, "uluna", LUNA_COLLATERAL, logger)
 
   console.log("borrow")
 
-  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW)
+  await borrowNative(terra, borrower, redBank, "uusd", USD_BORROW, logger)
 
   console.log("repay")
 
@@ -192,7 +200,8 @@ async function getDebt(
   while (debt > 0) {
     await executeContract(terra, borrower, redBank,
       { repay_native: { denom: "uusd" } },
-      `${repay}uusd`
+      `${repay}uusd`,
+      logger
     )
 
     debt = await getDebt(terra, borrower, redBank)
@@ -206,4 +215,6 @@ async function getDebt(
   strictEqual(debt, 0)
 
   console.log("OK")
+
+  logger.showGasConsumption()
 })()

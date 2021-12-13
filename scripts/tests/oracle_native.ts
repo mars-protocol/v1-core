@@ -15,7 +15,7 @@ import {
 import { strictEqual } from "assert"
 import {
   deployContract,
-  executeContract,
+  executeContract, Logger,
   queryContract,
   setTimeoutDuration,
   sleep
@@ -52,6 +52,7 @@ async function testLunaPrice(
   terra: LCDClient,
   deployer: Wallet,
   oracle: string,
+  logger?: Logger
 ) {
   console.log("testLunaPrice")
 
@@ -61,7 +62,9 @@ async function testLunaPrice(
         asset: { native: { denom: "uluna" } },
         price_source: { native: { denom: "uluna" } }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
   const marsOraclePrice = await queryContract(terra, oracle,
@@ -77,6 +80,7 @@ async function testNativeTokenPrice(
   deployer: Wallet,
   oracle: string,
   denom: string,
+  logger?: Logger
 ) {
   console.log("testNativeTokenPrice:", denom)
 
@@ -86,7 +90,9 @@ async function testNativeTokenPrice(
         asset: { native: { denom } },
         price_source: { native: { denom } }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
   const marsOraclePrice = await queryContract(terra, oracle,
@@ -106,6 +112,8 @@ async function testNativeTokenPrice(
 (async () => {
   setTimeoutDuration(0)
 
+  const logger = new Logger()
+
   const terra = new LocalTerra()
   const deployer = terra.wallets.test1
 
@@ -119,9 +127,11 @@ async function testNativeTokenPrice(
 
   await testLunaPrice(terra, deployer, oracle)
 
-  await testNativeTokenPrice(terra, deployer, oracle, "uusd")
-  await testNativeTokenPrice(terra, deployer, oracle, "ueur")
-  await testNativeTokenPrice(terra, deployer, oracle, "ukrw")
+  await testNativeTokenPrice(terra, deployer, oracle, "uusd", logger)
+  await testNativeTokenPrice(terra, deployer, oracle, "ueur", logger)
+  await testNativeTokenPrice(terra, deployer, oracle, "ukrw", logger)
 
   console.log("OK")
+
+  logger.showGasConsumption()
 })()

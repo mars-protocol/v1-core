@@ -12,7 +12,7 @@ import { join } from "path"
 import 'dotenv/config.js'
 import {
   deployContract,
-  executeContract,
+  executeContract, Logger,
   performTransaction,
   queryContract,
   setGasAdjustment,
@@ -85,6 +85,8 @@ async function assertXmarsTotalSupplyAt(
 (async () => {
   setTimeoutDuration(0)
   setGasAdjustment(2)
+
+  const logger = new Logger()
 
   const terra = new LocalTerra()
 
@@ -165,7 +167,9 @@ async function assertXmarsTotalSupplyAt(
           protocol_admin_address: deployer.key.accAddress,
         }
       }
-    }
+    },
+    undefined,
+    logger
   )
 
   // astroport pairs
@@ -179,7 +183,9 @@ async function assertXmarsTotalSupplyAt(
           { native_token: { denom: "uusd" } }
         ]
       }
-    }
+    },
+    undefined,
+    logger
   )
   const marsUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -192,7 +198,9 @@ async function assertXmarsTotalSupplyAt(
           { native_token: { denom: "uusd" } }
         ]
       }
-    }
+    },
+    undefined,
+    logger
   )
   const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -211,9 +219,10 @@ async function assertXmarsTotalSupplyAt(
       }
     },
     `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
+    logger
   )
 
-  await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT)
+  await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT, logger)
 
   await executeContract(terra, deployer, mars,
     {
@@ -221,7 +230,9 @@ async function assertXmarsTotalSupplyAt(
         spender: marsUusdPair,
         amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT),
       }
-    }
+    },
+    undefined,
+    logger
   )
 
   await executeContract(terra, deployer, marsUusdPair,
@@ -239,6 +250,7 @@ async function assertXmarsTotalSupplyAt(
       }
     },
     `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
+    logger
   )
 
   // TESTS
@@ -248,7 +260,7 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("alice stakes Mars and receives the same amount of xMars")
 
-    await mintCw20(terra, deployer, mars, alice.key.accAddress, MARS_STAKE_AMOUNT)
+    await mintCw20(terra, deployer, mars, alice.key.accAddress, MARS_STAKE_AMOUNT, logger)
 
     const txResult = await executeContract(terra, alice, mars,
       {
@@ -257,7 +269,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(MARS_STAKE_AMOUNT),
           msg: toEncodedBinary({ stake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -275,7 +289,7 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("bob stakes Mars and receives the same amount of xMars")
 
-    await mintCw20(terra, deployer, mars, bob.key.accAddress, MARS_STAKE_AMOUNT)
+    await mintCw20(terra, deployer, mars, bob.key.accAddress, MARS_STAKE_AMOUNT, logger)
 
     const txResult = await executeContract(terra, bob, mars,
       {
@@ -284,7 +298,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(MARS_STAKE_AMOUNT),
           msg: toEncodedBinary({ stake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -302,7 +318,7 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("bob transfers half of his xMars to alice")
 
-    const txResult = await transferCw20(terra, bob, xMars, alice.key.accAddress, MARS_STAKE_AMOUNT / 2)
+    const txResult = await transferCw20(terra, bob, xMars, alice.key.accAddress, MARS_STAKE_AMOUNT / 2, logger)
     const block = await getBlockHeight(terra, txResult)
 
     // before staking
@@ -336,7 +352,9 @@ async function assertXmarsTotalSupplyAt(
           offer_asset_info: { native_token: { denom: "uluna" } },
           amount: String(ULUNA_SWAP_AMOUNT)
         }
-      }
+      },
+      undefined,
+      logger
     )
 
     const ulunaBalanceAfterSwapToUusd = await queryBalanceNative(terra, staking, "uluna")
@@ -353,7 +371,8 @@ async function assertXmarsTotalSupplyAt(
     const uusdSwapAmount = uusdBalanceAfterSwapToUusd - 10_000000
 
     await executeContract(terra, deployer, staking,
-      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } }
+      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } },
+      undefined, logger
     )
 
     const marsBalanceAfterSwapToMars = await queryBalanceCw20(terra, staking, mars)
@@ -366,7 +385,7 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("carol stakes Mars and receives a smaller amount of xMars")
 
-    await mintCw20(terra, deployer, mars, carol.key.accAddress, MARS_STAKE_AMOUNT)
+    await mintCw20(terra, deployer, mars, carol.key.accAddress, MARS_STAKE_AMOUNT, logger)
 
     const txResult = await executeContract(terra, carol, mars,
       {
@@ -375,7 +394,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(MARS_STAKE_AMOUNT),
           msg: toEncodedBinary({ stake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -409,7 +430,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(unstakeAmount),
           msg: toEncodedBinary({ unstake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -429,7 +452,7 @@ async function assertXmarsTotalSupplyAt(
     console.log("claiming before cooldown has ended fails")
 
     await assert.rejects(
-      executeContract(terra, bob, staking, { claim: {} }),
+      executeContract(terra, bob, staking, { claim: {} }, undefined, logger),
       (error: any) => {
         return error.response.data.message.includes("Cooldown has not ended")
       }
@@ -439,7 +462,7 @@ async function assertXmarsTotalSupplyAt(
   {
     console.log("check that claimed Mars is not used in the Mars/xMars exchange rate when dan stakes Mars")
 
-    await mintCw20(terra, deployer, mars, dan.key.accAddress, MARS_STAKE_AMOUNT)
+    await mintCw20(terra, deployer, mars, dan.key.accAddress, MARS_STAKE_AMOUNT, logger)
 
     const stakingMarsBalance = await queryBalanceCw20(terra, staking, mars)
     const globalState = await queryContract(terra, staking, { global_state: {} })
@@ -453,7 +476,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(MARS_STAKE_AMOUNT),
           msg: toEncodedBinary({ stake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -482,7 +507,7 @@ async function assertXmarsTotalSupplyAt(
 
     const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
 
-    const txResult = await executeContract(terra, bob, staking, { claim: {} })
+    const txResult = await executeContract(terra, bob, staking, { claim: {} }, undefined, logger)
     const block = await getBlockHeight(terra, txResult)
 
     const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
@@ -508,7 +533,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(unstakeAmount),
           msg: toEncodedBinary({ unstake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
 
     expectedXmarsTotalSupply -= unstakeAmount
@@ -534,7 +561,9 @@ async function assertXmarsTotalSupplyAt(
           amount: String(unstakeAmount),
           msg: toEncodedBinary({ unstake: {} })
         }
-      }
+      },
+      undefined,
+      logger
     )
 
     const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
@@ -558,7 +587,9 @@ async function assertXmarsTotalSupplyAt(
           recipient: deployer.key.accAddress,
           amount: String(transferMarsAmount)
         }
-      }
+      },
+      undefined,
+      logger
     )
 
     const slashPercentage = parseFloat(txResult.logs[0].eventsByType.wasm.slash_percentage[0])
@@ -579,4 +610,6 @@ async function assertXmarsTotalSupplyAt(
   }
 
   console.log("OK")
+
+  logger.showGasConsumption()
 })()
