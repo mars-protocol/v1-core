@@ -53,6 +53,12 @@ export class TransactionError extends CustomError {
   }
 }
 
+interface Opts {
+  admin?: string,
+  coins?: string,
+  logger?: Logger
+}
+
 export class Logger {
   private gasConsumptions: Array<{msg: string, gasUsed: number}> = []
 
@@ -128,7 +134,8 @@ export async function uploadContract(terra: LCDClient, wallet: Wallet, filepath:
   return Number(result.logs[0].eventsByType.store_code.code_id[0]) // code_id
 }
 
-export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object, admin?: string, logger?: Logger) {
+export async function instantiateContract(terra: LCDClient, wallet: Wallet, codeId: number, msg: object, opts: Opts = {}) {
+  let admin = opts.admin
   if (admin == undefined) {
     admin = wallet.key.accAddress
   }
@@ -138,7 +145,10 @@ export async function instantiateContract(terra: LCDClient, wallet: Wallet, code
   return attributes[attributes.length - 1].value // contract address
 }
 
-export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, coins?: string, logger?: Logger) {
+export async function executeContract(terra: LCDClient, wallet: Wallet, contractAddress: string, msg: object, opts: Opts = {}) {
+  const coins = opts.coins
+  const logger = opts.logger
+
   const executeMsg = new MsgExecuteContract(wallet.key.accAddress, contractAddress, msg, coins);
   const result = await performTransaction(terra, wallet, executeMsg);
 

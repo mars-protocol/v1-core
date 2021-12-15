@@ -209,7 +209,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         protocol_admin_address: admin.key.accAddress,
       },
     },
-  }, undefined, logger);
+  }, { logger: logger });
 
   console.log("done!");
 
@@ -234,7 +234,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         amount: String(BOB_WALLET_MARS_BALANCE),
         msg: toEncodedBinary({ stake: {} }),
       },
-    }, undefined, logger);
+    }, { logger: logger });
 
     console.log("success!");
   }
@@ -253,7 +253,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
           },
         }),
       },
-    }, undefined, logger);
+    }, { logger: logger });
 
     // the block height where bob performed the staking action
     const height = await getBlockHeight(terra, txResult);
@@ -295,7 +295,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
           },
         }),
       },
-    }, undefined, logger);
+    }, { logger: logger });
     const proposalId = parseInt(
       submitProposalResult.logs[0].eventsByType.wasm.proposal_id[0]
     );
@@ -309,7 +309,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         proposal_id: proposalId,
         vote: "for",
       },
-    }, undefined, logger);
+    }, { logger: logger });
 
     console.log("success!");
 
@@ -328,7 +328,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
 
     const txResult = await executeContract(terra, bob, vesting, {
       withdraw: {},
-    }, undefined, logger);
+    }, { logger: logger });
 
     // bob's wallet xMars balance should not have changed
     const bobXMarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars);

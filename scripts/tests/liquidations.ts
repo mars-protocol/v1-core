@@ -124,8 +124,7 @@ async function testCollateralizedNativeLoan(
           receive_ma_token: receiveMaToken,
         }
       },
-      `${uusdAmountLiquidated}uusd`,
-      logger
+      { coins: `${uusdAmountLiquidated}uusd`, logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes(
@@ -191,8 +190,7 @@ async function testCollateralizedNativeLoan(
         receive_ma_token: receiveMaToken,
       }
     },
-    `${uusdAmountLiquidated}uusd`,
-    logger
+  { coins: `${uusdAmountLiquidated}uusd`, logger: logger }
   )
   txEvents = txResult.logs[0].eventsByType
   await sleep(100)
@@ -340,7 +338,7 @@ async function testCollateralizedCw20Loan(
           })
         }
       },
-      undefined, logger
+      { logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes(
@@ -411,7 +409,7 @@ async function testCollateralizedCw20Loan(
         })
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   txEvents = txResult.logs[0].eventsByType
 
@@ -498,7 +496,7 @@ async function testUncollateralizedNativeLoan(
         new_limit: String(USD_COLLATERAL_AMOUNT),
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   console.log("borrower borrows uusd")
@@ -538,8 +536,8 @@ async function testUncollateralizedNativeLoan(
           receive_ma_token: false,
         }
       },
-      `${uusdAmountBorrowed}uusd`,
-      logger
+
+      { coins: `${uusdAmountBorrowed}uusd`, logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes(
@@ -613,7 +611,7 @@ async function testUncollateralizedNativeLoan(
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   // cw20 tokens
@@ -666,7 +664,7 @@ async function testUncollateralizedNativeLoan(
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -702,7 +700,7 @@ async function testUncollateralizedNativeLoan(
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -736,7 +734,7 @@ async function testUncollateralizedNativeLoan(
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -770,7 +768,7 @@ async function testUncollateralizedNativeLoan(
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,

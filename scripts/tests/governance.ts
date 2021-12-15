@@ -70,8 +70,7 @@ async function castVote(
         vote
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -208,8 +207,7 @@ async function waitUntilBlockHeight(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   // mint tokens
@@ -295,8 +293,7 @@ async function waitUntilBlockHeight(
         })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   let blockHeight = await getBlockHeight(terra, txResult)
   const aliceProposalVotingPeriodEnd = blockHeight + PROPOSAL_VOTING_PERIOD
@@ -319,8 +316,7 @@ async function waitUntilBlockHeight(
         })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   blockHeight = await getBlockHeight(terra, txResult)
   const bobProposalVotingPeriodEnd = blockHeight + PROPOSAL_VOTING_PERIOD
@@ -357,7 +353,7 @@ async function waitUntilBlockHeight(
 
   const aliceMarsBalanceBefore = await queryBalanceCw20(terra, alice.key.accAddress, mars)
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: aliceProposalId } }, undefined, logger)
+  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: aliceProposalId } }, { logger: logger })
 
   const aliceProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: aliceProposalId } })
   strictEqual(aliceProposalStatus.status, "passed")
@@ -370,7 +366,7 @@ async function waitUntilBlockHeight(
   const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
   const stakingContractMarsBalanceBefore = await queryBalanceCw20(terra, staking, mars)
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: bobProposalId } }, undefined, logger)
+  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: bobProposalId } }, { logger: logger })
 
   const bobProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: bobProposalId } })
   strictEqual(bobProposalStatus.status, "rejected")
@@ -386,7 +382,7 @@ async function waitUntilBlockHeight(
 
   console.log("execute proposal")
 
-  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: aliceProposalId } }, undefined, logger)
+  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: aliceProposalId } }, { logger: logger })
 
   // check that the asset has been initialised on the red bank
   const marketsList = await queryContract(terra, redBank, { markets_list: {} })

@@ -53,8 +53,7 @@ async function setAssetIncentive(
         emission_per_second: String(umarsEmissionRate)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -64,7 +63,7 @@ async function claimRewards(
   incentives: string,
   logger?: Logger
 ) {
-  const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} }, undefined, logger)
+  const result = await executeContract(terra, wallet, incentives, { claim_rewards: {} }, { logger: logger })
   return await getTxTimestamp(terra, result)
 }
 
@@ -184,8 +183,7 @@ function assertBalance(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -219,8 +217,7 @@ function assertBalance(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -260,8 +257,7 @@ function assertBalance(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -334,8 +330,7 @@ function assertBalance(
         emission_per_second: "0"
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   const ulunaIncentiveEndTime = await getTxTimestamp(terra, result)
 

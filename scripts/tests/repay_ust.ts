@@ -101,8 +101,7 @@ async function getDebt(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -136,8 +135,7 @@ async function getDebt(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25, logger)
@@ -171,8 +169,7 @@ async function getDebt(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1, logger)
@@ -200,8 +197,7 @@ async function getDebt(
   while (debt > 0) {
     await executeContract(terra, borrower, redBank,
       { repay_native: { denom: "uusd" } },
-      `${repay}uusd`,
-      logger
+      { coins: `${repay}uusd`, logger: logger }
     )
 
     debt = await getDebt(terra, borrower, redBank)

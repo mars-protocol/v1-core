@@ -75,8 +75,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
 
   await executeContract(terra, alice, redBank,
     { deposit_native: { denom: "uusd" } },
-    `${ALICE_UUSD_COLLATERAL}uusd`,
-    logger
+    { coins: `${ALICE_UUSD_COLLATERAL}uusd`, logger: logger }
   )
 
   console.log("bob deposits mars")
@@ -89,8 +88,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("bob borrows uusd")
@@ -104,8 +102,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
         amount: String(ALICE_UUSD_COLLATERAL - 1)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   let uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
@@ -116,8 +113,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
 
   await executeContract(terra, alice, redBank,
     { deposit_native: { denom: "uusd" } },
-    `${3 * ALICE_UUSD_COLLATERAL}uusd`,
-    logger
+    { coins: `${3 * ALICE_UUSD_COLLATERAL}uusd`, logger: logger }
   )
 
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
@@ -134,8 +130,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
         amount: String(3 * ALICE_UUSD_COLLATERAL),
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
@@ -146,8 +141,7 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
 
   await executeContract(terra, bob, redBank,
     { repay_native: { denom: "uusd" } },
-    `${0.8 * ALICE_UUSD_COLLATERAL}uusd`,
-    logger
+    { coins: `${0.8 * ALICE_UUSD_COLLATERAL}uusd`, logger: logger }
   )
 
   uusdBorrowRate = await queryBorrowRate(terra, redBank, { native: { denom: "uusd" } })
@@ -158,18 +152,15 @@ async function testLinearInterestRate(env: Env, logger?: Logger) {
   // withdraw all liquidity to reset the red-bank before the next test
   await executeContract(terra, bob, redBank,
     { repay_native: { denom: "uusd" } },
-    `${10 * ALICE_UUSD_COLLATERAL}uusd`,
-    logger
+    { coins: `${10 * ALICE_UUSD_COLLATERAL}uusd`, logger: logger }
   )
 
   await executeContract(terra, bob, redBank,
-    { withdraw: { asset: { cw20: { contract_addr: mars } } } },
-    undefined, logger
+    { withdraw: { asset: { cw20: { contract_addr: mars } } } }, { logger: logger }
   )
 
   await executeContract(terra, alice, redBank,
-    { withdraw: { asset: { native: { denom: "uusd" } } } },
-    undefined, logger
+    { withdraw: { asset: { native: { denom: "uusd" } } } }, { logger: logger }
   )
 
   const maUusdTokenInfo = await queryContract(terra, maUusd, { token_info: {} })
@@ -192,16 +183,13 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("bob deposits uusd")
 
   await executeContract(terra, bob, redBank,
-    { deposit_native: { denom: "uusd" } },
-    `${BOB_UUSD_COLLATERAL}uusd`,
-    logger
+    { deposit_native: { denom: "uusd" } }, { coins: `${BOB_UUSD_COLLATERAL}uusd`, logger: logger }
   )
 
   console.log("bob borrows mars")
@@ -213,8 +201,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         amount: String(ALICE_MARS_COLLATERAL)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   let marsBorrowRateBefore = await queryBorrowRate(terra, redBank, { cw20: { contract_addr: mars } })
@@ -229,8 +216,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   let marsBorrowRateAfter = await queryBorrowRate(terra, redBank, { cw20: { contract_addr: mars } })
@@ -249,8 +235,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         amount: String(3 * ALICE_MARS_COLLATERAL),
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   marsBorrowRateAfter = await queryBorrowRate(terra, redBank, { cw20: { contract_addr: mars } })
@@ -270,8 +255,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         msg: toEncodedBinary({ repay_cw20: {} })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   marsBorrowRateAfter = await queryBorrowRate(terra, redBank, { cw20: { contract_addr: mars } })
@@ -352,8 +336,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -387,8 +370,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await executeContract(terra, deployer, oracle,
@@ -398,8 +380,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         price_source: { fixed: { price: String(MARS_USD_PRICE) } }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   const maMars = await queryMaAssetAddress(terra, redBank, { cw20: { contract_addr: mars } })
@@ -429,8 +410,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await executeContract(terra, deployer, oracle,
@@ -440,8 +420,7 @@ async function testDynamicInterestRate(env: Env, logger?: Logger) {
         price_source: { fixed: { price: "1" } }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })

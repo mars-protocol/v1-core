@@ -50,8 +50,7 @@ export async function mintCw20(
         amount: String(amount)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -70,8 +69,7 @@ export async function transferCw20(
         recipient
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -130,8 +128,7 @@ export async function setAssetOraclePriceSource(
         price_source: { fixed: { price: String(price) } }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -154,8 +151,7 @@ export async function depositNative(
 ) {
   return await executeContract(terra, wallet, redBank,
     { deposit_native: { denom } },
-    `${amount}${denom}`,
-    logger
+    { coins: `${amount}${denom}`, logger: logger }
   )
 }
 
@@ -175,8 +171,7 @@ export async function depositCw20(
         msg: toEncodedBinary({ deposit_cw20: {} })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -196,8 +191,7 @@ export async function borrowNative(
         amount: String(amount)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -216,8 +210,7 @@ export async function borrowCw20(
         amount: String(amount)
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -236,8 +229,7 @@ export async function withdraw(
         amount: String(amount),
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 

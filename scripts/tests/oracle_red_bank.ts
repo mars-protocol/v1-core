@@ -115,8 +115,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -148,8 +147,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("setup astroport pair")
@@ -181,8 +179,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
         ]
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -200,8 +197,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           price_source: { fixed: { price: "25" } }
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const alice = terra.wallets.test2
@@ -226,8 +222,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           price_source: { astroport_spot: { pair_address: ulunaUusdPair } }
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const bob = terra.wallets.test3
@@ -249,8 +244,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           ]
         }
       },
-      `1000000000000uluna,30000000000000uusd`,
-      logger
+      { coins: `1000000000000uluna,30000000000000uusd`, logger: logger }
     )
 
     const userPosition = await queryContract(terra, redBank,
@@ -277,8 +271,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           }
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const carol = terra.wallets.test4
@@ -300,14 +293,12 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           ]
         }
       },
-      `1uluna,30uusd`,
-      logger
+      { coins: `1uluna,30uusd`, logger: logger }
     )
 
     // record TWAP
     await executeContract(terra, deployer, oracle,
-      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } },
-      undefined, logger
+      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }, { logger: logger }
     )
 
     // wait until a twap snapshot can be recorded again
@@ -315,8 +306,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
 
     // record TWAP
     await executeContract(terra, deployer, oracle,
-      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } },
-      undefined, logger
+      { record_twap_snapshots: { assets: [{ native: { denom: "uluna" } }] } }, { logger: logger }
     )
 
     const userPosition = await queryContract(terra, redBank,
@@ -337,7 +327,7 @@ async function waitUntilTerraOracleAvailable(terra: LCDClient) {
           price_source: { native: { denom: "uluna" } }
         }
       },
-      undefined, logger
+      { logger: logger }
     )
 
     const dan = terra.wallets.test5

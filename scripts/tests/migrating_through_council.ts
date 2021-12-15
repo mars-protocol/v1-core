@@ -51,8 +51,7 @@ async function castVote(
         vote
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 }
 
@@ -162,8 +161,7 @@ async function waitUntilBlockHeight(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   // mint tokens
@@ -172,7 +170,7 @@ async function waitUntilBlockHeight(
 
   // deploy `counter_version_one` with admin set to council
   const counterVer1CodeId = await uploadContract(terra, deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_one.wasm"))
-  const counterVer1 = await instantiateContract(terra, deployer, counterVer1CodeId, { owner: deployer.key.accAddress }, council)
+  const counterVer1 = await instantiateContract(terra, deployer, counterVer1CodeId, { owner: deployer.key.accAddress }, { admin: council })
 
   // upload `counter_version_two`
   const counterVer2CodeId = await uploadContract(terra, deployer, join(MARS_MOCKS_ARTIFACTS_PATH, "counter_version_two.wasm"))
@@ -181,8 +179,8 @@ async function waitUntilBlockHeight(
 
   console.log("verify first version of `counter` contract")
 
-  await executeContract(terra, deployer, counterVer1, { increment: {}}, undefined, logger)
-  await executeContract(terra, deployer, counterVer1, { increment: {}}, undefined, logger)
+  await executeContract(terra, deployer, counterVer1, { increment: {}}, { logger: logger })
+  await executeContract(terra, deployer, counterVer1, { increment: {}}, { logger: logger })
 
   const countResponse = await queryContract(terra, counterVer1, {get_count: {}})
   strictEqual(countResponse.count, 2)
@@ -220,8 +218,7 @@ async function waitUntilBlockHeight(
         })
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   let blockHeight = await getBlockHeight(terra, txResult)
   const johnProposalVotingPeriodEnd = blockHeight + PROPOSAL_VOTING_PERIOD
@@ -238,7 +235,7 @@ async function waitUntilBlockHeight(
 
   console.log("end proposal")
 
-  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: johnProposalId } }, undefined, logger)
+  await executeContract(terra, deployer, council, { end_proposal: { proposal_id: johnProposalId } }, { logger: logger })
 
   const johnProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: johnProposalId } })
   strictEqual(johnProposalStatus.status, "passed")
@@ -249,11 +246,11 @@ async function waitUntilBlockHeight(
 
   console.log("execute proposal")
 
-  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: johnProposalId } }, undefined, logger)
+  await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: johnProposalId } }, { logger: logger })
 
   console.log("verify second version of `counter` contract")
 
-  await executeContract(terra, deployer, counterVer1, { increment: {}}, undefined, logger)
+  await executeContract(terra, deployer, counterVer1, { increment: {}}, { logger: logger })
 
   const countResponse2 = await queryContract(terra, counterVer1, {get_count: {}})
   strictEqual(countResponse2.count, 3)

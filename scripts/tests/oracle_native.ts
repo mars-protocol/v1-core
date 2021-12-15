@@ -63,8 +63,7 @@ async function testLunaPrice(
         price_source: { native: { denom: "uluna" } }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   const marsOraclePrice = await queryContract(terra, oracle,
@@ -91,8 +90,7 @@ async function testNativeTokenPrice(
         price_source: { native: { denom } }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   const marsOraclePrice = await queryContract(terra, oracle,

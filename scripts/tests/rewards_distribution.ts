@@ -130,8 +130,7 @@ async function testNative(env: Env, logger?: Logger) {
 
     await executeContract(terra, borrower, redBank,
       { repay_native: { denom: "uusd" } },
-      `${Math.floor(USD_BORROW_AMOUNT)}uusd`,
-      logger
+      { coins: `${Math.floor(USD_BORROW_AMOUNT)}uusd`, logger: logger }
     )
 
     const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
@@ -150,8 +149,7 @@ async function testNative(env: Env, logger?: Logger) {
           amount: String(Math.floor(USD_COLLATERAL_AMOUNT / 2))
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
@@ -174,8 +172,7 @@ async function testNative(env: Env, logger?: Logger) {
           amount: String(Math.floor(maUusdBalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
@@ -191,8 +188,7 @@ async function testNative(env: Env, logger?: Logger) {
 
     // withdraw remaining balance
     let result = await executeContract(terra, deployer, protocolRewardsCollector,
-      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } },
-      undefined, logger
+      { withdraw_from_red_bank: { asset: { native: { denom: "uusd" } } } }, { logger: logger }
     )
 
     const maUusdBalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maUusd)
@@ -209,8 +205,7 @@ async function testNative(env: Env, logger?: Logger) {
 
   await assert.rejects(
     executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } },
-      undefined, logger
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }, { logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes("Asset is not enabled for distribution: \"uusd\"")
@@ -226,7 +221,7 @@ async function testNative(env: Env, logger?: Logger) {
         enabled: true
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   {
@@ -238,8 +233,7 @@ async function testNative(env: Env, logger?: Logger) {
     const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
     await executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } },
-      undefined, logger
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }, { logger: logger }
     )
 
     const protocolRewardsCollectorUusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
@@ -336,7 +330,7 @@ async function testCw20(env: Env, logger?: Logger) {
           msg: toEncodedBinary({ repay_cw20: {} })
         }
       },
-      undefined, logger
+      { logger: logger }
     )
 
     const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
@@ -355,7 +349,7 @@ async function testCw20(env: Env, logger?: Logger) {
           amount: String(Math.floor(CW20_TOKEN_1_BORROW_AMOUNT / 2))
         }
       },
-      undefined, logger
+      { logger: logger }
     )
 
     const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
@@ -378,7 +372,7 @@ async function testCw20(env: Env, logger?: Logger) {
           amount: String(Math.floor(maCwToken1BalanceBefore / MA_TOKEN_SCALING_FACTOR / 2))
         }
       },
-      undefined, logger
+      { logger: logger }
     )
 
     const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
@@ -394,8 +388,7 @@ async function testCw20(env: Env, logger?: Logger) {
 
     // withdraw remaining balance
     const result = await executeContract(terra, deployer, protocolRewardsCollector,
-      { withdraw_from_red_bank: { asset: { cw20: { contract_addr: cw20Token1 } } } },
-      undefined, logger
+      { withdraw_from_red_bank: { asset: { cw20: { contract_addr: cw20Token1 } } } }, { logger: logger }
     )
 
     const maCwToken1BalanceAfter = await queryBalanceCw20(terra, protocolRewardsCollector, maCw20Token1)
@@ -412,8 +405,7 @@ async function testCw20(env: Env, logger?: Logger) {
 
   await assert.rejects(
     executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { cw20: { contract_addr: cw20Token1 } } } },
-      undefined, logger
+      { distribute_protocol_rewards: { asset: { cw20: { contract_addr: cw20Token1 } } } }, { logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes(`Asset is not enabled for distribution: \"${cw20Token1}\"`)
@@ -423,8 +415,7 @@ async function testCw20(env: Env, logger?: Logger) {
   console.log("swap cw20 token 1 to uusd")
 
   await executeContract(terra, deployer, protocolRewardsCollector,
-    { swap_asset_to_uusd: { offer_asset_info: { token: { contract_addr: cw20Token1 } } } },
-    undefined, logger
+    { swap_asset_to_uusd: { offer_asset_info: { token: { contract_addr: cw20Token1 } } } }, { logger: logger }
   )
 
   console.log("enable uusd for distribution")
@@ -436,7 +427,7 @@ async function testCw20(env: Env, logger?: Logger) {
         enabled: true
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   {
@@ -448,8 +439,7 @@ async function testCw20(env: Env, logger?: Logger) {
     const stakingUusdBalanceBefore = await queryBalanceNative(terra, staking, "uusd")
 
     await executeContract(terra, deployer, protocolRewardsCollector,
-      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } },
-      undefined, logger
+      { distribute_protocol_rewards: { asset: { native: { denom: "uusd" } } } }, { logger: logger }
     )
 
     const protocolRewardsCollectorUusdBalanceAfter = await queryBalanceNative(terra, protocolRewardsCollector, "uusd")
@@ -564,8 +554,7 @@ async function testLiquidateNative(env: Env, logger?: Logger) {
         receive_ma_token: false,
       }
     },
-    `${Math.floor(USD_BORROW_AMOUNT * CLOSE_FACTOR)}uusd`,
-    logger
+    { coins: `${Math.floor(USD_BORROW_AMOUNT * CLOSE_FACTOR)}uusd`, logger: logger }
   )
 
   // get the protocol rewards collector balances after the borrower is liquidated
@@ -658,7 +647,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         })
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   // get the protocol rewards collector balances after the borrower is liquidated
@@ -768,7 +757,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   // cw20 tokens
@@ -821,7 +810,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { native: { denom: "uluna" } },
@@ -855,7 +844,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { native: { denom: "uusd" } },
@@ -889,7 +878,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { cw20: { contract_addr: cw20Token1 } },
@@ -923,7 +912,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         }
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   await setAssetOraclePriceSource(terra, deployer, oracle,
     { cw20: { contract_addr: cw20Token2 } },
@@ -944,7 +933,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         ]
       }
     },
-    undefined, logger
+    { logger: logger }
   )
   const cw20Token1UusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -957,7 +946,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         amount: String(CW20_TOKEN_1_UUSD_PAIR_CW20_TOKEN_1_LP_AMOUNT),
       }
     },
-    undefined, logger
+    { logger: logger }
   )
 
   await executeContract(terra, deployer, cw20Token1UusdPair,
@@ -974,8 +963,7 @@ async function testLiquidateCw20(env: Env, logger?: Logger) {
         ]
       }
     },
-    `${CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
-    logger
+    { coins: `${CW20_TOKEN_1_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`, logger: logger }
   )
 
   // tests

@@ -91,8 +91,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -122,8 +121,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 25, logger)
@@ -153,8 +151,7 @@ const SECONDS_IN_YEAR = 60 * 60 * 24 * 365;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   const maUusd = await queryMaAssetAddress(terra, redBank, { native: { denom: "uusd" } })
 

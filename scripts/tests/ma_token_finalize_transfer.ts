@@ -153,8 +153,7 @@ async function testTransferCollateral(
           enable: false,
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     ),
     (error: any) => {
       return error.response.data.message.includes(
@@ -230,8 +229,7 @@ async function testTransferCollateral(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -265,8 +263,7 @@ async function testTransferCollateral(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -304,8 +301,7 @@ async function testTransferCollateral(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,

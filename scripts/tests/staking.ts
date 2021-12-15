@@ -168,8 +168,7 @@ async function assertXmarsTotalSupplyAt(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   // astroport pairs
@@ -184,8 +183,7 @@ async function assertXmarsTotalSupplyAt(
         ]
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   const marsUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -199,8 +197,7 @@ async function assertXmarsTotalSupplyAt(
         ]
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
   const ulunaUusdPair = result.logs[0].eventsByType.wasm.pair_contract_addr[0]
 
@@ -218,8 +215,7 @@ async function assertXmarsTotalSupplyAt(
         ]
       }
     },
-    `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
-    logger
+    { coins: `${ULUNA_UUSD_PAIR_ULUNA_LP_AMOUNT}uluna,${ULUNA_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`, logger: logger }
   )
 
   await mintCw20(terra, deployer, mars, deployer.key.accAddress, MARS_UUSD_PAIR_MARS_LP_AMOUNT, logger)
@@ -231,8 +227,7 @@ async function assertXmarsTotalSupplyAt(
         amount: String(MARS_UUSD_PAIR_MARS_LP_AMOUNT),
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await executeContract(terra, deployer, marsUusdPair,
@@ -249,8 +244,7 @@ async function assertXmarsTotalSupplyAt(
         ]
       }
     },
-    `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`,
-    logger
+    { coins: `${MARS_UUSD_PAIR_UUSD_LP_AMOUNT}uusd`, logger: logger }
   )
 
   // TESTS
@@ -270,8 +264,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ stake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -299,8 +292,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ stake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -353,8 +345,7 @@ async function assertXmarsTotalSupplyAt(
           amount: String(ULUNA_SWAP_AMOUNT)
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const ulunaBalanceAfterSwapToUusd = await queryBalanceNative(terra, staking, "uluna")
@@ -371,8 +362,7 @@ async function assertXmarsTotalSupplyAt(
     const uusdSwapAmount = uusdBalanceAfterSwapToUusd - 10_000000
 
     await executeContract(terra, deployer, staking,
-      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } },
-      undefined, logger
+      { swap_uusd_to_mars: { amount: String(uusdSwapAmount) } }, { logger: logger }
     )
 
     const marsBalanceAfterSwapToMars = await queryBalanceCw20(terra, staking, mars)
@@ -395,8 +385,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ stake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -431,8 +420,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ unstake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -452,7 +440,7 @@ async function assertXmarsTotalSupplyAt(
     console.log("claiming before cooldown has ended fails")
 
     await assert.rejects(
-      executeContract(terra, bob, staking, { claim: {} }, undefined, logger),
+      executeContract(terra, bob, staking, { claim: {} }, { logger: logger }),
       (error: any) => {
         return error.response.data.message.includes("Cooldown has not ended")
       }
@@ -477,8 +465,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ stake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
     const block = await getBlockHeight(terra, txResult)
 
@@ -507,7 +494,7 @@ async function assertXmarsTotalSupplyAt(
 
     const bobMarsBalanceBefore = await queryBalanceCw20(terra, bob.key.accAddress, mars)
 
-    const txResult = await executeContract(terra, bob, staking, { claim: {} }, undefined, logger)
+    const txResult = await executeContract(terra, bob, staking, { claim: {} }, { logger: logger })
     const block = await getBlockHeight(terra, txResult)
 
     const bobMarsBalanceAfter = await queryBalanceCw20(terra, bob.key.accAddress, mars)
@@ -534,8 +521,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ unstake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     expectedXmarsTotalSupply -= unstakeAmount
@@ -562,8 +548,7 @@ async function assertXmarsTotalSupplyAt(
           msg: toEncodedBinary({ unstake: {} })
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const claim = await queryContract(terra, staking, { claim: { user_address: dan.key.accAddress } })
@@ -588,8 +573,7 @@ async function assertXmarsTotalSupplyAt(
           amount: String(transferMarsAmount)
         }
       },
-      undefined,
-      logger
+      { logger: logger }
     )
 
     const slashPercentage = parseFloat(txResult.logs[0].eventsByType.wasm.slash_percentage[0])

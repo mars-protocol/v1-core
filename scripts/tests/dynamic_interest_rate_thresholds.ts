@@ -98,8 +98,7 @@ async function queryBorrowRate(
         }
       }
     },
-    undefined,
-    logger
+    {logger: logger}
   )
 
   console.log("init assets")
@@ -134,8 +133,7 @@ async function queryBorrowRate(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uluna" } }, 45, logger)
@@ -171,8 +169,7 @@ async function queryBorrowRate(
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle, { native: { denom: "uusd" } }, 1, logger)

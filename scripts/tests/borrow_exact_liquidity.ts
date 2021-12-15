@@ -89,8 +89,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   console.log("init assets")
@@ -120,8 +119,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
@@ -155,8 +153,7 @@ const MARS_COLLATERAL = 100_000_000_000000;
         }
       }
     },
-    undefined,
-    logger
+    { logger: logger }
   )
 
   await setAssetOraclePriceSource(terra, deployer, oracle,
