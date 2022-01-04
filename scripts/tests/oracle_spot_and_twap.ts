@@ -1,4 +1,4 @@
-import { LocalTerra, MnemonicKey } from "@terra-money/terra.js";
+import { Int, LocalTerra, MnemonicKey } from "@terra-money/terra.js";
 import { join } from "path";
 import { strictEqual } from "assert";
 import "dotenv/config.js";
@@ -7,7 +7,7 @@ import {
   executeContract,
   instantiateContract, Logger,
   queryContract,
-  setGasAdjustment,
+  sleep,
   toEncodedBinary,
   uploadContract,
 } from "../helpers.js";
@@ -21,6 +21,7 @@ type Snapshot = {
 };
 
 // CONSTS
+const ASTROPORT_TWAP_PRECISION = 1_000000
 
 // required environment variables:
 const ASTROPORT_ARTIFACTS_PATH = process.env.ASTROPORT_ARTIFACTS_PATH!;
@@ -416,6 +417,7 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   //
   // The solution is simple: modify `createTransaction` function in helpers to explicitly feed in a
   // gas limit, so that LCD does not need to estimate it. The transaction should be successful.
+  await sleep(1000)
   process.stdout.write("recoding TWAP snapshot... ");
   snapshots.push(await recordTwapSnapshots());
   console.log("success!");
@@ -433,7 +435,9 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
         contract: astroportPair,
         amount: "1000000",
         msg: toEncodedBinary({
-          swap: {},
+          swap: {
+            max_spread: "0.5",
+          },
         }),
       },
     }, { logger: logger });
@@ -445,6 +449,7 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   }
 
   // take a final snapshot
+  await sleep(1000)
   process.stdout.write("recoding TWAP snapshot... ");
   snapshots.push(await recordTwapSnapshots());
   console.log("success!");
@@ -469,15 +474,19 @@ async function assertOraclePrice(token: string, expectedPrice: string) {
   snapshots.sort((a, b) => {
     let diffA = diff(snapshotEnd.timestamp - a.timestamp, 30);
     let diffB = diff(snapshotEnd.timestamp - b.timestamp, 30);
-    if (diffA < diffB) return -1;
-    else if (diffA > diffB) return +1;
-    return 0;
+    if (diffA < diffB) {
+      return -1
+    } else if (diffA > diffB) {
+      return 1
+    } else {
+      return 0
+    }
   });
   const snapshotStart = snapshots[0];
 
-  const cumPriceDelta = snapshotEnd.cumulativePrice - snapshotStart.cumulativePrice;
-  const period = snapshotEnd.timestamp - snapshotStart.timestamp;
-  const expectedPrice = cumPriceDelta / period;
+  const cumPriceDelta = new Int(snapshotEnd.cumulativePrice).sub(new Int(snapshotStart.cumulativePrice));
+  const period = new Int(snapshotEnd.timestamp).sub(new Int(snapshotStart.timestamp));
+  const expectedPrice = cumPriceDelta.div(period).dividedBy(ASTROPORT_TWAP_PRECISION);
 
   process.stdout.write("querying TWAP average price... ");
   await assertOraclePrice(anchorToken, expectedPrice.toString());
