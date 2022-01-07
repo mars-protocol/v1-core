@@ -177,7 +177,13 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::{from_binary, Coin, OwnedDeps};
+    use cosmwasm_std::{
+        from_binary, from_slice, Coin, ContractResult, OwnedDeps, Querier, QuerierResult,
+        QueryRequest, SystemError, WasmQuery,
+    };
+    use mars_core::address_provider::{self, helpers};
+    use mars_core::error::MarsError;
+    use terra_cosmwasm::TerraQueryWrapper;
 
     #[test]
     fn test_proper_initialization() {
@@ -292,6 +298,153 @@ mod tests {
             let result: Vec<Addr> = from_binary(&addresses_query).unwrap();
             assert_eq!(result[0], xmars_token_address);
             assert_eq!(result[1], council_address);
+        }
+    }
+
+    #[test]
+    fn test_query_address_helpers() {
+        let deps = OwnedDeps {
+            storage: MockStorage::default(),
+            api: MockApi::default(),
+            querier: AddressProviderMockQuerier {},
+        };
+
+        // Errors if address(es) are empty
+        {
+            let err = helpers::query_address(
+                &deps.as_ref().querier,
+                Addr::unchecked("address_provider"),
+                MarsContract::Incentives,
+            )
+            .unwrap_err();
+
+            assert_eq!(
+                err,
+                MarsError::EmptyAddresses {
+                    empty_addresses: vec![MarsContract::Incentives]
+                }
+            );
+
+            let err = helpers::query_addresses(
+                &deps.as_ref().querier,
+                Addr::unchecked("address_provider"),
+                vec![
+                    MarsContract::ProtocolRewardsCollector,
+                    MarsContract::RedBank,
+                    MarsContract::Incentives,
+                ],
+            )
+            .unwrap_err();
+
+            assert_eq!(
+                err,
+                MarsError::EmptyAddresses {
+                    empty_addresses: vec![
+                        MarsContract::ProtocolRewardsCollector,
+                        MarsContract::Incentives
+                    ]
+                }
+            );
+        }
+
+        // Correctly set addresses are returned
+        {
+            let address = helpers::query_address(
+                &deps.as_ref().querier,
+                Addr::unchecked("address_provider"),
+                MarsContract::RedBank,
+            )
+            .unwrap();
+
+            assert_eq!(address, Addr::unchecked("red_bank"));
+
+            let addresses = helpers::query_addresses(
+                &deps.as_ref().querier,
+                Addr::unchecked("address_provider"),
+                vec![MarsContract::Vesting, MarsContract::RedBank],
+            )
+            .unwrap();
+
+            assert_eq!(
+                addresses,
+                vec![Addr::unchecked("vesting"), Addr::unchecked("red_bank")]
+            );
+        }
+    }
+
+    // Mocks to test query_address and query_addresses helpers
+
+    #[derive(Clone, Copy)]
+    pub struct AddressProviderMockQuerier {}
+
+    impl Querier for AddressProviderMockQuerier {
+        fn raw_query(&self, bin_request: &[u8]) -> QuerierResult {
+            let request: QueryRequest<TerraQueryWrapper> = match from_slice(bin_request) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(SystemError::InvalidRequest {
+                        error: format!("Parsing query request: {}", e),
+                        request: bin_request.into(),
+                    })
+                    .into()
+                }
+            };
+            self.handle_query(&request)
+        }
+    }
+
+    impl AddressProviderMockQuerier {
+        pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
+            if let QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: _,
+                msg,
+            }) = request
+            {
+                let parse_address_provider_query: StdResult<address_provider::msg::QueryMsg> =
+                    from_binary(msg);
+
+                if let Ok(address_provider_query) = parse_address_provider_query {
+                    let ret: ContractResult<Binary> = match address_provider_query {
+                        QueryMsg::Address { contract } => {
+                            to_binary(&get_contract_address(contract)).into()
+                        }
+
+                        QueryMsg::Addresses { contracts } => {
+                            let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
+                            for contract in contracts {
+                                ret.push(get_contract_address(contract));
+                            }
+                            to_binary(&ret).into()
+                        }
+
+                        _ => panic!("[mock]: Unsupported address provider query"),
+                    };
+
+                    return Ok(ret).into();
+                }
+            }
+
+            panic!("[mock]: Unsupported wasm query");
+        }
+    }
+
+    fn get_contract_address(contract: MarsContract) -> Addr {
+        match contract {
+            // empty for testing purposes
+            MarsContract::Incentives => Addr::unchecked(""),
+            MarsContract::ProtocolRewardsCollector => Addr::unchecked(""),
+
+            // correctly set
+            MarsContract::Council => Addr::unchecked("council"),
+            MarsContract::SafetyFund => Addr::unchecked("safety_fund"),
+            MarsContract::MarsToken => Addr::unchecked("mars_token"),
+            MarsContract::Oracle => Addr::unchecked("oracle"),
+            MarsContract::ProtocolAdmin => Addr::unchecked("protocol_admin"),
+            MarsContract::RedBank => Addr::unchecked("red_bank"),
+            MarsContract::Staking => Addr::unchecked("staking"),
+            MarsContract::Treasury => Addr::unchecked("treasury"),
+            MarsContract::Vesting => Addr::unchecked("vesting"),
+            MarsContract::XMarsToken => Addr::unchecked("xmars_token"),
         }
     }
 

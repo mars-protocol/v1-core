@@ -1783,17 +1783,17 @@ pub fn execute_finalize_liquidity_token_transfer(
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, MarsError> {
     match msg {
-        QueryMsg::Config {} => to_binary(&query_config(deps)?),
+        QueryMsg::Config {} => Ok(to_binary(&query_config(deps)?)?),
 
-        QueryMsg::Market { asset } => to_binary(&query_market(deps, asset)?),
+        QueryMsg::Market { asset } => Ok(to_binary(&query_market(deps, asset)?)?),
 
-        QueryMsg::MarketsList {} => to_binary(&query_markets_list(deps)?),
+        QueryMsg::MarketsList {} => Ok(to_binary(&query_markets_list(deps)?)?),
 
         QueryMsg::UserDebt { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_user_debt(deps, env, address)?)
+            Ok(to_binary(&query_user_debt(deps, env, address)?)?)
         }
 
         QueryMsg::UserAssetDebt {
@@ -1801,12 +1801,14 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             asset,
         } => {
             let address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_user_asset_debt(deps, env, address, asset)?)
+            Ok(to_binary(&query_user_asset_debt(
+                deps, env, address, asset,
+            )?)?)
         }
 
         QueryMsg::UserCollateral { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_user_collateral(deps, address)?)
+            Ok(to_binary(&query_user_collateral(deps, address)?)?)
         }
 
         QueryMsg::UncollateralizedLoanLimit {
@@ -1814,44 +1816,44 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             asset,
         } => {
             let user_address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_uncollateralized_loan_limit(
+            Ok(to_binary(&query_uncollateralized_loan_limit(
                 deps,
                 user_address,
                 asset,
-            )?)
+            )?)?)
         }
 
-        QueryMsg::ScaledLiquidityAmount { asset, amount } => {
-            to_binary(&query_scaled_liquidity_amount(deps, env, asset, amount)?)
-        }
+        QueryMsg::ScaledLiquidityAmount { asset, amount } => Ok(to_binary(
+            &query_scaled_liquidity_amount(deps, env, asset, amount)?,
+        )?),
 
-        QueryMsg::ScaledDebtAmount { asset, amount } => {
-            to_binary(&query_scaled_debt_amount(deps, env, asset, amount)?)
-        }
+        QueryMsg::ScaledDebtAmount { asset, amount } => Ok(to_binary(&query_scaled_debt_amount(
+            deps, env, asset, amount,
+        )?)?),
 
         QueryMsg::UnderlyingLiquidityAmount {
             ma_token_address,
             amount_scaled,
-        } => to_binary(&query_underlying_liquidity_amount(
+        } => Ok(to_binary(&query_underlying_liquidity_amount(
             deps,
             env,
             ma_token_address,
             amount_scaled,
-        )?),
+        )?)?),
 
         QueryMsg::UnderlyingDebtAmount {
             asset,
             amount_scaled,
-        } => to_binary(&query_underlying_debt_amount(
+        } => Ok(to_binary(&query_underlying_debt_amount(
             deps,
             env,
             asset,
             amount_scaled,
-        )?),
+        )?)?),
 
         QueryMsg::UserPosition { user_address } => {
             let address = deps.api.addr_validate(&user_address)?;
-            to_binary(&query_user_position(deps, env, address)?)
+            Ok(to_binary(&query_user_position(deps, env, address)?)?)
         }
     }
 }
@@ -2066,7 +2068,11 @@ pub fn query_underlying_debt_amount(
     get_underlying_debt_amount(amount_scaled, &market, env.block.time.seconds())
 }
 
-pub fn query_user_position(deps: Deps, env: Env, address: Addr) -> StdResult<UserPositionResponse> {
+pub fn query_user_position(
+    deps: Deps,
+    env: Env,
+    address: Addr,
+) -> Result<UserPositionResponse, MarsError> {
     let config = CONFIG.load(deps.storage)?;
     let global_state = GLOBAL_STATE.load(deps.storage)?;
     let user = USERS.load(deps.storage, &address)?;

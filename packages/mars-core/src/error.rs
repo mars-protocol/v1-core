@@ -1,6 +1,8 @@
 use cosmwasm_std::StdError;
 use thiserror::Error;
 
+use crate::address_provider::MarsContract;
+
 #[derive(Error, Debug, PartialEq)]
 pub enum MarsError {
     #[error("{0}")]
@@ -22,4 +24,7 @@ pub enum MarsError {
         expected_params: String,
         invalid_params: String,
     },
+
+    #[error("One or more addresses are empty: {empty_addresses:?}")]
+    EmptyAddresses { empty_addresses: Vec<MarsContract> },
 }

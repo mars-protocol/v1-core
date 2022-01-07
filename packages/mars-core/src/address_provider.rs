@@ -123,19 +123,27 @@ pub mod helpers {
     use super::msg::QueryMsg;
     use super::MarsContract;
     use crate::error::MarsError;
-    use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, StdResult, WasmQuery};
+    use cosmwasm_std::{to_binary, Addr, QuerierWrapper, QueryRequest, WasmQuery};
 
     pub fn query_address(
         querier: &QuerierWrapper,
         address_provider_address: Addr,
         contract: MarsContract,
-    ) -> StdResult<Addr> {
+    ) -> Result<Addr, MarsError> {
         let query: Addr = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: address_provider_address.to_string(),
-            msg: to_binary(&QueryMsg::Address { contract })?,
+            msg: to_binary(&QueryMsg::Address {
+                contract: contract.clone(),
+            })?,
         }))?;
 
-        Ok(query)
+        if query == Addr::unchecked("") {
+            Err(MarsError::EmptyAddresses {
+                empty_addresses: vec![contract],
+            })
+        } else {
+            Ok(query)
+        }
     }
 
     pub fn query_addresses(
@@ -147,7 +155,9 @@ pub mod helpers {
 
         let query: Vec<Addr> = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: address_provider_address.to_string(),
-            msg: to_binary(&QueryMsg::Addresses { contracts })?,
+            msg: to_binary(&QueryMsg::Addresses {
+                contracts: contracts.clone(),
+            })?,
         }))?;
 
         if query.len() != expected_len {
@@ -157,6 +167,17 @@ pub mod helpers {
             });
         }
 
-        Ok(query)
+        let empty_addresses = query
+            .iter()
+            .zip(contracts)
+            .filter(|(address, _)| *address == &Addr::unchecked(""))
+            .map(|(_, contract)| contract)
+            .collect::<Vec<MarsContract>>();
+
+        if !empty_addresses.is_empty() {
+            Err(MarsError::EmptyAddresses { empty_addresses })
+        } else {
+            Ok(query)
+        }
     }
 }
