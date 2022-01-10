@@ -21,7 +21,7 @@ pub fn handle_query(contract_addr: &Addr, query: QueryMsg) -> QuerierResult {
         QueryMsg::Addresses { contracts } => {
             let addresses = contracts
                 .into_iter()
-                .map(|contract| get_contract_address(contract))
+                .map(get_contract_address)
                 .collect::<Vec<_>>();
             to_binary(&addresses).into()
         }
