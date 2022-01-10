@@ -410,11 +410,11 @@ mod tests {
                         }
 
                         QueryMsg::Addresses { contracts } => {
-                            let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
-                            for contract in contracts {
-                                ret.push(get_contract_address(contract));
-                            }
-                            to_binary(&ret).into()
+                            let addresses = contracts
+                                .into_iter()
+                                .map(|contract| get_contract_address(contract))
+                                .collect::<Vec<_>>();
+                            to_binary(&addresses).into()
                         }
 
                         _ => panic!("[mock]: Unsupported address provider query"),
