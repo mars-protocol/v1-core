@@ -445,7 +445,7 @@ mod tests {
     use astroport::factory::PairType;
     use astroport::pair::{CumulativePricesResponse, SimulationResponse};
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
-    use cosmwasm_std::{from_binary, Addr, OwnedDeps, StdError};
+    use cosmwasm_std::{from_binary, Addr, OwnedDeps};
     use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
     #[test]
@@ -1063,15 +1063,6 @@ mod tests {
         // query price when no snapshot was taken within the tolerable window
         let query_error_time = snapshot_time + window_size - tolerance - 1;
 
-        let error = query_asset_price(
-            deps.as_ref(),
-            mock_env_at_block_time(query_error_time),
-            asset_reference.clone(),
-        )
-        .unwrap_err();
-
-        assert_eq!(error, ContractError::NoSnapshotWithinTolerance {});
-
         let error = query(
             deps.as_ref(),
             mock_env_at_block_time(query_error_time),
@@ -1081,10 +1072,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(
-            error,
-            StdError::generic_err("No TWAP snapshot within tolerance")
-        );
+        assert_eq!(error, ContractError::NoSnapshotWithinTolerance {}.into());
 
         // query price when a snapshot was taken within the tolerable window
         let query_time = snapshot_time + window_size;
