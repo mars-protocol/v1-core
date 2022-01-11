@@ -178,19 +178,17 @@ pub fn execute_record_twap_snapshots(
 // QUERIES
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> Result<Binary, ContractError> {
+pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::Config {} => Ok(to_binary(&query_config(deps, env)?)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps, env)?),
         QueryMsg::AssetPriceSource { asset } => {
-            Ok(to_binary(&query_asset_price_source(deps, env, asset)?)?)
+            to_binary(&query_asset_price_source(deps, env, asset)?)
         }
-        QueryMsg::AssetPrice { asset } => Ok(to_binary(&query_asset_price(
-            deps,
-            env,
-            asset.get_reference(),
-        )?)?),
+        QueryMsg::AssetPrice { asset } => {
+            to_binary(&query_asset_price(deps, env, asset.get_reference())?)
+        }
         QueryMsg::AssetPriceByReference { asset_reference } => {
-            Ok(to_binary(&query_asset_price(deps, env, asset_reference)?)?)
+            to_binary(&query_asset_price(deps, env, asset_reference)?)
         }
     }
 }
@@ -447,7 +445,7 @@ mod tests {
     use astroport::factory::PairType;
     use astroport::pair::{CumulativePricesResponse, SimulationResponse};
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
-    use cosmwasm_std::{from_binary, Addr, OwnedDeps};
+    use cosmwasm_std::{from_binary, Addr, OwnedDeps, StdError};
     use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
     #[test]
@@ -1065,6 +1063,15 @@ mod tests {
         // query price when no snapshot was taken within the tolerable window
         let query_error_time = snapshot_time + window_size - tolerance - 1;
 
+        let error = query_asset_price(
+            deps.as_ref(),
+            mock_env_at_block_time(query_error_time),
+            asset_reference.clone(),
+        )
+        .unwrap_err();
+
+        assert_eq!(error, ContractError::NoSnapshotWithinTolerance {});
+
         let error = query(
             deps.as_ref(),
             mock_env_at_block_time(query_error_time),
@@ -1074,7 +1081,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error, ContractError::NoSnapshotWithinTolerance {});
+        assert_eq!(
+            error,
+            StdError::generic_err("No TWAP snapshot within tolerance")
+        );
 
         // query price when a snapshot was taken within the tolerable window
         let query_time = snapshot_time + window_size;
