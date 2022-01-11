@@ -146,12 +146,12 @@ fn query_address(deps: Deps, contract: MarsContract) -> StdResult<Addr> {
 
 fn query_addresses(deps: Deps, contracts: Vec<MarsContract>) -> StdResult<Vec<Addr>> {
     let config = CONFIG.load(deps.storage)?;
-    let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
-    for contract in contracts {
-        ret.push(get_address(&config, contract));
-    }
+    let addresses = contracts
+        .into_iter()
+        .map(|contract| get_address(&config, contract))
+        .collect();
 
-    Ok(ret)
+    Ok(addresses)
 }
 
 fn get_address(config: &Config, address: MarsContract) -> Addr {
@@ -177,13 +177,7 @@ fn get_address(config: &Config, address: MarsContract) -> Addr {
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, MockApi, MockQuerier, MockStorage};
-    use cosmwasm_std::{
-        from_binary, from_slice, Coin, ContractResult, OwnedDeps, Querier, QuerierResult,
-        QueryRequest, SystemError, WasmQuery,
-    };
-    use mars_core::address_provider::{self, helpers};
-    use mars_core::error::MarsError;
-    use terra_cosmwasm::TerraQueryWrapper;
+    use cosmwasm_std::{from_binary, Coin, OwnedDeps};
 
     #[test]
     fn test_proper_initialization() {
