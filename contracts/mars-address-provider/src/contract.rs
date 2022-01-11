@@ -146,12 +146,12 @@ fn query_address(deps: Deps, contract: MarsContract) -> StdResult<Addr> {
 
 fn query_addresses(deps: Deps, contracts: Vec<MarsContract>) -> StdResult<Vec<Addr>> {
     let config = CONFIG.load(deps.storage)?;
-    let addresses = contracts
-        .into_iter()
-        .map(|contract| get_address(&config, contract))
-        .collect();
+    let mut ret: Vec<Addr> = Vec::with_capacity(contracts.len());
+    for contract in contracts {
+        ret.push(get_address(&config, contract));
+    }
 
-    Ok(addresses)
+    Ok(ret)
 }
 
 fn get_address(config: &Config, address: MarsContract) -> Addr {
