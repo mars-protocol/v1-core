@@ -3,7 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::MarsError;
-use crate::helpers::assert_param_le_one;
+use crate::helpers::decimal_param_le_one;
 use crate::math::decimal::Decimal;
 
 use self::error::ContractError;
@@ -34,7 +34,7 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), ContractError> {
-        assert_param_le_one(&self.proposal_required_quorum, "proposal_required_quorum")?;
+        decimal_param_le_one(&self.proposal_required_quorum, "proposal_required_quorum")?;
 
         let minimum_proposal_required_threshold =
             Decimal::percent(MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE);

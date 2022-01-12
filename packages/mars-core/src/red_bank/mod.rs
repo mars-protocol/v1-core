@@ -9,7 +9,7 @@ use cosmwasm_std::{Addr, Uint128};
 
 use crate::asset::AssetType;
 use crate::error::MarsError;
-use crate::helpers::assert_param_le_one;
+use crate::helpers::decimal_param_le_one;
 use crate::math::decimal::Decimal;
 
 use self::interest_rate_models::InterestRateModel;
@@ -29,7 +29,7 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), MarsError> {
-        assert_param_le_one(&self.close_factor, "close_factor")?;
+        decimal_param_le_one(&self.close_factor, "close_factor")?;
 
         Ok(())
     }
@@ -89,9 +89,9 @@ pub struct Market {
 
 impl Market {
     pub fn validate(&self) -> Result<(), MarketError> {
-        assert_param_le_one(&self.max_loan_to_value, "max_loan_to_value")?;
-        assert_param_le_one(&self.liquidation_threshold, "liquidation_threshold")?;
-        assert_param_le_one(&self.liquidation_bonus, "liquidation_bonus")?;
+        decimal_param_le_one(&self.max_loan_to_value, "max_loan_to_value")?;
+        decimal_param_le_one(&self.liquidation_threshold, "liquidation_threshold")?;
+        decimal_param_le_one(&self.liquidation_bonus, "liquidation_bonus")?;
 
         // liquidation_threshold should be greater than max_loan_to_value
         if self.liquidation_threshold <= self.max_loan_to_value {

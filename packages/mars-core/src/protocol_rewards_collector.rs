@@ -5,7 +5,7 @@ use thiserror::Error;
 use cosmwasm_std::{Addr, Decimal as StdDecimal};
 
 use crate::error::MarsError;
-use crate::helpers::assert_param_le_one;
+use crate::helpers::decimal_param_le_one;
 use crate::math::decimal::Decimal;
 
 /// Global configuration
@@ -27,8 +27,8 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
-        assert_param_le_one(&self.safety_fund_fee_share, "safety_fund_fee_share")?;
-        assert_param_le_one(&self.treasury_fee_share, "treasury_fee_share")?;
+        decimal_param_le_one(&self.safety_fund_fee_share, "safety_fund_fee_share")?;
+        decimal_param_le_one(&self.treasury_fee_share, "treasury_fee_share")?;
 
         let combined_fee_share = self.safety_fund_fee_share + self.treasury_fee_share;
         // Combined fee shares cannot exceed one
