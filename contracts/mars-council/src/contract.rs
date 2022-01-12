@@ -752,11 +752,12 @@ mod tests {
             let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::ProposalRequiredThresholdOutOfRange {
-                    proposal_required_threshold: Decimal::percent(49),
-                    minimum: Decimal::percent(50),
-                    maximum: Decimal::percent(100),
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_threshold".to_string(),
+                    invalid_value: "0.49".to_string(),
+                    predicate: ">= 0.5 and <= 1".to_string(),
                 }
+                .into()
             );
         }
 
@@ -778,11 +779,12 @@ mod tests {
             let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::ProposalRequiredThresholdOutOfRange {
-                    proposal_required_threshold: Decimal::percent(101),
-                    minimum: Decimal::percent(50),
-                    maximum: Decimal::percent(100),
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_threshold".to_string(),
+                    invalid_value: "1.01".to_string(),
+                    predicate: ">= 0.5 and <= 1".to_string(),
                 }
+                .into()
             );
         }
 
@@ -881,11 +883,12 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::ProposalRequiredThresholdOutOfRange {
-                    proposal_required_threshold: Decimal::percent(49),
-                    minimum: Decimal::percent(50),
-                    maximum: Decimal::percent(100),
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_threshold".to_string(),
+                    invalid_value: "0.49".to_string(),
+                    predicate: ">= 0.5 and <= 1".to_string(),
                 }
+                .into()
             );
         }
 
@@ -903,11 +906,12 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                ContractError::ProposalRequiredThresholdOutOfRange {
-                    proposal_required_threshold: Decimal::percent(101),
-                    minimum: Decimal::percent(50),
-                    maximum: Decimal::percent(100),
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_threshold".to_string(),
+                    invalid_value: "1.01".to_string(),
+                    predicate: ">= 0.5 and <= 1".to_string(),
                 }
+                .into()
             );
         }
 

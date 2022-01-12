@@ -2,6 +2,7 @@ use cosmwasm_std::{Addr, CosmosMsg, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::error::MarsError;
 use crate::helpers::assert_param_le_one;
 use crate::math::decimal::Decimal;
 
@@ -43,11 +44,15 @@ impl Config {
         if !(self.proposal_required_threshold >= minimum_proposal_required_threshold
             && self.proposal_required_threshold <= maximum_proposal_required_threshold)
         {
-            return Err(ContractError::ProposalRequiredThresholdOutOfRange {
-                proposal_required_threshold: self.proposal_required_threshold,
-                minimum: minimum_proposal_required_threshold,
-                maximum: maximum_proposal_required_threshold,
-            });
+            return Err(MarsError::InvalidParam {
+                param_name: "proposal_required_threshold".to_string(),
+                invalid_value: self.proposal_required_threshold.to_string(),
+                predicate: format!(
+                    ">= {} and <= {}",
+                    minimum_proposal_required_threshold, maximum_proposal_required_threshold
+                ),
+            }
+            .into());
         }
 
         Ok(())
@@ -246,7 +251,7 @@ pub mod error {
     use cosmwasm_std::StdError;
     use thiserror::Error;
 
-    use crate::{error::MarsError, math::decimal::Decimal};
+    use crate::error::MarsError;
 
     #[derive(Error, Debug, PartialEq)]
     pub enum ContractError {
@@ -278,13 +283,6 @@ pub mod error {
         ExecuteProposalDelayNotEnded {},
         #[error("Proposal has expired")]
         ExecuteProposalExpired {},
-
-        #[error("Proposal required threshold {proposal_required_threshold} must be between {minimum} and {maximum}")]
-        ProposalRequiredThresholdOutOfRange {
-            proposal_required_threshold: Decimal,
-            minimum: Decimal,
-            maximum: Decimal,
-        },
     }
 
     impl ContractError {
