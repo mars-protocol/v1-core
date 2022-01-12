@@ -40,12 +40,8 @@ impl Config {
         let maximum_proposal_required_threshold =
             Decimal::percent(MAXIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE);
 
-        if !(self
-            .proposal_required_threshold
-            .ge(&minimum_proposal_required_threshold)
-            && self
-                .proposal_required_threshold
-                .le(&maximum_proposal_required_threshold))
+        if !(self.proposal_required_threshold >= minimum_proposal_required_threshold
+            && self.proposal_required_threshold <= maximum_proposal_required_threshold)
         {
             return Err(ContractError::ProposalRequiredThresholdOutOfRange {
                 proposal_required_threshold: self.proposal_required_threshold,
