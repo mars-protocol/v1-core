@@ -422,8 +422,8 @@ mod tests {
         let base_config = CreateOrUpdateConfig {
             owner: Some("owner".to_string()),
             address_provider_address: Some("address_provider".to_string()),
-            safety_fund_fee_share: None,
-            treasury_fee_share: None,
+            safety_fund_fee_share: Some(Decimal::from_ratio(2u128, 10u128)),
+            treasury_fee_share: Some(Decimal::from_ratio(1u128, 10u128)),
             astroport_factory_address: Some("astroport".to_string()),
             astroport_max_spread: Some(astroport_max_spread),
         };
@@ -447,12 +447,30 @@ mod tests {
         assert_eq!(response, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
-        // init config with safety_fund_fee_share and treasury_fee_share greater than 1
+        // init config with safety_fund_fee_share greater than 1
         // *
         let mut safety_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         let config = CreateOrUpdateConfig {
             safety_fund_fee_share: Some(safety_fund_fee_share),
+            ..base_config.clone()
+        };
+        let msg = InstantiateMsg { config };
+        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(
+            response,
+            ConfigError::Mars(MarsError::InvalidParam {
+                param_name: "safety_fund_fee_share".to_string(),
+                invalid_value: "1.1".to_string(),
+                predicate: "<= 1".to_string(),
+            })
+            .into()
+        );
+
+        // *
+        // init config with treasury_fee_share greater than 1
+        // *
+        let mut treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
+        let config = CreateOrUpdateConfig {
             treasury_fee_share: Some(treasury_fee_share),
             ..base_config.clone()
         };
@@ -460,9 +478,10 @@ mod tests {
         let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             response,
-            ConfigError::Mars(MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
-                invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
+            ConfigError::Mars(MarsError::InvalidParam {
+                param_name: "treasury_fee_share".to_string(),
+                invalid_value: "1.2".to_string(),
+                predicate: "<= 1".to_string(),
             })
             .into()
         );
@@ -536,13 +555,33 @@ mod tests {
         assert_eq!(error_res, MarsError::Unauthorized {}.into());
 
         // *
-        // update config with safety_fund_fee_share, treasury_fee_share greater than 1
+        // update config with safety_fund_fee_share greater than 1
         // *
         safety_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
-        treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
             safety_fund_fee_share: Some(safety_fund_fee_share),
+            ..base_config.clone()
+        };
+        let msg = ExecuteMsg::UpdateConfig { config };
+        let info = mock_info("owner");
+        let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(
+            error_res,
+            ConfigError::Mars(MarsError::InvalidParam {
+                param_name: "safety_fund_fee_share".to_string(),
+                invalid_value: "1.1".to_string(),
+                predicate: "<= 1".to_string(),
+            })
+            .into()
+        );
+
+        // *
+        // update config with treasury_fee_share greater than 1
+        // *
+        treasury_fee_share = Decimal::from_ratio(12u128, 10u128);
+        let config = CreateOrUpdateConfig {
+            owner: None,
             treasury_fee_share: Some(treasury_fee_share),
             ..base_config.clone()
         };
@@ -551,9 +590,10 @@ mod tests {
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
-            ConfigError::Mars(MarsError::ParamsNotLessOrEqualOne {
-                expected_params: "safety_fund_fee_share, treasury_fee_share".to_string(),
-                invalid_params: "safety_fund_fee_share, treasury_fee_share".to_string()
+            ConfigError::Mars(MarsError::InvalidParam {
+                param_name: "treasury_fee_share".to_string(),
+                invalid_value: "1.2".to_string(),
+                predicate: "<= 1".to_string(),
             })
             .into()
         );

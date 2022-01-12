@@ -2,12 +2,13 @@ use cosmwasm_std::{Addr, CosmosMsg, Uint128};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::helpers::all_conditions_valid;
+use crate::helpers::assert_param_le_one;
 use crate::math::decimal::Decimal;
 
 use self::error::ContractError;
 
 const MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 50;
+const MAXIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 100;
 
 /// Council global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -32,36 +33,28 @@ pub struct Config {
 
 impl Config {
     pub fn validate(&self) -> Result<(), ContractError> {
-        let conditions_and_names = vec![
-            (
-                Self::less_or_equal_one(&self.proposal_required_quorum),
-                "proposal_required_quorum",
-            ),
-            (
-                Self::less_or_equal_one(&self.proposal_required_threshold),
-                "proposal_required_threshold",
-            ),
-        ];
-        all_conditions_valid(conditions_and_names)?;
+        assert_param_le_one(&self.proposal_required_quorum, "proposal_required_quorum")?;
 
         let minimum_proposal_required_threshold =
             Decimal::percent(MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE);
+        let maximum_proposal_required_threshold =
+            Decimal::percent(MAXIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE);
 
-        if self
+        if !(self
             .proposal_required_threshold
-            .le(&minimum_proposal_required_threshold)
+            .ge(&minimum_proposal_required_threshold)
+            && self
+                .proposal_required_threshold
+                .le(&maximum_proposal_required_threshold))
         {
             return Err(ContractError::ProposalRequiredThresholdOutOfRange {
                 proposal_required_threshold: self.proposal_required_threshold,
                 minimum: minimum_proposal_required_threshold,
+                maximum: maximum_proposal_required_threshold,
             });
         }
 
         Ok(())
-    }
-
-    fn less_or_equal_one(value: &Decimal) -> bool {
-        value.le(&Decimal::one())
     }
 }
 
@@ -290,10 +283,11 @@ pub mod error {
         #[error("Proposal has expired")]
         ExecuteProposalExpired {},
 
-        #[error("Proposal required threshold {proposal_required_threshold} must be between {minimum} and 1")]
+        #[error("Proposal required threshold {proposal_required_threshold} must be between {minimum} and {maximum}")]
         ProposalRequiredThresholdOutOfRange {
             proposal_required_threshold: Decimal,
             minimum: Decimal,
+            maximum: Decimal,
         },
     }
 

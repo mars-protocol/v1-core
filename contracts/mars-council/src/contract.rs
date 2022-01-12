@@ -706,7 +706,7 @@ mod tests {
             assert_eq!(error_res, MarsError::InstantiateParamsUnavailable {}.into());
         }
 
-        // init with proposal_required_quorum, proposal_required_threshold greater than 1
+        // init with proposal_required_quorum greater than 1
         {
             let config = CreateOrUpdateConfig {
                 address_provider_address: Some(String::from("address_provider")),
@@ -715,8 +715,8 @@ mod tests {
                 proposal_effective_delay: Some(1),
                 proposal_expiration_period: Some(1),
                 proposal_required_deposit: Some(Uint128::new(1)),
-                proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
-                proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+                proposal_required_quorum: Some(Decimal::percent(101)),
+                proposal_required_threshold: Some(Decimal::percent(50)),
             };
             let msg = InstantiateMsg { config };
             let env = cosmwasm_std::testing::mock_env();
@@ -724,11 +724,10 @@ mod tests {
             let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                MarsError::ParamsNotLessOrEqualOne {
-                    expected_params: "proposal_required_quorum, proposal_required_threshold"
-                        .to_string(),
-                    invalid_params: "proposal_required_quorum, proposal_required_threshold"
-                        .to_string()
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_quorum".to_string(),
+                    invalid_value: Decimal::percent(101).to_string(),
+                    predicate: "<= 1".to_string(),
                 }
                 .into()
             );
@@ -755,6 +754,33 @@ mod tests {
                 ContractError::ProposalRequiredThresholdOutOfRange {
                     proposal_required_threshold: Decimal::percent(49),
                     minimum: Decimal::percent(50),
+                    maximum: Decimal::percent(100),
+                }
+            );
+        }
+
+        // init with proposal_required_threshold greater than 100%
+        {
+            let config = CreateOrUpdateConfig {
+                address_provider_address: Some(String::from("address_provider")),
+
+                proposal_voting_period: Some(1),
+                proposal_effective_delay: Some(1),
+                proposal_expiration_period: Some(1),
+                proposal_required_deposit: Some(Uint128::new(1)),
+                proposal_required_quorum: Some(Decimal::percent(50)),
+                proposal_required_threshold: Some(Decimal::percent(101)),
+            };
+            let msg = InstantiateMsg { config };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info("someone");
+            let error_res = instantiate(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                ContractError::ProposalRequiredThresholdOutOfRange {
+                    proposal_required_threshold: Decimal::percent(101),
+                    minimum: Decimal::percent(50),
+                    maximum: Decimal::percent(100),
                 }
             );
         }
@@ -768,7 +794,7 @@ mod tests {
                 proposal_effective_delay: Some(1),
                 proposal_expiration_period: Some(1),
                 proposal_required_deposit: Some(Uint128::new(1)),
-                proposal_required_threshold: Some(Decimal::one()),
+                proposal_required_threshold: Some(Decimal::percent(50)),
                 proposal_required_quorum: Some(Decimal::one()),
             };
             let msg = InstantiateMsg { config };
@@ -814,12 +840,11 @@ mod tests {
         let _res = instantiate(deps.as_mut(), env, info, msg).unwrap();
 
         // *
-        // update config with proposal_required_quorum, proposal_required_threshold greater than 1
+        // update config with proposal_required_quorum greater than 1
         // *
         {
             let config = CreateOrUpdateConfig {
-                proposal_required_quorum: Some(Decimal::from_ratio(11u128, 10u128)),
-                proposal_required_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
+                proposal_required_quorum: Some(Decimal::percent(101)),
                 ..init_config.clone()
             };
             let msg = UpdateConfig { config };
@@ -828,11 +853,10 @@ mod tests {
             let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
             assert_eq!(
                 error_res,
-                MarsError::ParamsNotLessOrEqualOne {
-                    expected_params: "proposal_required_quorum, proposal_required_threshold"
-                        .to_string(),
-                    invalid_params: "proposal_required_quorum, proposal_required_threshold"
-                        .to_string()
+                MarsError::InvalidParam {
+                    param_name: "proposal_required_quorum".to_string(),
+                    invalid_value: Decimal::percent(101).to_string(),
+                    predicate: "<= 1".to_string(),
                 }
                 .into()
             );
@@ -855,6 +879,29 @@ mod tests {
                 ContractError::ProposalRequiredThresholdOutOfRange {
                     proposal_required_threshold: Decimal::percent(49),
                     minimum: Decimal::percent(50),
+                    maximum: Decimal::percent(100),
+                }
+            );
+        }
+
+        // *
+        // update config with proposal_required_threshold greater than 100%
+        // *
+        {
+            let config = CreateOrUpdateConfig {
+                proposal_required_threshold: Some(Decimal::percent(101)),
+                ..init_config.clone()
+            };
+            let msg = UpdateConfig { config };
+            let env = cosmwasm_std::testing::mock_env();
+            let info = mock_info(MOCK_CONTRACT_ADDR);
+            let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
+            assert_eq!(
+                error_res,
+                ContractError::ProposalRequiredThresholdOutOfRange {
+                    proposal_required_threshold: Decimal::percent(101),
+                    minimum: Decimal::percent(50),
+                    maximum: Decimal::percent(100),
                 }
             );
         }
