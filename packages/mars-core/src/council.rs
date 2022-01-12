@@ -7,8 +7,8 @@ use crate::math::decimal::Decimal;
 
 use self::error::ContractError;
 
-const MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 50;
-const MAXIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 100;
+pub const MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 50;
+pub const MAXIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE: u64 = 100;
 
 /// Council global configuration
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

@@ -2493,7 +2493,7 @@ mod tests {
         // init asset with max_loan_to_value greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                max_loan_to_value: Some(Decimal::from_ratio(110u128, 10u128)),
+                max_loan_to_value: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::InitAsset {
@@ -2510,7 +2510,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "max_loan_to_value".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()
@@ -2521,7 +2521,7 @@ mod tests {
         // init asset with liquidation_threshold greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                liquidation_threshold: Some(Decimal::from_ratio(110u128, 10u128)),
+                liquidation_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::InitAsset {
@@ -2538,7 +2538,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "liquidation_threshold".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()
@@ -2549,7 +2549,7 @@ mod tests {
         // init asset with liquidation_bonus greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                liquidation_bonus: Some(Decimal::from_ratio(110u128, 10u128)),
+                liquidation_bonus: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::InitAsset {
@@ -2566,7 +2566,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "liquidation_bonus".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()
@@ -3006,7 +3006,7 @@ mod tests {
         // update asset with max_loan_to_value greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                max_loan_to_value: Some(Decimal::from_ratio(110u128, 10u128)),
+                max_loan_to_value: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -3022,7 +3022,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "max_loan_to_value".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()
@@ -3033,7 +3033,7 @@ mod tests {
         // update asset with liquidation_threshold greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                liquidation_threshold: Some(Decimal::from_ratio(110u128, 10u128)),
+                liquidation_threshold: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -3049,7 +3049,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "liquidation_threshold".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()
@@ -3060,7 +3060,7 @@ mod tests {
         // update asset with liquidation_bonus greater than 1
         {
             let invalid_asset_params = InitOrUpdateAssetParams {
-                liquidation_bonus: Some(Decimal::from_ratio(110u128, 10u128)),
+                liquidation_bonus: Some(Decimal::from_ratio(11u128, 10u128)),
                 ..asset_params.clone()
             };
             let msg = ExecuteMsg::UpdateAsset {
@@ -3076,7 +3076,7 @@ mod tests {
                 ContractError::Market(
                     MarsError::InvalidParam {
                         param_name: "liquidation_bonus".to_string(),
-                        invalid_value: Decimal::from_ratio(110u128, 10u128).to_string(),
+                        invalid_value: "1.1".to_string(),
                         predicate: "<= 1".to_string(),
                     }
                     .into()

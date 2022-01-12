@@ -669,6 +669,7 @@ mod tests {
     use super::*;
     use cosmwasm_std::testing::{MockApi, MockStorage, MOCK_CONTRACT_ADDR};
     use cosmwasm_std::{Coin, OwnedDeps, StdError, SubMsg};
+    use mars_core::council::MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE;
     use mars_core::math::decimal::Decimal;
     use mars_core::testing::{
         mock_dependencies, mock_env, mock_info, MarsMockQuerier, MockEnvParams,
@@ -726,7 +727,7 @@ mod tests {
                 error_res,
                 MarsError::InvalidParam {
                     param_name: "proposal_required_quorum".to_string(),
-                    invalid_value: Decimal::percent(101).to_string(),
+                    invalid_value: "1.01".to_string(),
                     predicate: "<= 1".to_string(),
                 }
                 .into()
@@ -794,7 +795,9 @@ mod tests {
                 proposal_effective_delay: Some(1),
                 proposal_expiration_period: Some(1),
                 proposal_required_deposit: Some(Uint128::new(1)),
-                proposal_required_threshold: Some(Decimal::percent(50)),
+                proposal_required_threshold: Some(Decimal::percent(
+                    MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE,
+                )),
                 proposal_required_quorum: Some(Decimal::one()),
             };
             let msg = InstantiateMsg { config };
@@ -829,7 +832,9 @@ mod tests {
             proposal_effective_delay: Some(11),
             proposal_expiration_period: Some(12),
             proposal_required_deposit: Some(Uint128::new(111)),
-            proposal_required_threshold: Some(Decimal::one()),
+            proposal_required_threshold: Some(Decimal::percent(
+                MINIMUM_PROPOSAL_REQUIRED_THRESHOLD_PERCENTAGE,
+            )),
             proposal_required_quorum: Some(Decimal::one()),
         };
         let msg = InstantiateMsg {
@@ -855,7 +860,7 @@ mod tests {
                 error_res,
                 MarsError::InvalidParam {
                     param_name: "proposal_required_quorum".to_string(),
-                    invalid_value: Decimal::percent(101).to_string(),
+                    invalid_value: "1.01".to_string(),
                     predicate: "<= 1".to_string(),
                 }
                 .into()
