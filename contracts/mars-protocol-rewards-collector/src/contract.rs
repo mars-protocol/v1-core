@@ -428,6 +428,8 @@ mod tests {
             astroport_max_spread: Some(astroport_max_spread),
         };
 
+        let info = mock_info("owner");
+
         // *
         // init config with empty params
         // *
@@ -442,9 +444,8 @@ mod tests {
         let msg = InstantiateMsg {
             config: empty_config,
         };
-        let info = mock_info("owner");
-        let response = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
-        assert_eq!(response, MarsError::InstantiateParamsUnavailable {}.into());
+        let err = instantiate(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(err, MarsError::InstantiateParamsUnavailable {}.into());
 
         // *
         // init config with safety_fund_fee_share greater than 1
@@ -460,7 +461,7 @@ mod tests {
             response,
             ConfigError::Mars(MarsError::InvalidParam {
                 param_name: "safety_fund_fee_share".to_string(),
-                invalid_value: "1.1".to_string(),
+                invalid_value: safety_fund_fee_share.to_string(),
                 predicate: "<= 1".to_string(),
             })
             .into()
@@ -480,7 +481,7 @@ mod tests {
             response,
             ConfigError::Mars(MarsError::InvalidParam {
                 param_name: "treasury_fee_share".to_string(),
-                invalid_value: "1.2".to_string(),
+                invalid_value: treasury_fee_share.to_string(),
                 predicate: "<= 1".to_string(),
             })
             .into()
@@ -557,6 +558,8 @@ mod tests {
         // *
         // update config with safety_fund_fee_share greater than 1
         // *
+        let info = mock_info("owner");
+
         safety_fund_fee_share = Decimal::from_ratio(11u128, 10u128);
         let config = CreateOrUpdateConfig {
             owner: None,
@@ -564,13 +567,12 @@ mod tests {
             ..base_config.clone()
         };
         let msg = ExecuteMsg::UpdateConfig { config };
-        let info = mock_info("owner");
         let error_res = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
         assert_eq!(
             error_res,
             ConfigError::Mars(MarsError::InvalidParam {
                 param_name: "safety_fund_fee_share".to_string(),
-                invalid_value: "1.1".to_string(),
+                invalid_value: safety_fund_fee_share.to_string(),
                 predicate: "<= 1".to_string(),
             })
             .into()
@@ -592,7 +594,7 @@ mod tests {
             error_res,
             ConfigError::Mars(MarsError::InvalidParam {
                 param_name: "treasury_fee_share".to_string(),
-                invalid_value: "1.2".to_string(),
+                invalid_value: treasury_fee_share.to_string(),
                 predicate: "<= 1".to_string(),
             })
             .into()
