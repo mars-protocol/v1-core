@@ -1271,9 +1271,6 @@ pub fn execute_repay(
     let debt_amount_scaled_delta =
         debt_amount_scaled_before.checked_sub(debt_amount_scaled_after)?;
 
-    if debt_amount_scaled_delta > market.debt_total_scaled {
-        return Err(ContractError::CannotRepayMoreThanDebt {});
-    }
     market.debt_total_scaled = market
         .debt_total_scaled
         .checked_sub(debt_amount_scaled_delta)?;
