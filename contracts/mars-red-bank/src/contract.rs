@@ -1351,7 +1351,7 @@ pub fn execute_liquidate(
     }
 
     // check if user has outstanding debt in the deposited asset that needs to be repayed
-    let user_debt = DEBTS.load(
+    let mut user_debt = DEBTS.load(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
     )?;
@@ -1475,23 +1475,32 @@ pub fn execute_liquidate(
         get_scaled_debt_amount(debt_amount_to_repay, &debt_market, env.block.time.seconds())?;
 
     // update user and market debt
-    let mut debt = DEBTS.load(
-        deps.storage,
-        (debt_asset_reference.as_slice(), &user_address),
-    )?;
     // NOTE: Should be > 0 as amount to repay is capped by the close factor
-    debt.amount_scaled = debt
+    let underlying_debt_amount_remaining =
+        user_debt_asset_total_debt.checked_sub(debt_amount_to_repay)?;
+    let debt_amount_scaled_remaining = get_scaled_debt_amount(
+        underlying_debt_amount_remaining,
+        &debt_market,
+        env.block.time.seconds(),
+    )?;
+    let debt_amount_scaled_delta = user_debt
         .amount_scaled
-        .checked_sub(debt_amount_to_repay_scaled)?;
+        .checked_sub(debt_amount_scaled_remaining)?;
+    println!("PIOBAB, OLD method, debt_amount_to_repay_scaled: {}", debt_amount_to_repay_scaled);
+    println!("PIOBAB, debt_amount_scaled_delta: {}", debt_amount_scaled_delta);
+    let amount_scaled = user_debt.amount_scaled.checked_sub(debt_amount_to_repay_scaled)?;
+    user_debt.amount_scaled = debt_amount_scaled_remaining;
+    println!("PIOBAB, OLD method, amount_scaled: {}", amount_scaled);
+    println!("PIOBAB, amount_scaled: {}", debt_amount_scaled_remaining);
     DEBTS.save(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
-        &debt,
+        &user_debt,
     )?;
 
     let debt_market_debt_total_scaled_after = debt_market
         .debt_total_scaled
-        .checked_sub(debt_amount_to_repay_scaled)?;
+        .checked_sub(debt_amount_scaled_delta)?;
 
     // 6. Update markets depending on whether the collateral and debt markets are the same
     // and whether the liquidator receives ma_tokens (no change in liquidity) or underlying asset
