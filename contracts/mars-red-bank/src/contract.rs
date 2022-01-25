@@ -1511,20 +1511,8 @@ pub fn execute_liquidate(
     let debt_amount_scaled_delta = user_debt
         .amount_scaled
         .checked_sub(debt_amount_scaled_remaining)?;
-    println!(
-        "PIOBAB, OLD method, debt_amount_to_repay_scaled: {}",
-        debt_amount_to_repay_scaled
-    );
-    println!(
-        "PIOBAB, debt_amount_scaled_delta: {}",
-        debt_amount_scaled_delta
-    );
-    let amount_scaled = user_debt
-        .amount_scaled
-        .checked_sub(debt_amount_to_repay_scaled)?;
+
     user_debt.amount_scaled = debt_amount_scaled_remaining;
-    println!("PIOBAB, OLD method, amount_scaled: {}", amount_scaled);
-    println!("PIOBAB, amount_scaled: {}", debt_amount_scaled_remaining);
     DEBTS.save(
         deps.storage,
         (debt_asset_reference.as_slice(), &user_address),
