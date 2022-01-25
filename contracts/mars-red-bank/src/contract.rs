@@ -810,12 +810,31 @@ pub fn execute_withdraw(
     let asset_ma_addr = market.ma_token_address.clone();
     let withdrawer_balance_scaled =
         cw20_get_balance(&deps.querier, asset_ma_addr, withdrawer_addr.clone())?;
+    let underlying_withdrawer_balance = get_underlying_liquidity_amount(
+        withdrawer_balance_scaled,
+        &market,
+        env.block.time.seconds(),
+    )?;
 
     if withdrawer_balance_scaled.is_zero() {
         return Err(ContractError::UserNoBalance { asset: asset_label });
     }
 
-    let (withdraw_amount, withdraw_amount_scaled) = match amount {
+    let withdraw_amount = match amount {
+        Some(amount) => {
+            // Check user has sufficient balance to send back
+            if amount.is_zero() || amount > underlying_withdrawer_balance {
+                return Err(ContractError::InvalidWithdrawAmount { asset: asset_label });
+            };
+            amount
+        }
+        None => {
+            // If no amount is specified, the full balance is withdrawn
+            underlying_withdrawer_balance
+        }
+    };
+
+    /*let (withdraw_amount, withdraw_amount_scaled) = match amount {
         Some(amount) => {
             // Check user has sufficient balance to send back
             let amount_scaled =
@@ -834,7 +853,7 @@ pub fn execute_withdraw(
             )?;
             (withdrawer_balance, withdrawer_balance_scaled)
         }
-    };
+    };*/
 
     let config = CONFIG.load(deps.storage)?;
 
@@ -896,7 +915,7 @@ pub fn execute_withdraw(
     let mut response = Response::new();
 
     // if amount to withdraw equals the user's balance then unset collateral bit
-    if asset_as_collateral && withdraw_amount_scaled == withdrawer_balance_scaled {
+    if asset_as_collateral && withdraw_amount == underlying_withdrawer_balance {
         unset_bit(&mut withdrawer.collateral_assets, market.index)?;
         USERS.save(deps.storage, &withdrawer_addr, &withdrawer)?;
         response = response.add_event(build_collateral_position_changed_event(
@@ -924,6 +943,15 @@ pub fn execute_withdraw(
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     // burn maToken
+    let underlying_withdrawer_balance_remaining =
+        underlying_withdrawer_balance.checked_sub(withdraw_amount)?;
+    let withdrawer_balance_scaled_remaining = get_scaled_liquidity_amount(
+        underlying_withdrawer_balance_remaining,
+        &market,
+        env.block.time.seconds(),
+    )?;
+    let withdraw_amount_scaled =
+        withdrawer_balance_scaled.checked_sub(withdrawer_balance_scaled_remaining)?;
     response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
@@ -1486,9 +1514,17 @@ pub fn execute_liquidate(
     let debt_amount_scaled_delta = user_debt
         .amount_scaled
         .checked_sub(debt_amount_scaled_remaining)?;
-    println!("PIOBAB, OLD method, debt_amount_to_repay_scaled: {}", debt_amount_to_repay_scaled);
-    println!("PIOBAB, debt_amount_scaled_delta: {}", debt_amount_scaled_delta);
-    let amount_scaled = user_debt.amount_scaled.checked_sub(debt_amount_to_repay_scaled)?;
+    println!(
+        "PIOBAB, OLD method, debt_amount_to_repay_scaled: {}",
+        debt_amount_to_repay_scaled
+    );
+    println!(
+        "PIOBAB, debt_amount_scaled_delta: {}",
+        debt_amount_scaled_delta
+    );
+    let amount_scaled = user_debt
+        .amount_scaled
+        .checked_sub(debt_amount_to_repay_scaled)?;
     user_debt.amount_scaled = debt_amount_scaled_remaining;
     println!("PIOBAB, OLD method, amount_scaled: {}", amount_scaled);
     println!("PIOBAB, amount_scaled: {}", debt_amount_scaled_remaining);
