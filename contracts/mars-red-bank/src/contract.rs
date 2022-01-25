@@ -1211,17 +1211,15 @@ pub fn execute_repay(
         response,
     )?;
 
-    let mut repay_amount_scaled =
-        get_scaled_debt_amount(repay_amount, &market, env.block.time.seconds())?;
+    let debt_amount_scaled_before = debt.amount_scaled;
+    let underlying_debt_amount_before =
+        get_underlying_debt_amount(debt.amount_scaled, &market, env.block.time.seconds())?;
 
     // If repay amount exceeds debt, refund any excess amounts
     let mut refund_amount = Uint128::zero();
-    if repay_amount_scaled > debt.amount_scaled {
-        refund_amount = get_underlying_debt_amount(
-            repay_amount_scaled - debt.amount_scaled,
-            &market,
-            env.block.time.seconds(),
-        )?;
+    let mut underlying_debt_amount_after = Uint128::zero();
+    if repay_amount > underlying_debt_amount_before {
+        refund_amount = repay_amount - underlying_debt_amount_before;
         let refund_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
             user_address.clone(),
@@ -1230,16 +1228,27 @@ pub fn execute_repay(
             refund_amount,
         )?;
         response = response.add_message(refund_msg);
-        repay_amount_scaled = debt.amount_scaled;
+    } else {
+        underlying_debt_amount_after = underlying_debt_amount_before - repay_amount;
     }
 
-    debt.amount_scaled = debt.amount_scaled.checked_sub(repay_amount_scaled)?;
-    DEBTS.save(deps.storage, (asset_reference, &user_address), &debt)?;
+    let debt_amount_scaled_after = get_scaled_debt_amount(
+        underlying_debt_amount_after,
+        &market,
+        env.block.time.seconds(),
+    )?;
+    debt.amount_scaled = debt_amount_scaled_after;
+    DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
 
-    if repay_amount_scaled > market.debt_total_scaled {
+    let debt_amount_scaled_delta =
+        debt_amount_scaled_before.checked_sub(debt_amount_scaled_after)?;
+
+    if debt_amount_scaled_delta > market.debt_total_scaled {
         return Err(ContractError::CannotRepayMoreThanDebt {});
     }
-    market.debt_total_scaled = market.debt_total_scaled.checked_sub(repay_amount_scaled)?;
+    market.debt_total_scaled = market
+        .debt_total_scaled
+        .checked_sub(debt_amount_scaled_delta)?;
 
     response = update_interest_rates(
         &deps,
@@ -5558,17 +5567,12 @@ mod tests {
 
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        let expected_repay_amount_scaled = compute_scaled_amount(
-            Uint128::from(repay_amount),
-            expected_params_cw20.borrow_index,
-            ScalingOperation::Debt,
-        )
-        .unwrap();
-        let expected_refund_amount: u128 = (compute_underlying_amount(
-            expected_repay_amount_scaled - expected_debt_scaled_1_after_borrow_again,
-            expected_params_cw20.borrow_index,
-        )
-        .unwrap())
+        let expected_refund_amount: u128 = (Uint128::from(repay_amount)
+            - compute_underlying_amount(
+                expected_debt_scaled_1_after_borrow_again,
+                expected_params_cw20.borrow_index,
+            )
+            .unwrap())
         .into();
 
         assert_eq!(
