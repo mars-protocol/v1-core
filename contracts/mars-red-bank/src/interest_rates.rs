@@ -59,9 +59,16 @@ pub fn apply_accumulated_interests(
     }
 
     // Compute accrued protocol rewards
-    let previous_debt_total =
-        compute_underlying_amount(market.debt_total_scaled, previous_borrow_index)?;
-    let new_debt_total = compute_underlying_amount(market.debt_total_scaled, market.borrow_index)?;
+    let previous_debt_total = compute_underlying_amount(
+        market.debt_total_scaled,
+        previous_borrow_index,
+        ScalingOperation::Debt,
+    )?;
+    let new_debt_total = compute_underlying_amount(
+        market.debt_total_scaled,
+        market.borrow_index,
+        ScalingOperation::Debt,
+    )?;
 
     let borrow_interest_accrued = if new_debt_total > previous_debt_total {
         // debt stays constant between the application of the interest rate
@@ -130,6 +137,7 @@ pub fn get_underlying_liquidity_amount(
     compute_underlying_amount(
         amount_scaled,
         get_updated_liquidity_index(market, timestamp)?,
+        ScalingOperation::Liquidity,
     )
 }
 
@@ -156,7 +164,11 @@ pub fn get_underlying_debt_amount(
     market: &Market,
     timestamp: u64,
 ) -> StdResult<Uint128> {
-    compute_underlying_amount(amount_scaled, get_updated_borrow_index(market, timestamp)?)
+    compute_underlying_amount(
+        amount_scaled,
+        get_updated_borrow_index(market, timestamp)?,
+        ScalingOperation::Debt,
+    )
 }
 
 pub enum ScalingOperation {
@@ -188,11 +200,29 @@ pub fn compute_scaled_amount(
 
 /// Descales the amount introduced by `get_scaled_amount`, returning the underlying amount.
 /// As interest rate is accumulated the index used to descale the amount should be bigger than the one used to scale it.
-pub fn compute_underlying_amount(scaled_amount: Uint128, index: Decimal) -> StdResult<Uint128> {
+pub fn compute_underlying_amount(
+    scaled_amount: Uint128,
+    index: Decimal,
+    scaling_operation: ScalingOperation,
+) -> StdResult<Uint128> {
     // Multiply scaled amount by decimal (index)
     let before_factor = scaled_amount * index;
     // Descale by SCALING_FACTOR which is introduced when scaling the amount
-    let result = before_factor.checked_div(SCALING_FACTOR)?;
+    match scaling_operation {
+        ScalingOperation::Liquidity => {
+            let result = before_factor.checked_div(SCALING_FACTOR)?;
+            Ok(result)
+        }
+        ScalingOperation::Debt => checked_div_with_ceiling(before_factor, SCALING_FACTOR),
+    }
+}
+
+fn checked_div_with_ceiling(numerator: Uint128, denominator: Uint128) -> StdResult<Uint128> {
+    let mut result = numerator.checked_div(denominator)?;
+
+    if numerator.checked_rem(denominator)? > Uint128::zero() {
+        result += Uint128::from(1_u32);
+    }
 
     Ok(result)
 }
@@ -317,25 +347,29 @@ mod tests {
         let value = Uint128::new(5u128);
         let index = Decimal::from_ratio(3u128, 1u128);
         let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount = compute_underlying_amount(scaled_amount, index).unwrap();
+        let amount =
+            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
         assert_eq!(amount, value);
 
         let value = Uint128::new(99u128);
         let index = Decimal::from_ratio(33u128, 1u128);
         let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount = compute_underlying_amount(scaled_amount, index).unwrap();
+        let amount =
+            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
         assert_eq!(amount, value);
 
         let value = Uint128::new(9876542u128);
         let index = Decimal::from_ratio(3333u128, 10u128);
         let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount = compute_underlying_amount(scaled_amount, index).unwrap();
+        let amount =
+            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
         assert_eq!(amount, value);
 
         let value = Uint128::new(98765432199u128);
         let index = Decimal::from_ratio(1234567u128, 1000u128);
         let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount = compute_underlying_amount(scaled_amount, index).unwrap();
+        let amount =
+            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
         assert_eq!(amount, value);
     }
 }

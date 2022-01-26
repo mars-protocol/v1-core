@@ -3702,9 +3702,12 @@ mod tests {
         assert_eq!(new_market.indexes_last_updated, 1_500_000);
 
         // Interest rate should have been recomputed using new strategy and values
-        let expected_debt =
-            compute_underlying_amount(new_market.debt_total_scaled, new_market.borrow_index)
-                .unwrap();
+        let expected_debt = compute_underlying_amount(
+            new_market.debt_total_scaled,
+            new_market.borrow_index,
+            ScalingOperation::Debt,
+        )
+        .unwrap();
         let expected_liquidity = Uint128::new(asset_liquidity);
         let expected_utilization_rate =
             Decimal::from_ratio(expected_debt, expected_liquidity + expected_debt);
@@ -3733,9 +3736,12 @@ mod tests {
                 .add_attribute("liquidity_rate", expected_liquidity_rate.to_string())]
         );
 
-        let current_debt_total =
-            compute_underlying_amount(new_market.debt_total_scaled, new_market.borrow_index)
-                .unwrap();
+        let current_debt_total = compute_underlying_amount(
+            new_market.debt_total_scaled,
+            new_market.borrow_index,
+            ScalingOperation::Debt,
+        )
+        .unwrap();
         let interest_accrued = current_debt_total - asset_initial_debt;
         let expected_protocol_rewards = interest_accrued * market_before.reserve_factor;
         // mint message is sent because debt is non zero
@@ -4726,6 +4732,7 @@ mod tests {
             let token_1_weighted_lt_in_uusd = compute_underlying_amount(
                 ma_token_1_balance_scaled,
                 get_updated_liquidity_index(&market_1_initial, env.block.time.seconds()).unwrap(),
+                ScalingOperation::Liquidity,
             )
             .unwrap()
                 * market_1_initial.liquidation_threshold
@@ -4733,6 +4740,7 @@ mod tests {
             let token_3_weighted_lt_in_uusd = compute_underlying_amount(
                 ma_token_3_balance_scaled,
                 get_updated_liquidity_index(&market_3_initial, env.block.time.seconds()).unwrap(),
+                ScalingOperation::Liquidity,
             )
             .unwrap()
                 * market_3_initial.liquidation_threshold
@@ -4743,6 +4751,7 @@ mod tests {
             let total_collateralized_debt_in_uusd = compute_underlying_amount(
                 token_2_debt_scaled,
                 get_updated_borrow_index(&market_2_initial, env.block.time.seconds()).unwrap(),
+                ScalingOperation::Debt,
             )
             .unwrap()
                 * token_2_exchange_rate;
@@ -4899,6 +4908,7 @@ mod tests {
                 market_initial.indexes_last_updated + seconds_elapsed,
             )
             .unwrap(),
+            ScalingOperation::Debt,
         )
         .unwrap();
 
@@ -5518,6 +5528,7 @@ mod tests {
         let repay_amount: u128 = compute_underlying_amount(
             expected_debt_scaled_2_after_repay_some_2,
             expected_params_native.borrow_index,
+            ScalingOperation::Debt,
         )
         .unwrap()
         .into();
@@ -5616,6 +5627,7 @@ mod tests {
             - compute_underlying_amount(
                 expected_debt_scaled_1_after_borrow_again,
                 expected_params_cw20.borrow_index,
+                ScalingOperation::Debt,
             )
             .unwrap())
         .into();
@@ -5904,7 +5916,12 @@ mod tests {
             time_elapsed,
         )
         .unwrap();
-        let collateral = compute_underlying_amount(deposit_amount_scaled, liquidity_index).unwrap();
+        let collateral = compute_underlying_amount(
+            deposit_amount_scaled,
+            liquidity_index,
+            ScalingOperation::Liquidity,
+        )
+        .unwrap();
         let max_to_borrow = collateral * ltv;
         let msg = ExecuteMsg::Borrow {
             asset: Asset::Native {
@@ -5944,8 +5961,12 @@ mod tests {
 
         assert_eq!(
             valid_amount,
-            compute_underlying_amount(debt.amount_scaled, market_after_borrow.borrow_index)
-                .unwrap()
+            compute_underlying_amount(
+                debt.amount_scaled,
+                market_after_borrow.borrow_index,
+                ScalingOperation::Debt
+            )
+            .unwrap()
         );
     }
 
@@ -6013,6 +6034,7 @@ mod tests {
             let debt_total = compute_underlying_amount(
                 market_after_borrow.debt_total_scaled,
                 market_after_borrow.borrow_index,
+                ScalingOperation::Debt,
             )
             .unwrap();
             assert_eq!(debt_total, initial_liquidity.into());
@@ -6163,13 +6185,28 @@ mod tests {
             .set_cw20_balances(ma_token_address_3, &[(borrower_addr, balance_3.into())]);
 
         let max_borrow_allowed_in_uusd = (market_1_initial.max_loan_to_value
-            * compute_underlying_amount(balance_1, market_1_initial.liquidity_index).unwrap()
+            * compute_underlying_amount(
+                balance_1,
+                market_1_initial.liquidity_index,
+                ScalingOperation::Liquidity,
+            )
+            .unwrap()
             * exchange_rate_1)
             + (market_2_initial.max_loan_to_value
-                * compute_underlying_amount(balance_2, market_2_initial.liquidity_index).unwrap()
+                * compute_underlying_amount(
+                    balance_2,
+                    market_2_initial.liquidity_index,
+                    ScalingOperation::Liquidity,
+                )
+                .unwrap()
                 * exchange_rate_2)
             + (market_3_initial.max_loan_to_value
-                * compute_underlying_amount(balance_3, market_3_initial.liquidity_index).unwrap()
+                * compute_underlying_amount(
+                    balance_3,
+                    market_3_initial.liquidity_index,
+                    ScalingOperation::Liquidity,
+                )
+                .unwrap()
                 * exchange_rate_3);
         let exceeding_borrow_amount =
             Decimal::divide_uint128_by_decimal(max_borrow_allowed_in_uusd, exchange_rate_2)
@@ -6921,6 +6958,7 @@ mod tests {
             let user_debt_asset_total_debt = compute_underlying_amount(
                 expected_user_cw20_debt_scaled,
                 expected_debt_indices.borrow,
+                ScalingOperation::Debt,
             )
             .unwrap();
             // Since debt is being over_repayed, we expect to max out the liquidatable debt
@@ -7146,6 +7184,7 @@ mod tests {
             let user_collateral_balance = compute_underlying_amount(
                 user_collateral_balance_scaled,
                 expected_collateral_indices.liquidity,
+                ScalingOperation::Liquidity,
             )
             .unwrap();
 
@@ -7378,6 +7417,7 @@ mod tests {
             let user_collateral_balance = compute_underlying_amount(
                 user_collateral_balance_scaled,
                 expected_collateral_indices.liquidity,
+                ScalingOperation::Liquidity,
             )
             .unwrap();
 
@@ -9209,6 +9249,7 @@ mod tests {
             let token_1_weighted_lt_in_uusd = compute_underlying_amount(
                 ma_token_1_balance_scaled,
                 get_updated_liquidity_index(&market_1_initial, env.block.time.seconds()).unwrap(),
+                ScalingOperation::Liquidity,
             )
             .unwrap()
                 * market_1_initial.liquidation_threshold
@@ -9216,6 +9257,7 @@ mod tests {
             let token_2_weighted_lt_in_uusd = compute_underlying_amount(
                 ma_token_2_balance_scaled,
                 get_updated_liquidity_index(&market_2_initial, env.block.time.seconds()).unwrap(),
+                ScalingOperation::Liquidity,
             )
             .unwrap()
                 * market_2_initial.liquidation_threshold
@@ -9670,8 +9712,12 @@ mod tests {
             } else {
                 Uint128::zero()
             };
-        let dec_debt_total =
-            compute_underlying_amount(new_debt_total_scaled, expected_indices.borrow).unwrap();
+        let dec_debt_total = compute_underlying_amount(
+            new_debt_total_scaled,
+            expected_indices.borrow,
+            ScalingOperation::Debt,
+        )
+        .unwrap();
         let contract_current_balance = Uint128::from(initial_liquidity);
         let liquidity_taken = Uint128::from(deltas.less_liquidity);
         let dec_liquidity_total = contract_current_balance - liquidity_taken;
@@ -9703,10 +9749,18 @@ mod tests {
         expected_indices: &TestExpectedIndices,
     ) -> Uint128 {
         let previous_borrow_index = market.borrow_index;
-        let previous_debt_total =
-            compute_underlying_amount(market.debt_total_scaled, previous_borrow_index).unwrap();
-        let current_debt_total =
-            compute_underlying_amount(market.debt_total_scaled, expected_indices.borrow).unwrap();
+        let previous_debt_total = compute_underlying_amount(
+            market.debt_total_scaled,
+            previous_borrow_index,
+            ScalingOperation::Debt,
+        )
+        .unwrap();
+        let current_debt_total = compute_underlying_amount(
+            market.debt_total_scaled,
+            expected_indices.borrow,
+            ScalingOperation::Debt,
+        )
+        .unwrap();
         let interest_accrued = if current_debt_total > previous_debt_total {
             current_debt_total - previous_debt_total
         } else {
