@@ -205,15 +205,21 @@ pub fn compute_underlying_amount(
     index: Decimal,
     scaling_operation: ScalingOperation,
 ) -> StdResult<Uint128> {
-    // Multiply scaled amount by decimal (index)
-    let before_factor = scaled_amount * index;
     // Descale by SCALING_FACTOR which is introduced when scaling the amount
     match scaling_operation {
         ScalingOperation::Liquidity => {
+            // Multiply scaled amount by decimal (index)
+            let before_factor = scaled_amount * index;
             let result = before_factor.checked_div(SCALING_FACTOR)?;
             Ok(result)
         }
-        ScalingOperation::Debt => checked_div_with_ceiling(before_factor, SCALING_FACTOR),
+        ScalingOperation::Debt => {
+            // Multiply scaled amount by decimal (index) and ceil
+            let before_factor =
+                Decimal::multiply_uint128_by_decimal_and_ceil(scaled_amount, index)?;
+            let result = before_factor.checked_div(SCALING_FACTOR)?;
+            Ok(result)
+        }
     }
 }
 
