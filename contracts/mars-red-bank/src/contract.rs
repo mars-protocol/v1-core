@@ -3952,6 +3952,72 @@ mod tests {
     }
 
     #[test]
+    fn test_deposit_on_behalf_of() {
+        let initial_liquidity = 10000000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "somecoin")]);
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("matoken"),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            ..Default::default()
+        };
+        let market = th_init_market(deps.as_mut(), b"somecoin", &mock_market);
+
+        let depositor_addr = Addr::unchecked("depositor");
+        let another_user_addr = Addr::unchecked("another_user");
+        let deposit_amount = 110000;
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info(
+            depositor_addr.as_str(),
+            &[coin(deposit_amount, "somecoin")],
+        );
+        let msg = ExecuteMsg::DepositNative {
+            denom: String::from("somecoin"),
+            on_behalf_of: Some(another_user_addr.to_string()),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        let expected_mint_amount = compute_scaled_amount(
+            Uint128::from(deposit_amount),
+            market.liquidity_index,
+            ScalingOperation::Liquidity,
+        )
+        .unwrap();
+
+        // 'depositor' should not be saved
+        let _user = USERS.load(&deps.storage, &depositor_addr).unwrap_err();
+
+        // 'another_user' should have collateral bit set
+        let user = USERS.load(&deps.storage, &another_user_addr).unwrap();
+        assert!(get_bit(user.collateral_assets, market.index).unwrap());
+
+        // recipient should be `another_user`
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: "matoken".to_string(),
+                msg: to_binary(&Cw20ExecuteMsg::Mint {
+                    recipient: another_user_addr.to_string(),
+                    amount: expected_mint_amount.into(),
+                })
+                .unwrap(),
+                funds: vec![]
+            }))]
+        );
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "deposit"),
+                attr("asset", "somecoin"),
+                attr("sender", depositor_addr),
+                attr("user", another_user_addr),
+                attr("amount", deposit_amount.to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn test_withdraw_native() {
         // Withdraw native token
         let initial_available_liquidity = 12000000u128;
@@ -4248,6 +4314,114 @@ mod tests {
         assert_eq!(market.liquidity_rate, expected_params.liquidity_rate);
         assert_eq!(market.liquidity_index, expected_params.liquidity_index);
         assert_eq!(market.borrow_index, expected_params.borrow_index);
+    }
+
+    #[test]
+    fn test_withdraw_and_send_funds_to_another_user() {
+        // Withdraw cw20 token
+        let mut deps = th_setup(&[]);
+        let cw20_contract_addr = Addr::unchecked("somecontract");
+        let initial_available_liquidity = 12000000u128;
+
+        let ma_token_addr = Addr::unchecked("matoken");
+
+        let withdrawer_addr = Addr::unchecked("withdrawer");
+        let another_user_addr = Addr::unchecked("another_user");
+
+        deps.querier.set_cw20_balances(
+            cw20_contract_addr.clone(),
+            &[(
+                Addr::unchecked(MOCK_CONTRACT_ADDR),
+                Uint128::new(initial_available_liquidity),
+            )],
+        );
+        deps.querier.set_cw20_balances(
+            ma_token_addr.clone(),
+            &[(
+                withdrawer_addr.clone(),
+                Uint128::new(2_000_000) * SCALING_FACTOR,
+            )],
+        );
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("matoken"),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            reserve_factor: Decimal::zero(),
+            asset_type: AssetType::Cw20,
+            ..Default::default()
+        };
+        let withdraw_amount = Uint128::from(20000u128);
+
+        let market_initial =
+            th_init_market(deps.as_mut(), cw20_contract_addr.as_bytes(), &mock_market);
+        MARKET_REFERENCES_BY_MA_TOKEN
+            .save(
+                deps.as_mut().storage,
+                &ma_token_addr,
+                &cw20_contract_addr.as_bytes().to_vec(),
+            )
+            .unwrap();
+
+        let user = User::default();
+        USERS
+            .save(deps.as_mut().storage, &withdrawer_addr, &user)
+            .unwrap();
+
+        let msg = ExecuteMsg::Withdraw {
+            asset: Asset::Cw20 {
+                contract_addr: cw20_contract_addr.to_string(),
+            },
+            amount: Some(withdraw_amount),
+            recipient: Some(another_user_addr.to_string()),
+        };
+
+        let env = mock_env(MockEnvParams::default());
+        let info = mock_info("withdrawer");
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        let withdraw_amount_scaled = compute_scaled_amount(
+            withdraw_amount,
+            market_initial.liquidity_index,
+            ScalingOperation::Liquidity,
+        )
+        .unwrap();
+
+        // Check if maToken is received by `another_user`
+        assert_eq!(
+            res.messages,
+            vec![
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: ma_token_addr.to_string(),
+                    msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
+                        user: withdrawer_addr.to_string(),
+                        amount: withdraw_amount_scaled.into(),
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
+                SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: cw20_contract_addr.to_string(),
+                    msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                        recipient: another_user_addr.to_string(),
+                        amount: withdraw_amount.into(),
+                    })
+                    .unwrap(),
+                    funds: vec![]
+                })),
+            ]
+        );
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "withdraw"),
+                attr("asset", "somecontract"),
+                attr("user", withdrawer_addr),
+                attr("recipient", another_user_addr),
+                attr("burn_amount", withdraw_amount_scaled.to_string()),
+                attr("withdraw_amount", withdraw_amount.to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -5412,6 +5586,157 @@ mod tests {
     }
 
     #[test]
+    fn test_repay_on_behalf_of() {
+        let available_liquidity_native = 1000000000u128;
+        let mut deps = th_setup(&[coin(available_liquidity_native, "borrowedcoinnative")]);
+
+        deps.querier
+            .set_oracle_price(b"depositedcoinnative".to_vec(), Decimal::one());
+        deps.querier
+            .set_oracle_price(b"borrowedcoinnative".to_vec(), Decimal::one());
+
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("borrowedcoinnative"), Uint128::new(100u128))],
+        );
+
+        let mock_market_1 = Market {
+            ma_token_address: Addr::unchecked("matoken1"),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let mock_market_2 = Market {
+            ma_token_address: Addr::unchecked("matoken2"),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(50u128, 100u128),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+
+        let market_1_initial =
+            th_init_market(deps.as_mut(), b"depositedcoinnative", &mock_market_1); // collateral
+        let market_2_initial = th_init_market(deps.as_mut(), b"borrowedcoinnative", &mock_market_2);
+
+        let borrower_addr = Addr::unchecked("borrower");
+        let user_addr = Addr::unchecked("user");
+
+        // Set user as having the market_1_initial (collateral) deposited
+        let mut user = User::default();
+
+        set_bit(&mut user.collateral_assets, market_1_initial.index).unwrap();
+        USERS
+            .save(deps.as_mut().storage, &borrower_addr, &user)
+            .unwrap();
+
+        // Set the querier to return a certain collateral balance
+        let deposit_coin_address = Addr::unchecked("matoken1");
+        deps.querier.set_cw20_balances(
+            deposit_coin_address,
+            &[(borrower_addr.clone(), Uint128::new(10000) * SCALING_FACTOR)],
+        );
+
+        // *
+        // 'borrower' borrows native coin
+        // *
+        let borrow_amount = 4000u128;
+        let env = mock_env(MockEnvParams::default());
+        let info = mock_info(borrower_addr.as_str());
+        let msg = ExecuteMsg::Borrow {
+            asset: Asset::Native {
+                denom: String::from("borrowedcoinnative"),
+            },
+            amount: Uint128::from(borrow_amount),
+            recipient: None,
+        };
+        let _res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
+        assert!(get_bit(user.borrowed_assets, market_2_initial.index).unwrap());
+
+        // *
+        // 'user' repays debt on behalf of 'borrower'
+        // *
+        let repay_amount = borrow_amount - 350u128;
+        let env = mock_env(MockEnvParams::default());
+        let info = cosmwasm_std::testing::mock_info(
+            user_addr.as_str(),
+            &[coin(repay_amount, "borrowedcoinnative")],
+        );
+        let msg = ExecuteMsg::RepayNative {
+            denom: String::from("borrowedcoinnative"),
+            on_behalf_of: Some(borrower_addr.to_string()),
+        };
+        let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
+
+        // 'user' should not be saved
+        let _user = USERS.load(&deps.storage, &user_addr).unwrap_err();
+
+        // Debt for 'user' should not exist
+        let debt = DEBTS
+            .may_load(&deps.storage, (b"borrowedcoinnative", &user_addr))
+            .unwrap();
+        assert!(debt.is_none());
+
+        let market_after_borrow = MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
+
+        // Debt for 'borrower' should be decreased by 'repay_amount'
+        let debt = DEBTS
+            .load(&deps.storage, (b"borrowedcoinnative", &borrower_addr))
+            .unwrap();
+        assert_eq!(
+            Uint128::from(borrow_amount - repay_amount),
+            compute_underlying_amount(debt.amount_scaled, market_after_borrow.borrow_index)
+                .unwrap()
+        );
+
+        // Check msgs and attributes
+        assert_eq!(res.messages, vec![]);
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "repay"),
+                attr("asset", "borrowedcoinnative"),
+                attr("sender", "user"),
+                attr("user", "borrower"),
+                attr("amount", repay_amount.to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_repay_uncollateralized_loan_on_behalf_of() {
+        let mut deps = th_setup(&[]);
+
+        let repayer_addr = Addr::unchecked("repayer");
+        let another_user_addr = Addr::unchecked("another_user");
+
+        UNCOLLATERALIZED_LOAN_LIMITS
+            .save(
+                deps.as_mut().storage,
+                (b"somecoin", &another_user_addr),
+                &Uint128::new(1000u128),
+            )
+            .unwrap();
+
+        let env = mock_env(MockEnvParams::default());
+        let info =
+            cosmwasm_std::testing::mock_info(repayer_addr.as_str(), &[coin(110000, "somecoin")]);
+        let msg = ExecuteMsg::RepayNative {
+            denom: "somecoin".to_string(),
+            on_behalf_of: Some(another_user_addr.to_string()),
+        };
+        let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
+        assert_eq!(
+            error_res,
+            ContractError::CannotRepayUncollateralizedLoanOnBehalfOf {}
+        );
+    }
+
+    #[test]
     fn test_borrow_uusd() {
         let initial_liquidity = 10000000;
         let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
@@ -5828,6 +6153,107 @@ mod tests {
             ContractError::BorrowNotEnabled {
                 asset: "somecoin".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn test_borrow_and_send_funds_to_another_user() {
+        let initial_liquidity = 10000000;
+        let mut deps = th_setup(&[coin(initial_liquidity, "uusd")]);
+
+        let borrower_addr = Addr::unchecked("borrower");
+        let another_user_addr = Addr::unchecked("another_user");
+
+        let mock_market = Market {
+            ma_token_address: Addr::unchecked("matoken"),
+            liquidity_index: Decimal::one(),
+            borrow_index: Decimal::one(),
+            max_loan_to_value: Decimal::from_ratio(5u128, 10u128),
+            debt_total_scaled: Uint128::zero(),
+            asset_type: AssetType::Native,
+            ..Default::default()
+        };
+        let market = th_init_market(deps.as_mut(), b"uusd", &mock_market);
+
+        // Set tax data for uusd
+        deps.querier.set_native_tax(
+            Decimal::from_ratio(1u128, 100u128),
+            &[(String::from("uusd"), Uint128::new(100u128))],
+        );
+
+        // Set user as having the market_collateral deposited
+        let deposit_amount_scaled = Uint128::new(100_000) * SCALING_FACTOR;
+        let mut user = User::default();
+        set_bit(&mut user.collateral_assets, market.index).unwrap();
+        USERS
+            .save(deps.as_mut().storage, &borrower_addr, &user)
+            .unwrap();
+
+        // Set the querier to return collateral balance
+        let deposit_coin_address = Addr::unchecked("matoken");
+        deps.querier.set_cw20_balances(
+            deposit_coin_address,
+            &[(borrower_addr.clone(), deposit_amount_scaled.into())],
+        );
+
+        let borrow_amount = Uint128::from(1000u128);
+        let msg = ExecuteMsg::Borrow {
+            asset: Asset::Native {
+                denom: "uusd".to_string(),
+            },
+            amount: borrow_amount,
+            recipient: Some(another_user_addr.to_string()),
+        };
+        let env = mock_env(MockEnvParams::default());
+        let info = mock_info("borrower");
+        let res = execute(deps.as_mut(), env, info, msg).unwrap();
+
+        let market_after_borrow = MARKETS.load(&deps.storage, b"uusd").unwrap();
+
+        // 'borrower' has bit set for the borrowed asset of the market
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
+        assert!(get_bit(user.borrowed_assets, market.index).unwrap());
+
+        // Debt for 'borrower' should exist
+        let debt = DEBTS
+            .load(&deps.storage, (b"uusd", &borrower_addr))
+            .unwrap();
+        assert_eq!(
+            borrow_amount,
+            compute_underlying_amount(debt.amount_scaled, market_after_borrow.borrow_index)
+                .unwrap()
+        );
+
+        // Debt for 'another_user' should not exist
+        let debt = DEBTS
+            .may_load(&deps.storage, (b"uusd", &another_user_addr))
+            .unwrap();
+        assert!(debt.is_none());
+
+        // Check msgs and attributes (funds should be sent to 'another_user')
+        assert_eq!(
+            res.messages,
+            vec![SubMsg::new(CosmosMsg::Bank(BankMsg::Send {
+                to_address: another_user_addr.to_string(),
+                amount: vec![deduct_tax(
+                    deps.as_ref(),
+                    Coin {
+                        denom: String::from("uusd"),
+                        amount: borrow_amount,
+                    }
+                )
+                .unwrap()],
+            }))]
+        );
+        assert_eq!(
+            res.attributes,
+            vec![
+                attr("action", "borrow"),
+                attr("asset", "uusd"),
+                attr("user", borrower_addr),
+                attr("recipient", another_user_addr),
+                attr("amount", borrow_amount.to_string()),
+            ]
         );
     }
 
