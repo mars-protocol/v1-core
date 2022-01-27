@@ -148,12 +148,12 @@ pub fn execute(
         ExecuteMsg::Withdraw {
             asset,
             amount,
-            recipient_address,
+            recipient: recipient_address,
         } => execute_withdraw(deps, env, info, asset, amount, recipient_address),
         ExecuteMsg::Borrow {
             asset,
             amount,
-            recipient_address,
+            recipient: recipient_address,
         } => execute_borrow(deps, env, info, asset, amount, recipient_address),
 
         ExecuteMsg::RepayNative {
@@ -694,17 +694,16 @@ pub fn execute_deposit(
     deps: DepsMut,
     env: Env,
     _info: MessageInfo,
-    depositor_address: Addr,
+    sender_address: Addr,
     on_behalf_of: Option<String>,
     asset_reference: &[u8],
     asset_label: &str,
     deposit_amount: Uint128,
 ) -> Result<Response, ContractError> {
-    let original_depositor_address = depositor_address.clone();
-    let depositor_address = if let Some(address) = on_behalf_of {
+    let user_address = if let Some(address) = on_behalf_of {
         deps.api.addr_validate(&address)?
     } else {
-        depositor_address
+        sender_address.clone()
     };
 
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
@@ -727,18 +726,18 @@ pub fn execute_deposit(
     }
 
     let mut user = USERS
-        .may_load(deps.storage, &depositor_address)?
+        .may_load(deps.storage, &user_address)?
         .unwrap_or_default();
 
     let mut response = Response::new();
     let has_deposited_asset = get_bit(user.collateral_assets, market.index)?;
     if !has_deposited_asset {
         set_bit(&mut user.collateral_assets, market.index)?;
-        USERS.save(deps.storage, &depositor_address, &user)?;
+        USERS.save(deps.storage, &user_address, &user)?;
         response = response.add_event(build_collateral_position_changed_event(
             asset_label,
             true,
-            depositor_address.to_string(),
+            user_address.to_string(),
         ));
     }
 
@@ -775,13 +774,13 @@ pub fn execute_deposit(
     response = response
         .add_attribute("action", "deposit")
         .add_attribute("asset", asset_label)
-        .add_attribute("user", original_depositor_address.as_str())
-        .add_attribute("on_behalf_of", depositor_address.as_str())
+        .add_attribute("sender", sender_address)
+        .add_attribute("user", user_address.as_str())
         .add_attribute("amount", deposit_amount)
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.into(),
             msg: to_binary(&Cw20ExecuteMsg::Mint {
-                recipient: depositor_address.into(),
+                recipient: user_address.into(),
                 amount: mint_amount,
             })?,
             funds: vec![],
@@ -1155,25 +1154,26 @@ pub fn execute_repay(
     deps: DepsMut,
     env: Env,
     _info: MessageInfo,
-    repayer_address: Addr,
+    sender_address: Addr,
     on_behalf_of: Option<String>,
     asset_reference: &[u8],
     asset_label: String,
     repay_amount: Uint128,
     asset_type: AssetType,
 ) -> Result<Response, ContractError> {
-    let original_repayer_address = repayer_address.clone();
-    let repayer_address = if let Some(address) = on_behalf_of {
+    let user_address = if let Some(address) = on_behalf_of {
         let on_behalf_of_addr = deps.api.addr_validate(&address)?;
         // Uncollateralized loans should not have 'on behalf of' because it creates accounting complexity for them
         match UNCOLLATERALIZED_LOAN_LIMITS
             .may_load(deps.storage, (asset_reference, &on_behalf_of_addr))?
         {
-            Some(limit) if !limit.is_zero() => repayer_address,
+            Some(limit) if !limit.is_zero() => {
+                return Err(ContractError::CannotRepayUncollateralizedLoanOnBehalfOf {})
+            }
             _ => on_behalf_of_addr,
         }
     } else {
-        repayer_address
+        sender_address.clone()
     };
 
     let mut market = MARKETS.load(deps.storage, asset_reference)?;
@@ -1188,7 +1188,7 @@ pub fn execute_repay(
     }
 
     // Check new debt
-    let mut debt = DEBTS.load(deps.storage, (asset_reference, &repayer_address))?;
+    let mut debt = DEBTS.load(deps.storage, (asset_reference, &user_address))?;
 
     if debt.amount_scaled.is_zero() {
         return Err(ContractError::CannotRepayZeroDebt {});
@@ -1224,7 +1224,7 @@ pub fn execute_repay(
         )?;
         let refund_msg = build_send_asset_with_tax_deduction_msg(
             deps.as_ref(),
-            repayer_address.clone(),
+            user_address.clone(),
             asset_label.clone(),
             asset_type,
             refund_amount,
@@ -1234,7 +1234,7 @@ pub fn execute_repay(
     }
 
     debt.amount_scaled = debt.amount_scaled.checked_sub(repay_amount_scaled)?;
-    DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
+    DEBTS.save(deps.storage, (asset_reference, &user_address), &debt)?;
 
     if repay_amount_scaled > market.debt_total_scaled {
         return Err(ContractError::CannotRepayMoreThanDebt {});
@@ -1253,21 +1253,21 @@ pub fn execute_repay(
 
     if debt.amount_scaled.is_zero() {
         // Remove asset from borrowed assets
-        let mut user = USERS.load(deps.storage, &repayer_address)?;
+        let mut user = USERS.load(deps.storage, &user_address)?;
         unset_bit(&mut user.borrowed_assets, market.index)?;
-        USERS.save(deps.storage, &repayer_address, &user)?;
+        USERS.save(deps.storage, &user_address, &user)?;
         response = response.add_event(build_debt_position_changed_event(
             &asset_label,
             false,
-            repayer_address.to_string(),
+            user_address.to_string(),
         ));
     }
 
     response = response
         .add_attribute("action", "repay")
         .add_attribute("asset", asset_label)
-        .add_attribute("user", original_repayer_address)
-        .add_attribute("on_behalf_of", repayer_address)
+        .add_attribute("sender", sender_address)
+        .add_attribute("user", user_address)
         .add_attribute("amount", repay_amount.checked_sub(refund_amount)?);
     Ok(response)
 }
@@ -3712,8 +3712,8 @@ mod tests {
             vec![
                 attr("action", "deposit"),
                 attr("asset", "somecoin"),
+                attr("sender", "depositor"),
                 attr("user", "depositor"),
-                attr("on_behalf_of", "depositor"),
                 attr("amount", deposit_amount.to_string()),
             ]
         );
@@ -3845,8 +3845,8 @@ mod tests {
             vec![
                 attr("action", "deposit"),
                 attr("asset", cw20_addr.clone()),
+                attr("sender", "depositor"),
                 attr("user", "depositor"),
-                attr("on_behalf_of", "depositor"),
                 attr("amount", deposit_amount.to_string()),
             ]
         );
@@ -4008,7 +4008,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: Some(withdraw_amount),
-            recipient_address: None,
+            recipient: None,
         };
 
         let env = mock_env_at_block_time(mock_market.indexes_last_updated + seconds_elapsed);
@@ -4160,7 +4160,7 @@ mod tests {
                 contract_addr: cw20_contract_addr.to_string(),
             },
             amount: Some(withdraw_amount),
-            recipient_address: None,
+            recipient: None,
         };
 
         let env = mock_env_at_block_time(mock_market.indexes_last_updated + seconds_elapsed);
@@ -4273,7 +4273,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: Some(Uint128::from(2000u128)),
-            recipient_address: None,
+            recipient: None,
         };
 
         let info = mock_info("withdrawer");
@@ -4307,7 +4307,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: Some(Uint128::new(2000)),
-            recipient_address: None,
+            recipient: None,
         };
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
@@ -4470,7 +4470,7 @@ mod tests {
                     denom: "token3".to_string(),
                 },
                 amount: Some(withdraw_amount),
-                recipient_address: None,
+                recipient: None,
             };
             let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg).unwrap_err();
             assert_eq!(
@@ -4488,7 +4488,7 @@ mod tests {
                     denom: "token3".to_string(),
                 },
                 amount: Some(withdraw_amount),
-                recipient_address: None,
+                recipient: None,
             };
             let res = execute(deps.as_mut(), env.clone(), info, msg).unwrap();
 
@@ -4587,7 +4587,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: None,
-            recipient_address: None,
+            recipient: None,
         };
 
         let env = mock_env_at_block_time(mock_market.indexes_last_updated + seconds_elapsed);
@@ -4726,7 +4726,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: None,
-            recipient_address: None,
+            recipient: None,
         };
 
         // normal address cannot withdraw without an existing position
@@ -4843,7 +4843,7 @@ mod tests {
                 contract_addr: cw20_contract_addr.to_string(),
             },
             amount: Uint128::from(borrow_amount),
-            recipient_address: None,
+            recipient: None,
         };
 
         let env = mock_env_at_block_time(block_time);
@@ -4939,7 +4939,7 @@ mod tests {
                 contract_addr: cw20_contract_addr.to_string(),
             },
             amount: Uint128::from(borrow_amount),
-            recipient_address: None,
+            recipient: None,
         };
 
         let env = mock_env_at_block_time(block_time);
@@ -5008,7 +5008,7 @@ mod tests {
                 denom: String::from("borrowedcoinnative"),
             },
             amount: Uint128::from(borrow_amount),
-            recipient_address: None,
+            recipient: None,
         };
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
@@ -5100,7 +5100,7 @@ mod tests {
                 denom: String::from("borrowedcoinnative"),
             },
             amount: Uint128::from(83968_u128),
-            recipient_address: None,
+            recipient: None,
         };
         let error_res = execute(deps.as_mut(), env, info, msg).unwrap_err();
         assert_eq!(
@@ -5157,8 +5157,8 @@ mod tests {
             vec![
                 attr("action", "repay"),
                 attr("asset", "borrowedcoinnative"),
+                attr("sender", "borrower"),
                 attr("user", "borrower"),
-                attr("on_behalf_of", "borrower"),
                 attr("amount", repay_amount.to_string()),
             ]
         );
@@ -5243,8 +5243,8 @@ mod tests {
             vec![
                 attr("action", "repay"),
                 attr("asset", "borrowedcoinnative"),
+                attr("sender", "borrower"),
                 attr("user", "borrower"),
-                attr("on_behalf_of", "borrower"),
                 attr("amount", repay_amount.to_string()),
             ]
         );
@@ -5346,8 +5346,8 @@ mod tests {
             vec![
                 attr("action", "repay"),
                 attr("asset", "borrowedcoincw20"),
+                attr("sender", "borrower"),
                 attr("user", "borrower"),
-                attr("on_behalf_of", "borrower"),
                 attr(
                     "amount",
                     Uint128::new(repay_amount - expected_refund_amount).to_string()
@@ -5471,7 +5471,7 @@ mod tests {
                 denom: "uusd".to_string(),
             },
             amount: max_to_borrow + Uint128::from(1u128),
-            recipient_address: None,
+            recipient: None,
         };
         let env = mock_env_at_block_time(new_block_time);
         let info = mock_info("borrower");
@@ -5487,7 +5487,7 @@ mod tests {
                 denom: "uusd".to_string(),
             },
             amount: valid_amount,
-            recipient_address: None,
+            recipient: None,
         };
         let env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -5565,7 +5565,7 @@ mod tests {
                     denom: "uusd".to_string(),
                 },
                 amount: initial_liquidity.into(),
-                recipient_address: None,
+                recipient: None,
             };
             let _res = execute(deps.as_mut(), env, info.clone(), msg).unwrap();
 
@@ -5590,7 +5590,7 @@ mod tests {
                     denom: "uusd".to_string(),
                 },
                 amount: 100u128.into(),
-                recipient_address: None,
+                recipient: None,
             };
             let error_res = execute(deps.as_mut(), env, info.clone(), msg).unwrap_err();
             assert_eq!(
@@ -5746,7 +5746,7 @@ mod tests {
                 denom: "depositedcoin2".to_string(),
             },
             amount: exceeding_borrow_amount,
-            recipient_address: None,
+            recipient: None,
         };
         let env = mock_env(MockEnvParams::default());
         let info = mock_info("borrower");
@@ -5762,7 +5762,7 @@ mod tests {
                 denom: "depositedcoin2".to_string(),
             },
             amount: permissible_borrow_amount,
-            recipient_address: None,
+            recipient: None,
         };
         execute(deps.as_mut(), env, info, borrow_msg).unwrap();
     }
@@ -5788,7 +5788,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: Uint128::new(1000),
-            recipient_address: None,
+            recipient: None,
         };
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
@@ -5820,7 +5820,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: Uint128::new(1000),
-            recipient_address: None,
+            recipient: None,
         };
         let error_res = execute(deps.as_mut(), env.clone(), info.clone(), msg.clone()).unwrap_err();
         assert_eq!(
@@ -7634,7 +7634,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: initial_borrow_amount,
-            recipient_address: None,
+            recipient: None,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -7711,7 +7711,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: exceeding_limit,
-            recipient_address: None,
+            recipient: None,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");
@@ -7728,7 +7728,7 @@ mod tests {
                 denom: "somecoin".to_string(),
             },
             amount: remaining_limit,
-            recipient_address: None,
+            recipient: None,
         };
         let borrow_env = mock_env_at_block_time(block_time);
         let info = mock_info("borrower");

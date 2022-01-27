@@ -73,7 +73,7 @@ pub enum ExecuteMsg {
     DepositNative {
         /// Denom used in Terra (e.g: uluna, uusd)
         denom: String,
-        /// Deposit the funds for the user
+        /// Address that will receive the maTokens
         on_behalf_of: Option<String>,
     },
 
@@ -88,7 +88,7 @@ pub enum ExecuteMsg {
         /// burned in exchange for the equivalent asset amount.
         amount: Option<Uint128>,
         /// The address where the withdrawn amount is sent
-        recipient_address: Option<String>,
+        recipient: Option<String>,
     },
 
     /// Borrow Terra native coins. If borrow allowed, amount is added to caller's debt
@@ -101,7 +101,7 @@ pub enum ExecuteMsg {
         /// Amount to borrow
         amount: Uint128,
         /// The address where the borrowed amount is sent
-        recipient_address: Option<String>,
+        recipient: Option<String>,
     },
 
     /// Repay Terra native coins loan. Coins used to repay must be sent in the

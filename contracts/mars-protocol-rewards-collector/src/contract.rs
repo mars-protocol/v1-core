@@ -206,7 +206,7 @@ pub fn execute_withdraw_from_red_bank(
         msg: to_binary(&red_bank::msg::ExecuteMsg::Withdraw {
             asset,
             amount,
-            recipient_address: None,
+            recipient: None,
         })?,
         funds: vec![],
     });
@@ -786,7 +786,7 @@ mod tests {
                 msg: to_binary(&red_bank::msg::ExecuteMsg::Withdraw {
                     asset: asset.clone(),
                     amount: Some(amount),
-                    recipient_address: None
+                    recipient: None
                 })
                 .unwrap(),
                 funds: vec![]
