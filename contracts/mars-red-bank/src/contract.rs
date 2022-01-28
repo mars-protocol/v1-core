@@ -1266,7 +1266,7 @@ pub fn execute_repay(
         env.block.time.seconds(),
     )?;
     debt.amount_scaled = debt_amount_scaled_after;
-    DEBTS.save(deps.storage, (asset_reference, &repayer_address), &debt)?;
+    DEBTS.save(deps.storage, (asset_reference, &user_address), &debt)?;
 
     let debt_amount_scaled_delta =
         debt_amount_scaled_before.checked_sub(debt_amount_scaled_after)?;
