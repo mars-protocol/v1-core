@@ -4335,12 +4335,10 @@ mod tests {
                 Uint128::new(initial_available_liquidity),
             )],
         );
+        let ma_token_balance_scaled = Uint128::new(2_000_000) * SCALING_FACTOR;
         deps.querier.set_cw20_balances(
             ma_token_addr.clone(),
-            &[(
-                withdrawer_addr.clone(),
-                Uint128::new(2_000_000) * SCALING_FACTOR,
-            )],
+            &[(withdrawer_addr.clone(), ma_token_balance_scaled)],
         );
 
         let mock_market = Market {
@@ -4351,7 +4349,6 @@ mod tests {
             asset_type: AssetType::Cw20,
             ..Default::default()
         };
-        let withdraw_amount = Uint128::from(20000u128);
 
         let market_initial =
             th_init_market(deps.as_mut(), cw20_contract_addr.as_bytes(), &mock_market);
@@ -4372,7 +4369,7 @@ mod tests {
             asset: Asset::Cw20 {
                 contract_addr: cw20_contract_addr.to_string(),
             },
-            amount: Some(withdraw_amount),
+            amount: None,
             recipient: Some(another_user_addr.to_string()),
         };
 
@@ -4380,12 +4377,13 @@ mod tests {
         let info = mock_info("withdrawer");
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
 
-        let withdraw_amount_scaled = compute_scaled_amount(
-            withdraw_amount,
-            market_initial.liquidity_index,
-            ScalingOperation::Liquidity,
-        )
-        .unwrap();
+        // User should have unset bit for collateral after full withdraw
+        let user = USERS.load(&deps.storage, &withdrawer_addr).unwrap();
+        assert!(!get_bit(user.collateral_assets, market_initial.index).unwrap());
+
+        let withdraw_amount =
+            compute_underlying_amount(ma_token_balance_scaled, market_initial.liquidity_index)
+                .unwrap();
 
         // Check if maToken is received by `another_user`
         assert_eq!(
@@ -4395,7 +4393,7 @@ mod tests {
                     contract_addr: ma_token_addr.to_string(),
                     msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
                         user: withdrawer_addr.to_string(),
-                        amount: withdraw_amount_scaled.into(),
+                        amount: ma_token_balance_scaled.into(),
                     })
                     .unwrap(),
                     funds: vec![]
@@ -4418,7 +4416,7 @@ mod tests {
                 attr("asset", "somecontract"),
                 attr("user", withdrawer_addr),
                 attr("recipient", another_user_addr),
-                attr("burn_amount", withdraw_amount_scaled.to_string()),
+                attr("burn_amount", ma_token_balance_scaled.to_string()),
                 attr("withdraw_amount", withdraw_amount.to_string()),
             ]
         );
@@ -5660,7 +5658,7 @@ mod tests {
         // *
         // 'user' repays debt on behalf of 'borrower'
         // *
-        let repay_amount = borrow_amount - 350u128;
+        let repay_amount = borrow_amount;
         let env = mock_env(MockEnvParams::default());
         let info = cosmwasm_std::testing::mock_info(
             user_addr.as_str(),
@@ -5681,17 +5679,15 @@ mod tests {
             .unwrap();
         assert!(debt.is_none());
 
-        let market_after_borrow = MARKETS.load(&deps.storage, b"borrowedcoinnative").unwrap();
-
-        // Debt for 'borrower' should be decreased by 'repay_amount'
+        // Debt for 'borrower' should be repayed
         let debt = DEBTS
             .load(&deps.storage, (b"borrowedcoinnative", &borrower_addr))
             .unwrap();
-        assert_eq!(
-            Uint128::from(borrow_amount - repay_amount),
-            compute_underlying_amount(debt.amount_scaled, market_after_borrow.borrow_index)
-                .unwrap()
-        );
+        assert_eq!(debt.amount_scaled, Uint128::zero());
+
+        // 'borrower' should have unset bit for debt after full repay
+        let user = USERS.load(&deps.storage, &borrower_addr).unwrap();
+        assert!(!get_bit(user.borrowed_assets, market_2_initial.index).unwrap());
 
         // Check msgs and attributes
         assert_eq!(res.messages, vec![]);
