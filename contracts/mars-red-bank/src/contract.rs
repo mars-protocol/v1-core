@@ -1484,8 +1484,8 @@ pub fn execute_liquidate(
         .debt_total_scaled
         .checked_sub(debt_amount_to_repay_scaled)?;
 
-    // 6. Update markets depending on wether the collateral and debt markets are the same
-    // and wether the liquidator receives ma_tokens (no change in liquidity) or underlying asset
+    // 6. Update markets depending on whether the collateral and debt markets are the same
+    // and whether the liquidator receives ma_tokens (no change in liquidity) or underlying asset
     // (changes liquidity)
     if collateral_and_debt_are_the_same_asset {
         // NOTE: for the sake of clarity copy attributes from collateral market and
