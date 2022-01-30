@@ -23,12 +23,14 @@ impl Asset {
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
         match &self {
             Asset::Native { denom } => {
-                let asset_reference = denom.as_bytes().to_vec();
-                (denom.to_string(), asset_reference, AssetType::Native)
+                let lower_case_denom = denom.to_lowercase();
+                let asset_reference = lower_case_denom.as_bytes().to_vec();
+                (lower_case_denom, asset_reference, AssetType::Native)
             }
             Asset::Cw20 { contract_addr } => {
-                let asset_reference = contract_addr.as_bytes().to_vec();
-                (contract_addr.to_string(), asset_reference, AssetType::Cw20)
+                let lower_case_contract_addr = contract_addr.to_lowercase();
+                let asset_reference = lower_case_contract_addr.as_bytes().to_vec();
+                (lower_case_contract_addr, asset_reference, AssetType::Cw20)
             }
         }
     }
