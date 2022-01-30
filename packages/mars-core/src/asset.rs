@@ -23,9 +23,8 @@ impl Asset {
     pub fn get_attributes(&self) -> (String, Vec<u8>, AssetType) {
         match &self {
             Asset::Native { denom } => {
-                let lower_case_denom = denom.to_lowercase();
-                let asset_reference = lower_case_denom.as_bytes().to_vec();
-                (lower_case_denom, asset_reference, AssetType::Native)
+                let asset_reference = denom.as_bytes().to_vec();
+                (denom.clone(), asset_reference, AssetType::Native)
             }
             Asset::Cw20 { contract_addr } => {
                 let lower_case_contract_addr = contract_addr.to_lowercase();
@@ -38,7 +37,7 @@ impl Asset {
     /// Return bytes used as key for storage
     pub fn get_reference(&self) -> Vec<u8> {
         match &self {
-            Asset::Native { denom } => denom.to_lowercase().as_bytes().to_vec(),
+            Asset::Native { denom } => denom.as_bytes().to_vec(),
             Asset::Cw20 { contract_addr } => contract_addr.to_lowercase().as_bytes().to_vec(),
         }
     }

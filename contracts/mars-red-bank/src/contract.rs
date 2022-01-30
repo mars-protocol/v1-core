@@ -2863,20 +2863,6 @@ mod tests {
             assert_eq!(error_res, ContractError::AssetAlreadyInitialized {});
         }
 
-        // can't init native asset more than once with the upper case name
-        {
-            let msg = ExecuteMsg::InitAsset {
-                asset: Asset::Native {
-                    denom: "SomeAsset".to_string(),
-                },
-                asset_params: asset_params.clone(),
-                asset_symbol: None,
-            };
-            let info = mock_info("owner");
-            let error_res = execute(deps.as_mut(), env.clone(), info, msg).unwrap_err();
-            assert_eq!(error_res, ContractError::AssetAlreadyInitialized {});
-        }
-
         // callback comes back with created token
         {
             let msg = ExecuteMsg::InitAssetTokenCallback {

@@ -95,7 +95,7 @@ pub fn execute_set_asset_incentive(
         return Err(MarsError::Unauthorized {}.into());
     }
 
-    // use lower case address to don't duplicate assets
+    // use lower case address to prevent duplicate assets
     let ma_token_address = ma_token_address.to_lowercase();
     let ma_asset_address = deps.api.addr_validate(&ma_token_address)?;
 
