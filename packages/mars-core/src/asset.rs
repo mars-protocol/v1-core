@@ -38,8 +38,8 @@ impl Asset {
     /// Return bytes used as key for storage
     pub fn get_reference(&self) -> Vec<u8> {
         match &self {
-            Asset::Native { denom } => denom.as_bytes().to_vec(),
-            Asset::Cw20 { contract_addr } => contract_addr.as_bytes().to_vec(),
+            Asset::Native { denom } => denom.to_lowercase().as_bytes().to_vec(),
+            Asset::Cw20 { contract_addr } => contract_addr.to_lowercase().as_bytes().to_vec(),
         }
     }
 }
