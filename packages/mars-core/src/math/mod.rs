@@ -2,7 +2,10 @@ pub mod decimal;
 
 use cosmwasm_std::{StdResult, Uint128};
 
-pub fn uint128_checked_div_with_ceil(numerator: Uint128, denominator: Uint128) -> StdResult<Uint128>{
+pub fn uint128_checked_div_with_ceil(
+    numerator: Uint128,
+    denominator: Uint128,
+) -> StdResult<Uint128> {
     let mut result = numerator.checked_div(denominator)?;
 
     if numerator.checked_rem(denominator)? > Uint128::zero() {
