@@ -163,10 +163,10 @@ impl MarsMockQuerier {
         self.vesting_querier.vesting_address = address;
     }
 
-    pub fn set_locked_voting_power_at(&mut self, address: Addr, block: u64, voting_power: Uint128) {
+    pub fn set_locked_balance_at(&mut self, address: Addr, block: u64, balance: Uint128) {
         self.vesting_querier
-            .voting_power_at
-            .insert((address, block), voting_power);
+            .balance_at
+            .insert((address, block), balance);
     }
 
     pub fn set_astroport_pair(&mut self, pair_info: PairInfo) {

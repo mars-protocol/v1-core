@@ -7,15 +7,15 @@ use crate::vesting;
 pub struct VestingQuerier {
     /// vesting contract address to be used in queries
     pub vesting_address: Addr,
-    /// maps human address and a block to a specific voting power
-    pub voting_power_at: HashMap<(Addr, u64), Uint128>,
+    /// maps human address and a block to a specific Mars balance
+    pub balance_at: HashMap<(Addr, u64), Uint128>,
 }
 
 impl Default for VestingQuerier {
     fn default() -> Self {
         VestingQuerier {
             vesting_address: Addr::unchecked(""),
-            voting_power_at: HashMap::new(),
+            balance_at: HashMap::new(),
         }
     }
 }
@@ -35,15 +35,12 @@ impl VestingQuerier {
         }
 
         match query {
-            vesting::msg::QueryMsg::VotingPowerAt {
+            vesting::msg::QueryMsg::BalanceAt {
                 user_address,
                 block,
             } => {
-                match self
-                    .voting_power_at
-                    .get(&(Addr::unchecked(user_address), block))
-                {
-                    Some(voting_power) => Ok(to_binary(voting_power).into()).into(),
+                match self.balance_at.get(&(Addr::unchecked(user_address), block)) {
+                    Some(balance) => Ok(to_binary(balance).into()).into(),
                     // If voting power is not set, return zero
                     None => Ok(to_binary(&Uint128::zero()).into()).into(),
                 }

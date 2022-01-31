@@ -19,13 +19,4 @@ pub enum ContractError {
 
     #[error("Data already exists for user: {user_address}")]
     DataAlreadyExists { user_address: String },
-
-    #[error("Cannot find attribute: {key}")]
-    ReplyParseFailed { key: String },
-
-    #[error("Mars/xMars ratio is undefined")]
-    XMarsRatioUndefined {},
-
-    #[error("Unlock time setup is invalid")]
-    InvalidUnlockTimeSetup {},
 }
