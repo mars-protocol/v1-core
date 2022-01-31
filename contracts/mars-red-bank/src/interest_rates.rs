@@ -113,8 +113,13 @@ pub fn calculate_applied_linear_interest_rate(
 }
 
 /// Get scaled liquidity amount from an underlying amount, a Market and timestamp in seconds
+/// Liquidity amounts are always truncated to make sure rounding errors accumulate in favor of
+/// the protocol
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
+/// NOTE: This function should not be used when calculating how much scaled amount is getting
+/// burned from given underlying withdraw amount. In that case, all math should be done in underlying
+/// amounts then get scaled back again
 pub fn get_scaled_liquidity_amount(
     amount: Uint128,
     market: &Market,
@@ -128,6 +133,8 @@ pub fn get_scaled_liquidity_amount(
 }
 
 /// Get underlying liquidity amount from a scaled amount, a Market and timestamp in seconds
+/// Liquidity amounts are always truncated to make sure rounding errors accumulate in favor of
+/// the protocol
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
 pub fn get_underlying_liquidity_amount(
@@ -143,8 +150,13 @@ pub fn get_underlying_liquidity_amount(
 }
 
 /// Get scaled borrow amount from an underlying amount, a Market and timestamp in seconds
+/// Debt amounts are always ceiled to make sure rounding errors accumulate in favor of
+/// the protocol
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
+/// NOTE: This function should not be used when calculating how much scaled amount is getting
+/// repaid from a sent underlying amount. In that case, all math should be done in underlying
+/// amounts then get scaled back again
 pub fn get_scaled_debt_amount(
     amount: Uint128,
     market: &Market,
@@ -158,6 +170,8 @@ pub fn get_scaled_debt_amount(
 }
 
 /// Get underlying borrow amount from a scaled amount, a Market and timestamp in seconds
+/// Debt amounts are always ceiled so as for rounding errors to accumulate in favor of
+/// the protocol
 /// NOTE: Calling this function when interests for the market are up to date with the current block
 /// and index is not, will use the wrong interest rate to update the index.
 pub fn get_underlying_debt_amount(
@@ -311,9 +325,14 @@ pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 
 #[cfg(test)]
 mod tests {
+    use cosmwasm_std::Uint128;
     use mars_core::math::decimal::Decimal;
+    use mars_core::red_bank::Market;
 
-    use crate::interest_rates::calculate_applied_linear_interest_rate;
+    use crate::interest_rates::{
+        calculate_applied_linear_interest_rate, get_scaled_debt_amount,
+        get_scaled_liquidity_amount, get_underlying_debt_amount, get_underlying_liquidity_amount,
+    };
 
     #[test]
     fn test_accumulated_index_calculation() {
@@ -324,5 +343,35 @@ mod tests {
             calculate_applied_linear_interest_rate(index, rate, time_elapsed).unwrap();
 
         assert_eq!(accumulated, Decimal::from_ratio(11u128, 100u128));
+    }
+
+    #[test]
+    fn test_liquidity_and_debt_rounding() {
+        let start = Uint128::from(100_000_000_000_u128);
+        let mut market = Market::default();
+        market.liquidity_index = Decimal::from_ratio(3_u128, 1_u128);
+        market.borrow_index = Decimal::from_ratio(3_u128, 1_u128);
+        market.indexes_last_updated = 1;
+
+        let scaled_amount_liquidity = get_scaled_liquidity_amount(start, &market, 1).unwrap();
+        let scaled_amount_debt = get_scaled_debt_amount(start, &market, 1).unwrap();
+        assert_eq!(
+            Uint128::from(33_333_333_333_333_333_u128),
+            scaled_amount_liquidity
+        );
+        assert_eq!(
+            Uint128::from(33_333_333_333_333_334_u128),
+            scaled_amount_debt
+        );
+
+        let back_to_underlying_liquidity =
+            get_underlying_liquidity_amount(scaled_amount_liquidity, &market, 1).unwrap();
+        let back_to_underlying_debt =
+            get_underlying_debt_amount(scaled_amount_debt, &market, 1).unwrap();
+        assert_eq!(
+            Uint128::from(99_999_999_999_u128),
+            back_to_underlying_liquidity
+        );
+        assert_eq!(Uint128::from(100_000_000_001_u128), back_to_underlying_debt);
     }
 }
