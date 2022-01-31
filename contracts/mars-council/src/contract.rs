@@ -9,7 +9,9 @@ use cw_storage_plus::{Bound, U64Key};
 
 use mars_core::council::error::ContractError;
 use mars_core::error::MarsError;
-use mars_core::helpers::{option_string_to_addr, zero_address};
+use mars_core::helpers::{
+    cw20_get_balance, cw20_get_total_supply, option_string_to_addr, zero_address,
+};
 use mars_core::math::decimal::Decimal;
 
 use mars_core::address_provider;
@@ -190,9 +192,16 @@ pub fn execute_submit_proposal(
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::Staking, MarsContract::MarsToken],
+        vec![
+            MarsContract::Staking,
+            MarsContract::Vesting,
+            MarsContract::MarsToken,
+            MarsContract::XMarsToken,
+        ],
     )?;
+    let xmars_token_address = addresses_query.pop().unwrap();
     let mars_token_address = addresses_query.pop().unwrap();
+    let vesting_address = addresses_query.pop().unwrap();
     let staking_address = addresses_query.pop().unwrap();
 
     let is_mars = info.sender == mars_token_address;
@@ -209,8 +218,19 @@ pub fn execute_submit_proposal(
     global_state.proposal_count += 1;
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
-    // Query the current Mars:xMars ratio
+    // Query the current MARS:xMARS ratio for this proposal
     let xmars_per_mars = staking_get_xmars_per_mars(&deps.querier, staking_address)?;
+
+    // Compute the total voting power for this proposal
+    // The total voting power of a proposal is the sum of two parts:
+    // 1. Free voting power: the total supply of xMARS token at the block where the proposal was
+    //    created
+    // 2. Locked voting power: the total amount of MARS token locked in the vesting contract, at the
+    //    block where the proposal was created, converted to equivalent xMARS amount by multiplying
+    //    it with the mars_xmars_ratio at the block where the proposal was created
+    let total_xmars_free = cw20_get_total_supply(&deps.querier, xmars_token_address)?;
+    let total_mars_locked = cw20_get_balance(&deps.querier, mars_token_address, vesting_address)?;
+    let total_voting_power = total_xmars_free + total_mars_locked * xmars_per_mars;
 
     let new_proposal = Proposal {
         proposal_id: global_state.proposal_count,
@@ -221,6 +241,7 @@ pub fn execute_submit_proposal(
         start_height: env.block.height,
         end_height: env.block.height + config.proposal_voting_period,
         xmars_per_mars,
+        total_voting_power,
         title,
         description,
         link: option_link,
@@ -276,19 +297,20 @@ pub fn execute_cast_vote(
     let vesting_address = addresses_query.pop().unwrap();
     let xmars_token_address = addresses_query.pop().unwrap();
 
+    // Compute the voter's voting power
     // The voting power of a user is the sum of two parts:
     // 1. Free voting power: the amount of xMARS token in the user's wallet, at the block where the
-    // proposal was created
+    //    proposal was created
     // 2. Locked voting power: the amount of MARS locked in the vesting contract owned by the user,
-    // at the block where the proposal was created, converted to equivalent xMars amount by
-    // multiplying it with the Mars:XMars ratio at the block where the proposal was created
+    //    at the block where the proposal was created, converted to equivalent xMars amount by
+    //    multiplying it with the Mars:XMars ratio at the block where the proposal was created
     let xmars_free = xmars_get_balance_at(
         &deps.querier,
         xmars_token_address,
         info.sender.clone(),
         proposal.start_height,
     )?;
-    let mars_locked = vesting_get_balance_at(
+    let mars_locked = mars_get_locked_balance_at(
         &deps.querier,
         vesting_address,
         info.sender.clone(),
@@ -346,17 +368,11 @@ pub fn execute_end_proposal(
     }
 
     let config = CONFIG.load(deps.storage)?;
-    let mars_contracts = vec![
-        MarsContract::MarsToken,
-        MarsContract::Staking,
-        MarsContract::XMarsToken,
-    ];
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        mars_contracts,
+        vec![MarsContract::MarsToken, MarsContract::Staking],
     )?;
-    let xmars_token_address = addresses_query.pop().unwrap();
     let staking_address = addresses_query.pop().unwrap();
     let mars_token_address = addresses_query.pop().unwrap();
 
@@ -364,16 +380,11 @@ pub fn execute_end_proposal(
     let for_votes = proposal.for_votes;
     let against_votes = proposal.against_votes;
     let total_votes = for_votes + against_votes;
-    let total_voting_power = xmars_get_total_supply_at(
-        &deps.querier,
-        xmars_token_address,
-        proposal.start_height - 1,
-    )?;
 
     let mut proposal_quorum: Decimal = Decimal::zero();
     let mut proposal_threshold: Decimal = Decimal::zero();
-    if total_voting_power > Uint128::zero() {
-        proposal_quorum = Decimal::from_ratio(total_votes, total_voting_power);
+    if proposal.total_voting_power > Uint128::zero() {
+        proposal_quorum = Decimal::from_ratio(total_votes, proposal.total_voting_power);
     }
     if total_votes > Uint128::zero() {
         proposal_threshold = Decimal::from_ratio(for_votes, total_votes);
@@ -624,20 +635,8 @@ fn query_proposal_votes(
 
 // HELPERS
 
-fn xmars_get_total_supply_at(
-    querier: &QuerierWrapper,
-    xmars_address: Addr,
-    block: u64,
-) -> StdResult<Uint128> {
-    let query: xmars_token::TotalSupplyResponse =
-        querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: xmars_address.into(),
-            msg: to_binary(&xmars_token::msg::QueryMsg::TotalSupplyAt { block })?,
-        }))?;
-
-    Ok(query.total_supply)
-}
-
+/// Query a user's xMARS balance at a past block. Used to calculate the user's voting power when
+/// casting vote.
 fn xmars_get_balance_at(
     querier: &QuerierWrapper,
     xmars_address: Addr,
@@ -655,7 +654,9 @@ fn xmars_get_balance_at(
     Ok(query.balance)
 }
 
-fn vesting_get_balance_at(
+/// Query a user's MARS balance locked in the vesting contract at a past block. Used to calculate
+/// the user's voting power when casting vote.
+fn mars_get_locked_balance_at(
     querier: &QuerierWrapper,
     vesting_address: Addr,
     user_address: Addr,
@@ -670,6 +671,7 @@ fn vesting_get_balance_at(
     }))
 }
 
+/// Query the current MARS:xMARS exchange ratio, in the form of xMARS per MARS.
 fn staking_get_xmars_per_mars(
     querier: &QuerierWrapper,
     staking_address: Addr,
@@ -1145,6 +1147,18 @@ mod tests {
         let mut deps = th_setup(&[]);
         let submitter_address = Addr::unchecked("submitter");
 
+        // Assume at the current block height of 100,000, there is a total supply of 100,000 xMARS,
+        // 20,000 MARS locked in vesting contract, and a MARS:xMARS exchange ratio of 1 MARS = 0.8 xMARS
+        // The expected total voting power is 100,000 + 20,000 * 0.8 = 116,000 xMARS
+        deps.querier
+            .set_cw20_total_supply(Addr::unchecked("xmars_token"), Uint128::new(100_000));
+        deps.querier.set_cw20_balances(
+            Addr::unchecked("mars_token"),
+            &[(Addr::unchecked("vesting"), Uint128::new(20_000))],
+        );
+        deps.querier
+            .set_staking_xmars_per_mars(Decimal::from_ratio(8u128, 10u128));
+
         // Submit Proposal without link or call data
         let msg = ExecuteMsg::Receive(Cw20ReceiveMsg {
             msg: to_binary(&ReceiveMsg::SubmitProposal {
@@ -1186,6 +1200,7 @@ mod tests {
         assert_eq!(proposal.start_height, 100_000);
         assert_eq!(proposal.end_height, expected_end_height);
         assert_eq!(proposal.xmars_per_mars, Decimal::from_ratio(8u128, 10u128));
+        assert_eq!(proposal.total_voting_power, Uint128::new(116000));
         assert_eq!(proposal.title, "A valid title");
         assert_eq!(proposal.description, "A valid description");
         assert_eq!(proposal.link, None);
@@ -2166,6 +2181,8 @@ mod tests {
         against_votes: Uint128,
         start_height: u64,
         end_height: u64,
+        xmars_per_mars: Decimal,
+        total_voting_power: Uint128,
         messages: Option<Vec<ProposalMessage>>,
     }
 
@@ -2178,6 +2195,8 @@ mod tests {
                 against_votes: Uint128::zero(),
                 start_height: 1,
                 end_height: 1,
+                xmars_per_mars: Decimal::from_ratio(8u128, 10u128), // 1 MARS = 0.8 xMARS,
+                total_voting_power: Uint128::new(100_000),
                 messages: None,
             }
         }
@@ -2192,7 +2211,8 @@ mod tests {
             against_votes: mock_proposal.against_votes,
             start_height: mock_proposal.start_height,
             end_height: mock_proposal.end_height,
-            xmars_per_mars: Decimal::from_ratio(8u128, 10u128), // 1 MARS = 0.8 xMARS
+            xmars_per_mars: mock_proposal.xmars_per_mars,
+            total_voting_power: mock_proposal.total_voting_power,
             title: "A valid title".to_string(),
             description: "A description".to_string(),
             link: None,

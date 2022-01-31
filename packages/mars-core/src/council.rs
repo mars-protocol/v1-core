@@ -86,6 +86,10 @@ pub struct Proposal {
     /// block where the proposal was created. Used to calculate voting power of the Mars tokens
     /// locked in the vesting contract
     pub xmars_per_mars: Decimal,
+    /// The total voting power, defined as the sum of the total supply of xMARS and the total amount
+    /// of MARS locked in vesting contract (converted to equivalent xMARS amount) at the block where
+    /// the proposal was created. Used to compute quorum when the proposal is ended
+    pub total_voting_power: Uint128,
     /// Title for the proposal
     pub title: String,
     /// Description for the proposal
