@@ -14,6 +14,7 @@ use mars_core::math::decimal::Decimal;
 
 use mars_core::address_provider;
 use mars_core::address_provider::MarsContract;
+use mars_core::staking;
 use mars_core::vesting;
 use mars_core::xmars_token;
 
@@ -186,11 +187,13 @@ pub fn execute_submit_proposal(
     }
 
     let config = CONFIG.load(deps.storage)?;
-    let mars_token_address = address_provider::helpers::query_address(
+    let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        MarsContract::MarsToken,
+        vec![MarsContract::Staking, MarsContract::MarsToken],
     )?;
+    let mars_token_address = addresses_query.pop().unwrap();
+    let staking_address = addresses_query.pop().unwrap();
 
     let is_mars = info.sender == mars_token_address;
     // Validate deposit amount
@@ -206,6 +209,9 @@ pub fn execute_submit_proposal(
     global_state.proposal_count += 1;
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
+    // Query the current Mars:xMars ratio
+    let xmars_per_mars = staking_get_xmars_per_mars(&deps.querier, staking_address)?;
+
     let new_proposal = Proposal {
         proposal_id: global_state.proposal_count,
         submitter_address: deps.api.addr_validate(&submitter_address_unchecked)?,
@@ -214,6 +220,7 @@ pub fn execute_submit_proposal(
         against_votes: Uint128::zero(),
         start_height: env.block.height,
         end_height: env.block.height + config.proposal_voting_period,
+        xmars_per_mars,
         title,
         description,
         link: option_link,
@@ -269,22 +276,25 @@ pub fn execute_cast_vote(
     let vesting_address = addresses_query.pop().unwrap();
     let xmars_token_address = addresses_query.pop().unwrap();
 
-    // The voting power of a user consists of two parts:
-    // 1. the amount of xMARS token in the user's wallet
-    // 2. the amount of xMARS locked in the vesting contract owned by the user
-    let voting_power_free = xmars_get_balance_at(
+    // The voting power of a user is the sum of two parts:
+    // 1. Free voting power: the amount of xMARS token in the user's wallet, at the block where the
+    // proposal was created
+    // 2. Locked voting power: the amount of MARS locked in the vesting contract owned by the user,
+    // at the block where the proposal was created, converted to equivalent xMars amount by
+    // multiplying it with the Mars:XMars ratio at the block where the proposal was created
+    let xmars_free = xmars_get_balance_at(
         &deps.querier,
         xmars_token_address,
         info.sender.clone(),
         proposal.start_height,
     )?;
-    let voting_power_locked = vesting_get_balance_at(
+    let mars_locked = vesting_get_balance_at(
         &deps.querier,
         vesting_address,
         info.sender.clone(),
         proposal.start_height,
     )?;
-    let voting_power = voting_power_free + voting_power_locked;
+    let voting_power = xmars_free + mars_locked * proposal.xmars_per_mars;
 
     if voting_power.is_zero() {
         return Err(ContractError::VoteNoVotingPower {
@@ -657,6 +667,16 @@ fn vesting_get_balance_at(
             user_address: user_address.to_string(),
             block,
         })?,
+    }))
+}
+
+fn staking_get_xmars_per_mars(
+    querier: &QuerierWrapper,
+    staking_address: Addr,
+) -> StdResult<Decimal> {
+    querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: staking_address.into(),
+        msg: to_binary(&staking::msg::QueryMsg::XMarsPerMars {})?,
     }))
 }
 
@@ -1165,6 +1185,7 @@ mod tests {
         assert_eq!(proposal.against_votes, Uint128::new(0));
         assert_eq!(proposal.start_height, 100_000);
         assert_eq!(proposal.end_height, expected_end_height);
+        assert_eq!(proposal.xmars_per_mars, Decimal::from_ratio(8u128, 10u128));
         assert_eq!(proposal.title, "A valid title");
         assert_eq!(proposal.description, "A valid description");
         assert_eq!(proposal.link, None);
@@ -1358,6 +1379,9 @@ mod tests {
 
         let active_proposal_id = 1_u64;
 
+        // Voter has 100 xMARS in wallet and 20 MARS locked in vesting contract
+        // At 1 MARS = 0.8 xMARS, the voter's voting power is
+        // 100 + 20 * 0.8 = 116
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
@@ -1365,7 +1389,7 @@ mod tests {
 
         deps.querier.set_vesting_address(Addr::unchecked("vesting"));
         deps.querier
-            .set_locked_balance_at(voter_address.clone(), 100_000, Uint128::new(23));
+            .set_locked_balance_at(voter_address.clone(), 100_000, Uint128::new(20));
 
         let active_proposal = th_build_mock_proposal(
             deps.as_mut(),
@@ -1410,7 +1434,7 @@ mod tests {
                 attr("proposal_id", active_proposal_id.to_string()),
                 attr("voter", "voter"),
                 attr("vote", "for"),
-                attr("voting_power", 123.to_string()), // 100 (free) + 23 (locked)
+                attr("voting_power", 116.to_string()), // 100 (free) + 20 * 0.8 (locked)
             ],
             res.attributes
         );
@@ -1418,7 +1442,7 @@ mod tests {
         let proposal = PROPOSALS
             .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128::new(123));
+        assert_eq!(proposal.for_votes, Uint128::new(116));
         assert_eq!(proposal.against_votes, Uint128::new(0));
 
         let proposal_vote = PROPOSAL_VOTES
@@ -1429,7 +1453,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(proposal_vote.option, ProposalVoteOption::For);
-        assert_eq!(proposal_vote.power, Uint128::new(123));
+        assert_eq!(proposal_vote.power, Uint128::new(116));
 
         // Voting again with same address should fail
         let msg = ExecuteMsg::CastVote {
@@ -1452,10 +1476,16 @@ mod tests {
                 vote: ProposalVoteOption::Against,
             };
 
+            // Voter2's voting power = 200 + 80 * 0.8 = 264
             deps.querier.set_xmars_balance_at(
                 Addr::unchecked("voter2"),
                 active_proposal.start_height,
                 Uint128::new(200),
+            );
+            deps.querier.set_locked_balance_at(
+                Addr::unchecked("voter2"),
+                active_proposal.start_height,
+                Uint128::new(80),
             );
 
             let env = mock_env(MockEnvParams {
@@ -1470,7 +1500,7 @@ mod tests {
                     attr("proposal_id", active_proposal_id.to_string()),
                     attr("voter", "voter2"),
                     attr("vote", "against"),
-                    attr("voting_power", 200.to_string()),
+                    attr("voting_power", 264.to_string()),
                 ],
                 res.attributes
             );
@@ -1518,8 +1548,8 @@ mod tests {
         let proposal = PROPOSALS
             .load(&deps.storage, U64Key::new(active_proposal_id))
             .unwrap();
-        assert_eq!(proposal.for_votes, Uint128::new(123 + 300));
-        assert_eq!(proposal.against_votes, Uint128::new(200 + 400));
+        assert_eq!(proposal.for_votes, Uint128::new(116 + 300));
+        assert_eq!(proposal.against_votes, Uint128::new(264 + 400));
     }
 
     #[test]
@@ -1606,7 +1636,7 @@ mod tests {
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_total_supply_at(99_999, Uint128::new(100));
+            .set_xmars_total_supply_at(100_000, Uint128::new(100));
         deps.querier.set_vesting_address(Addr::unchecked("vesting"));
 
         th_build_mock_proposal(
@@ -1659,7 +1689,7 @@ mod tests {
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_total_supply_at(89_999, Uint128::new(100_000));
+            .set_xmars_total_supply_at(90_000, Uint128::new(100_000));
         deps.querier.set_vesting_address(Addr::unchecked("vesting"));
 
         let proposal_threshold = Decimal::from_ratio(51_u128, 100_u128);
@@ -2103,6 +2133,12 @@ mod tests {
     fn th_setup(contract_balances: &[Coin]) -> OwnedDeps<MockStorage, MockApi, MarsMockQuerier> {
         let mut deps = mock_dependencies(contract_balances);
 
+        // We assume a MARS:xMARS ratio of 1 MARS = 0.8 xMARS throughout the tests
+        deps.querier
+            .set_staking_mars_per_xmars(Decimal::from_ratio(10u128, 8u128));
+        deps.querier
+            .set_staking_xmars_per_mars(Decimal::from_ratio(8u128, 10u128));
+
         let config = CreateOrUpdateConfig {
             address_provider_address: Some(String::from("address_provider")),
 
@@ -2156,6 +2192,7 @@ mod tests {
             against_votes: mock_proposal.against_votes,
             start_height: mock_proposal.start_height,
             end_height: mock_proposal.end_height,
+            xmars_per_mars: Decimal::from_ratio(8u128, 10u128), // 1 MARS = 0.8 xMARS
             title: "A valid title".to_string(),
             description: "A description".to_string(),
             link: None,

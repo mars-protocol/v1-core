@@ -82,6 +82,10 @@ pub struct Proposal {
     pub start_height: u64,
     /// Block at which voting for the porposal ends
     pub end_height: u64,
+    /// The exchange ratio between MARS and xMARS tokens, in the form of of xMARS per MARS, at the
+    /// block where the proposal was created. Used to calculate voting power of the Mars tokens
+    /// locked in the vesting contract
+    pub xmars_per_mars: Decimal,
     /// Title for the proposal
     pub title: String,
     /// Description for the proposal
