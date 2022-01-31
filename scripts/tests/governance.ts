@@ -28,6 +28,10 @@ import {
 // required environment variables:
 const CW_PLUS_ARTIFACTS_PATH = process.env.CW_PLUS_ARTIFACTS_PATH!
 
+// staking parameters
+const COOLDOWN_DURATION_SECONDS = 2;
+
+// council parameters
 const PROPOSAL_EFFECTIVE_DELAY = 5
 const PROPOSAL_REQUIRED_DEPOSIT = 100_000000
 const PROPOSAL_VOTING_PERIOD = 10
@@ -118,8 +122,8 @@ async function waitUntilBlockHeight(
   const bob = terra.wallets.test3
   const carol = terra.wallets.test4
   // mock contract address
+  const astroportFactory = new MnemonicKey().accAddress
   const incentives = new MnemonicKey().accAddress
-  const staking = new MnemonicKey().accAddress
 
   console.log("upload contracts")
 
@@ -160,12 +164,26 @@ async function waitUntilBlockHeight(
     }
   )
 
+  const staking = await deployContract(terra,deployer,"../artifacts/mars_staking.wasm",
+    {
+      config: {
+        owner: deployer.key.accAddress,
+        address_provider_address: addressProvider,
+        astroport_factory_address: astroportFactory,
+        astroport_max_spread: "0.05",
+        cooldown_duration: COOLDOWN_DURATION_SECONDS,
+      },
+    }
+  )
+
   const vesting = await deployContract(terra, deployer, "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
-      unlock_start_time: 1893452400, // 2030-01-01
-      unlock_cliff: 15552000,        // 180 days
-      unlock_duration: 94608000,     // 3 years
+      unlock_schedule: {
+        start_time: 1893452400, // 2030-01-01,
+        cliff: 15552000,        // 180 days,
+        duration: 94608000,     // 3 years
+      }
     }
   )
 
