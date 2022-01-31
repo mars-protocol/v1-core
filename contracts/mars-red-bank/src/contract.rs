@@ -922,16 +922,12 @@ pub fn execute_withdraw(
     MARKETS.save(deps.storage, asset_reference.as_slice(), &market)?;
 
     // burn maToken
-    let withdrawer_balance_remaining =
-        withdrawer_balance_before.checked_sub(withdraw_amount)?;
-    let withdrawer_balance_scaled_remaining = get_scaled_liquidity_amount(
-        withdrawer_balance_remaining,
-        &market,
-        env.block.time.seconds(),
-    )?;
+    let withdrawer_balance_after = withdrawer_balance_before.checked_sub(withdraw_amount)?;
+    let withdrawer_balance_scaled_after =
+        get_scaled_liquidity_amount(withdrawer_balance_after, &market, env.block.time.seconds())?;
 
     let burn_amount =
-        withdrawer_balance_scaled_before.checked_sub(withdrawer_balance_scaled_remaining)?;
+        withdrawer_balance_scaled_before.checked_sub(withdrawer_balance_scaled_after)?;
     response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: market.ma_token_address.to_string(),
         msg: to_binary(&ma_token::msg::ExecuteMsg::Burn {
@@ -1473,10 +1469,10 @@ pub fn execute_liquidate(
     }
 
     // 5. Compute and update user new debt
-    let user_debt_asset_debt_amount_remaining =
+    let user_debt_asset_debt_amount_after =
         user_debt_asset_total_debt.checked_sub(debt_amount_to_repay)?;
-    let user_debt_asset_debt_amount_scaled_remaining = get_scaled_debt_amount(
-        user_debt_asset_debt_amount_remaining,
+    let user_debt_asset_debt_amount_scaled_after = get_scaled_debt_amount(
+        user_debt_asset_debt_amount_after,
         &debt_market,
         env.block.time.seconds(),
     )?;
@@ -1484,9 +1480,9 @@ pub fn execute_liquidate(
     // Compute delta so it can be substracted to total debt
     let debt_amount_scaled_delta = user_debt
         .amount_scaled
-        .checked_sub(user_debt_asset_debt_amount_scaled_remaining)?;
+        .checked_sub(user_debt_asset_debt_amount_scaled_after)?;
 
-    user_debt.amount_scaled = user_debt_asset_debt_amount_scaled_remaining;
+    user_debt.amount_scaled = user_debt_asset_debt_amount_scaled_after;
 
     DEBTS.save(
         deps.storage,
