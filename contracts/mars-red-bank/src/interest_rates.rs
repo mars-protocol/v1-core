@@ -7,8 +7,8 @@ use cosmwasm_std::{
 use cw20::Cw20ExecuteMsg;
 
 use mars_core::asset::get_asset_balance;
-use mars_core::math::{uint128_checked_div_with_ceil};
 use mars_core::math::decimal::Decimal;
+use mars_core::math::uint128_checked_div_with_ceil;
 
 use crate::error::ContractError;
 use crate::interest_rate_models::update_market_interest_rates_with_model;
@@ -206,18 +206,14 @@ pub fn compute_underlying_amount(
     // Multiply scaled amount by decimal (index)
     let before_scaling_factor = scaled_amount * index;
 
-
     // Descale by SCALING_FACTOR which is introduced when scaling the amount
     match scaling_operation {
-        ScalingOperation::Truncate => {
-            Ok(before_scaling_factor.checked_div(SCALING_FACTOR)?)
-        },
+        ScalingOperation::Truncate => Ok(before_scaling_factor.checked_div(SCALING_FACTOR)?),
         ScalingOperation::Ceil => {
             uint128_checked_div_with_ceil(before_scaling_factor, SCALING_FACTOR)
-        },
+        }
     }
 }
-
 
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
@@ -317,9 +313,7 @@ pub fn build_interests_updated_event(label: &str, market: &Market) -> Event {
 mod tests {
     use mars_core::math::decimal::Decimal;
 
-    use crate::interest_rates::{
-        calculate_applied_linear_interest_rate, 
-    };
+    use crate::interest_rates::calculate_applied_linear_interest_rate;
 
     #[test]
     fn test_accumulated_index_calculation() {
