@@ -269,8 +269,6 @@ pub fn execute_cast_vote(
     let vesting_address = addresses_query.pop().unwrap();
     let xmars_token_address = addresses_query.pop().unwrap();
 
-    let balance_at_block = proposal.start_height - 1;
-
     // The voting power of a user consists of two parts:
     // 1. the amount of xMARS token in the user's wallet
     // 2. the amount of xMARS locked in the vesting contract owned by the user
@@ -278,19 +276,19 @@ pub fn execute_cast_vote(
         &deps.querier,
         xmars_token_address,
         info.sender.clone(),
-        balance_at_block,
+        proposal.start_height,
     )?;
     let voting_power_locked = vesting_get_balance_at(
         &deps.querier,
         vesting_address,
         info.sender.clone(),
-        balance_at_block,
+        proposal.start_height,
     )?;
     let voting_power = voting_power_free + voting_power_locked;
 
     if voting_power.is_zero() {
         return Err(ContractError::VoteNoVotingPower {
-            block: balance_at_block,
+            block: proposal.start_height,
         });
     }
 
@@ -655,7 +653,7 @@ fn vesting_get_balance_at(
 ) -> StdResult<Uint128> {
     querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr: vesting_address.into(),
-        msg: to_binary(&vesting::msg::QueryMsg::VotingPowerAt {
+        msg: to_binary(&vesting::msg::QueryMsg::BalanceAt {
             user_address: user_address.to_string(),
             block,
         })?,
@@ -1245,9 +1243,9 @@ mod tests {
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_balance_at(voter_address, 99_999, Uint128::new(100));
+            .set_xmars_balance_at(voter_address, 100_000, Uint128::new(100));
         deps.querier
-            .set_xmars_balance_at(invalid_voter_address, 99_999, Uint128::zero());
+            .set_xmars_balance_at(invalid_voter_address, 100_000, Uint128::zero());
         deps.querier.set_vesting_address(Addr::unchecked("vesting"));
 
         let active_proposal_id = 1_u64;
@@ -1345,7 +1343,10 @@ mod tests {
             });
             let info = mock_info("invalid_voter");
             let response = execute(deps.as_mut(), env, info, msg).unwrap_err();
-            assert_eq!(response, ContractError::VoteNoVotingPower { block: 99_999 });
+            assert_eq!(
+                response,
+                ContractError::VoteNoVotingPower { block: 100_000 }
+            );
         }
     }
 
@@ -1360,11 +1361,11 @@ mod tests {
         deps.querier
             .set_xmars_address(Addr::unchecked("xmars_token"));
         deps.querier
-            .set_xmars_balance_at(voter_address.clone(), 99_999, Uint128::new(100));
+            .set_xmars_balance_at(voter_address.clone(), 100_000, Uint128::new(100));
 
         deps.querier.set_vesting_address(Addr::unchecked("vesting"));
         deps.querier
-            .set_locked_voting_power_at(voter_address.clone(), 99_999, Uint128::new(23));
+            .set_locked_balance_at(voter_address.clone(), 100_000, Uint128::new(23));
 
         let active_proposal = th_build_mock_proposal(
             deps.as_mut(),
@@ -1453,7 +1454,7 @@ mod tests {
 
             deps.querier.set_xmars_balance_at(
                 Addr::unchecked("voter2"),
-                active_proposal.start_height - 1,
+                active_proposal.start_height,
                 Uint128::new(200),
             );
 
@@ -1478,13 +1479,13 @@ mod tests {
         // Extra for and against votes to check aggregates are computed correctly
         deps.querier.set_xmars_balance_at(
             Addr::unchecked("voter3"),
-            active_proposal.start_height - 1,
+            active_proposal.start_height,
             Uint128::new(300),
         );
 
         deps.querier.set_xmars_balance_at(
             Addr::unchecked("voter4"),
-            active_proposal.start_height - 1,
+            active_proposal.start_height,
             Uint128::new(400),
         );
 
@@ -1999,15 +2000,15 @@ mod tests {
         let voter_address4 = Addr::unchecked("voter4");
         let voter_address5 = Addr::unchecked("voter5");
         deps.querier
-            .set_xmars_balance_at(voter_address1, 99_999, Uint128::new(100));
+            .set_xmars_balance_at(voter_address1, 100_000, Uint128::new(100));
         deps.querier
-            .set_xmars_balance_at(voter_address2, 99_999, Uint128::new(200));
+            .set_xmars_balance_at(voter_address2, 100_000, Uint128::new(200));
         deps.querier
-            .set_xmars_balance_at(voter_address3, 99_999, Uint128::new(300));
+            .set_xmars_balance_at(voter_address3, 100_000, Uint128::new(300));
         deps.querier
-            .set_xmars_balance_at(voter_address4, 99_999, Uint128::new(400));
+            .set_xmars_balance_at(voter_address4, 100_000, Uint128::new(400));
         deps.querier
-            .set_xmars_balance_at(voter_address5, 99_999, Uint128::new(500));
+            .set_xmars_balance_at(voter_address5, 100_000, Uint128::new(500));
 
         let active_proposal = th_build_mock_proposal(
             deps.as_mut(),

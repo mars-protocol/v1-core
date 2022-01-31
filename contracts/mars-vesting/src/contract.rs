@@ -127,8 +127,6 @@ pub fn execute_create_allocation(
         }
     }
 
-    // create submsg to stake deposited Mars tokens
-    // reply will be handled by `after_staking`
     Ok(Response::new()
         .add_attribute("action", "create_allocation")
         .add_attribute("user", user_address)
