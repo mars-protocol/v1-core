@@ -7,6 +7,7 @@ use cosmwasm_std::{
 use cw20::Cw20ExecuteMsg;
 
 use mars_core::asset::get_asset_balance;
+use mars_core::math::{uint128_checked_div_with_ceil};
 use mars_core::math::decimal::Decimal;
 
 use crate::error::ContractError;
@@ -24,8 +25,8 @@ const SECONDS_PER_YEAR: u64 = 31536000u64;
 /// 1. Updates market borrow and liquidity indices.
 /// 2. If there are any protocol rewards, builds a mint to the rewards collector and adds it
 ///    to the returned response
-/// Note it does not save the market to store
-/// NOTE: For a given block, this function should be called before updating interest rates
+/// NOTE: it does not save the market to store
+/// WARNING: For a given block, this function should be called before updating interest rates
 /// as it would apply the new interest rates instead of the ones that were valid during
 /// the period between indexes_last_updated and current_block
 pub fn apply_accumulated_interests(
@@ -62,12 +63,12 @@ pub fn apply_accumulated_interests(
     let previous_debt_total = compute_underlying_amount(
         market.debt_total_scaled,
         previous_borrow_index,
-        ScalingOperation::Debt,
+        ScalingOperation::Ceil,
     )?;
     let new_debt_total = compute_underlying_amount(
         market.debt_total_scaled,
         market.borrow_index,
-        ScalingOperation::Debt,
+        ScalingOperation::Ceil,
     )?;
 
     let borrow_interest_accrued = if new_debt_total > previous_debt_total {
@@ -85,7 +86,7 @@ pub fn apply_accumulated_interests(
         let mint_amount = compute_scaled_amount(
             accrued_protocol_rewards,
             market.liquidity_index,
-            ScalingOperation::Liquidity,
+            ScalingOperation::Truncate,
         )?;
         response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.clone().into(),
@@ -122,7 +123,7 @@ pub fn get_scaled_liquidity_amount(
     compute_scaled_amount(
         amount,
         get_updated_liquidity_index(market, timestamp)?,
-        ScalingOperation::Liquidity,
+        ScalingOperation::Truncate,
     )
 }
 
@@ -137,7 +138,7 @@ pub fn get_underlying_liquidity_amount(
     compute_underlying_amount(
         amount_scaled,
         get_updated_liquidity_index(market, timestamp)?,
-        ScalingOperation::Liquidity,
+        ScalingOperation::Truncate,
     )
 }
 
@@ -152,7 +153,7 @@ pub fn get_scaled_debt_amount(
     compute_scaled_amount(
         amount,
         get_updated_borrow_index(market, timestamp)?,
-        ScalingOperation::Debt,
+        ScalingOperation::Ceil,
     )
 }
 
@@ -167,13 +168,13 @@ pub fn get_underlying_debt_amount(
     compute_underlying_amount(
         amount_scaled,
         get_updated_borrow_index(market, timestamp)?,
-        ScalingOperation::Debt,
+        ScalingOperation::Ceil,
     )
 }
 
 pub enum ScalingOperation {
-    Liquidity,
-    Debt,
+    Truncate,
+    Ceil,
 }
 
 /// Scales the amount dividing by an index in order to compute interest rates. Before dividing,
@@ -182,9 +183,6 @@ pub enum ScalingOperation {
 /// Current index is 10. We deposit 6.123456 UST (6123456 uusd). Scaled amount will be
 /// 6123456 / 10 = 612345 so we loose some precision. In order to avoid this situation
 /// we scale the amount by SCALING_FACTOR.
-/// For debt amounts the scaled amount is rounded up in order to mitigate a potential lack
-/// of liquidity caused by potential accumulation of rounding errors due to integer division
-/// result getting truncated
 pub fn compute_scaled_amount(
     amount: Uint128,
     index: Decimal,
@@ -193,8 +191,8 @@ pub fn compute_scaled_amount(
     // Scale by SCALING_FACTOR to have better precision
     let scaled_amount = amount.checked_mul(SCALING_FACTOR)?;
     match scaling_operation {
-        ScalingOperation::Liquidity => Decimal::divide_uint128_by_decimal(scaled_amount, index),
-        ScalingOperation::Debt => Decimal::divide_uint128_by_decimal_and_ceil(scaled_amount, index),
+        ScalingOperation::Truncate => Decimal::divide_uint128_by_decimal(scaled_amount, index),
+        ScalingOperation::Ceil => Decimal::divide_uint128_by_decimal_and_ceil(scaled_amount, index),
     }
 }
 
@@ -205,33 +203,21 @@ pub fn compute_underlying_amount(
     index: Decimal,
     scaling_operation: ScalingOperation,
 ) -> StdResult<Uint128> {
+    // Multiply scaled amount by decimal (index)
+    let before_scaling_factor = scaled_amount * index;
+
+
     // Descale by SCALING_FACTOR which is introduced when scaling the amount
     match scaling_operation {
-        ScalingOperation::Liquidity => {
-            // Multiply scaled amount by decimal (index)
-            let before_factor = scaled_amount * index;
-            let result = before_factor.checked_div(SCALING_FACTOR)?;
-            Ok(result)
-        }
-        ScalingOperation::Debt => {
-            // Multiply scaled amount by decimal (index) and ceil
-            let before_factor =
-                Decimal::multiply_uint128_by_decimal_and_ceil(scaled_amount, index)?;
-            let result = before_factor.checked_div(SCALING_FACTOR)?;
-            Ok(result)
-        }
+        ScalingOperation::Truncate => {
+            Ok(before_scaling_factor.checked_div(SCALING_FACTOR)?)
+        },
+        ScalingOperation::Ceil => {
+            uint128_checked_div_with_ceil(before_scaling_factor, SCALING_FACTOR)
+        },
     }
 }
 
-fn checked_div_with_ceiling(numerator: Uint128, denominator: Uint128) -> StdResult<Uint128> {
-    let mut result = numerator.checked_div(denominator)?;
-
-    if numerator.checked_rem(denominator)? > Uint128::zero() {
-        result += Uint128::from(1_u32);
-    }
-
-    Ok(result)
-}
 
 /// Return applied interest rate for borrow index according to passed blocks
 /// NOTE: Calling this function when interests for the market are up to date with the current block
@@ -332,10 +318,8 @@ mod tests {
     use mars_core::math::decimal::Decimal;
 
     use crate::interest_rates::{
-        calculate_applied_linear_interest_rate, compute_scaled_amount, compute_underlying_amount,
-        ScalingOperation,
+        calculate_applied_linear_interest_rate, 
     };
-    use cosmwasm_std::Uint128;
 
     #[test]
     fn test_accumulated_index_calculation() {
@@ -346,36 +330,5 @@ mod tests {
             calculate_applied_linear_interest_rate(index, rate, time_elapsed).unwrap();
 
         assert_eq!(accumulated, Decimal::from_ratio(11u128, 100u128));
-    }
-
-    #[test]
-    fn test_scaled_amount_debt() {
-        let value = Uint128::new(5u128);
-        let index = Decimal::from_ratio(3u128, 1u128);
-        let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount =
-            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
-        assert_eq!(amount, value);
-
-        let value = Uint128::new(99u128);
-        let index = Decimal::from_ratio(33u128, 1u128);
-        let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount =
-            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
-        assert_eq!(amount, value);
-
-        let value = Uint128::new(9876542u128);
-        let index = Decimal::from_ratio(3333u128, 10u128);
-        let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount =
-            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
-        assert_eq!(amount, value);
-
-        let value = Uint128::new(98765432199u128);
-        let index = Decimal::from_ratio(1234567u128, 1000u128);
-        let scaled_amount = compute_scaled_amount(value, index, ScalingOperation::Debt).unwrap();
-        let amount =
-            compute_underlying_amount(scaled_amount, index, ScalingOperation::Debt).unwrap();
-        assert_eq!(amount, value);
     }
 }
