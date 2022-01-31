@@ -219,7 +219,8 @@ pub fn execute_submit_proposal(
     GLOBAL_STATE.save(deps.storage, &global_state)?;
 
     // Query the current MARS:xMARS ratio for this proposal
-    let xmars_per_mars = staking_get_xmars_per_mars(&deps.querier, staking_address)?;
+    let xmars_per_mars = staking_get_xmars_per_mars(&deps.querier, staking_address)?
+        .unwrap_or_else(|| Decimal::one());
 
     // Compute the total voting power for this proposal
     // The total voting power of a proposal is the sum of two parts:
@@ -677,7 +678,7 @@ fn mars_get_locked_balance_at(
 fn staking_get_xmars_per_mars(
     querier: &QuerierWrapper,
     staking_address: Addr,
-) -> StdResult<Decimal> {
+) -> StdResult<Option<Decimal>> {
     querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr: staking_address.into(),
         msg: to_binary(&staking::msg::QueryMsg::XMarsPerMars {})?,
