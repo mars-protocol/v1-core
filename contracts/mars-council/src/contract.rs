@@ -259,6 +259,8 @@ pub fn execute_submit_proposal(
         attr("submitter", submitter_address_unchecked),
         attr("proposal_id", &global_state.proposal_count.to_string()),
         attr("proposal_end_height", &new_proposal.end_height.to_string()),
+        attr("proposal_xmars_per_mars", xmars_per_mars.to_string()),
+        attr("proposal_total_voting_power", total_voting_power),
     ]);
 
     Ok(response)
@@ -1178,6 +1180,8 @@ mod tests {
         let info = mock_info("mars_token");
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
+        let expected_xmars_per_mars = Decimal::from_ratio(8u128, 10u128);
+        let expected_total_voting_power = Uint128::new(116_000);
         assert_eq!(
             res.attributes,
             vec![
@@ -1185,6 +1189,11 @@ mod tests {
                 attr("submitter", "submitter"),
                 attr("proposal_id", 1.to_string()),
                 attr("proposal_end_height", expected_end_height.to_string()),
+                attr(
+                    "proposal_xmars_per_mars",
+                    expected_xmars_per_mars.to_string()
+                ),
+                attr("proposal_total_voting_power", expected_total_voting_power)
             ]
         );
 
@@ -1199,8 +1208,8 @@ mod tests {
         assert_eq!(proposal.against_votes, Uint128::new(0));
         assert_eq!(proposal.start_height, 100_000);
         assert_eq!(proposal.end_height, expected_end_height);
-        assert_eq!(proposal.xmars_per_mars, Decimal::from_ratio(8u128, 10u128));
-        assert_eq!(proposal.total_voting_power, Uint128::new(116000));
+        assert_eq!(proposal.xmars_per_mars, expected_xmars_per_mars);
+        assert_eq!(proposal.total_voting_power, expected_total_voting_power);
         assert_eq!(proposal.title, "A valid title");
         assert_eq!(proposal.description, "A valid description");
         assert_eq!(proposal.link, None);
@@ -1236,6 +1245,8 @@ mod tests {
         let info = mock_info("mars_token");
         let res = execute(deps.as_mut(), env, info, msg).unwrap();
         let expected_end_height = 100_000 + TEST_PROPOSAL_VOTING_PERIOD;
+        let expected_xmars_per_mars = Decimal::from_ratio(8u128, 10u128);
+        let expected_total_voting_power = Uint128::new(116_000);
         assert_eq!(
             res.attributes,
             vec![
@@ -1243,6 +1254,11 @@ mod tests {
                 attr("submitter", "submitter"),
                 attr("proposal_id", 2.to_string()),
                 attr("proposal_end_height", expected_end_height.to_string()),
+                attr(
+                    "proposal_xmars_per_mars",
+                    expected_xmars_per_mars.to_string()
+                ),
+                attr("proposal_total_voting_power", expected_total_voting_power)
             ]
         );
 
