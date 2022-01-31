@@ -122,7 +122,7 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         proposal_expiration_period: 3000,
         proposal_required_deposit: String(PROPOSAL_REQUIRED_DEPOSIT),
         proposal_required_quorum: String(PROPOSAL_REQUIRED_QUORUM),
-        proposal_required_threshold: "0.05",
+        proposal_required_threshold: "0.5",
       },
     }
   );
@@ -156,9 +156,11 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
-      unlock_start_time: 0,
-      unlock_cliff: 0,
-      unlock_duration: 0,
+      unlock_schedule: {
+        start_time: 0,
+        cliff: 0,
+        duration: 0,
+      }
     }
   );
 
@@ -252,7 +254,12 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
         amount: String(BOB_VESTING_MARS_BALANCE),
         msg: toEncodedBinary({
           create_allocation: {
-            user_address: bob.key.accAddress
+            user_address: bob.key.accAddress,
+            vest_schedule: {
+              start_time: 0,
+              cliff: 0,
+              duration: 0,
+            }
           },
         }),
       },
@@ -262,22 +269,22 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
     const height = await getBlockHeight(terra, txResult);
 
     // before the height, bob should have 0 locked voting power
-    const votingPowerBefore: string = await queryContract(terra, vesting, {
-      voting_power_at: {
+    const balanceBefore: string = await queryContract(terra, vesting, {
+      balance_at: {
         user_address: bob.key.accAddress,
         block: height - 1,
       },
     });
-    strictEqual(votingPowerBefore, "0");
+    strictEqual(balanceBefore, "0");
 
     // at or after the height, bob should have `BOB_VESTING_MARS_BALANCE` voting power
-    const votingPowerAfter: string = await queryContract(terra, vesting, {
-      voting_power_at: {
+    const balanceAfter: string = await queryContract(terra, vesting, {
+      balance_at: {
         user_address: bob.key.accAddress,
         block: height,
       },
     });
-    strictEqual(votingPowerAfter, String(BOB_VESTING_MARS_BALANCE));
+    strictEqual(balanceAfter, String(BOB_VESTING_MARS_BALANCE));
 
     console.log("success!");
   }
@@ -327,38 +334,14 @@ const BOB_VESTING_MARS_BALANCE = 1_000_000000; // Mars tokens allocated to bob i
   }
 
   {
-    process.stdout.write("bob withdraws xMars... ");
+    process.stdout.write("bob withdraws mars... ");
 
     const txResult = await executeContract(terra, bob, vesting, {
       withdraw: {},
     }, { logger: logger });
 
-    // bob's wallet xMars balance should not have changed
-    const bobXMarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, xMars);
-    strictEqual(bobXMarsBalance, BOB_WALLET_MARS_BALANCE);
-
-    // a claim should have been created for bob
-    type ClaimResponse = {
-      claim?: {
-        created_at_block: number,
-        cooldown_end_timestamp: number,
-        amount: string
-      }
-    };
-    const response: ClaimResponse = await terra.wasm.contractQuery(staking, {
-      claim: {
-        user_address: bob.key.accAddress
-      }
-    });
-    const expectedResponse: ClaimResponse = {
-      claim: {
-        created_at_block: txResult.height,
-        cooldown_end_timestamp: 0, // localterra returns an empty string for txResult.timestamp, so we can't verify it
-        amount: BOB_VESTING_MARS_BALANCE.toString()
-      }
-    };
-    strictEqual(response.claim?.created_at_block, expectedResponse.claim?.created_at_block)
-    strictEqual(response.claim?.amount, expectedResponse.claim?.amount)
+    const bobMarsBalance = await queryBalanceCw20(terra, bob.key.accAddress, mars);
+    strictEqual(bobMarsBalance, BOB_VESTING_MARS_BALANCE);
 
     console.log("success!");
   }
