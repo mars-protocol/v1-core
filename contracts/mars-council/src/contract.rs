@@ -273,10 +273,10 @@ pub fn execute_cast_vote(
 
     // The voting power of a user for a proposal is defined as the sum of two parts:
     //
-    // - Free voting power: the amount of xMARS token in the user's wallet, at the block where the
+    // - Free voting power: the amount of xMARS token in the user's wallet, at the block before the
     //   proposal was created
     // - Locked voting power: the amount of MARS locked in the vesting contract owned by the user,
-    //   at the block where the proposal was created
+    //   at the block before the proposal was created
     //
     // The reason we can use the amount of MARS (instead of xMARS) for locked voting power is that,
     // since vesting allocations can only be created when 1 MARS == 1 xMARS, these MARS tokens would
@@ -363,10 +363,10 @@ pub fn execute_end_proposal(
 
     // The total voting power of a proposal is defined as the sum of two parts:
     //
-    // - Free voting power: the total supply of xMARS token at the block where the proposal was
+    // - Free voting power: the total supply of xMARS token at the block before the proposal was
     //   created
     // - Locked voting power: the total amount of MARS token locked in the vesting contract, at the
-    //   block where the proposal was created
+    //   block before the proposal was created
     //
     // The reason we can use the amount of MARS (instead of xMARS) for locked voting power is that,
     // since vesting allocations can only be created when 1 MARS == 1 xMARS, these MARS tokens would
