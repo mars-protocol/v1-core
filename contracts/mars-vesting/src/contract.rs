@@ -47,7 +47,7 @@ fn validate_unlock_schedule(
     current_timestamp: u64,
 ) -> Result<(), ContractError> {
     if unlock_schedule.start_time <= current_timestamp
-        || unlock_schedule.cliff <= 0
+        || unlock_schedule.cliff == 0
         || unlock_schedule.duration <= unlock_schedule.cliff
     {
         return Err(ContractError::InvalidUnlockTimeSetup {});
@@ -605,7 +605,7 @@ mod tests {
         //------------------------------
         // timestamp: 9999999999
         // block number: 69420
-        // 
+        //
         // bob finally withdraws
         let env = mock_env(MockEnvParams {
             block_height: 69420,
@@ -614,34 +614,99 @@ mod tests {
         let msg = ExecuteMsg::Withdraw {};
         execute(deps.as_mut(), env, mock_info("bob"), msg).unwrap();
 
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10000), Uint128::zero());
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10010), Uint128::new(100000000));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10020), Uint128::new(100000000));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10499), Uint128::new(100000000));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10500), Uint128::new(61095891));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10750), Uint128::new(61095891));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 10999), Uint128::new(61095891));
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 11000), Uint128::zero());
-        assert_eq!(voting_power_at(deps.as_ref(), "alice", 88888), Uint128::zero());
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10000),
+            Uint128::zero()
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10010),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10020),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10499),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10500),
+            Uint128::new(61095891)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10750),
+            Uint128::new(61095891)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 10999),
+            Uint128::new(61095891)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 11000),
+            Uint128::zero()
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "alice", 88888),
+            Uint128::zero()
+        );
 
-        assert_eq!(voting_power_at(deps.as_ref(), "bob", 10000), Uint128::zero());
-        assert_eq!(voting_power_at(deps.as_ref(), "bob", 10010), Uint128::new(100000000));
-        assert_eq!(voting_power_at(deps.as_ref(), "bob", 69419), Uint128::new(100000000));
-        assert_eq!(voting_power_at(deps.as_ref(), "bob", 69420), Uint128::zero());
-        assert_eq!(voting_power_at(deps.as_ref(), "bob", 88888), Uint128::zero());
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "bob", 10000),
+            Uint128::zero()
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "bob", 10010),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "bob", 69419),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "bob", 69420),
+            Uint128::zero()
+        );
+        assert_eq!(
+            voting_power_at(deps.as_ref(), "bob", 88888),
+            Uint128::zero()
+        );
 
         assert_eq!(total_voting_power_at(deps.as_ref(), 10000), Uint128::zero());
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10010), Uint128::new(200000000));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10020), Uint128::new(200000000));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10499), Uint128::new(200000000));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10500), Uint128::new(161095891));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10750), Uint128::new(161095891));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 10999), Uint128::new(161095891));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 11000), Uint128::new(100000000));
-        assert_eq!(total_voting_power_at(deps.as_ref(), 69419), Uint128::new(100000000));
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10010),
+            Uint128::new(200000000)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10020),
+            Uint128::new(200000000)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10499),
+            Uint128::new(200000000)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10500),
+            Uint128::new(161095891)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10750),
+            Uint128::new(161095891)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 10999),
+            Uint128::new(161095891)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 11000),
+            Uint128::new(100000000)
+        );
+        assert_eq!(
+            total_voting_power_at(deps.as_ref(), 69419),
+            Uint128::new(100000000)
+        );
         assert_eq!(total_voting_power_at(deps.as_ref(), 69420), Uint128::zero());
         assert_eq!(total_voting_power_at(deps.as_ref(), 88888), Uint128::zero());
-        
     }
 
     // TEST HELPERS
@@ -660,16 +725,18 @@ mod tests {
             unlock_schedule: MOCK_UNLOCK_SCHEDULE,
         };
         instantiate(deps.as_mut(), env.clone(), mock_info("deployer"), msg).unwrap();
-        
-        let msg = |user: &str| ExecuteMsg::Receive(Cw20ReceiveMsg {
-            amount: Uint128::new(100000000), // 100 Mars
-            sender: "protocol_admin".to_string(),
-            msg: to_binary(&ReceiveMsg::CreateAllocation {
-                user_address: user.to_string(),
-                vest_schedule: MOCK_VEST_SCHEDULE,
+
+        let msg = |user: &str| {
+            ExecuteMsg::Receive(Cw20ReceiveMsg {
+                amount: Uint128::new(100000000), // 100 Mars
+                sender: "protocol_admin".to_string(),
+                msg: to_binary(&ReceiveMsg::CreateAllocation {
+                    user_address: user.to_string(),
+                    vest_schedule: MOCK_VEST_SCHEDULE,
+                })
+                .unwrap(),
             })
-            .unwrap(),
-        });
+        };
 
         // create an allocation for alice
         execute(
