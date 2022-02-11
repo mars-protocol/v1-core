@@ -103,16 +103,6 @@ pub fn execute(
             Ok(execute_transfer_mars(deps, env, info, recipient, amount)?)
         }
 
-        ExecuteMsg::SwapAssetToUusd {
-            offer_asset_info,
-            amount,
-        } => Ok(execute_swap_asset_to_uusd(
-            deps,
-            env,
-            offer_asset_info,
-            amount,
-        )?),
-
         ExecuteMsg::SwapUusdToMars { amount } => Ok(execute_swap_uusd_to_mars(deps, env, amount)?),
     }
 }
@@ -406,45 +396,6 @@ pub fn execute_transfer_mars(
         );
 
     Ok(res)
-}
-
-pub fn execute_swap_asset_to_uusd(
-    deps: DepsMut,
-    env: Env,
-    offer_asset_info: AssetInfo,
-    amount: Option<Uint128>,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-
-    // throw error if the user tries to swap Mars
-    let mars_token_address = address_provider::helpers::query_address(
-        &deps.querier,
-        config.address_provider_address,
-        MarsContract::MarsToken,
-    )?;
-
-    if let AssetInfo::Token { contract_addr } = offer_asset_info.clone() {
-        if contract_addr.to_string().to_lowercase() == mars_token_address.to_string().to_lowercase()
-        {
-            return Err(ContractError::MarsCannotSwap {});
-        }
-    }
-
-    let ask_asset_info = AssetInfo::NativeToken {
-        denom: "uusd".to_string(),
-    };
-
-    let astroport_max_spread = Some(config.astroport_max_spread);
-
-    Ok(execute_swap(
-        deps,
-        env,
-        offer_asset_info,
-        ask_asset_info,
-        amount,
-        config.astroport_factory_address,
-        astroport_max_spread,
-    )?)
 }
 
 pub fn execute_swap_uusd_to_mars(
@@ -1478,38 +1429,6 @@ mod tests {
                 expected_total_mars_for_claimers
             );
         }
-    }
-
-    #[test]
-    fn test_cannot_swap_mars() {
-        let mut deps = th_setup(&[]);
-        // *
-        // can't swap Mars with SwapAssetToUusd
-        // *
-        let msg = ExecuteMsg::SwapAssetToUusd {
-            offer_asset_info: AssetInfo::Token {
-                contract_addr: Addr::unchecked("mars_token"),
-            },
-            amount: None,
-        };
-        let info = mock_info("owner", &[]);
-        let response =
-            execute(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap_err();
-        assert_eq!(response, ContractError::MarsCannotSwap {});
-
-        // *
-        // Check for case sensitivity
-        // *
-        let msg = ExecuteMsg::SwapAssetToUusd {
-            offer_asset_info: AssetInfo::Token {
-                contract_addr: Addr::unchecked("MARS_token"),
-            },
-            amount: None,
-        };
-        let info = mock_info("owner", &[]);
-        let response =
-            execute(deps.as_mut(), mock_env(MockEnvParams::default()), info, msg).unwrap_err();
-        assert_eq!(response, ContractError::MarsCannotSwap {});
     }
 
     // TEST HELPERS
