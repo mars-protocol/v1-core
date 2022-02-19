@@ -17,7 +17,7 @@ use mars_core::address_provider::MarsContract;
 use mars_core::vesting;
 use mars_core::xmars_token;
 
-use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg};
+use crate::msg::{CreateOrUpdateConfig, ExecuteMsg, InstantiateMsg, QueryMsg, ReceiveMsg, VersionResponse, MigrateMsg};
 use crate::state::{CONFIG, GLOBAL_STATE, PROPOSALS, PROPOSAL_VOTES};
 use crate::{
     Config, GlobalState, Proposal, ProposalMessage, ProposalStatus, ProposalVote,
@@ -31,6 +31,8 @@ const MIN_DESC_LENGTH: usize = 4;
 const MAX_DESC_LENGTH: usize = 1024;
 const MIN_LINK_LENGTH: usize = 12;
 const MAX_LINK_LENGTH: usize = 128;
+
+const CONTRACT_VERSION: &str = "two_council";
 
 // INSTANTIATE
 
@@ -119,6 +121,11 @@ pub fn execute(
 
         ExecuteMsg::UpdateConfig { config } => execute_update_config(deps, env, info, config),
     }
+}
+
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    Ok(Response::default())
 }
 
 /// cw20 receive implementation
@@ -567,7 +574,14 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
             start_after,
             limit,
         )?),
+        QueryMsg::GetVersion {} => to_binary(&query_version(deps)?),
     }
+}
+
+fn query_version(_deps: Deps) -> StdResult<VersionResponse> {
+    Ok(VersionResponse {
+        version: CONTRACT_VERSION.to_string(),
+    })
 }
 
 fn query_config(deps: Deps) -> StdResult<Config> {

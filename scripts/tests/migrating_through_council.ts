@@ -123,9 +123,11 @@ async function waitUntilBlockHeight(
   const vesting = await deployContract(terra, deployer, "../artifacts/mars_vesting.wasm",
     {
       address_provider_address: addressProvider,
-      unlock_start_time: 1893452400, // 2030-01-01
-      unlock_cliff: 15552000,        // 180 days
-      unlock_duration: 94608000,     // 3 years
+      unlock_schedule: {
+        start_time: 1893452400, // 2030-01-01
+        cliff: 15552000,        // 180 days
+        duration: 94608000,     // 3 years
+      }
     }
   )
 
@@ -259,6 +261,75 @@ async function waitUntilBlockHeight(
 
   const versionResponse2 = await queryContract(terra, counterVer1, { get_version: {} })
   strictEqual(versionResponse2.version, "two")
+
+  {
+    console.log("john submits a proposal to initialise `council` contract migration")
+
+    const councilVer2CodeId = await uploadContract(terra, deployer, "../artifacts/mars_council_two.wasm")
+
+    let txResult = await executeContract(terra, john, mars,
+      {
+        send: {
+          contract: council,
+          amount: String(JOHN_PROPOSAL_DEPOSIT),
+          msg: toEncodedBinary({
+            submit_proposal: {
+              title: "Migrate council contract",
+              description: "Migrate council -> mars_council_two",
+              link: "http://www.terra.money",
+              messages: [
+                {
+                  execution_order: 1,
+                  msg: {
+                    wasm: {
+                      migrate: {
+                        contract_addr: council,
+                        new_code_id: councilVer2CodeId,
+                        msg: toEncodedBinary({})
+                      }
+                    }
+                  }
+                },
+              ]
+            }
+          })
+        }
+      },
+      { logger: logger }
+    )
+    let blockHeight = await getBlockHeight(terra, txResult)
+    const johnProposalVotingPeriodEnd = blockHeight + PROPOSAL_VOTING_PERIOD
+    const johnProposalEffectiveDelayEnd = johnProposalVotingPeriodEnd + PROPOSAL_EFFECTIVE_DELAY
+    const johnProposalId = parseInt(txResult.logs[0].eventsByType.wasm.proposal_id[0])
+
+    console.log("vote")
+
+    await castVote(terra, john, council, johnProposalId, "for", logger)
+
+    console.log("wait for voting periods to end")
+
+    await waitUntilBlockHeight(terra, johnProposalVotingPeriodEnd)
+
+    console.log("end proposal")
+
+    await executeContract(terra, deployer, council, { end_proposal: { proposal_id: johnProposalId } }, { logger: logger })
+
+    const johnProposalStatus = await queryContract(terra, council, { proposal: { proposal_id: johnProposalId } })
+    strictEqual(johnProposalStatus.status, "passed")
+
+    console.log("wait for effective delay period to end")
+
+    await waitUntilBlockHeight(terra, johnProposalEffectiveDelayEnd)
+
+    console.log("execute proposal")
+
+    await executeContract(terra, deployer, council, { execute_proposal: { proposal_id: johnProposalId } }, { logger: logger })
+
+    console.log("verify second version of `council` contract")
+
+    const versionResponse2 = await queryContract(terra, council, { get_version: {} })
+    strictEqual(versionResponse2.version, "two")
+  }
 
   console.log("OK")
 

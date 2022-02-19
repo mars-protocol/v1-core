@@ -216,6 +216,14 @@ pub mod msg {
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct VersionResponse {
+        pub version: String,
+    }
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+    pub struct MigrateMsg {}
+
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
     #[serde(rename_all = "snake_case")]
     pub enum ReceiveMsg {
         /// Submit a proposal to be voted
@@ -244,6 +252,7 @@ pub mod msg {
             start_after: Option<String>,
             limit: Option<u32>,
         },
+        GetVersion {},
     }
 }
 
