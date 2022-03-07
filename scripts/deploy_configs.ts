@@ -12,7 +12,7 @@ export const testnet: Config = {
   },
   vestingInitMsg: {
     "address_provider_address": undefined,
-    "default_unlock_schedule": {
+    "unlock_schedule": {
       "start_time": 1638316800,
       "cliff": 15770000,
       "duration": 94610000
@@ -239,7 +239,7 @@ export const local: Config = {
   vestingInitMsg: {
     // "config": {
     "address_provider_address": undefined,
-    "default_unlock_schedule": {
+    "unlock_schedule": {
       "start_time": 1638316800,
       "cliff": 15770000,
       "duration": 94610000
