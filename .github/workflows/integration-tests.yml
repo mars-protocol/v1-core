@@ -31,19 +31,20 @@ jobs:
           { name: ma_token_finalize_transfer, block-time: 250 },
           { name: ma_token_underlying_liquidity_amount, block-time: 250 },
           #{ name: migrating_through_council, block-time: 250 },
-          #{ name: oracle_native, block-time: 1500 },
-          #{ name: oracle_red_bank, block-time: 1500 },
-          #{ name: oracle_spot_and_twap, block-time: 250 },
+          { name: oracle_native, block-time: 1500 },
+          { name: oracle_red_bank, block-time: 1500 },
+          { name: oracle_spot_and_twap, block-time: 250 },
           { name: redbank_overflow_checks, block-time: 250 },
           { name: repay_ust, block-time: 250 },
-          #{ name: rewards_distribution, block-time: 250 },
-          #{ name: staking, block-time: 250 },
+          { name: rewards_distribution, block-time: 250 },
+          { name: staking, block-time: 250 },
           { name: utilization_rate_updates, block-time: 250 },
-          #{ name: vesting, block-time: 250 }
+          { name: vesting, block-time: 250 }
         ]
     env:
       CW_PLUS_ARTIFACTS_PATH: /home/runner/work/cw-plus-artifacts
       MARS_MOCKS_ARTIFACTS_PATH: /home/runner/work/mars-mocks-artifacts
+      ASTROPORT_ARTIFACTS_PATH: /home/runner/work/astroport-artifacts
     steps:
       - uses: actions/checkout@v2
       - name: download cw-plus artifacts
@@ -60,6 +61,16 @@ jobs:
       #    tar -xf cosmwasm-artifacts.tar.gz
       #    mv artifacts/* .
       #    rm -rf artifacts
+      #    rm cosmwasm-artifacts.tar.gz
+      - name: download astroport artifacts
+        run: |
+          mkdir $ASTROPORT_ARTIFACTS_PATH
+          wget https://github.com/astroport-fi/astroport-core/releases/download/v1.0.0/cosmwasm-artifacts.tar.gz -O $ASTROPORT_ARTIFACTS_PATH/cosmwasm-artifacts.tar.gz
+          cd $ASTROPORT_ARTIFACTS_PATH
+          tar -xf cosmwasm-artifacts.tar.gz
+          mv artifacts/* .
+          rm -rf artifacts
+          rm cosmwasm-artifacts.tar.gz
       - name: download mars artifacts
         uses: actions/download-artifact@v2
         with:
