@@ -52,16 +52,16 @@ jobs:
           mkdir $CW_PLUS_ARTIFACTS_PATH
           wget https://github.com/CosmWasm/cw-plus/releases/download/v0.9.1/cw1_whitelist.wasm -O $CW_PLUS_ARTIFACTS_PATH/cw1_whitelist.wasm
           wget https://github.com/CosmWasm/cw-plus/releases/download/v0.9.1/cw20_base.wasm -O $CW_PLUS_ARTIFACTS_PATH/cw20_base.wasm
-      #- name: download mars-mocks artifacts
-      #  run: |
-      #    mkdir $MARS_MOCKS_ARTIFACTS_PATH
-      #    echo ${{ secrets.GITHUB_TOKEN }}
-      #    wget --header 'Authorization: token ${{ secrets.GITHUB_TOKEN }}' https://github.com/mars-protocol/mars-mocks/releases/download/v1.0.0/cosmwasm-artifacts.tar.gz -O $MARS_MOCKS_ARTIFACTS_PATH/cosmwasm-artifacts.tar.gz
-      #    cd $MARS_MOCKS_ARTIFACTS_PATH
-      #    tar -xf cosmwasm-artifacts.tar.gz
-      #    mv artifacts/* .
-      #    rm -rf artifacts
-      #    rm cosmwasm-artifacts.tar.gz
+      - name: download mars-mocks artifacts
+        run: |
+          mkdir $MARS_MOCKS_ARTIFACTS_PATH
+          echo ${{ secrets.GITHUB_TOKEN }}
+          wget --header 'Authorization: token ${{ secrets.GITHUB_TOKEN }}' https://github.com/mars-protocol/mars-mocks/releases/download/v1.0.0/cosmwasm-artifacts.tar.gz -O $MARS_MOCKS_ARTIFACTS_PATH/cosmwasm-artifacts.tar.gz
+          cd $MARS_MOCKS_ARTIFACTS_PATH
+          tar -xf cosmwasm-artifacts.tar.gz
+          mv artifacts/* .
+          rm -rf artifacts
+          rm cosmwasm-artifacts.tar.gz
       - name: download astroport artifacts
         run: |
           mkdir $ASTROPORT_ARTIFACTS_PATH
