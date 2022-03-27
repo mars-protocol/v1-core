@@ -19,6 +19,9 @@ use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchec
 use self::helpers::*;
 use astroport::pair::TWAP_PRECISION;
 
+use chainlink_terra::msg::QueryMsg as ChainlinkQueryMsg;
+use chainlink_terra::state::Round;
+
 // INIT
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -314,6 +317,20 @@ fn query_asset_price(
 
             let stluna_price = stluna_exchange_rate.checked_mul(luna_price)?;
             Ok(stluna_price)
+        }
+
+        PriceSourceChecked::Chainlink { contract_addr } => {
+            let decimals: u8 = deps
+                .querier
+                .query_wasm_smart(&contract_addr, &ChainlinkQueryMsg::Decimals)?;
+
+            let round: Round = deps
+                .querier
+                .query_wasm_smart(contract_addr, &ChainlinkQueryMsg::LatestRoundData)?;
+
+            let price_precision = Uint128::from(10_u128.pow(decimals.into()));
+            let price = Decimal::from_ratio(round.answer as u128, price_precision);
+            Ok(price)
         }
     }
 }
