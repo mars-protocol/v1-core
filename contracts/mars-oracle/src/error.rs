@@ -24,6 +24,9 @@ pub enum ContractError {
 
     #[error("Invalid pair")]
     InvalidPair {},
+
+    #[error("Chainlink price is too old")]
+    ChainlinkPriceTooOld {},
 }
 
 impl From<ContractError> for StdError {

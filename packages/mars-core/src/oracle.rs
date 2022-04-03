@@ -56,6 +56,9 @@ pub enum PriceSource<A> {
     Chainlink {
         /// Chainlink’s contract for the asset
         contract_addr: A,
+        /// Defines how many seconds can pass from current timestamp to last observations
+        /// for the price to be considered up-to-date
+        validity_period: u64,
     },
 }
 
@@ -106,8 +109,12 @@ impl PriceSourceUnchecked {
             PriceSourceUnchecked::Stluna { hub_address } => PriceSourceChecked::Stluna {
                 hub_address: api.addr_validate(hub_address)?,
             },
-            PriceSourceUnchecked::Chainlink { contract_addr } => PriceSourceChecked::Chainlink {
+            PriceSourceUnchecked::Chainlink {
+                contract_addr,
+                validity_period,
+            } => PriceSourceChecked::Chainlink {
                 contract_addr: api.addr_validate(contract_addr)?,
+                validity_period: *validity_period,
             },
         })
     }

@@ -319,14 +319,21 @@ fn query_asset_price(
             Ok(stluna_price)
         }
 
-        PriceSourceChecked::Chainlink { contract_addr } => {
+        PriceSourceChecked::Chainlink {
+            contract_addr,
+            validity_period,
+        } => {
             let decimals: u8 = deps
                 .querier
                 .query_wasm_smart(&contract_addr, &ChainlinkQueryMsg::Decimals)?;
-
             let round: Round = deps
                 .querier
                 .query_wasm_smart(contract_addr, &ChainlinkQueryMsg::LatestRoundData)?;
+
+            let current_timestamp = env.block.time.seconds();
+            if (round.observations_timestamp as u64) + validity_period < current_timestamp {
+                return Err(ContractError::ChainlinkPriceTooOld {});
+            }
 
             let price_precision = Uint128::from(10_u128.pow(decimals.into()));
             let price = Decimal::from_ratio(round.answer as u128, price_precision);
