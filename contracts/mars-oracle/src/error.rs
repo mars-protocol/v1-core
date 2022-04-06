@@ -27,6 +27,9 @@ pub enum ContractError {
 
     #[error("Chainlink price is too old")]
     ChainlinkPriceTooOld {},
+
+    #[error("Chainlink price exceeds the allowable price deviation from Astroport TWAP")]
+    ChainlinkPriceExceedsAllowableDeviationPercentage {},
 }
 
 impl From<ContractError> for StdError {

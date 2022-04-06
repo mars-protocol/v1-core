@@ -60,6 +60,25 @@ pub enum PriceSource<A> {
         /// for the price to be considered up-to-date
         validity_period: u64,
     },
+    /// Chainlink TWAP price quoted in UST
+    ChainlinkAnchoredToAstroportTwap {
+        /// Chainlink’s contract for the asset
+        contract_addr: A,
+        /// Astroport address of the asset
+        pair_address: A,
+        /// Window size
+        window_size: u64,
+        /// When calculating averaged price, we take the most recent TWAP snapshot and find a second
+        /// snapshot in the range of window_size +/- tolerance. For example, if window size is 5 minutes
+        /// and tolerance is 1 minute, we look for snapshots that are 4 - 6 minutes back in time from
+        /// the most recent snapshot.
+        ///
+        /// If there are multiple snapshots within the range, we take the one that is closest to the
+        /// desired window size.
+        tolerance: u64,
+        /// How much percentage the price from Chainlink can deviate from Astroport Twap price
+        deviation_percentage: Option<Decimal>,
+    },
 }
 
 impl<A> fmt::Display for PriceSource<A> {
@@ -72,6 +91,9 @@ impl<A> fmt::Display for PriceSource<A> {
             PriceSource::AstroportLiquidityToken { .. } => "astroport_liquidity_token",
             PriceSource::Stluna { .. } => "stluna",
             PriceSource::Chainlink { .. } => "chainlink",
+            PriceSource::ChainlinkAnchoredToAstroportTwap { .. } => {
+                "chainlink_anchored_to_astroport_twap"
+            }
         };
         write!(f, "{}", label)
     }
@@ -115,6 +137,19 @@ impl PriceSourceUnchecked {
             } => PriceSourceChecked::Chainlink {
                 contract_addr: api.addr_validate(contract_addr)?,
                 validity_period: *validity_period,
+            },
+            PriceSourceUnchecked::ChainlinkAnchoredToAstroportTwap {
+                contract_addr,
+                pair_address,
+                window_size,
+                tolerance,
+                deviation_percentage,
+            } => PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
+                contract_addr: api.addr_validate(contract_addr)?,
+                pair_address: api.addr_validate(pair_address)?,
+                window_size: *window_size,
+                tolerance: *tolerance,
+                deviation_percentage: *deviation_percentage,
             },
         })
     }

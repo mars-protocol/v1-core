@@ -1,9 +1,6 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{
-    attr, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128,
-};
+use cosmwasm_std::{attr, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, Addr};
 use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
 
@@ -100,6 +97,11 @@ pub fn execute_set_asset(
         | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
             assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
         }
+        PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
+            contract_addr: _contract_addr,
+            pair_address,
+            ..
+        } => assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?,
         _ => (),
     }
 
@@ -130,6 +132,13 @@ pub fn execute_record_twap_snapshots(
                 pair_address,
                 window_size,
                 tolerance,
+            } => (pair_address, window_size, tolerance),
+            PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
+                contract_addr: _contract_addr,
+                pair_address,
+                window_size,
+                tolerance,
+                deviation_percentage: _deviation_percentage,
             } => (pair_address, window_size, tolerance),
             _ => {
                 return Err(ContractError::PriceSourceNotTwap {});
@@ -248,45 +257,14 @@ fn query_asset_price(
             pair_address,
             window_size,
             tolerance,
-        } => {
-            let snapshots = ASTROPORT_TWAP_SNAPSHOTS.load(deps.storage, &asset_reference)?;
-
-            // First, query the current TWAP snapshot
-            let current_snapshot = AstroportTwapSnapshot {
-                timestamp: env.block.time.seconds(),
-                price_cumulative: query_astroport_cumulative_price(&deps.querier, &pair_address)?,
-            };
-
-            // Find the oldest snapshot whose period from current snapshot is within the tolerable window
-            // We do this using a linear search, and quit as soon as we find one; otherwise throw error
-            let previous_snapshot = snapshots
-                .iter()
-                .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
-                .ok_or(ContractError::NoSnapshotWithinTolerance {})?;
-
-            // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
-            // price warps back to zero, resulting in more recent cum. prices being smaller than
-            // earlier ones. (same behavior as in Solidity)
-            //
-            // Calculations below assumes the cumulative price doesn't overflows more than once during
-            // the period, which should always be the case in practice
-            let price_delta =
-                if current_snapshot.price_cumulative >= previous_snapshot.price_cumulative {
-                    current_snapshot.price_cumulative - previous_snapshot.price_cumulative
-                } else {
-                    current_snapshot
-                        .price_cumulative
-                        .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
-                };
-            let period = current_snapshot.timestamp - previous_snapshot.timestamp;
-            // NOTE: Astroport introduces TWAP precision (https://github.com/astroport-fi/astroport/pull/143).
-            // We need to divide the result by price_precision: (price_delta / (time * price_precision)).
-            let price_precision = Uint128::from(10_u128.pow(TWAP_PRECISION.into()));
-            let price =
-                Decimal::from_ratio(price_delta, price_precision.checked_mul(period.into())?);
-
-            Ok(price)
-        }
+        } => query_astroport_twap_price(
+            &deps,
+            &env,
+            &asset_reference,
+            &pair_address,
+            window_size,
+            tolerance,
+        ),
 
         // The value of each unit of the liquidity token is the total value of pool's two assets
         // divided by the liquidity token's total supply
@@ -339,7 +317,92 @@ fn query_asset_price(
             let price = Decimal::from_ratio(round.answer as u128, price_precision);
             Ok(price)
         }
+
+        PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
+            contract_addr,
+            pair_address,
+            window_size,
+            tolerance,
+            deviation_percentage,
+        } => {
+            let astroport_twap_price = query_astroport_twap_price(
+                &deps,
+                &env,
+                &asset_reference,
+                &pair_address,
+                window_size,
+                tolerance,
+            )?;
+
+            let decimals: u8 = deps
+                .querier
+                .query_wasm_smart(&contract_addr, &ChainlinkQueryMsg::Decimals)?;
+            let round: Round = deps
+                .querier
+                .query_wasm_smart(contract_addr, &ChainlinkQueryMsg::LatestRoundData)?;
+            let price_precision = Uint128::from(10_u128.pow(decimals.into()));
+            let chainlink_price = Decimal::from_ratio(round.answer as u128, price_precision);
+
+            let deviation_percentage =
+                deviation_percentage.unwrap_or(Decimal::from_ratio(15u32, 100u32));
+            let lower_bound_chainlink_price = astroport_twap_price
+                .checked_mul(Decimal::from_ratio(100u32, 1u32) - deviation_percentage)?;
+            let upper_bound_chainlink_price = astroport_twap_price
+                .checked_mul(Decimal::from_ratio(100u32, 1u32) + deviation_percentage)?;
+            if chainlink_price >= lower_bound_chainlink_price
+                && chainlink_price <= upper_bound_chainlink_price
+            {
+                Ok(chainlink_price)
+            } else {
+                Err(ContractError::ChainlinkPriceExceedsAllowableDeviationPercentage {})
+            }
+        }
     }
+}
+
+fn query_astroport_twap_price(
+    deps: &Deps,
+    env: &Env,
+    asset_reference: &Vec<u8>,
+    pair_address: &Addr,
+    window_size: u64,
+    tolerance: u64,
+) -> Result<Decimal, ContractError> {
+    let snapshots = ASTROPORT_TWAP_SNAPSHOTS.load(deps.storage, &asset_reference)?;
+
+    // First, query the current TWAP snapshot
+    let current_snapshot = AstroportTwapSnapshot {
+        timestamp: env.block.time.seconds(),
+        price_cumulative: query_astroport_cumulative_price(&deps.querier, &pair_address)?,
+    };
+
+    // Find the oldest snapshot whose period from current snapshot is within the tolerable window
+    // We do this using a linear search, and quit as soon as we find one; otherwise throw error
+    let previous_snapshot = snapshots
+        .iter()
+        .find(|snapshot| period_diff(&current_snapshot, snapshot, window_size) <= tolerance)
+        .ok_or(ContractError::NoSnapshotWithinTolerance {})?;
+
+    // Handle the case if Astroport's cumulative price overflows. In this case, cumulative
+    // price warps back to zero, resulting in more recent cum. prices being smaller than
+    // earlier ones. (same behavior as in Solidity)
+    //
+    // Calculations below assumes the cumulative price doesn't overflows more than once during
+    // the period, which should always be the case in practice
+    let price_delta = if current_snapshot.price_cumulative >= previous_snapshot.price_cumulative {
+        current_snapshot.price_cumulative - previous_snapshot.price_cumulative
+    } else {
+        current_snapshot
+            .price_cumulative
+            .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
+    };
+    let period = current_snapshot.timestamp - previous_snapshot.timestamp;
+    // NOTE: Astroport introduces TWAP precision (https://github.com/astroport-fi/astroport/pull/143).
+    // We need to divide the result by price_precision: (price_delta / (time * price_precision)).
+    let price_precision = Uint128::from(10_u128.pow(TWAP_PRECISION.into()));
+    let price = Decimal::from_ratio(price_delta, price_precision.checked_mul(period.into())?);
+
+    Ok(price)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
