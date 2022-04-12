@@ -526,6 +526,7 @@ dependencies = [
  "cw2",
  "cw20 0.9.1",
  "cw20-base",
+ "proxy-ocr2",
  "schemars",
  "serde",
  "terra-cosmwasm",
