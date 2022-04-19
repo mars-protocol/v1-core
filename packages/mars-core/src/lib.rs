@@ -13,6 +13,9 @@ pub mod treasury;
 pub mod vesting;
 pub mod xmars_token;
 
+// Other contracts
+pub mod lido;
+
 // Types
 pub mod asset;
 pub mod math;

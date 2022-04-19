@@ -8,7 +8,7 @@ use cw20::Cw20QueryMsg;
 use terra_cosmwasm::TerraQueryWrapper;
 
 use crate::{
-    address_provider, incentives, ma_token, oracle, staking, testing::mock_address_provider,
+    address_provider, incentives, lido, ma_token, oracle, staking, testing::mock_address_provider,
     vesting, xmars_token,
 };
 use astroport::{
@@ -27,7 +27,9 @@ use super::{
     vesting_querier::VestingQuerier,
     xmars_querier::XMarsQuerier,
 };
+use crate::lido::StateResponse;
 use crate::math::decimal::Decimal;
+use crate::testing::lido_querier::LidoQuerier;
 
 pub struct MarsMockQuerier {
     base: MockQuerier<TerraQueryWrapper>,
@@ -40,6 +42,7 @@ pub struct MarsMockQuerier {
     staking_querier: StakingQuerier,
     vesting_querier: VestingQuerier,
     incentives_querier: IncentivesQuerier,
+    lido_querier: LidoQuerier,
 }
 
 impl Querier for MarsMockQuerier {
@@ -72,6 +75,7 @@ impl MarsMockQuerier {
             staking_querier: StakingQuerier::default(),
             vesting_querier: VestingQuerier::default(),
             incentives_querier: IncentivesQuerier::default(),
+            lido_querier: LidoQuerier::default(),
         }
     }
 
@@ -237,6 +241,10 @@ impl MarsMockQuerier {
             .insert(Addr::unchecked(user_address), unclaimed_rewards);
     }
 
+    pub fn set_lido_state_response(&mut self, state_response: StateResponse) {
+        self.lido_querier.state_response = Some(state_response);
+    }
+
     pub fn handle_query(&self, request: &QueryRequest<TerraQueryWrapper>) -> QuerierResult {
         match &request {
             QueryRequest::Custom(TerraQueryWrapper { route, query_data }) => {
@@ -322,6 +330,12 @@ impl MarsMockQuerier {
                     return self
                         .vesting_querier
                         .handle_query(&contract_addr, vesting_query);
+                }
+
+                // Lido Queries
+                let lido_query: StdResult<lido::QueryMsg> = from_binary(msg);
+                if let Ok(query) = lido_query {
+                    return self.lido_querier.handle_query(&query);
                 }
 
                 panic!("[mock]: Unsupported wasm query: {:?}", msg);
