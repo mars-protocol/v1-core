@@ -50,8 +50,8 @@ pub enum PriceSource<A> {
         /// Address of the asset of interest
         pair_address: A,
     },
-    /// stLuna price calculated from stLuna/Luna exchange rate from Lido staking contract and Luna price from current price source
-    StLuna { staking_contract_addr: A },
+    /// stLuna price calculated from stLuna/Luna exchange rate from Lido hub contract and Luna price from current price source
+    StLuna { hub_address: A },
 }
 
 impl<A> fmt::Display for PriceSource<A> {
@@ -97,10 +97,8 @@ impl PriceSourceUnchecked {
                     pair_address: api.addr_validate(pair_address)?,
                 }
             }
-            PriceSourceUnchecked::StLuna {
-                staking_contract_addr,
-            } => PriceSourceChecked::StLuna {
-                staking_contract_addr: api.addr_validate(staking_contract_addr)?,
+            PriceSourceUnchecked::StLuna { hub_address } => PriceSourceChecked::StLuna {
+                hub_address: api.addr_validate(hub_address)?,
             },
         })
     }

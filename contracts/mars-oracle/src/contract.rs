@@ -304,11 +304,8 @@ fn query_asset_price(
             Ok(price)
         }
 
-        PriceSourceChecked::StLuna {
-            staking_contract_addr,
-        } => {
-            let stluna_exchange_rate =
-                query_stluna_exchange_rate(&deps.querier, &staking_contract_addr)?;
+        PriceSourceChecked::StLuna { hub_address } => {
+            let stluna_exchange_rate = query_stluna_exchange_rate(&deps.querier, &hub_address)?;
 
             let luna_asset = Asset::Native {
                 denom: "uluna".to_string(),
@@ -453,10 +450,10 @@ mod helpers {
 
     pub fn query_stluna_exchange_rate(
         querier: &QuerierWrapper,
-        staking_contract_addr: &Addr,
+        hub_address: &Addr,
     ) -> StdResult<Decimal> {
         let response: StateResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: staking_contract_addr.to_string(),
+            contract_addr: hub_address.to_string(),
             msg: to_binary(&QueryMsg::State {}).unwrap(),
         }))?;
         Ok(response.stluna_exchange_rate)
@@ -702,7 +699,7 @@ mod tests {
         let msg = ExecuteMsg::SetAsset {
             asset: asset,
             price_source: PriceSourceUnchecked::StLuna {
-                staking_contract_addr: "stluna_staking_addr".to_string(),
+                hub_address: "stluna_hub_addr".to_string(),
             },
         };
         execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
@@ -713,7 +710,7 @@ mod tests {
         assert_eq!(
             price_source,
             PriceSourceChecked::StLuna {
-                staking_contract_addr: Addr::unchecked("stluna_staking_addr")
+                hub_address: Addr::unchecked("stluna_hub_addr")
             }
         );
     }
@@ -1195,7 +1192,7 @@ mod tests {
                 &mut deps.storage,
                 asset_reference.as_slice(),
                 &PriceSourceChecked::StLuna {
-                    staking_contract_addr: Addr::unchecked("stluna_staking_addr"),
+                    hub_address: Addr::unchecked("stluna_hub_addr"),
                 },
             )
             .unwrap();
