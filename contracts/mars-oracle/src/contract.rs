@@ -338,7 +338,7 @@ mod helpers {
             SimulationResponse,
         },
     };
-    use mars_core::lido::{QueryMsg, StateResponse};
+    use mars_core::basset::hub::{QueryMsg, StateResponse};
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
@@ -454,9 +454,9 @@ mod helpers {
     ) -> StdResult<Decimal> {
         let response: StateResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
             contract_addr: hub_address.to_string(),
-            msg: to_binary(&QueryMsg::State {}).unwrap(),
+            msg: to_binary(&QueryMsg::State {})?,
         }))?;
-        Ok(response.stluna_exchange_rate)
+        Ok(response.stluna_exchange_rate.into())
     }
 }
 
@@ -469,8 +469,9 @@ mod tests {
     use astroport::factory::PairType;
     use astroport::pair::{CumulativePricesResponse, SimulationResponse};
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
+    use cosmwasm_std::Decimal as StdDecimal;
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars_core::lido::StateResponse;
+    use mars_core::basset::hub::StateResponse;
     use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
     #[test]
@@ -1197,15 +1198,17 @@ mod tests {
             )
             .unwrap();
 
-        deps.querier.set_lido_state_response(StateResponse {
+        deps.querier.set_basset_state_response(StateResponse {
             bluna_exchange_rate: Default::default(),
-            stluna_exchange_rate: Decimal::from_ratio(11_u128, 10_u128), // 1 stluna = 1.1 luna
+            stluna_exchange_rate: StdDecimal::from_ratio(11_u128, 10_u128), // 1 stluna = 1.1 luna
             total_bond_bluna_amount: Default::default(),
             total_bond_stluna_amount: Default::default(),
             last_index_modification: 0,
             prev_hub_balance: Default::default(),
             last_unbonded_time: 0,
             last_processed_batch: 0,
+            total_bond_amount: Default::default(),
+            exchange_rate: Default::default(),
         });
 
         let price: Decimal = from_binary(

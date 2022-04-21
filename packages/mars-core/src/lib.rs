@@ -13,9 +13,6 @@ pub mod treasury;
 pub mod vesting;
 pub mod xmars_token;
 
-// Other contracts
-pub mod lido;
-
 // Types
 pub mod asset;
 pub mod math;
@@ -28,3 +25,6 @@ pub mod tax;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod testing;
+
+// Reimport to be used by mars contracts
+pub use basset;
