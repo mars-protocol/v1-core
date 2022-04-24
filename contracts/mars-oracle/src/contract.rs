@@ -1,6 +1,9 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{attr, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, Addr};
+use cosmwasm_std::{
+    attr, to_binary, Addr, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, QuerierWrapper,
+    Response, StdResult, Uint128,
+};
 use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
 
@@ -98,7 +101,8 @@ pub fn execute_set_asset(
             assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
         }
         PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-            contract_addr: _contract_addr,
+            proxy_address: _,
+            ust_usd_proxy_address: _,
             pair_address,
             ..
         } => assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?,
@@ -134,11 +138,12 @@ pub fn execute_record_twap_snapshots(
                 tolerance,
             } => (pair_address, window_size, tolerance),
             PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-                contract_addr: _contract_addr,
+                proxy_address: _,
+                ust_usd_proxy_address: _,
                 pair_address,
                 window_size,
                 tolerance,
-                deviation_percentage: _deviation_percentage,
+                deviation_percentage: _,
             } => (pair_address, window_size, tolerance),
             _ => {
                 return Err(ContractError::PriceSourceNotTwap {});
@@ -298,28 +303,17 @@ fn query_asset_price(
         }
 
         PriceSourceChecked::Chainlink {
-            contract_addr,
-            validity_period,
-        } => {
-            let decimals: u8 = deps
-                .querier
-                .query_wasm_smart(&contract_addr, &ChainlinkQueryMsg::Decimals)?;
-            let round: Round = deps
-                .querier
-                .query_wasm_smart(contract_addr, &ChainlinkQueryMsg::LatestRoundData)?;
-
-            let current_timestamp = env.block.time.seconds();
-            if (round.observations_timestamp as u64) + validity_period < current_timestamp {
-                return Err(ContractError::ChainlinkPriceTooOld {});
-            }
-
-            let price_precision = Uint128::from(10_u128.pow(decimals.into()));
-            let price = Decimal::from_ratio(round.answer as u128, price_precision);
-            Ok(price)
-        }
+            proxy_address,
+            ust_usd_proxy_address,
+        } => query_chainlink_spot_price(
+            &deps.querier,
+            &proxy_address,
+            ust_usd_proxy_address.as_ref(),
+        ),
 
         PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-            contract_addr,
+            proxy_address,
+            ust_usd_proxy_address,
             pair_address,
             window_size,
             tolerance,
@@ -334,25 +328,23 @@ fn query_asset_price(
                 tolerance,
             )?;
 
-            let decimals: u8 = deps
-                .querier
-                .query_wasm_smart(&contract_addr, &ChainlinkQueryMsg::Decimals)?;
-            let round: Round = deps
-                .querier
-                .query_wasm_smart(contract_addr, &ChainlinkQueryMsg::LatestRoundData)?;
-            let price_precision = Uint128::from(10_u128.pow(decimals.into()));
-            let chainlink_price = Decimal::from_ratio(round.answer as u128, price_precision);
+            let chainlink_price = query_chainlink_spot_price(
+                &deps.querier,
+                &proxy_address,
+                ust_usd_proxy_address.as_ref(),
+            )?;
 
+            // Check whether the Astroport TWAP price falls within the max_deviation from the Chainlink price
             let deviation_percentage =
                 deviation_percentage.unwrap_or_else(|| Decimal::from_ratio(15u32, 100u32));
             // 100% - deviation_percentage
-            let lower_bound_chainlink_price =
-                astroport_twap_price.checked_mul(Decimal::one() - deviation_percentage)?;
+            let lower_bound_astroport_twap_price =
+                chainlink_price.checked_mul(Decimal::one() - deviation_percentage)?;
             // 100% + deviation_percentage
-            let upper_bound_chainlink_price =
-                astroport_twap_price.checked_mul(Decimal::one() + deviation_percentage)?;
-            if chainlink_price >= lower_bound_chainlink_price
-                && chainlink_price <= upper_bound_chainlink_price
+            let upper_bound_astroport_twap_price =
+                chainlink_price.checked_mul(Decimal::one() + deviation_percentage)?;
+            if astroport_twap_price >= lower_bound_astroport_twap_price
+                && astroport_twap_price <= upper_bound_astroport_twap_price
             {
                 Ok(chainlink_price)
             } else {
@@ -405,6 +397,37 @@ fn query_astroport_twap_price(
     let price = Decimal::from_ratio(price_delta, price_precision.checked_mul(period.into())?);
 
     Ok(price)
+}
+
+fn query_chainlink_spot_price(
+    querier: &QuerierWrapper,
+    proxy_address: &Addr,
+    ust_usd_proxy_address: Option<&Addr>,
+) -> Result<Decimal, ContractError> {
+    let decimals: u8 = querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::Decimals)?;
+    let round: Round =
+        querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::LatestRoundData)?;
+
+    let price_precision = Uint128::from(10_u128.pow(decimals.into()));
+    let price = Decimal::from_ratio(round.answer as u128, price_precision);
+
+    // If the Chainlink price is USD denominated, convert the price to UST using the Chainlink UST/USD price feed
+    if let Some(ust_usd_proxy_address) = ust_usd_proxy_address {
+        let ust_usd_decimals: u8 =
+            querier.query_wasm_smart(ust_usd_proxy_address, &ChainlinkQueryMsg::Decimals)?;
+        let ust_usd_round: Round =
+            querier.query_wasm_smart(ust_usd_proxy_address, &ChainlinkQueryMsg::LatestRoundData)?;
+
+        let ust_usd_price_precision = Uint128::from(10_u128.pow(ust_usd_decimals.into()));
+        let ust_usd_price =
+            Decimal::from_ratio(ust_usd_round.answer as u128, ust_usd_price_precision);
+
+        let price = price.checked_div(ust_usd_price)?;
+
+        Ok(price)
+    } else {
+        Ok(price)
+    }
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -822,8 +845,8 @@ mod tests {
         let msg = ExecuteMsg::SetAsset {
             asset,
             price_source: PriceSourceUnchecked::Chainlink {
-                contract_addr: "luna_chainlink_addr".to_string(),
-                validity_period: 3600,
+                proxy_address: "luna_chainlink_addr".to_string(),
+                ust_usd_proxy_address: None,
             },
         };
         execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
@@ -834,8 +857,8 @@ mod tests {
         assert_eq!(
             price_source,
             PriceSourceChecked::Chainlink {
-                contract_addr: Addr::unchecked("luna_chainlink_addr"),
-                validity_period: 3600
+                proxy_address: Addr::unchecked("luna_chainlink_addr"),
+                ust_usd_proxy_address: None
             }
         );
     }
@@ -866,7 +889,8 @@ mod tests {
         let msg = ExecuteMsg::SetAsset {
             asset,
             price_source: PriceSourceUnchecked::ChainlinkAnchoredToAstroportTwap {
-                contract_addr: "cw20token_chainlink_addr".to_string(),
+                proxy_address: "cw20token_chainlink_addr".to_string(),
+                ust_usd_proxy_address: Some("ust_usd_chainlink_addr".to_string()),
                 pair_address: "cw20token_pair".to_string(),
                 window_size: 3600,
                 tolerance: 660,
@@ -882,7 +906,8 @@ mod tests {
         assert_eq!(
             price_source,
             PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-                contract_addr: Addr::unchecked("cw20token_chainlink_addr"),
+                proxy_address: Addr::unchecked("cw20token_chainlink_addr"),
+                ust_usd_proxy_address: Some(Addr::unchecked("ust_usd_chainlink_addr")),
                 pair_address: Addr::unchecked("cw20token_pair"),
                 window_size: 3600,
                 tolerance: 660,
@@ -1392,6 +1417,7 @@ mod tests {
         };
         let asset_reference = asset.get_reference();
 
+        // Luna price in USD (ust_usd_proxy_address is empty)
         let chainlink_cw20_contract_addr = Addr::unchecked("cw20token_chainlink_addr");
         deps.querier
             .set_chainlink_decimals(chainlink_cw20_contract_addr.clone(), 6);
@@ -1411,8 +1437,47 @@ mod tests {
                 &mut deps.storage,
                 asset_reference.as_slice(),
                 &PriceSourceChecked::Chainlink {
-                    contract_addr: chainlink_cw20_contract_addr,
-                    validity_period: 3600,
+                    proxy_address: chainlink_cw20_contract_addr.clone(),
+                    ust_usd_proxy_address: None,
+                },
+            )
+            .unwrap();
+
+        let price: Decimal = from_binary(
+            &query(
+                deps.as_ref(),
+                env.clone(),
+                QueryMsg::AssetPriceByReference {
+                    asset_reference: asset_reference.clone(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(price, Decimal::from_ratio(12456_u128, 100_u128));
+
+        // Converts the price to UST using the Chainlink UST/USD price feed
+        let chainlink_ust_usd_contract_addr = Addr::unchecked("ust_usd_chainlink_addr");
+        deps.querier
+            .set_chainlink_decimals(chainlink_ust_usd_contract_addr.clone(), 8);
+        deps.querier.set_chainlink_latest_round_data(
+            chainlink_ust_usd_contract_addr.clone(),
+            Round {
+                round_id: 1,
+                answer: 80000000,
+                observations_timestamp: block_timestamp_sec,
+                transmission_timestamp: block_timestamp_sec,
+            },
+        );
+
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
+                &PriceSourceChecked::Chainlink {
+                    proxy_address: chainlink_cw20_contract_addr,
+                    ust_usd_proxy_address: Some(chainlink_ust_usd_contract_addr),
                 },
             )
             .unwrap();
@@ -1427,7 +1492,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(price, Decimal::from_ratio(12456_u128, 100_u128));
+        assert_eq!(price, Decimal::from_ratio(15570_u128, 100_u128));
     }
 
     #[test]
@@ -1451,7 +1516,8 @@ mod tests {
                 &mut deps.storage,
                 asset_reference.as_slice(),
                 &PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-                    contract_addr: chainlink_cw20_contract_addr.clone(),
+                    proxy_address: chainlink_cw20_contract_addr.clone(),
+                    ust_usd_proxy_address: None,
                     pair_address: Addr::unchecked("pair"),
                     window_size,
                     tolerance,

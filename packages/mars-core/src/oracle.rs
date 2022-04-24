@@ -52,18 +52,21 @@ pub enum PriceSource<A> {
     },
     /// stLuna price calculated from stLuna/Luna exchange rate from Lido hub contract and Luna price from current price source
     Stluna { hub_address: A },
-    /// Chainlink price quoted in UST
+    /// Chainlink price quoted in UST. If the Chainlink price is USD denominated, the system converts
+    /// the price to UST using the Chainlink UST/USD price feed (`ust_usd_proxy_address` can't be empty in that case).
     Chainlink {
-        /// Chainlink’s contract for the asset
-        contract_addr: A,
-        /// Defines how many seconds can pass from current timestamp to last observations
-        /// for the price to be considered up-to-date
-        validity_period: u64,
+        /// Chainlink’s proxy contract for the asset
+        proxy_address: A,
+        /// Chainlink’s proxy contract for UST/USD price feed
+        ust_usd_proxy_address: Option<A>,
     },
-    /// Chainlink TWAP price quoted in UST
+    /// Chainlink TWAP price quoted in UST. If the Chainlink price is USD denominated, the system converts
+    /// the price to UST using the Chainlink UST/USD price feed (`ust_usd_proxy_address` can't be empty in that case).
     ChainlinkAnchoredToAstroportTwap {
-        /// Chainlink’s contract for the asset
-        contract_addr: A,
+        /// Chainlink’s proxy contract for the asset
+        proxy_address: A,
+        /// Chainlink’s proxy contract for UST/USD price feed
+        ust_usd_proxy_address: Option<A>,
         /// Astroport address of the asset
         pair_address: A,
         /// Window size
@@ -132,25 +135,39 @@ impl PriceSourceUnchecked {
                 hub_address: api.addr_validate(hub_address)?,
             },
             PriceSourceUnchecked::Chainlink {
-                contract_addr,
-                validity_period,
-            } => PriceSourceChecked::Chainlink {
-                contract_addr: api.addr_validate(contract_addr)?,
-                validity_period: *validity_period,
-            },
+                proxy_address,
+                ust_usd_proxy_address,
+            } => {
+                let ust_usd_proxy_address = match ust_usd_proxy_address {
+                    Some(addr) => Some(api.addr_validate(addr)?),
+                    None => None,
+                };
+                PriceSourceChecked::Chainlink {
+                    proxy_address: api.addr_validate(proxy_address)?,
+                    ust_usd_proxy_address,
+                }
+            }
             PriceSourceUnchecked::ChainlinkAnchoredToAstroportTwap {
-                contract_addr,
+                proxy_address,
+                ust_usd_proxy_address,
                 pair_address,
                 window_size,
                 tolerance,
                 deviation_percentage,
-            } => PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-                contract_addr: api.addr_validate(contract_addr)?,
-                pair_address: api.addr_validate(pair_address)?,
-                window_size: *window_size,
-                tolerance: *tolerance,
-                deviation_percentage: *deviation_percentage,
-            },
+            } => {
+                let ust_usd_proxy_address = match ust_usd_proxy_address {
+                    Some(addr) => Some(api.addr_validate(addr)?),
+                    None => None,
+                };
+                PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
+                    proxy_address: api.addr_validate(proxy_address)?,
+                    ust_usd_proxy_address,
+                    pair_address: api.addr_validate(pair_address)?,
+                    window_size: *window_size,
+                    tolerance: *tolerance,
+                    deviation_percentage: *deviation_percentage,
+                }
+            }
         })
     }
 }

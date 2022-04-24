@@ -25,9 +25,6 @@ pub enum ContractError {
     #[error("Invalid pair")]
     InvalidPair {},
 
-    #[error("Chainlink price is too old")]
-    ChainlinkPriceTooOld {},
-
     #[error("Chainlink price exceeds the allowable price deviation from Astroport TWAP")]
     ChainlinkPriceExceedsAllowableDeviationPercentage {},
 }
