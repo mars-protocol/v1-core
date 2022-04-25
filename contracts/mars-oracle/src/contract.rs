@@ -19,8 +19,7 @@ use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchec
 use self::helpers::*;
 use astroport::pair::TWAP_PRECISION;
 
-use chainlink_terra::msg::QueryMsg as ChainlinkQueryMsg;
-use chainlink_terra::state::Round;
+pub const DEFAULT_DEVIATION_PERCENTAGE: u64 = 15;
 
 // INIT
 
@@ -93,19 +92,14 @@ pub fn execute_set_asset(
     let price_source = price_source_unchecked.to_checked(deps.api)?;
     PRICE_SOURCES.save(deps.storage, &asset_reference, &price_source)?;
 
-    // for spot and TWAP sources, we must make sure: the astroport pair indicated by `pair_address`
+    // for price sources that utilize Astroport pools, we must make sure: the astroport pair indicated by `pair_address`
     // consists of UST and the asset of interest
     match &price_source {
         PriceSourceChecked::AstroportSpot { pair_address }
-        | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
+        | PriceSourceChecked::AstroportTwap { pair_address, .. }
+        | PriceSourceChecked::ChainlinkAnchoredToAstroportTwap { pair_address, .. } => {
             assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
         }
-        PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-            proxy_address: _,
-            ust_usd_proxy_address: _,
-            pair_address,
-            ..
-        } => assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?,
         _ => (),
     }
 
@@ -138,12 +132,10 @@ pub fn execute_record_twap_snapshots(
                 tolerance,
             } => (pair_address, window_size, tolerance),
             PriceSourceChecked::ChainlinkAnchoredToAstroportTwap {
-                proxy_address: _,
-                ust_usd_proxy_address: _,
                 pair_address,
                 window_size,
                 tolerance,
-                deviation_percentage: _,
+                ..
             } => (pair_address, window_size, tolerance),
             _ => {
                 return Err(ContractError::PriceSourceNotTwap {});
@@ -305,7 +297,7 @@ fn query_asset_price(
         PriceSourceChecked::Chainlink {
             proxy_address,
             ust_usd_proxy_address,
-        } => query_chainlink_spot_price(
+        } => query_chainlink_price_with_possible_ust_conversion(
             &deps.querier,
             &proxy_address,
             ust_usd_proxy_address.as_ref(),
@@ -328,15 +320,15 @@ fn query_asset_price(
                 tolerance,
             )?;
 
-            let chainlink_price = query_chainlink_spot_price(
+            let chainlink_price = query_chainlink_price_with_possible_ust_conversion(
                 &deps.querier,
                 &proxy_address,
                 ust_usd_proxy_address.as_ref(),
             )?;
 
             // Check whether the Astroport TWAP price falls within the max_deviation from the Chainlink price
-            let deviation_percentage =
-                deviation_percentage.unwrap_or_else(|| Decimal::from_ratio(15u32, 100u32));
+            let deviation_percentage = deviation_percentage
+                .unwrap_or_else(|| Decimal::percent(DEFAULT_DEVIATION_PERCENTAGE));
             // 100% - deviation_percentage
             let lower_bound_astroport_twap_price =
                 chainlink_price.checked_mul(Decimal::one() - deviation_percentage)?;
@@ -348,7 +340,13 @@ fn query_asset_price(
             {
                 Ok(chainlink_price)
             } else {
-                Err(ContractError::ChainlinkPriceExceedsAllowableDeviationPercentage {})
+                Err(
+                    ContractError::ChainlinkPriceExceedsAllowableDeviationPercentage {
+                        chainlink_price,
+                        astroport_twap_price,
+                        deviation_percentage,
+                    },
+                )
             }
         }
     }
@@ -391,6 +389,7 @@ fn query_astroport_twap_price(
             .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
     };
     let period = current_snapshot.timestamp - previous_snapshot.timestamp;
+
     // NOTE: Astroport introduces TWAP precision (https://github.com/astroport-fi/astroport/pull/143).
     // We need to divide the result by price_precision: (price_delta / (time * price_precision)).
     let price_precision = Uint128::from(10_u128.pow(TWAP_PRECISION.into()));
@@ -399,35 +398,20 @@ fn query_astroport_twap_price(
     Ok(price)
 }
 
-fn query_chainlink_spot_price(
+fn query_chainlink_price_with_possible_ust_conversion(
     querier: &QuerierWrapper,
     proxy_address: &Addr,
     ust_usd_proxy_address: Option<&Addr>,
 ) -> Result<Decimal, ContractError> {
-    let decimals: u8 = querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::Decimals)?;
-    let round: Round =
-        querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::LatestRoundData)?;
-
-    let price_precision = Uint128::from(10_u128.pow(decimals.into()));
-    let price = Decimal::from_ratio(round.answer as u128, price_precision);
+    let mut price = query_chainlink_price(querier, proxy_address)?;
 
     // If the Chainlink price is USD denominated, convert the price to UST using the Chainlink UST/USD price feed
     if let Some(ust_usd_proxy_address) = ust_usd_proxy_address {
-        let ust_usd_decimals: u8 =
-            querier.query_wasm_smart(ust_usd_proxy_address, &ChainlinkQueryMsg::Decimals)?;
-        let ust_usd_round: Round =
-            querier.query_wasm_smart(ust_usd_proxy_address, &ChainlinkQueryMsg::LatestRoundData)?;
-
-        let ust_usd_price_precision = Uint128::from(10_u128.pow(ust_usd_decimals.into()));
-        let ust_usd_price =
-            Decimal::from_ratio(ust_usd_round.answer as u128, ust_usd_price_precision);
-
-        let price = price.checked_div(ust_usd_price)?;
-
-        Ok(price)
-    } else {
-        Ok(price)
+        let ust_usd_price = query_chainlink_price(querier, ust_usd_proxy_address)?;
+        price = price.checked_div(ust_usd_price)?;
     }
+
+    Ok(price)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -456,6 +440,9 @@ mod helpers {
         },
     };
     use mars_core::basset::hub::{QueryMsg, StateResponse};
+
+    use chainlink_terra::msg::QueryMsg as ChainlinkQueryMsg;
+    use chainlink_terra::state::Round;
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
@@ -575,6 +562,20 @@ mod helpers {
         }))?;
         Ok(response.stluna_exchange_rate.into())
     }
+
+    pub fn query_chainlink_price(
+        querier: &QuerierWrapper,
+        proxy_address: &Addr,
+    ) -> Result<Decimal, ContractError> {
+        let decimals: u8 = querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::Decimals)?;
+        let round: Round =
+            querier.query_wasm_smart(proxy_address, &ChainlinkQueryMsg::LatestRoundData)?;
+
+        let price_precision = Uint128::from(10_u128.pow(decimals.into()));
+        let price = Decimal::from_ratio(round.answer as u128, price_precision);
+
+        Ok(price)
+    }
 }
 
 // TESTS
@@ -585,6 +586,7 @@ mod tests {
     use astroport::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
     use astroport::factory::PairType;
     use astroport::pair::{CumulativePricesResponse, SimulationResponse};
+    use chainlink_terra::state::Round;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::Decimal as StdDecimal;
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
@@ -1585,6 +1587,10 @@ mod tests {
         let chainlink_price_precision = Uint128::from(10_u128.pow(chainlink_decimals.into()));
         let chainlink_answer = chainlink_price_precision * astroport_twap_price;
         let deviated_chainlink_answer = chainlink_answer * Decimal::from_ratio(120u32, 100u32);
+        let deviated_chainlink_price = Decimal::from_ratio(
+            deviated_chainlink_answer.u128(),
+            chainlink_price_precision.u128(),
+        );
         deps.querier.set_chainlink_latest_round_data(
             chainlink_cw20_contract_addr.clone(),
             Round {
@@ -1605,7 +1611,12 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             error,
-            ContractError::ChainlinkPriceExceedsAllowableDeviationPercentage {}.into()
+            ContractError::ChainlinkPriceExceedsAllowableDeviationPercentage {
+                chainlink_price: deviated_chainlink_price,
+                astroport_twap_price,
+                deviation_percentage: Decimal::percent(DEFAULT_DEVIATION_PERCENTAGE)
+            }
+            .into()
         );
 
         // set price which is the same as Astroport TWAP

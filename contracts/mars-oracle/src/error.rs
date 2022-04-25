@@ -1,5 +1,6 @@
 use cosmwasm_std::{OverflowError, StdError};
 use mars_core::error::MarsError;
+use mars_core::math::decimal::Decimal;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq)]
@@ -25,8 +26,17 @@ pub enum ContractError {
     #[error("Invalid pair")]
     InvalidPair {},
 
-    #[error("Chainlink price exceeds the allowable price deviation from Astroport TWAP")]
-    ChainlinkPriceExceedsAllowableDeviationPercentage {},
+    #[error(
+        "Chainlink price exceeds the allowable price deviation from Astroport TWAP \
+        (chainlink_price: {chainlink_price:?}, \
+        astroport_twap_price: {astroport_twap_price:?}, \
+        deviation_percentage: {deviation_percentage:?})"
+    )]
+    ChainlinkPriceExceedsAllowableDeviationPercentage {
+        chainlink_price: Decimal,
+        astroport_twap_price: Decimal,
+        deviation_percentage: Decimal,
+    },
 }
 
 impl From<ContractError> for StdError {
