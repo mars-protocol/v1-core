@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "mars-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "astroport",
  "basset",
@@ -580,7 +580,7 @@ dependencies = [
 
 [[package]]
 name = "mars-oracle"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "astroport",
  "cosmwasm-schema",
