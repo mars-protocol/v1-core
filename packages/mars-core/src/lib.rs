@@ -28,3 +28,4 @@ pub mod testing;
 
 // Reimport to be used by mars contracts
 pub use basset;
+pub use stader;
