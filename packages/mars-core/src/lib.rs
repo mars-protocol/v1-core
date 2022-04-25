@@ -3,6 +3,7 @@ pub mod address_provider;
 pub mod council;
 pub mod cw20_core;
 pub mod incentives;
+pub mod lp_staking_proxy;
 pub mod ma_token;
 pub mod oracle;
 pub mod protocol_rewards_collector;
