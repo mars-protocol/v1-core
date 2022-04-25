@@ -188,6 +188,9 @@ pub struct CreateOrUpdateConfig {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InitOrUpdateAssetParams {
+    /// Staking proxy contract address
+    pub staking_proxy_address: Option<Addr>,
+
     /// Initial borrow rate
     pub initial_borrow_rate: Option<Decimal>,
 

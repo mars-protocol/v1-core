@@ -448,6 +448,7 @@ pub fn create_market(
     // Destructuring a struct’s fields into separate variables in order to force
     // compile error if we add more params
     let InitOrUpdateAssetParams {
+        staking_proxy_address,
         initial_borrow_rate: borrow_rate,
         max_loan_to_value,
         reserve_factor,
@@ -478,6 +479,7 @@ pub fn create_market(
         index,
         asset_type,
         ma_token_address: Addr::unchecked(""),
+        staking_proxy_address: staking_proxy_address,
         borrow_index: Decimal::one(),
         liquidity_index: Decimal::one(),
         borrow_rate: borrow_rate.unwrap(),
@@ -549,6 +551,7 @@ pub fn execute_update_asset(
             // Destructuring a struct’s fields into separate variables in order to force
             // compile error if we add more params
             let InitOrUpdateAssetParams {
+                staking_proxy_address,
                 initial_borrow_rate: _,
                 max_loan_to_value,
                 reserve_factor,
@@ -585,6 +588,7 @@ pub fn execute_update_asset(
             }
 
             let mut updated_market = Market {
+                staking_proxy_address: market.staking_proxy_address,
                 max_loan_to_value: max_loan_to_value.unwrap_or(market.max_loan_to_value),
                 reserve_factor: reserve_factor.unwrap_or(market.reserve_factor),
                 liquidation_threshold: liquidation_threshold
@@ -599,6 +603,11 @@ pub fn execute_update_asset(
             if let Some(params) = interest_rate_model_params {
                 updated_market.interest_rate_model =
                     init_interest_rate_model(params, env.block.time.seconds())?;
+            }
+
+            // Staking contract addr can only be set if its not already set
+            if staking_proxy_address.is_some() && updated_market.staking_proxy_address.is_none() {
+                updated_market.staking_proxy_address = staking_proxy_address;
             }
 
             updated_market.validate()?;
@@ -2044,6 +2053,7 @@ pub fn query_markets_list(deps: Deps) -> StdResult<MarketsListResponse> {
                 asset_reference,
                 asset_type: market.asset_type,
                 ma_token_address: market.ma_token_address,
+                staking_proxy_address: market.staking_proxy_address,
             })
         })
         .collect();
