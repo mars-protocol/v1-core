@@ -4,7 +4,7 @@ use std::str;
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     from_binary, to_binary, Addr, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo,
-    Order, Response, StdError, StdResult, Uint128, WasmMsg,
+    Order, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
@@ -143,6 +143,16 @@ pub fn execute(
                 deposit_amount,
             )
         }
+
+        ExecuteMsg::Stake { asset, amount } => {
+            execute_stake_with_proxy(deps, env, info, asset, amount)
+        }
+
+        ExecuteMsg::Unstake {
+            asset,
+            amount,
+            claim_rewards,
+        } => execute_unstake_from_proxy(deps, env, info, asset, amount, claim_rewards),
 
         ExecuteMsg::Withdraw {
             asset,
@@ -793,6 +803,147 @@ pub fn execute_deposit(
             })?,
             funds: vec![],
         }));
+
+    Ok(response)
+}
+
+/// Stakes Tokens with the proxy contract. Returns error if the proxy contract addr is not set
+pub fn execute_stake_with_proxy(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    asset: Asset,
+    amount: Option<Uint128>,
+) -> Result<Response, ContractError> {
+    let user_addr = info.sender;
+
+    let (asset_label, asset_reference, _) = asset.get_attributes();
+    let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
+
+    if !market.active {
+        return Err(ContractError::MarketNotActive { asset: asset_label });
+    }
+
+    if market.staking_proxy_address.clone().is_none() {
+        return Err(ContractError::StakingProxyNotSet { asset: asset_label });
+    }
+
+    let asset_ma_addr = market.ma_token_address.clone();
+    let user_balance_scaled = cw20_get_balance(&deps.querier, asset_ma_addr, user_addr.clone())?;
+
+    let user_balance =
+        get_underlying_liquidity_amount(user_balance_scaled, &market, env.block.time.seconds())?;
+
+    let user_staked_balance = {
+        let user_staking_info: mars_core::lp_staking_proxy::UserInfoResponse =
+            deps.querier.query_wasm_smart(
+                &market.staking_proxy_address.clone().unwrap(),
+                &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                    user_address: user_addr.clone(),
+                },
+            )?;
+        user_staking_info.underlying_tokens_staked
+    };
+    let max_stakable_amount = user_balance.checked_sub(user_staked_balance)?;
+
+    let amount_to_stake = match amount {
+        Some(amount) => {
+            // Check user has sufficient balance to stake
+            if amount > max_stakable_amount {
+                return Err(ContractError::InvalidWithdrawAmount { asset: asset_label });
+            };
+            amount
+        }
+        None => {
+            // If no amount is specified, the max stakable balance is staked with the proxy
+            max_stakable_amount
+        }
+    };
+
+    let ma_token_share =
+        get_scaled_liquidity_amount(amount_to_stake, &market, env.block.time.seconds())?;
+
+    let mut response = Response::new();
+
+    response
+        .messages
+        .push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: asset_label,
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Send {
+                contract: market.staking_proxy_address.unwrap().to_string(),
+                amount: amount_to_stake,
+                msg: to_binary(
+                    &mars_core::lp_staking_proxy::Cw20HookMsg::DepositWithProxy {
+                        user_addr,
+                        ma_token_share,
+                    },
+                )?,
+            })?,
+        })));
+
+    Ok(response)
+}
+
+/// Stakes Tokens with the proxy contract. Returns error if the proxy contract addr is not set
+pub fn execute_unstake_from_proxy(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    asset: Asset,
+    amount: Option<Uint128>,
+    claim_rewards: bool,
+) -> Result<Response, ContractError> {
+    let user_addr = info.sender;
+
+    let (asset_label, asset_reference, _) = asset.get_attributes();
+    let market = MARKETS.load(deps.storage, asset_reference.as_slice())?;
+
+    if market.staking_proxy_address.is_none() {
+        return Err(ContractError::StakingProxyNotSet { asset: asset_label });
+    }
+
+    let user_staked_balance = {
+        let user_staking_info: mars_core::lp_staking_proxy::UserInfoResponse =
+            deps.querier.query_wasm_smart(
+                &market.staking_proxy_address.clone().unwrap(),
+                &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                    user_address: user_addr.clone(),
+                },
+            )?;
+        user_staking_info.underlying_tokens_staked
+    };
+
+    let amount_to_unstake = match amount {
+        Some(amount) => {
+            // Check user has sufficient balance to stake
+            if amount > user_staked_balance {
+                return Err(ContractError::InvalidWithdrawAmount { asset: asset_label });
+            };
+            amount
+        }
+        None => {
+            // If no amount is specified, all of user's staked balance is unstaked
+            user_staked_balance
+        }
+    };
+    let ma_token_share =
+        get_scaled_liquidity_amount(amount_to_unstake, &market, env.block.time.seconds())?;
+
+    let mut response = Response::new();
+
+    response
+        .messages
+        .push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: asset_label,
+            funds: vec![],
+            msg: to_binary(&mars_core::lp_staking_proxy::ExecuteMsg::Withdraw {
+                user_addr,
+                ma_token_share,
+                lp_token_amount: amount_to_unstake,
+                claim_rewards,
+            })?,
+        })));
 
     Ok(response)
 }

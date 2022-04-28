@@ -10,6 +10,12 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
+    #[error("Invalid amount")]
+    InvalidAmount {},
+
+    #[error("Staking is disabled")]
+    StakingNotAllowed {},
+
     #[error("Proxy Reward Token not set")]
     ProxyRewardNotSet {},
 

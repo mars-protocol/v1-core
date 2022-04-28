@@ -77,6 +77,24 @@ pub enum ExecuteMsg {
         on_behalf_of: Option<String>,
     },
 
+    /// User function to Stake CW20 tokens
+    Stake {
+        ///  Asset to stake
+        asset: Asset,
+        /// Amount to be stake. If None is specified, the full token balance will be staked
+        amount: Option<Uint128>,
+    },
+
+    /// User function to Unstake CW20 tokens
+    Unstake {
+        ///  Asset to unstake
+        asset: Asset,
+        /// Amount to be unstaked. If None is specified, the full token balance will be unstaked
+        amount: Option<Uint128>,
+        /// Boolean value indicating if rewards are to be claimed or not
+        claim_rewards: bool,
+    },
+
     /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
     /// If asset is a Terra native token, the amount sent to the user
     /// is selected so that the sum of the transfered amount plus the stability tax
