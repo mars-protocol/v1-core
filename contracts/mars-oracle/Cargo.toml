@@ -38,6 +38,10 @@ thiserror = "1.0.23"
 
 astroport = "1.0"
 
+basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v1.0.2" }
+
+stader = { git = "https://github.com/stader-labs/stader-liquid-token", package = "staking", tag = "v0.2.1", features = ["library"] }
+
 [dev-dependencies]
 cosmwasm-schema = "0.16.2"
 

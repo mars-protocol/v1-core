@@ -350,10 +350,8 @@ mod helpers {
             SimulationResponse,
         },
     };
-    use mars_core::basset::hub::{QueryMsg, StateResponse};
-    use mars_core::stader::msg::{
-        QueryMsg as StaderQueryMsg, QueryStateResponse as StaderStateResponse,
-    };
+    use basset::hub::{QueryMsg as BAssetQueryMsg, StateResponse as BAssetStateResponse};
+    use stader::msg::{QueryMsg as StaderQueryMsg, QueryStateResponse as StaderStateResponse};
 
     const PROBE_AMOUNT: Uint128 = Uint128::new(1_000_000);
 
@@ -467,10 +465,11 @@ mod helpers {
         querier: &QuerierWrapper,
         hub_address: &Addr,
     ) -> StdResult<Decimal> {
-        let response: StateResponse = querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: hub_address.to_string(),
-            msg: to_binary(&QueryMsg::State {})?,
-        }))?;
+        let response: BAssetStateResponse =
+            querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: hub_address.to_string(),
+                msg: to_binary(&BAssetQueryMsg::State {})?,
+            }))?;
         Ok(response.stluna_exchange_rate.into())
     }
 
@@ -495,13 +494,13 @@ mod tests {
     use astroport::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
     use astroport::factory::PairType;
     use astroport::pair::{CumulativePricesResponse, SimulationResponse};
+    use basset::hub::StateResponse;
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
     use cosmwasm_std::Decimal as StdDecimal;
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
-    use mars_core::basset::hub::StateResponse;
-    use mars_core::stader::msg::QueryStateResponse as StaderStateResponse;
-    use mars_core::stader::state::State as StaderState;
     use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
+    use stader::msg::QueryStateResponse as StaderStateResponse;
+    use stader::state::State as StaderState;
 
     #[test]
     fn test_proper_initialization() {
