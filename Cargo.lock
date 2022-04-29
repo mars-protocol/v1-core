@@ -5,7 +5,7 @@ version = 3
 [[package]]
 name = "access-controller"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "deviation-flagging-validator"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
@@ -402,7 +402,7 @@ dependencies = [
 [[package]]
 name = "flags"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "access-controller",
  "cosmwasm-std",
@@ -500,9 +500,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.124"
+version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21a41fed9d98f27ab1c6d161da622a4fa35e8a54a8adc24bbf3ddd0ef70b0e50"
+checksum = "5916d2ae698f6de9bfb891ad7a8d65c09d232dc58cc4ac433c7da3b2fd84bc2b"
 
 [[package]]
 name = "mars-address-provider"
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "mars-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "astroport",
  "basset",
@@ -580,9 +580,10 @@ dependencies = [
 
 [[package]]
 name = "mars-oracle"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "astroport",
+ "basset",
  "cosmwasm-schema",
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
@@ -699,7 +700,7 @@ dependencies = [
 [[package]]
 name = "ocr2"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "access-controller",
  "blake2",
@@ -725,7 +726,7 @@ checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
 [[package]]
 name = "owned"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
@@ -756,7 +757,7 @@ dependencies = [
 [[package]]
 name = "proxy-ocr2"
 version = "1.0.0"
-source = "git+https://github.com/smartcontractkit/chainlink-terra#34173605e6459a15a8a46daa1008855f5b686059"
+source = "git+https://github.com/smartcontractkit/chainlink-terra#b0a0407571561bfa799f3b21e941efacf4fe54f4"
 dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
