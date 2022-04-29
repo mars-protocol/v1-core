@@ -117,17 +117,6 @@ pub fn execute(
             }
             claim_rewards_and_execute(deps, env, ExecuteOnCallback::EmergencyWithdraw {})
         }
-        // update_fees(deps, info, astro_treasury_fee, proxy_treasury_fee),
-
-        // ExecuteMsg::SendAstroRewards { account, amount } => {
-        //     send_astro_rewards(deps, info, account, amount)
-        // }
-        // ExecuteMsg::SendProxyRewards { account, amount } => {
-        //     send_proxy_rewards(deps, info, account, amount)
-        // }
-        // ExecuteMsg::EmergencyWithdraw { account, amount } => {
-        //     withdraw(deps, env, info, account, amount)
-        // }
         ExecuteMsg::Callback(msg) => handle_callback(deps, env, info, msg),
     }
 }
@@ -186,142 +175,6 @@ fn receive_cw20(
             )
         }
     }
-}
-
-/// @dev Claims pending rewards from the AstroGenerator contract
-// fn update_rewards(deps: DepsMut) -> Result<Response, ContractError> {
-//     // let mut response = Response::new();
-//     let cfg = CONFIG.load(deps.storage)?;
-
-//     let mut lp_tokens_addr: Vec<Addr> = vec![];
-//     lp_tokens_addr.push(addr_validate_to_lower(
-//         deps.api,
-//         &cfg.lp_token_addr.to_string(),
-//     )?);
-
-//     // response
-//     //     .messages
-//     //     .push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-//     //         contract_addr: cfg.astro_generator_addr.to_string(),
-//     //         funds: vec![],
-//     //         msg: to_binary(&AstroGeneratorExecuteMsg::ClaimRewards {
-//     //             lp_tokens: lp_tokens_addr,
-//     //         })?,
-//     //     })));
-
-//     Ok(Response::default())
-// }
-
-/// @dev Transfers accrued rewards
-/// @param account : User to which accrued ASTRO tokens are to be transferred
-/// @param amount : Number of ASTRO to be transferred
-// fn send_astro_rewards(
-//     deps: DepsMut,
-//     info: MessageInfo,
-//     account: Addr,
-//     amount: Uint128,
-// ) -> Result<Response, ContractError> {
-//     let mut response = Response::new();
-//     let cfg = CONFIG.load(deps.storage)?;
-//     if info.sender != cfg.redbank_addr {
-//         return Err(ContractError::Unauthorized {});
-//     };
-
-//     response
-//         .messages
-//         .push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-//             contract_addr: cfg.astro_token.to_string(),
-//             msg: to_binary(&Cw20ExecuteMsg::Transfer {
-//                 recipient: account.to_string(),
-//                 amount,
-//             })?,
-//             funds: vec![],
-//         })));
-//     Ok(response)
-// }
-
-/// @dev Transfers accrued Proxy token rewards
-/// @param account : User to which accrued proxy reward tokens are to be transferred
-/// @param amount : Number of proxy reward tokens are to be transferred
-// fn send_proxy_rewards(
-//     deps: DepsMut,
-//     info: MessageInfo,
-//     account: Addr,
-//     amount: Uint128,
-// ) -> Result<Response, ContractError> {
-//     let cfg = CONFIG.load(deps.storage)?;
-//     if info.sender != cfg.redbank_addr {
-//         return Err(ContractError::Unauthorized {});
-//     };
-
-//     if !cfg.proxy_token.is_some() {
-//         return Err(ContractError::ProxyRewardNotSet {});
-//     }
-
-//     let mut response = Response::new();
-//     response
-//         .messages
-//         .push(SubMsg::new(CosmosMsg::Wasm(WasmMsg::Execute {
-//             contract_addr: cfg.proxy_token.unwrap().to_string(),
-//             msg: to_binary(&Cw20ExecuteMsg::Transfer {
-//                 recipient: account.to_string(),
-//                 amount,
-//             })?,
-//             funds: vec![],
-//         })));
-//     Ok(response)
-// }
-
-/// @dev Withdraws Tokens from the AstroGenerator contract
-/// @param account : User to which tokens are to be transferred
-/// @param amount : Number of tokens to be unstaked and transferred
-fn withdraw(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    account: Addr,
-    amount: Uint128,
-) -> Result<Response, ContractError> {
-    let mut response = Response::new();
-    let cfg = CONFIG.load(deps.storage)?;
-    if info.sender != cfg.redbank_addr {
-        return Err(ContractError::Unauthorized {});
-    };
-
-    // current LP Tokens balance
-    let prev_balance = {
-        let res: BalanceResponse = deps.querier.query_wasm_smart(
-            &cfg.lp_token_addr,
-            &Cw20QueryMsg::Balance {
-                address: env.contract.address.to_string(),
-            },
-        )?;
-        res.balance
-    };
-
-    // withdraw from the AstroGenerator contract
-    response.messages.push(SubMsg::new(WasmMsg::Execute {
-        contract_addr: cfg.astro_generator_addr.to_string(),
-        funds: vec![],
-        msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
-            lp_token: cfg.lp_token_addr,
-            amount: amount,
-        })?,
-    }));
-
-    // Callback function
-    response.messages.push(SubMsg::new(WasmMsg::Execute {
-        contract_addr: env.contract.address.to_string(),
-        funds: vec![],
-        msg: to_binary(&ExecuteMsg::Callback(
-            CallbackMsg::TransferTokensAfterWithdraw {
-                account,
-                prev_balance,
-            },
-        ))?,
-    }));
-
-    Ok(response)
 }
 
 pub fn transfer_tokens_after_withdraw(
@@ -526,7 +379,7 @@ fn stake_with_astro_generator(
     user_info.ma_tokens_staked = user_info.ma_tokens_staked.checked_add(ma_token_share)?;
 
     STATE.save(deps.storage, &state)?;
-    USERS.save(deps.storage, &user_addr, &user_info);
+    USERS.save(deps.storage, &user_addr, &user_info)?;
 
     // Add fee transfer Msgs to Response
     if !fee_msgs.is_empty() {
@@ -607,7 +460,7 @@ fn unstake_from_astro_generator(
     }
 
     STATE.save(deps.storage, &state)?;
-    USERS.save(deps.storage, &user_addr, &user_info);
+    USERS.save(deps.storage, &user_addr, &user_info)?;
 
     // Unstake LP tokens from the AstroGenerator
     if !lp_token_amount.is_zero() {
