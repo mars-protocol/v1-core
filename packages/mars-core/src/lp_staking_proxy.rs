@@ -44,20 +44,18 @@ pub enum ExecuteMsg {
         astro_treasury_fee: Decimal,
         proxy_treasury_fee: Decimal,
     },
+    UpdateOnTransfer {
+        from_user_addr: Addr,
+        to_user_addr: Addr,
+        underlying_amount: Uint128,
+        ma_token_share: Uint128,
+    },
+    /// Admin function (callable only by ma_token) to claim rewards and unstake (if needed) when burning ma_shares
+    UnstakeBeforeBurn {
+        user_address: Addr,
+        ma_shares_to_burn: Uint128,
+    },
     EmergencyWithdraw {},
-
-    // UpdateRewards {},
-    /// Sends ASTRO rewards to the recipient
-    // SendAstroRewards { account: Addr, amount: Uint128 },
-    /// Sends proxy token rewards to the recipient
-    // SendProxyRewards { account: Addr, amount: Uint128 },
-    /// Withdrawal the rewards
-    // EmergencyWithdraw {
-    //     /// the recipient for withdrawal
-    //     account: Addr,
-    //     /// the amount of withdraw
-    //     amount: Uint128,
-    // },
     /// the callback of type [`CallbackMsg`]
     Callback(CallbackMsg),
 }
@@ -111,10 +109,50 @@ pub enum ExecuteOnCallback {
         astro_treasury_fee: Decimal,
         proxy_treasury_fee: Decimal,
     },
+    UpdateOnTransfer {
+        from_user_addr: Addr,
+        to_user_addr: Addr,
+        underlying_amount: Uint128,
+        ma_token_share: Uint128,
+    },
+    UnstakeBeforeBurn {
+        user_address: Addr,
+        ma_shares_to_burn: Uint128,
+    },
     EmergencyWithdraw {},
 }
 
-pub type ConfigResponse = InstantiateMsg;
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ConfigResponse {
+    pub redbank_addr: Addr,
+    pub astro_generator_addr: Addr,
+    pub redbank_treasury: Addr,
+    pub lp_token_addr: Addr,
+    pub ma_token_addr: Option<Addr>,
+    pub pool_addr: Addr,
+    pub astro_token: Addr,
+    pub proxy_token: Option<Addr>,
+    pub astro_treasury_fee: Decimal,
+    pub proxy_treasury_fee: Decimal,
+    /// Boolean value which if True implies Staked tokens are accounted as collateral by Red Bank positions
+    pub is_collateral: bool,
+    /// Boolean value which if True imples staking is allowed
+    pub is_stakable: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct StateResponse {
+    /// Boolean value which if True implies Staked tokens are accounted as collateral by Red Bank positions
+    pub is_collateral: bool,
+    /// Boolean value which if True imples staking is allowed
+    pub is_stakable: bool,
+    /// Total number of ma_tokens for which the underlying liquidity is staked
+    pub total_ma_shares_staked: Uint128,
+    /// Ratio of Generator ASTRO rewards accured per maToken share
+    pub global_astro_per_ma_share_index: Decimal,
+    /// Ratio of Generator Proxy rewards accured per maToken share
+    pub global_proxy_per_ma_share_index: Decimal,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct UserInfoResponse {
@@ -132,6 +170,7 @@ pub struct UserInfoResponse {
 pub enum QueryMsg {
     /// Returns the contract's configuration struct
     Config {},
+    State {},
     UserInfo {
         user_address: Addr,
     },

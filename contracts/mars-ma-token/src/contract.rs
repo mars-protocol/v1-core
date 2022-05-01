@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response,
+    to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response,
     StdResult, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
@@ -58,6 +58,7 @@ pub fn instantiate(
         &Config {
             red_bank_address: deps.api.addr_validate(&msg.red_bank_address)?,
             incentives_address: deps.api.addr_validate(&msg.incentives_address)?,
+            staking_proxy_address: msg.staking_proxy_address,
         },
     )?;
 
@@ -164,7 +165,7 @@ pub fn execute_transfer(
 
 pub fn execute_transfer_on_liquidation(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     sender_unchecked: String,
     recipient_unchecked: String,
@@ -179,9 +180,47 @@ pub fn execute_transfer_on_liquidation(
     let sender = deps.api.addr_validate(&sender_unchecked)?;
     let recipient = deps.api.addr_validate(&recipient_unchecked)?;
 
+    let mut res = Response::new();
+
+    if config.staking_proxy_address.clone().is_some() {
+        let total_user_balance = BALANCES.load(deps.storage, &sender).unwrap_or_default();
+
+        let staked_amount = {
+            let user_staked_res: mars_core::lp_staking_proxy::UserInfoResponse =
+                deps.querier.query_wasm_smart(
+                    &config.red_bank_address,
+                    &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                        user_address: sender.clone(),
+                    },
+                )?;
+            user_staked_res.ma_tokens_staked
+        };
+
+        // Equivalent % of ma_shares to be transferred
+        let staked_ma_share_to_transfer =
+            staked_amount * Decimal::from_ratio(amount, total_user_balance);
+
+        let underlying_amount: Uint128 = deps.querier.query_wasm_smart(
+            &config.red_bank_address,
+            &mars_core::red_bank::msg::QueryMsg::UnderlyingLiquidityAmount {
+                ma_token_address: env.contract.address.to_string(),
+                amount_scaled: staked_ma_share_to_transfer,
+            },
+        )?;
+
+        // Claims accrued rewards and transfers equivalent % of staked ma_shares to the recepient
+        res = res.add_message(core::transfer_on_liq_msg(
+            config.staking_proxy_address.clone().unwrap(),
+            sender.clone(),
+            recipient.clone(),
+            underlying_amount,
+            amount,
+        )?);
+    }
+
     let messages = core::transfer(deps.storage, &config, sender, recipient, amount, false)?;
 
-    let res = Response::new()
+    let res = res
         .add_messages(messages)
         .add_attribute("action", "transfer")
         .add_attribute("from", sender_unchecked)
@@ -202,13 +241,42 @@ pub fn execute_burn(
     if info.sender != config.red_bank_address {
         return Err(ContractError::Unauthorized {});
     }
+    let user_address = deps.api.addr_validate(&user_unchecked)?;
 
     if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
+    let user_ma_balance = BALANCES
+        .load(deps.storage, &user_address.clone())
+        .unwrap_or_default();
+
+    let mut res = Response::new();
+
+    // Check if tokens need to be unstaked (and unstake them if needed) before burning
+    if config.staking_proxy_address.is_some() {
+        let user_staking_res: mars_core::lp_staking_proxy::UserInfoResponse =
+            deps.querier.query_wasm_smart(
+                &config.staking_proxy_address.clone().unwrap(),
+                &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                    user_address: user_address.clone(),
+                },
+            )?;
+
+        // Calculate equivalent ma_shares to be unstaked for the user
+        let ma_shares_to_unstake =
+            user_staking_res.ma_tokens_staked * Decimal::from_ratio(amount, user_ma_balance);
+
+        // Unstake equivalent ma_shares for the user
+        if !ma_shares_to_unstake.is_zero() {
+            res = res.add_message(core::update_staking_balance_msg(
+                config.staking_proxy_address.unwrap(),
+                user_address.clone(),
+                ma_shares_to_unstake,
+            )?);
+        }
+    }
 
     // lower balance
-    let user_address = deps.api.addr_validate(&user_unchecked)?;
     let user_balance_before = core::decrease_balance(deps.storage, &user_address, amount)?;
 
     // reduce total_supply
@@ -219,7 +287,7 @@ pub fn execute_burn(
         Ok(info)
     })?;
 
-    let res = Response::new()
+    res = res
         .add_message(core::balance_change_msg(
             config.incentives_address,
             user_address,

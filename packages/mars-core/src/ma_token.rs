@@ -7,10 +7,11 @@ use cosmwasm_std::Addr;
 pub struct Config {
     pub red_bank_address: Addr,
     pub incentives_address: Addr,
+    pub staking_proxy_address: Option<Addr>,
 }
 
 pub mod msg {
-    use cosmwasm_std::{Binary, Uint128};
+    use cosmwasm_std::{Addr, Binary, Uint128};
     use cw20::{Cw20Coin, Expiration, Logo, MinterResponse};
     use cw20_base::msg::InstantiateMarketingInfo;
     use schemars::JsonSchema;
@@ -30,6 +31,7 @@ pub mod msg {
         pub init_hook: Option<InitHook>,
         pub red_bank_address: String,
         pub incentives_address: String,
+        pub staking_proxy_address: Option<Addr>,
     }
 
     /// Hook to be called after token initialization

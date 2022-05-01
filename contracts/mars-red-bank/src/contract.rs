@@ -363,7 +363,7 @@ pub fn execute_init_asset(
                 env.block.time.seconds(),
                 market_idx,
                 asset_type,
-                asset_params,
+                asset_params.clone(),
             )?;
 
             // Save new market
@@ -438,6 +438,7 @@ pub fn execute_init_asset(
                         }),
                         red_bank_address: env.contract.address.to_string(),
                         incentives_address: incentives_address.into(),
+                        staking_proxy_address: asset_params.staking_proxy_address,
                     })?,
                     funds: vec![],
                     label: token_symbol,
@@ -1847,7 +1848,24 @@ fn process_underlying_asset_transfer_to_liquidator(
     )?;
 
     if contract_collateral_balance < collateral_amount_to_liquidate {
-        return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
+        // If collateral is staked, we check is user has staked balance which gets returned to the RB and can be transferred to the liquidator for liquidation
+        if collateral_market.staking_proxy_address.is_some() {
+            let user_staking_res: mars_core::lp_staking_proxy::UserInfoResponse =
+                deps.querier.query_wasm_smart(
+                    &collateral_market.staking_proxy_address.clone().unwrap(),
+                    &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                        user_address: user_addr.to_owned(),
+                    },
+                )?;
+
+            if contract_collateral_balance.checked_add(user_staking_res.underlying_tokens_staked)?
+                < collateral_amount_to_liquidate
+            {
+                return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
+            }
+        } else {
+            return Err(ContractError::CannotLiquidateWhenNotEnoughCollateral {});
+        }
     }
 
     let collateral_amount_to_liquidate_scaled = get_scaled_liquidity_amount(
@@ -2080,7 +2098,45 @@ pub fn execute_finalize_liquidity_token_transfer(
         }
     }
 
-    let res = Response::new()
+    let mut res = Response::new();
+
+    // If user has staked balance, transfer % of underlying staked balance to the recepient
+    if market.staking_proxy_address.is_some() {
+        // ma_tokens staked
+        let user_staked_ma_balance = {
+            let user_staking_info: mars_core::lp_staking_proxy::UserInfoResponse =
+                deps.querier.query_wasm_smart(
+                    &market.staking_proxy_address.clone().unwrap(),
+                    &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                        user_address: from_address.clone(),
+                    },
+                )?;
+            user_staking_info.ma_tokens_staked
+        };
+        // ma_share (staked) to transfer
+        let staked_ma_token_to_transfer =
+            amount * Decimal::from_ratio(user_staked_ma_balance, from_previous_balance);
+
+        // Add msg to transfer ownership of equivalent % of staked tokens to the recepient user
+        if !staked_ma_token_to_transfer.is_zero() {
+            res = res.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: market.staking_proxy_address.clone().unwrap().to_string(),
+                funds: vec![],
+                msg: to_binary(&mars_core::lp_staking_proxy::ExecuteMsg::UpdateOnTransfer {
+                    from_user_addr: from_address,
+                    to_user_addr: to_address,
+                    underlying_amount: get_underlying_liquidity_amount(
+                        staked_ma_token_to_transfer,
+                        &market,
+                        env.block.time.seconds(),
+                    )?,
+                    ma_token_share: staked_ma_token_to_transfer,
+                })?,
+            }));
+        }
+    }
+
+    res = res
         .add_attribute("action", "finalize_liquidity_token_transfer")
         .add_events(events);
     Ok(res)
