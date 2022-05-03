@@ -1,7 +1,7 @@
 use cosmwasm_std::{to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, Uint128, WasmMsg};
 
-use crate::error::ContractError;
 use cw20_base::state::{BALANCES, TOKEN_INFO};
+use cw20_base::ContractError;
 
 use crate::Config;
 

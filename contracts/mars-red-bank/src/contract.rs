@@ -629,8 +629,18 @@ pub fn execute_update_asset(
             }
 
             // Staking contract addr can only be set if its not already set
-            if staking_proxy_address.is_some() && updated_market.staking_proxy_address.is_none() {
-                updated_market.staking_proxy_address = staking_proxy_address;
+            if staking_proxy_address.clone().is_some()
+                && updated_market.staking_proxy_address.is_none()
+            {
+                updated_market.staking_proxy_address = staking_proxy_address.clone();
+
+                response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                    contract_addr: updated_market.ma_token_address.to_string(),
+                    funds: vec![],
+                    msg: to_binary(&ma_token::msg::ExecuteMsg::SetStakingProxy {
+                        staking_proxy_address: staking_proxy_address.unwrap(),
+                    })?,
+                }));
             }
 
             updated_market.validate()?;
