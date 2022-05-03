@@ -17,14 +17,6 @@ pub struct InstantiateMsg {
     pub is_stakable: bool,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum Cw20HookMsg {
-    DepositWithProxy {
-        user_addr: Addr,
-        ma_token_share: Uint128,
-    },
-}
 /// ## Description
 /// This structure describes the execute messages of the contract.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -58,9 +50,17 @@ pub enum ExecuteMsg {
         user_address: Addr,
         ma_shares_to_burn: Uint128,
     },
-    EmergencyWithdraw {},
     /// the callback of type [`CallbackMsg`]
     Callback(CallbackMsg),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Cw20HookMsg {
+    DepositWithProxy {
+        user_addr: Addr,
+        ma_token_share: Uint128,
+    },
 }
 
 /// ## Description
@@ -122,7 +122,6 @@ pub enum ExecuteOnCallback {
         user_address: Addr,
         ma_shares_to_burn: Uint128,
     },
-    EmergencyWithdraw {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

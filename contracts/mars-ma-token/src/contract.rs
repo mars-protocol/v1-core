@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    to_binary, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, QueryRequest, Response,
-    StdError, StdResult, Uint128, WasmMsg, WasmQuery,Addr
+    to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Env, MessageInfo, QueryRequest,
+    Response, StdError, StdResult, Uint128, WasmMsg, WasmQuery,
 };
 use cw2::set_contract_version;
 use cw20::{BalanceResponse, Cw20ReceiveMsg};
@@ -171,22 +171,21 @@ pub fn execute_set_staking_proxy(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    staking_proxy_address: Addr
+    staking_proxy_address: Addr,
 ) -> Result<Response, ContractError> {
-
     let mut config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.red_bank_address {
         return Err(ContractError::Unauthorized {});
     }
 
-    config.staking_proxy_address  = Some(staking_proxy_address);
+    config.staking_proxy_address = Some(staking_proxy_address.clone());
 
     CONFIG.save(deps.storage, &config)?;
 
     let res = Response::new()
         .add_attribute("action", "SetStakingProxy")
-        .add_attribute("staking_proxy_address", staking_proxy_address)
+        .add_attribute("staking_proxy_address", staking_proxy_address.as_str());
     Ok(res)
 }
 
