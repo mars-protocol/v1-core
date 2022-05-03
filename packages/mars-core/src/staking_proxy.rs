@@ -39,6 +39,9 @@ pub enum ExecuteMsg {
         lp_token_amount: Uint128,
         claim_rewards: bool,
     },
+    SetMaToken {
+        ma_token_addr: Addr,
+    },
     /// Admin function to Update fees charged on rewards
     UpdateFee {
         astro_treasury_fee: Decimal,

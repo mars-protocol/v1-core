@@ -161,18 +161,18 @@ fn get_user_asset_positions(
 
             // Check if staking is supported by this money market
             if market.staking_proxy_address.clone().is_some() {
-                let proxy_state_response: mars_core::lp_staking_proxy::StateResponse =
+                let proxy_state_response: mars_core::staking_proxy::StateResponse =
                     deps.querier.query_wasm_smart(
                         &market.staking_proxy_address.clone().unwrap(),
-                        &mars_core::lp_staking_proxy::QueryMsg::State {},
+                        &mars_core::staking_proxy::QueryMsg::State {},
                     )?;
 
                 // if the staked tokens are not enabled as collateral, we need to deduct the user's staked underlying balance from the collateral amount
                 if !proxy_state_response.is_collateral {
-                    let user_staking_res: mars_core::lp_staking_proxy::UserInfoResponse =
+                    let user_staking_res: mars_core::staking_proxy::UserInfoResponse =
                         deps.querier.query_wasm_smart(
                             &market.staking_proxy_address.clone().unwrap(),
-                            &mars_core::lp_staking_proxy::QueryMsg::UserInfo {
+                            &mars_core::staking_proxy::QueryMsg::UserInfo {
                                 user_address: user_address.to_owned(),
                             },
                         )?;

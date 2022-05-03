@@ -1,7 +1,7 @@
 use cosmwasm_std::{to_binary, Addr, CosmosMsg, StdError, StdResult, Storage, Uint128, WasmMsg};
 
+use crate::error::ContractError;
 use cw20_base::state::{BALANCES, TOKEN_INFO};
-use cw20_base::ContractError;
 
 use crate::Config;
 
@@ -130,33 +130,31 @@ pub fn balance_change_msg(
 
 /// Claims any accrued rewards and updates staked ma_shares balance before burning the ma_tokens
 pub fn update_staking_balance_msg(
-    proxy_staking_addr: Addr,
+    staking_proxy_addr: Addr,
     user_address: Addr,
     ma_shares_to_burn: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: proxy_staking_addr.into(),
-        msg: to_binary(
-            &mars_core::lp_staking_proxy::ExecuteMsg::UnstakeBeforeBurn {
-                user_address,
-                ma_shares_to_burn,
-            },
-        )?,
+        contract_addr: staking_proxy_addr.into(),
+        msg: to_binary(&mars_core::staking_proxy::ExecuteMsg::UnstakeBeforeBurn {
+            user_address,
+            ma_shares_to_burn,
+        })?,
         funds: vec![],
     }))
 }
 
 /// Claims any accrued rewards and transfers staked token shares to the new recepient
 pub fn transfer_on_liq_msg(
-    proxy_staking_addr: Addr,
+    staking_proxy_addr: Addr,
     from_user_addr: Addr,
     to_user_addr: Addr,
     underlying_amount: Uint128,
     ma_token_share: Uint128,
 ) -> StdResult<CosmosMsg> {
     Ok(CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: proxy_staking_addr.into(),
-        msg: to_binary(&mars_core::lp_staking_proxy::ExecuteMsg::UpdateOnTransfer {
+        contract_addr: staking_proxy_addr.into(),
+        msg: to_binary(&mars_core::staking_proxy::ExecuteMsg::UpdateOnTransfer {
             from_user_addr,
             to_user_addr,
             underlying_amount,

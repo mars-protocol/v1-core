@@ -1,7 +1,7 @@
 use astroport::DecimalCheckedOps;
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut, Empty,
-    Env, MessageInfo, Response, StdError, StdResult, SubMsg, Uint128, WasmMsg,
+    attr, entry_point, from_binary, to_binary, Addr, Binary, CosmosMsg, Decimal, Deps, DepsMut,
+    Empty, Env, MessageInfo, Response, StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::{BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
 
@@ -13,7 +13,7 @@ use astroport::generator::{
     PendingTokenResponse, QueryMsg as AstroGeneratorQueryMsg, RewardInfoResponse,
 };
 use cw2::set_contract_version;
-use mars_core::lp_staking_proxy::{
+use mars_core::staking_proxy::{
     CallbackMsg, ConfigResponse, Cw20HookMsg, ExecuteMsg, ExecuteOnCallback, InstantiateMsg,
     MigrateMsg, QueryMsg, StateResponse, UserInfoResponse,
 };
@@ -92,6 +92,12 @@ pub fn execute(
                     claim_rewards,
                 },
             )
+        }
+        ExecuteMsg::SetMaToken { ma_token_addr } => {
+            if info.sender != cfg.redbank_addr {
+                return Err(ContractError::Unauthorized {});
+            }
+            set_ma_token_address(deps, env, ma_token_addr)
         }
         ExecuteMsg::UpdateFee {
             astro_treasury_fee,
@@ -215,6 +221,20 @@ fn receive_cw20(
             )
         }
     }
+}
+
+pub fn set_ma_token_address(
+    deps: DepsMut,
+    _env: Env,
+    ma_token_addr: Addr,
+) -> Result<Response, ContractError> {
+    let mut cfg = CONFIG.load(deps.storage)?;
+    cfg.ma_token_addr = Some(ma_token_addr.clone());
+
+    Ok(Response::new().add_attributes(vec![
+        attr("action", "LP_Staking_Proxy::ExecuteMsg::SetMaToken"),
+        attr("ma_token_addr", ma_token_addr.to_string()),
+    ]))
 }
 
 pub fn transfer_tokens_after_withdraw(

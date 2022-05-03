@@ -1,4 +1,4 @@
-use cosmwasm_std::{OverflowError, StdError, Uint128};
+use cosmwasm_std::{OverflowError, StdError};
 use mars_core::error::MarsError;
 use thiserror::Error;
 
@@ -10,17 +10,8 @@ pub enum ContractError {
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("Invalid amount")]
-    InvalidAmount {},
-
     #[error("Staking is disabled")]
     StakingNotAllowed {},
-
-    #[error("Proxy Reward Token not set")]
-    ProxyRewardNotSet {},
-
-    #[error("Incorrect CW20 hook message variant!")]
-    IncorrectCw20HookMessageVariant {},
 
     #[error("{0}")]
     Mars(#[from] MarsError),
