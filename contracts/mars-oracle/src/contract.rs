@@ -1,8 +1,8 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    attr, to_binary, Attribute, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
-    Uint128,
+    attr, to_binary, Attribute, Binary, Deps, DepsMut, Env, Isqrt, MessageInfo, Response,
+    StdResult, Uint128, Uint256,
 };
 use mars_core::error::MarsError;
 use terra_cosmwasm::TerraQuerier;
@@ -18,6 +18,7 @@ use crate::{AstroportTwapSnapshot, Config, PriceSourceChecked, PriceSourceUnchec
 
 use self::helpers::*;
 use astroport::pair::TWAP_PRECISION;
+use std::convert::TryFrom;
 
 // INIT
 
@@ -285,8 +286,8 @@ fn query_asset_price(
             Ok(price)
         }
 
-        // The value of each unit of the liquidity token is the total value of pool's two assets
-        // divided by the liquidity token's total supply
+        // The calculation of the value of liquidity token, see: https://blog.alphafinance.io/fair-lp-token-pricing/.
+        // This formulation avoids a potential sandwich attack that distorts asset prices by a flashloan.
         //
         // NOTE: Price sources must exist for both assets in the pool
         PriceSourceChecked::AstroportLiquidityToken { pair_address } => {
@@ -300,7 +301,12 @@ fn query_asset_price(
             let asset1_price = query_asset_price(deps, env, asset1.get_reference())?;
             let asset1_value = asset1_price * pool.assets[1].amount;
 
-            let price = Decimal::from_ratio(asset0_value + asset1_value, pool.total_share);
+            // NOTE: we need to use Uint256 here, because Uint128 * Uint128 may overflow the 128-bit limit
+            let pool_value_u256 = Uint256::from(2u8)
+                * (Uint256::from(asset0_value) * Uint256::from(asset1_value)).isqrt();
+            let pool_value_u128 = Uint128::try_from(pool_value_u256)?;
+
+            let price = Decimal::from_ratio(pool_value_u128, pool.total_share);
             Ok(price)
         }
 
@@ -470,12 +476,13 @@ mod helpers {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use astroport::asset::Asset as AstroAsset;
     use astroport::asset::{Asset as AstroportAsset, AssetInfo, PairInfo};
     use astroport::factory::PairType;
-    use astroport::pair::{CumulativePricesResponse, SimulationResponse};
+    use astroport::pair::{CumulativePricesResponse, PoolResponse, SimulationResponse};
     use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
-    use cosmwasm_std::Decimal as StdDecimal;
     use cosmwasm_std::{from_binary, Addr, OwnedDeps};
+    use cosmwasm_std::{Decimal as StdDecimal, StdError};
     use mars_core::basset::hub::StateResponse;
     use mars_core::testing::{mock_dependencies, mock_env_at_block_time, MarsMockQuerier};
 
@@ -689,6 +696,34 @@ mod tests {
                 pair_address: Addr::unchecked("pair"),
                 window_size: 3600,
                 tolerance: 600,
+            }
+        );
+    }
+
+    #[test]
+    fn test_set_asset_astroport_liquidity_token() {
+        let mut deps = th_setup();
+        let info = mock_info("owner", &[]);
+
+        let asset = Asset::Cw20 {
+            contract_addr: "cw20_lp_token".to_string(),
+        };
+        let reference = asset.get_reference();
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset,
+            price_source: PriceSourceUnchecked::AstroportLiquidityToken {
+                pair_address: "lp_pair".to_string(),
+            },
+        };
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+
+        let price_source = PRICE_SOURCES
+            .load(&deps.storage, reference.as_slice())
+            .unwrap();
+        assert_eq!(
+            price_source,
+            PriceSourceChecked::AstroportLiquidityToken {
+                pair_address: Addr::unchecked("lp_pair")
             }
         );
     }
@@ -1160,6 +1195,149 @@ mod tests {
                 (query_time - snapshot_time) * 10_u64.pow(TWAP_PRECISION.into())
             )
         );
+    }
+
+    #[test]
+    fn test_query_asset_price_astroport_liquidity_token() {
+        let mut deps = th_setup();
+
+        // set native price source for luna
+        {
+            let asset = Asset::Native {
+                denom: String::from("uluna"),
+            };
+            let asset_reference = asset.get_reference();
+
+            PRICE_SOURCES
+                .save(
+                    &mut deps.storage,
+                    asset_reference.as_slice(),
+                    &PriceSourceChecked::Native {
+                        denom: "uluna".to_string(),
+                    },
+                )
+                .unwrap();
+
+            deps.querier.set_native_exchange_rates(
+                "uluna".to_string(),
+                &[("uusd".to_string(), Decimal::from_ratio(885_u128, 10_u128))],
+            );
+        }
+
+        // set native price source for ust
+        {
+            let asset = Asset::Native {
+                denom: String::from("uusd"),
+            };
+            let asset_reference = asset.get_reference();
+
+            PRICE_SOURCES
+                .save(
+                    &mut deps.storage,
+                    asset_reference.as_slice(),
+                    &PriceSourceChecked::Native {
+                        denom: "uusd".to_string(),
+                    },
+                )
+                .unwrap();
+
+            deps.querier.set_native_exchange_rates(
+                "uusd".to_string(),
+                &[("uusd".to_string(), Decimal::from_ratio(1_u128, 1_u128))],
+            );
+        }
+
+        // set price source for astro lp token
+        let asset = Asset::Cw20 {
+            contract_addr: "lp_token".to_string(),
+        };
+        let asset_reference = asset.get_reference();
+        PRICE_SOURCES
+            .save(
+                &mut deps.storage,
+                asset_reference.as_slice(),
+                &PriceSourceChecked::AstroportLiquidityToken {
+                    pair_address: Addr::unchecked("lp_pair"),
+                },
+            )
+            .unwrap();
+
+        // set correct astroport pool and query price
+        {
+            let offer_asset_info = AssetInfo::NativeToken {
+                denom: "uluna".to_string(),
+            };
+            let ask_asset_info = AssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            };
+            let pool_response = PoolResponse {
+                assets: [
+                    AstroAsset {
+                        info: offer_asset_info,
+                        amount: Uint128::from(105u32),
+                    },
+                    AstroAsset {
+                        info: ask_asset_info,
+                        amount: Uint128::from(120u32),
+                    },
+                ],
+                total_share: Uint128::from(10000u32),
+            };
+            deps.querier
+                .set_astroport_pool("lp_pair".to_string(), pool_response);
+
+            let price: Decimal = from_binary(
+                &query(
+                    deps.as_ref(),
+                    mock_env(),
+                    QueryMsg::AssetPriceByReference {
+                        asset_reference: asset_reference.clone(),
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(price, Decimal::from_ratio(211_u128, 1000_u128));
+        }
+
+        // set astroport pool (with asset which doesn't have price source) and query price
+        {
+            let offer_asset_info = AssetInfo::NativeToken {
+                denom: "nativetoken".to_string(),
+            };
+            let ask_asset_info = AssetInfo::NativeToken {
+                denom: "uusd".to_string(),
+            };
+            let pool_response = PoolResponse {
+                assets: [
+                    AstroAsset {
+                        info: offer_asset_info,
+                        amount: Uint128::from(10u32),
+                    },
+                    AstroAsset {
+                        info: ask_asset_info,
+                        amount: Uint128::from(20u32),
+                    },
+                ],
+                total_share: Uint128::from(1000u32),
+            };
+            deps.querier
+                .set_astroport_pool("lp_pair".to_string(), pool_response);
+
+            let error = query(
+                deps.as_ref(),
+                mock_env(),
+                QueryMsg::AssetPriceByReference {
+                    asset_reference: asset_reference.clone(),
+                },
+            )
+            .unwrap_err();
+            assert!(
+                matches!(error, StdError::NotFound { .. }),
+                "Expected StdError::NotFound, received {}",
+                error
+            );
+        }
     }
 
     #[test]

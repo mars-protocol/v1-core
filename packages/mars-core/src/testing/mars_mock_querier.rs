@@ -211,6 +211,12 @@ impl MarsMockQuerier {
         self.astroport_pair_querier.pairs.insert(key, pool_response);
     }
 
+    pub fn set_astroport_pool(&mut self, pair_address: String, pool_response: PoolResponse) {
+        self.astroport_pair_querier
+            .pairs
+            .insert(pair_address, pool_response);
+    }
+
     pub fn set_astroport_pair_cumulative_prices(
         &mut self,
         contract_addr: String,
