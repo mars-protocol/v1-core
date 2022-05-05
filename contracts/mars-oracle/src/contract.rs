@@ -1315,11 +1315,11 @@ mod tests {
             let pool_response = PoolResponse {
                 assets: [
                     AstroAsset {
-                        info: offer_asset_info.clone(),
+                        info: offer_asset_info,
                         amount: Uint128::from(6389u32),
                     },
                     AstroAsset {
-                        info: ask_asset_info.clone(),
+                        info: ask_asset_info,
                         amount: Uint128::from(1385000u32),
                     },
                 ],
