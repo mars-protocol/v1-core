@@ -1345,7 +1345,7 @@ mod tests {
             // UST price: 1
             // pool value = 2 * sqrt((88.5 * 6389) * (1 * 1385000)) = 1769874
             //
-            // Is slightly (<0.01%) off from the pre-manipulation value. Good enoguh!
+            // Is slightly (<0.01%) off from the pre-manipulation value. Good enough!
             assert_eq!(price, Decimal::from_ratio(1769874_u128, 10000_u128));
         }
 
