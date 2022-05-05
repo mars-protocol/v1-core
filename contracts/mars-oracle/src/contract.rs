@@ -1273,12 +1273,12 @@ mod tests {
             let pool_response = PoolResponse {
                 assets: [
                     AstroAsset {
-                        info: offer_asset_info,
-                        amount: Uint128::from(105u32),
+                        info: offer_asset_info.clone(),
+                        amount: Uint128::from(10000u32),
                     },
                     AstroAsset {
-                        info: ask_asset_info,
-                        amount: Uint128::from(120u32),
+                        info: ask_asset_info.clone(),
+                        amount: Uint128::from(885000u32),
                     },
                 ],
                 total_share: Uint128::from(10000u32),
@@ -1297,7 +1297,56 @@ mod tests {
                 .unwrap(),
             )
             .unwrap();
-            assert_eq!(price, Decimal::from_ratio(211_u128, 1000_u128));
+
+            // LUNA price: 88.5
+            // LUNA depth: 10000
+            // UST price: 1
+            // UST depth: 885000
+            // pool value: 2 * sqrt((88.5 * 10000) * (1 * 885000)) = 1770000
+            // LP token price: 1770000 / 10000 = 177
+            assert_eq!(price, Decimal::from_ratio(1770000_u128, 10000_u128));
+
+            // Now assume someone buys a large amount of Luna, skewing the pool depths. Let's see if
+            // the oracle price of the LP token is affected.
+            //
+            // Assume the attacker sells 500000 uusd for uluna
+            // UST depth = 885000 + 500000 = 1385000
+            // Luna depth = 10000 * 885000 / 1385000 = 6389 (ignoring trading commissions)
+            let pool_response = PoolResponse {
+                assets: [
+                    AstroAsset {
+                        info: offer_asset_info.clone(),
+                        amount: Uint128::from(6389u32),
+                    },
+                    AstroAsset {
+                        info: ask_asset_info.clone(),
+                        amount: Uint128::from(1385000u32),
+                    },
+                ],
+                total_share: Uint128::from(10000u32),
+            };
+            deps.querier
+                .set_astroport_pool("lp_pair".to_string(), pool_response);
+
+            let price: Decimal = from_binary(
+                &query(
+                    deps.as_ref(),
+                    mock_env(),
+                    QueryMsg::AssetPriceByReference {
+                        asset_reference: asset_reference.clone(),
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+
+            // Assume we use Terra L1 oracle for Luna and UST, their prices should not be affected
+            // LUNA price: 88.5
+            // UST price: 1
+            // pool value = 2 * sqrt((88.5 * 6389) * (1 * 1385000)) = 1769874
+            //
+            // Is slightly (<0.01%) off from the pre-manipulation value. Good enoguh!
+            assert_eq!(price, Decimal::from_ratio(1769874_u128, 10000_u128));
         }
 
         // set astroport pool (with asset which doesn't have price source) and query price
