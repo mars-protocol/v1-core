@@ -68,31 +68,13 @@ pub enum ExecuteMsg {
         new_limit: Uint128,
     },
 
-    /// Deposit Terra native coins. Deposited coins must be sent in the transaction
+    /// Deposit Terra native coins (Or stakes them via the proxy contract for yield rewards in-case of LP tokens when staking is enabled). Deposited coins must be sent in the transaction
     /// this call is made
     DepositNative {
         /// Denom used in Terra (e.g: uluna, uusd)
         denom: String,
         /// Address that will receive the maTokens
         on_behalf_of: Option<String>,
-    },
-
-    /// User function to Stake CW20 tokens
-    Stake {
-        ///  Asset to stake
-        asset: Asset,
-        /// Amount to be stake. If None is specified, the full token balance will be staked
-        amount: Option<Uint128>,
-    },
-
-    /// User function to Unstake CW20 tokens
-    Unstake {
-        ///  Asset to unstake
-        asset: Asset,
-        /// Amount to be unstaked. If None is specified, the full token balance will be unstaked
-        amount: Option<Uint128>,
-        /// Boolean value indicating if rewards are to be claimed or not
-        claim_rewards: bool,
     },
 
     /// Withdraw an amount of the asset burning an equivalent amount of maTokens.
