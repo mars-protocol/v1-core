@@ -209,52 +209,22 @@ pub fn execute_transfer_on_liquidation(
     let mut res = Response::new();
 
     if config.staking_proxy_address.clone().is_some() {
-        let total_user_balance = BALANCES.load(deps.storage, &sender).unwrap_or_default();
+        let underlying_amount: Uint128 = deps.querier.query_wasm_smart(
+            &config.red_bank_address,
+            &mars_core::red_bank::msg::QueryMsg::UnderlyingLiquidityAmount {
+                ma_token_address: env.contract.address.to_string(),
+                amount_scaled: amount,
+            },
+        )?;
 
-        let staked_amount = {
-            let user_staked_res: mars_core::staking_proxy::UserInfoResponse =
-                deps.querier.query_wasm_smart(
-                    &config.red_bank_address,
-                    &mars_core::staking_proxy::QueryMsg::UserInfo {
-                        user_address: sender.clone(),
-                    },
-                )?;
-            user_staked_res.ma_tokens_staked
-        };
-
-        if amount
-            > total_user_balance
-                .checked_sub(staked_amount)
-                .map_err(StdError::overflow)?
-        {
-            // Equivalent % of ma_shares to be transferred
-            // let staked_ma_share_to_transfer =
-            //     staked_amount * Decimal::from_ratio(amount, total_user_balance);
-            let staked_ma_share_to_transfer = amount
-                .checked_sub(
-                    total_user_balance
-                        .checked_sub(staked_amount)
-                        .map_err(StdError::overflow)?,
-                )
-                .map_err(StdError::overflow)?;
-
-            let underlying_amount: Uint128 = deps.querier.query_wasm_smart(
-                &config.red_bank_address,
-                &mars_core::red_bank::msg::QueryMsg::UnderlyingLiquidityAmount {
-                    ma_token_address: env.contract.address.to_string(),
-                    amount_scaled: staked_ma_share_to_transfer,
-                },
-            )?;
-
-            // Claims accrued rewards and transfers equivalent % of staked ma_shares to the recepient
-            res = res.add_message(core::transfer_on_liq_msg(
-                config.staking_proxy_address.clone().unwrap(),
-                sender.clone(),
-                recipient.clone(),
-                underlying_amount,
-                amount,
-            )?);
-        }
+        // Claims accrued rewards and transfers equivalent % of staked ma_shares / underlying tokens to the recepient
+        res = res.add_message(core::transfer_on_liq_msg(
+            config.staking_proxy_address.clone().unwrap(),
+            sender.clone(),
+            recipient.clone(),
+            underlying_amount,
+            amount,
+        )?);
     }
 
     let messages = core::transfer(deps.storage, &config, sender, recipient, amount, false)?;
@@ -285,49 +255,17 @@ pub fn execute_burn(
     if amount.is_zero() {
         return Err(ContractError::InvalidZeroAmount {});
     }
-    let user_ma_balance = BALANCES
-        .load(deps.storage, &user_address.clone())
-        .unwrap_or_default();
 
     let mut res = Response::new();
 
     // Check if tokens need to be unstaked (and unstake them if needed) before burning
     if config.staking_proxy_address.is_some() {
-        let user_staking_res: mars_core::staking_proxy::UserInfoResponse =
-            deps.querier.query_wasm_smart(
-                &config.staking_proxy_address.clone().unwrap(),
-                &mars_core::staking_proxy::QueryMsg::UserInfo {
-                    user_address: user_address.clone(),
-                },
-            )?;
-
-        // Calculate equivalent ma_shares to be unstaked for the user
-        // let ma_shares_to_unstake =
-        //     user_staking_res.ma_tokens_staked * Decimal::from_ratio(amount, user_ma_balance);
-
-        if amount
-            < user_ma_balance
-                .checked_sub(user_staking_res.ma_tokens_staked)
-                .map_err(StdError::overflow)?
-        {
-            // ma_shares to be unstaked
-            let ma_shares_to_unstake = amount
-                .checked_sub(
-                    user_ma_balance
-                        .checked_sub(user_staking_res.ma_tokens_staked)
-                        .map_err(StdError::overflow)?,
-                )
-                .map_err(StdError::overflow)?;
-
-            // Unstake equivalent ma_shares for the user
-            if !ma_shares_to_unstake.is_zero() {
-                res = res.add_message(core::update_staking_balance_msg(
-                    config.staking_proxy_address.unwrap(),
-                    user_address.clone(),
-                    ma_shares_to_unstake,
-                )?);
-            }
-        }
+        // Unstake equivalent ma_shares for the user
+        res = res.add_message(core::update_staking_balance_msg(
+            config.staking_proxy_address.unwrap(),
+            user_address.clone(),
+            amount,
+        )?);
     }
 
     // lower balance

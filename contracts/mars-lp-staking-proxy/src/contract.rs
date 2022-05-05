@@ -32,6 +32,7 @@ pub fn instantiate(
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
 
     let config = Config {
+        owner: msg.owner,
         redbank_addr: msg.redbank_addr,
         astro_generator_addr: msg.astro_generator_addr,
         redbank_treasury: msg.redbank_treasury,
@@ -45,8 +46,9 @@ pub fn instantiate(
     };
 
     let state = State {
-        is_collateral: msg.is_collateral,
+        emergency_withdraw_executed: false,
         is_stakable: msg.is_stakable,
+        total_underlying_tokens_staked: Uint128::zero(),
         total_ma_shares_staked: Uint128::zero(),
         astro_balance_before_claim: Uint128::zero(),
         proxy_balance_before_claim: Uint128::zero(),
@@ -156,6 +158,26 @@ pub fn execute(
                 },
             )
         }
+        ExecuteMsg::SwitchStakingStatus { is_staking_allowed } => {
+            // Checks if the transaction is authorized
+            if info.sender != cfg.owner {
+                return Err(ContractError::Unauthorized {});
+            }
+
+            claim_rewards_and_execute(
+                deps,
+                env,
+                ExecuteOnCallback::SwitchStakingStatus { is_staking_allowed },
+            )
+        }
+        ExecuteMsg::EmergencyWithdraw {} => {
+            // Checks if the transaction is authorized
+            if info.sender != cfg.owner {
+                return Err(ContractError::Unauthorized {});
+            }
+
+            claim_rewards_and_execute(deps, env, ExecuteOnCallback::EmergencyWithdraw {})
+        }
         ExecuteMsg::Callback(msg) => handle_callback(deps, env, info, msg),
     }
 }
@@ -174,9 +196,10 @@ pub fn handle_callback(
         CallbackMsg::UpdateIndexesAndExecute { execute_msg } => {
             update_indexes_and_execute(deps, env, execute_msg)
         }
-        CallbackMsg::TransferLpTokensToRedBank { prev_lp_balance } => {
-            transfer_lp_tokens_to_rb(deps, env, prev_lp_balance)
-        }
+        CallbackMsg::TransferLpTokensToRedBank {
+            prev_lp_balance,
+            lp_tokens_to_transfer,
+        } => transfer_lp_tokens_to_rb(deps, env, prev_lp_balance, lp_tokens_to_transfer),
         CallbackMsg::TransferTokensAfterWithdraw {
             account,
             prev_balance,
@@ -230,63 +253,6 @@ pub fn set_ma_token_address(
     ]))
 }
 
-pub fn transfer_tokens_after_withdraw(
-    deps: DepsMut,
-    env: Env,
-    account: Addr,
-    prev_balance: Uint128,
-) -> Result<Response, ContractError> {
-    let cfg = CONFIG.load(deps.storage)?;
-
-    // Calculate number of LP Tokens withdrawn from the staking contract
-    let amount = {
-        let res: BalanceResponse = deps.querier.query_wasm_smart(
-            &cfg.lp_token_addr,
-            &Cw20QueryMsg::Balance {
-                address: env.contract.address.to_string(),
-            },
-        )?;
-        res.balance - prev_balance
-    };
-
-    Ok(Response::new().add_message(WasmMsg::Execute {
-        contract_addr: cfg.lp_token_addr.to_string(),
-        funds: vec![],
-        msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: account.to_string(),
-            amount,
-        })?,
-    }))
-}
-
-pub fn transfer_lp_tokens_to_rb(
-    deps: DepsMut,
-    env: Env,
-    prev_lp_balance: Uint128,
-) -> Result<Response, ContractError> {
-    let cfg = CONFIG.load(deps.storage)?;
-
-    // Calculate number of LP Tokens withdrawn from the AstroGenerator contract
-    let cur_lp_balance = {
-        let res: BalanceResponse = deps.querier.query_wasm_smart(
-            &cfg.lp_token_addr,
-            &Cw20QueryMsg::Balance {
-                address: env.contract.address.to_string(),
-            },
-        )?;
-        res.balance
-    };
-
-    Ok(Response::new().add_message(WasmMsg::Execute {
-        contract_addr: cfg.lp_token_addr.to_string(),
-        funds: vec![],
-        msg: to_binary(&Cw20ExecuteMsg::Transfer {
-            recipient: cfg.redbank_addr.to_string(),
-            amount: cur_lp_balance.checked_sub(prev_lp_balance)?,
-        })?,
-    }))
-}
-
 /// ## Description
 /// Claims pending rewards on AstroGenerator (if any) and calls the `UpdateIndexesAndExecute` Callback function. Returns a [`ContractError`] on failure, otherwise returns a [`Response`] object with
 /// the specified attributes.
@@ -305,18 +271,6 @@ fn claim_rewards_and_execute(
 
     let mut response = Response::new();
 
-    // Store current ASTRO balance in the state for index calculation later
-    let cur_astro_balance = {
-        let res: BalanceResponse = deps.querier.query_wasm_smart(
-            &cfg.astro_token,
-            &Cw20QueryMsg::Balance {
-                address: env.contract.address.clone().to_string(),
-            },
-        )?;
-        res.balance
-    };
-    state.astro_balance_before_claim = cur_astro_balance;
-
     // QUERY :: Check if there are any pending rewards claimable with AstroGenerator, and if so add Msg to claim them
     let pending_rewards: PendingTokenResponse = deps.querier.query_wasm_smart(
         &cfg.astro_generator_addr,
@@ -331,6 +285,18 @@ fn claim_rewards_and_execute(
         || (pending_rewards.pending_on_proxy.is_some()
             && !pending_rewards.pending_on_proxy.unwrap().is_zero())
     {
+        // Store current ASTRO balance in the state for index calculation later
+        let cur_astro_balance = {
+            let res: BalanceResponse = deps.querier.query_wasm_smart(
+                &cfg.astro_token,
+                &Cw20QueryMsg::Balance {
+                    address: env.contract.address.clone().to_string(),
+                },
+            )?;
+            res.balance
+        };
+        state.astro_balance_before_claim = cur_astro_balance;
+
         // Store current PROXY balance in the state for index calculation later
         let cur_proxy_balance = {
             let res: BalanceResponse = deps.querier.query_wasm_smart(
@@ -351,9 +317,9 @@ fn claim_rewards_and_execute(
                 amount: Uint128::zero(),
             })?,
         }));
-    }
 
-    STATE.save(deps.storage, &state)?;
+        STATE.save(deps.storage, &state)?;
+    }
 
     // MSG :: Add CallbackMsg to Update Indexes (in-case rewards were claimed) and Execute staking / unstaking on AstroGenerator
     response = response.add_message(
@@ -419,6 +385,10 @@ fn update_indexes_and_execute(
             user_address,
             ma_shares_to_burn,
         } => unstake_before_burn(deps, env, user_address, ma_shares_to_burn),
+        ExecuteOnCallback::SwitchStakingStatus { is_staking_allowed } => {
+            switch_staking_status(deps, env, is_staking_allowed)
+        }
+        ExecuteOnCallback::EmergencyWithdraw {} => execute_emergency_withdraw(deps, env),
     }
 }
 
@@ -445,6 +415,13 @@ fn stake_with_astro_generator(
     // Update global state and userInfo state
     update_user_rewards(user_info.clone(), &state)?;
     state.total_ma_shares_staked = state.total_ma_shares_staked.checked_add(ma_token_share)?;
+    state.total_underlying_tokens_staked = state
+        .total_underlying_tokens_staked
+        .checked_add(lp_token_amount)?;
+
+    user_info.underlying_tokens_staked = user_info
+        .underlying_tokens_staked
+        .checked_add(lp_token_amount)?;
     user_info.ma_tokens_staked = user_info.ma_tokens_staked.checked_add(ma_token_share)?;
 
     STATE.save(deps.storage, &state)?;
@@ -492,7 +469,14 @@ fn unstake_from_astro_generator(
     update_user_rewards(user_info.clone(), &state)?;
 
     state.total_ma_shares_staked = state.total_ma_shares_staked.checked_sub(ma_token_share)?;
+    state.total_underlying_tokens_staked = state
+        .total_underlying_tokens_staked
+        .checked_sub(lp_token_amount)?;
+
     user_info.ma_tokens_staked = user_info.ma_tokens_staked.checked_sub(ma_token_share)?;
+    user_info.underlying_tokens_staked = user_info
+        .underlying_tokens_staked
+        .checked_sub(lp_token_amount)?;
 
     if claim_rewards {
         // Transfer accrued ASTRO rewards to the user
@@ -526,14 +510,16 @@ fn unstake_from_astro_generator(
 
     // Unstake LP tokens from the AstroGenerator
     if !lp_token_amount.is_zero() {
-        response = Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: cfg.astro_generator_addr.to_string(),
-            funds: vec![],
-            msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
-                lp_token: cfg.lp_token_addr.clone(),
-                amount: lp_token_amount,
-            })?,
-        }));
+        if !state.emergency_withdraw_executed {
+            response = Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: cfg.astro_generator_addr.to_string(),
+                funds: vec![],
+                msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
+                    lp_token: cfg.lp_token_addr.clone(),
+                    amount: lp_token_amount,
+                })?,
+            }));
+        }
 
         // Current LP balance (to calculate how many LP tokens were withdrawn from the Generator contract)
         let cur_lp_balance = {
@@ -550,6 +536,7 @@ fn unstake_from_astro_generator(
         response = response.add_message(
             CallbackMsg::TransferLpTokensToRedBank {
                 prev_lp_balance: cur_lp_balance,
+                lp_tokens_to_transfer: lp_token_amount,
             }
             .to_cosmos_msg(&env)?,
         );
@@ -593,7 +580,14 @@ fn unstake_before_burn(
     state.total_ma_shares_staked = state
         .total_ma_shares_staked
         .checked_sub(ma_shares_to_burn)?;
+    state.total_underlying_tokens_staked = state
+        .total_underlying_tokens_staked
+        .checked_sub(underlying_tokens_to_unstake)?;
+
     user_info.ma_tokens_staked = user_info.ma_tokens_staked.checked_sub(ma_shares_to_burn)?;
+    user_info.underlying_tokens_staked = user_info
+        .underlying_tokens_staked
+        .checked_sub(underlying_tokens_to_unstake)?;
 
     // Transfer accrued ASTRO rewards to the user
     if !user_info.claimable_astro.is_zero() {
@@ -625,14 +619,17 @@ fn unstake_before_burn(
 
     // Unstake LP tokens from the AstroGenerator
     if !underlying_tokens_to_unstake.is_zero() {
-        response = Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: cfg.astro_generator_addr.to_string(),
-            funds: vec![],
-            msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
-                lp_token: cfg.lp_token_addr.clone(),
-                amount: underlying_tokens_to_unstake,
-            })?,
-        }));
+        // if emergency withdraw has been executed, we don't need to unstake from AstroGenerator
+        if !state.emergency_withdraw_executed {
+            response = Response::new().add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: cfg.astro_generator_addr.to_string(),
+                funds: vec![],
+                msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
+                    lp_token: cfg.lp_token_addr.clone(),
+                    amount: underlying_tokens_to_unstake,
+                })?,
+            }));
+        }
 
         // Current LP balance (to calculate how many LP tokens were withdrawn from the Generator contract)
         let cur_lp_balance = {
@@ -649,11 +646,62 @@ fn unstake_before_burn(
         response = response.add_message(
             CallbackMsg::TransferLpTokensToRedBank {
                 prev_lp_balance: cur_lp_balance,
+                lp_tokens_to_transfer: underlying_tokens_to_unstake,
             }
             .to_cosmos_msg(&env)?,
         );
     }
 
+    Ok(response)
+}
+
+fn switch_staking_status(
+    mut deps: DepsMut,
+    env: Env,
+    is_staking_allowed: bool,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+
+    let fee_msgs = update_rewards_per_share(deps.branch(), &env)?;
+
+    // Check if staking is allowed or not
+    state.is_stakable = is_staking_allowed;
+
+    let mut response = Response::new();
+
+    STATE.save(deps.storage, &state)?;
+
+    // Add fee transfer Msgs to Response
+    if !fee_msgs.is_empty() {
+        response = response.add_messages(fee_msgs);
+    }
+    Ok(response)
+}
+
+fn execute_emergency_withdraw(mut deps: DepsMut, env: Env) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    let mut state = STATE.load(deps.storage)?;
+
+    let fee_msgs = update_rewards_per_share(deps.branch(), &env)?;
+    state.is_stakable = false;
+
+    let mut response = Response::new();
+
+    response = response.add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: cfg.astro_generator_addr.to_string(),
+        funds: vec![],
+        msg: to_binary(&AstroGeneratorExecuteMsg::Withdraw {
+            lp_token: cfg.lp_token_addr,
+            amount: state.total_underlying_tokens_staked,
+        })?,
+    }));
+
+    STATE.save(deps.storage, &state)?;
+
+    // Add fee transfer Msgs to Response
+    if !fee_msgs.is_empty() {
+        response = response.add_messages(fee_msgs);
+    }
     Ok(response)
 }
 
@@ -689,7 +737,7 @@ fn update_on_transfer(
     env: Env,
     from_user_addr: Addr,
     to_user_addr: Addr,
-    _underlying_amount: Uint128,
+    underlying_amount: Uint128,
     ma_token_share: Uint128,
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
@@ -708,6 +756,13 @@ fn update_on_transfer(
         .checked_sub(ma_token_share)?;
     to_user_info.ma_tokens_staked = to_user_info.ma_tokens_staked.checked_add(ma_token_share)?;
 
+    from_user_info.underlying_tokens_staked = from_user_info
+        .underlying_tokens_staked
+        .checked_sub(underlying_amount)?;
+    to_user_info.underlying_tokens_staked = to_user_info
+        .underlying_tokens_staked
+        .checked_add(underlying_amount)?;
+
     STATE.save(deps.storage, &state)?;
     USERS.save(deps.storage, &from_user_addr, &from_user_info)?;
     USERS.save(deps.storage, &to_user_addr, &to_user_info)?;
@@ -718,6 +773,77 @@ fn update_on_transfer(
     }
 
     Ok(response)
+}
+pub fn transfer_tokens_after_withdraw(
+    deps: DepsMut,
+    env: Env,
+    account: Addr,
+    prev_balance: Uint128,
+) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+
+    // Calculate number of LP Tokens withdrawn from the staking contract
+    let amount = {
+        let res: BalanceResponse = deps.querier.query_wasm_smart(
+            &cfg.lp_token_addr,
+            &Cw20QueryMsg::Balance {
+                address: env.contract.address.to_string(),
+            },
+        )?;
+        res.balance - prev_balance
+    };
+
+    Ok(Response::new().add_message(WasmMsg::Execute {
+        contract_addr: cfg.lp_token_addr.to_string(),
+        funds: vec![],
+        msg: to_binary(&Cw20ExecuteMsg::Transfer {
+            recipient: account.to_string(),
+            amount,
+        })?,
+    }))
+}
+
+pub fn transfer_lp_tokens_to_rb(
+    deps: DepsMut,
+    env: Env,
+    prev_lp_balance: Uint128,
+    lp_tokens_to_transfer: Uint128,
+) -> Result<Response, ContractError> {
+    let cfg = CONFIG.load(deps.storage)?;
+    let state = STATE.load(deps.storage)?;
+
+    if !state.emergency_withdraw_executed {
+        // Calculate number of LP Tokens withdrawn from the AstroGenerator contract
+        let cur_lp_balance = {
+            let res: BalanceResponse = deps.querier.query_wasm_smart(
+                &cfg.lp_token_addr,
+                &Cw20QueryMsg::Balance {
+                    address: env.contract.address.to_string(),
+                },
+            )?;
+            res.balance
+        };
+
+        Ok(Response::new().add_message(WasmMsg::Execute {
+            contract_addr: cfg.lp_token_addr.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: cfg.redbank_addr.to_string(),
+                amount: cur_lp_balance.checked_sub(prev_lp_balance)?,
+            })?,
+        }))
+    }
+    // If emergency withdrawal has been executed, tokens are held by the proxy contract and we transfer them directly
+    else {
+        Ok(Response::new().add_message(WasmMsg::Execute {
+            contract_addr: cfg.lp_token_addr.to_string(),
+            funds: vec![],
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: cfg.redbank_addr.to_string(),
+                amount: lp_tokens_to_transfer,
+            })?,
+        }))
+    }
 }
 
 pub fn update_user_rewards(mut user_info: UserInfo, state: &State) -> StdResult<()> {
@@ -848,7 +974,6 @@ pub fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
         astro_treasury_fee: cfg.astro_treasury_fee,
         proxy_token: cfg.proxy_token,
         proxy_treasury_fee: cfg.proxy_treasury_fee,
-        is_collateral: state.is_collateral,
         is_stakable: state.is_stakable,
     })
 }
@@ -897,9 +1022,10 @@ pub fn query_state(deps: Deps, env: Env) -> StdResult<StateResponse> {
     }
 
     Ok(StateResponse {
-        is_collateral: state.is_collateral,
+        emergency_withdraw_executed: state.emergency_withdraw_executed,
         is_stakable: state.is_stakable,
         total_ma_shares_staked: state.total_ma_shares_staked,
+        total_underlying_tokens_staked: state.total_underlying_tokens_staked,
         global_astro_per_ma_share_index: state.global_astro_per_ma_share_index,
         global_proxy_per_ma_share_index: state.global_proxy_per_ma_share_index,
     })
@@ -924,7 +1050,6 @@ pub fn query_user_info(deps: Deps, env: Env, user_address: Addr) -> StdResult<Us
             underlying_tokens_staked: underlying_tokens_staked,
             claimable_astro: user_info.claimable_astro,
             claimable_proxy: user_info.claimable_proxy,
-            is_collateral: state.is_collateral,
         });
     }
 
@@ -982,7 +1107,6 @@ pub fn query_user_info(deps: Deps, env: Env, user_address: Addr) -> StdResult<Us
         underlying_tokens_staked: underlying_tokens_staked,
         claimable_astro: user_info.claimable_astro,
         claimable_proxy: user_info.claimable_proxy,
-        is_collateral: state.is_collateral,
     })
 }
 

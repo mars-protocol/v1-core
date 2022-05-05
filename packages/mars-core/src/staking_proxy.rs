@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
+    pub owner: Addr,
     pub redbank_addr: Addr,
     pub astro_generator_addr: Addr,
     pub redbank_treasury: Addr,
@@ -13,7 +14,6 @@ pub struct InstantiateMsg {
     pub pool_addr: Addr,
     pub astro_token: Addr,
     pub proxy_token: Option<Addr>,
-    pub is_collateral: bool,
     pub is_stakable: bool,
 }
 
@@ -50,6 +50,12 @@ pub enum ExecuteMsg {
         user_address: Addr,
         ma_shares_to_burn: Uint128,
     },
+    /// Admin function (callable only by owner) to enable / disable staking
+    SwitchStakingStatus {
+        is_staking_allowed: bool,
+    },
+    /// Admin function (callable only by owner) to unstake all tokens from AstroGenerator
+    EmergencyWithdraw {},
     /// the callback of type [`CallbackMsg`]
     Callback(CallbackMsg),
 }
@@ -73,6 +79,7 @@ pub enum CallbackMsg {
     },
     TransferLpTokensToRedBank {
         prev_lp_balance: Uint128,
+        lp_tokens_to_transfer: Uint128,
     },
     TransferTokensAfterWithdraw {
         /// the recipient
@@ -122,6 +129,10 @@ pub enum ExecuteOnCallback {
         user_address: Addr,
         ma_shares_to_burn: Uint128,
     },
+    SwitchStakingStatus {
+        is_staking_allowed: bool,
+    },
+    EmergencyWithdraw {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -136,20 +147,19 @@ pub struct ConfigResponse {
     pub proxy_token: Option<Addr>,
     pub astro_treasury_fee: Decimal,
     pub proxy_treasury_fee: Decimal,
-    /// Boolean value which if True implies Staked tokens are accounted as collateral by Red Bank positions
-    pub is_collateral: bool,
     /// Boolean value which if True imples staking is allowed
     pub is_stakable: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct StateResponse {
-    /// Boolean value which if True implies Staked tokens are accounted as collateral by Red Bank positions
-    pub is_collateral: bool,
+    pub emergency_withdraw_executed: bool,
     /// Boolean value which if True imples staking is allowed
     pub is_stakable: bool,
     /// Total number of ma_tokens for which the underlying liquidity is staked
     pub total_ma_shares_staked: Uint128,
+    /// Total number of underlying tokens which have been staked
+    pub total_underlying_tokens_staked: Uint128,
     /// Ratio of Generator ASTRO rewards accured per maToken share
     pub global_astro_per_ma_share_index: Decimal,
     /// Ratio of Generator Proxy rewards accured per maToken share
@@ -162,7 +172,6 @@ pub struct UserInfoResponse {
     pub underlying_tokens_staked: Uint128,
     pub claimable_astro: Uint128,
     pub claimable_proxy: Uint128,
-    pub is_collateral: bool,
 }
 
 /// ## Description

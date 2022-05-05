@@ -6,6 +6,7 @@ use cw_storage_plus::{Item, Map};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct Config {
+    pub owner: Addr,
     pub redbank_addr: Addr,
     pub astro_generator_addr: Addr,
     pub redbank_treasury: Addr,
@@ -20,12 +21,13 @@ pub struct Config {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct State {
-    /// Boolean value which if True implies Staked tokens are accounted as collateral by Red Bank positions
-    pub is_collateral: bool,
+    pub emergency_withdraw_executed: bool,
     /// Boolean value which if True imples staking is allowed
     pub is_stakable: bool,
     /// Total number of ma_tokens for which the underlying liquidity is staked
     pub total_ma_shares_staked: Uint128,
+    /// Total number of underlying tokens which have been staked
+    pub total_underlying_tokens_staked: Uint128,
     /// ASTRO token balance before the rewards were claimed from the AstroGenerator
     pub astro_balance_before_claim: Uint128,
     /// Ratio of Generator ASTRO rewards accured per maToken share
@@ -40,6 +42,8 @@ pub struct State {
 pub struct UserInfo {
     /// Number of maTokens staked by the user
     pub ma_tokens_staked: Uint128,
+    /// Number of underlying Tokens staked by the user
+    pub underlying_tokens_staked: Uint128,
     /// Ratio to keep track of ASTRO tokens accrued as rewards by the user
     pub user_astro_per_ma_share_index: Decimal,
     /// Generator ASTRO tokens accrued as rewards by the user
@@ -54,6 +58,7 @@ impl Default for UserInfo {
     fn default() -> Self {
         UserInfo {
             ma_tokens_staked: Uint128::zero(),
+            underlying_tokens_staked: Uint128::zero(),
             user_astro_per_ma_share_index: Decimal::zero(),
             claimable_astro: Uint128::zero(),
             user_proxy_per_ma_share_index: Decimal::zero(),
