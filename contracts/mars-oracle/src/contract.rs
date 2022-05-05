@@ -287,7 +287,7 @@ fn query_asset_price(
         }
 
         // The calculation of the value of liquidity token, see: https://blog.alphafinance.io/fair-lp-token-pricing/.
-        // This formulation avoids a potential sandwich attack that distorts asset prices by a flashloan.
+        // This formulation avoids a potential manipulation attack that distorts asset prices by a flashloan.
         //
         // NOTE: Price sources must exist for both assets in the pool
         PriceSourceChecked::AstroportLiquidityToken { pair_address } => {
