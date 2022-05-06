@@ -101,7 +101,7 @@ pub fn execute_set_asset(
         | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
             assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
         }
-        PriceSourceChecked::AstroportLiquidityToken { pair_address, .. } => {
+        PriceSourceChecked::AstroportXykLiquidityToken { pair_address, .. } => {
             assert_astroport_pool_is_xyk(&deps.querier, pair_address)?;
         }
         _ => (),
@@ -296,7 +296,7 @@ fn query_asset_price(
         // This formulation avoids a potential manipulation attack that distorts asset prices by a flashloan.
         //
         // NOTE: Price sources must exist for both assets in the pool
-        PriceSourceChecked::AstroportLiquidityToken { pair_address } => {
+        PriceSourceChecked::AstroportXykLiquidityToken { pair_address } => {
             let pool = query_astroport_pool(&deps.querier, &pair_address)?;
 
             let asset0: Asset = (&pool.assets[0].info).into();
@@ -769,7 +769,7 @@ mod tests {
         };
         let msg = ExecuteMsg::SetAsset {
             asset,
-            price_source: PriceSourceUnchecked::AstroportLiquidityToken {
+            price_source: PriceSourceUnchecked::AstroportXykLiquidityToken {
                 pair_address: "usteak-uluna".to_string(),
             },
         };
@@ -782,7 +782,7 @@ mod tests {
         };
         let msg = ExecuteMsg::SetAsset {
             asset: asset.clone(),
-            price_source: PriceSourceUnchecked::AstroportLiquidityToken {
+            price_source: PriceSourceUnchecked::AstroportXykLiquidityToken {
                 pair_address: "uluna-uusd".to_string(),
             },
         };
@@ -793,7 +793,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             price_source,
-            PriceSourceChecked::AstroportLiquidityToken {
+            PriceSourceChecked::AstroportXykLiquidityToken {
                 pair_address: Addr::unchecked("uluna-uusd")
             }
         );
@@ -1327,7 +1327,7 @@ mod tests {
             .save(
                 &mut deps.storage,
                 asset_reference.as_slice(),
-                &PriceSourceChecked::AstroportLiquidityToken {
+                &PriceSourceChecked::AstroportXykLiquidityToken {
                     pair_address: Addr::unchecked("lp_pair"),
                 },
             )
