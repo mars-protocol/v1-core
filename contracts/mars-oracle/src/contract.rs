@@ -283,6 +283,7 @@ fn query_asset_price(
                         .checked_add(Uint128::MAX - previous_snapshot.price_cumulative)?
                 };
             let period = current_snapshot.timestamp - previous_snapshot.timestamp;
+
             // NOTE: Astroport introduces TWAP precision (https://github.com/astroport-fi/astroport/pull/143).
             // We need to divide the result by price_precision: (price_delta / (time * price_precision)).
             let price_precision = Uint128::from(10_u128.pow(TWAP_PRECISION.into()));
@@ -786,7 +787,7 @@ mod tests {
                 pair_address: "uluna-uusd".to_string(),
             },
         };
-         execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
         let price_source = PRICE_SOURCES
             .load(&deps.storage, asset.get_reference().as_slice())
