@@ -209,7 +209,9 @@ impl MarsMockQuerier {
         };
         let key = pair_info.contract_addr.to_string();
 
-        self.astroport_pair_querier.pairs.insert(key.clone(), pair_info);
+        self.astroport_pair_querier
+            .pairs
+            .insert(key.clone(), pair_info);
         self.astroport_pair_querier.pools.insert(key, pool_response);
     }
 
