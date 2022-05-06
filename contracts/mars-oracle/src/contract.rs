@@ -91,12 +91,18 @@ pub fn execute_set_asset(
     let price_source = price_source_unchecked.to_checked(deps.api)?;
     PRICE_SOURCES.save(deps.storage, &asset_reference, &price_source)?;
 
-    // for spot and TWAP sources, we must make sure: the astroport pair indicated by `pair_address`
-    // consists of UST and the asset of interest
+    // For spot and TWAP sources, we must make sure the pool indicated by `pair_address` consists of
+    // UST and the asset of interest.
+    //
+    // For Astroport LP tokens, we must make sure the pool is and XYK-pool, not a stableswap or of
+    // any other pool type.
     match &price_source {
         PriceSourceChecked::AstroportSpot { pair_address }
         | PriceSourceChecked::AstroportTwap { pair_address, .. } => {
             assert_astroport_pool_assets(&deps.querier, &asset, pair_address)?;
+        }
+        PriceSourceChecked::AstroportLiquidityToken { pair_address, .. } => {
+            assert_astroport_pool_is_xyk(&deps.querier, pair_address)?;
         }
         _ => (),
     }
@@ -343,7 +349,8 @@ mod helpers {
     use crate::error::ContractError;
 
     use astroport::{
-        asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo},
+        asset::{Asset as AstroportAsset, AssetInfo as AstroportAssetInfo, PairInfo},
+        factory::PairType,
         pair::{
             CumulativePricesResponse, PoolResponse, QueryMsg as AstroportQueryMsg,
             SimulationResponse,
@@ -392,6 +399,29 @@ mod helpers {
         } else {
             Err(ContractError::InvalidPair {})
         }
+    }
+
+    /// Assert the Astroport pair indicated by `pair_address` is of XYK type
+    pub fn assert_astroport_pool_is_xyk(
+        querier: &QuerierWrapper,
+        pair_address: &Addr,
+    ) -> Result<(), ContractError> {
+        let pair = query_astroport_pair(querier, pair_address)?;
+        if pair.pair_type == (PairType::Xyk {}) {
+            Ok(())
+        } else {
+            Err(ContractError::InvalidPair {})
+        }
+    }
+
+    pub fn query_astroport_pair(
+        querier: &QuerierWrapper,
+        pair_address: &Addr,
+    ) -> StdResult<PairInfo> {
+        querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: pair_address.to_string(),
+            msg: to_binary(&AstroportQueryMsg::Pair {})?,
+        }))
     }
 
     pub fn query_astroport_pool(
@@ -705,25 +735,66 @@ mod tests {
         let mut deps = th_setup();
         let info = mock_info("owner", &[]);
 
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [
+                AssetInfo::NativeToken {
+                    denom: "uluna".to_string(),
+                },
+                AssetInfo::NativeToken {
+                    denom: "uusd".to_string(),
+                },
+            ],
+            contract_addr: Addr::unchecked("uluna-uusd"),
+            liquidity_token: Addr::unchecked("uluna_uusd_lp"),
+            pair_type: PairType::Xyk {},
+        });
+
+        deps.querier.set_astroport_pair(PairInfo {
+            asset_infos: [
+                AssetInfo::Token {
+                    contract_addr: Addr::unchecked("steak_token"),
+                },
+                AssetInfo::NativeToken {
+                    denom: "uluna".to_string(),
+                },
+            ],
+            contract_addr: Addr::unchecked("usteak-uluna"),
+            liquidity_token: Addr::unchecked("usteak_uluna_lp"),
+            pair_type: PairType::Stable {},
+        });
+
+        // Attempt to use a stableswap pool; should fail
         let asset = Asset::Cw20 {
-            contract_addr: "cw20_lp_token".to_string(),
+            contract_addr: "usteak_uluna_lp".to_string(),
         };
-        let reference = asset.get_reference();
         let msg = ExecuteMsg::SetAsset {
-            asset: asset,
+            asset,
             price_source: PriceSourceUnchecked::AstroportLiquidityToken {
-                pair_address: "lp_pair".to_string(),
+                pair_address: "usteak-uluna".to_string(),
             },
         };
-        execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
+        let err = execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap_err();
+        assert_eq!(err, ContractError::InvalidPair {});
+
+        // Attempt to use an XYK pool; should succeed
+        let asset = Asset::Cw20 {
+            contract_addr: "uluna_uusd_LP".to_string(),
+        };
+        let msg = ExecuteMsg::SetAsset {
+            asset: asset.clone(),
+            price_source: PriceSourceUnchecked::AstroportLiquidityToken {
+                pair_address: "uluna-uusd".to_string(),
+            },
+        };
+         execute(deps.as_mut(), mock_env(), info.clone(), msg).unwrap();
 
         let price_source = PRICE_SOURCES
-            .load(&deps.storage, reference.as_slice())
+            .load(&deps.storage, asset.get_reference().as_slice())
             .unwrap();
         assert_eq!(
             price_source,
             PriceSourceChecked::AstroportLiquidityToken {
-                pair_address: Addr::unchecked("lp_pair")
+                pair_address: Addr::unchecked("uluna-uusd")
             }
         );
     }
