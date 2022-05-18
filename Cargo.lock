@@ -624,12 +624,10 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
  "cw20 0.9.1",
- "cw20-base",
  "mars-core",
  "mars-red-bank",
  "schemars",
  "serde",
- "thiserror",
 ]
 
 [[package]]
