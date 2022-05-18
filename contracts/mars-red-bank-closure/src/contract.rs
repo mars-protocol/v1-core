@@ -5,11 +5,11 @@ use cosmwasm_std::{
 
 use cw20::Cw20ExecuteMsg;
 use mars_core::asset::Asset;
-use mars_core::helpers::{cw20_get_balance, cw20_get_total_supply};
+use mars_core::helpers::cw20_get_total_supply;
 
 use mars_red_bank::state::MARKETS;
 
-use crate::helpers::{build_transfer_asset_msg, cw20_get_owners_balances};
+use crate::helpers::{build_transfer_asset_msg, cw20_get_owners_balances, get_asset_balance};
 use crate::msg::ExecuteMsg;
 
 #[entry_point]
@@ -47,25 +47,15 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
         )));
     }
 
-    // query the amount of this asset held by Red Bank
+    // query:
+    // - the amount of this asset held by Red Bank
+    // - the maToken's total supply
+    // - grab the first 10 holders of the asset's corresponding maToken and their respective balances
     // since all debts have been repaid, this amount should be sufficient to refund all users
-    let mut total_amount_to_refund = match &asset {
-        Asset::Cw20 { contract_addr } => cw20_get_balance(
-            &deps.querier,
-            deps.api.addr_validate(contract_addr)?,
-            env.contract.address,
-        )?,
-        Asset::Native { denom } => {
-            let balance_query = deps.querier.query_balance(env.contract.address, denom)?;
-            balance_query.amount
-        }
-    };
-
-    // query the maToken's total supply
+    let mut total_amount_to_refund =
+        get_asset_balance(&deps.querier, &asset, &env.contract.address)?;
     let mut ma_token_supply =
         cw20_get_total_supply(&deps.querier, market.ma_token_address.clone())?;
-
-    // grab the first 10 holders of the asset's corresponding maToken and their respective balances
     let owners_balances =
         cw20_get_owners_balances(&deps.querier, deps.api, &market.ma_token_address)?;
 
