@@ -51,7 +51,6 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
     // - the amount of this asset held by Red Bank
     // - the maToken's total supply
     // - grab the first 10 holders of the asset's corresponding maToken and their respective balances
-    // since all debts have been repaid, this amount should be sufficient to refund all users
     let mut total_amount_to_refund =
         get_asset_balance(&deps.querier, &asset, &env.contract.address)?;
     let mut ma_token_supply =
