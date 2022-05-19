@@ -86,7 +86,7 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
 
         // event log
         events.push(
-            Event::new("mars_red_bank/refund")
+            Event::new("mars_red_bank/refunded")
                 .add_attribute("user", &owner_addr)
                 .add_attribute("asset", &asset_label)
                 .add_attribute("asset_amount", amount_to_refund)
