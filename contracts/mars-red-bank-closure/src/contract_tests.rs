@@ -2,9 +2,9 @@ use cosmwasm_std::testing::{mock_env, mock_info, MockApi, MockStorage};
 use cosmwasm_std::{
     coin, to_binary, Addr, BankMsg, CosmosMsg, OwnedDeps, ReplyOn, SubMsg, Uint128, WasmMsg,
 };
-use cw20::Cw20ExecuteMsg;
 
 use mars_core::asset::Asset;
+use mars_core::ma_token::msg::ExecuteMsg as MaTokenExecuteMsg;
 use mars_core::testing::{mock_dependencies, MarsMockQuerier};
 use mars_red_bank::state::MARKETS;
 use mars_red_bank::Market;
@@ -82,8 +82,8 @@ fn refunding() {
             id: 0,
             msg: CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: "maUST".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::BurnFrom {
-                    owner: "alice".to_string(),
+                msg: to_binary(&MaTokenExecuteMsg::Burn {
+                    user: "alice".to_string(),
                     amount: Uint128::new(60000000)
                 })
                 .unwrap(),
@@ -111,8 +111,8 @@ fn refunding() {
             id: 0,
             msg: CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: "maUST".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::BurnFrom {
-                    owner: "bob".to_string(),
+                msg: to_binary(&MaTokenExecuteMsg::Burn {
+                    user: "bob".to_string(),
                     amount: Uint128::new(30000000)
                 })
                 .unwrap(),
@@ -140,8 +140,8 @@ fn refunding() {
             id: 0,
             msg: CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: "maUST".to_string(),
-                msg: to_binary(&Cw20ExecuteMsg::BurnFrom {
-                    owner: "charlie".to_string(),
+                msg: to_binary(&MaTokenExecuteMsg::Burn {
+                    user: "charlie".to_string(),
                     amount: Uint128::new(10000000)
                 })
                 .unwrap(),

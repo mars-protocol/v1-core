@@ -3,9 +3,9 @@ use cosmwasm_std::{
     Response, StdError, StdResult, WasmMsg,
 };
 
-use cw20::Cw20ExecuteMsg;
 use mars_core::asset::Asset;
 use mars_core::helpers::cw20_get_total_supply;
+use mars_core::ma_token::msg::ExecuteMsg as MaTokenExecuteMsg;
 
 use mars_red_bank::state::MARKETS;
 
@@ -70,8 +70,8 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
         // burn maToken
         msgs.push(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: market.ma_token_address.to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::BurnFrom {
-                owner: owner_addr.to_string(),
+            msg: to_binary(&MaTokenExecuteMsg::Burn {
+                user: owner_addr.to_string(),
                 amount: balance,
             })?,
             funds: vec![],
