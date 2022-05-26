@@ -67,7 +67,6 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
         total_amount_to_refund -= amount_to_refund;
         ma_token_supply -= balance;
 
-        // burn maToken
         if !balance.is_zero() {
             msgs.push(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: market.ma_token_address.to_string(),
