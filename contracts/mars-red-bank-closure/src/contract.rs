@@ -68,21 +68,25 @@ pub fn refund(deps: DepsMut, env: Env, asset: Asset) -> StdResult<Response> {
         ma_token_supply -= balance;
 
         // burn maToken
-        msgs.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: market.ma_token_address.to_string(),
-            msg: to_binary(&MaTokenExecuteMsg::Burn {
-                user: owner_addr.to_string(),
-                amount: balance,
-            })?,
-            funds: vec![],
-        }));
+        if !balance.is_zero() {
+            msgs.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: market.ma_token_address.to_string(),
+                msg: to_binary(&MaTokenExecuteMsg::Burn {
+                    user: owner_addr.to_string(),
+                    amount: balance,
+                })?,
+                funds: vec![],
+            }));
+        }
 
         // refund asset
-        msgs.push(build_transfer_asset_msg(
-            &asset,
-            amount_to_refund,
-            &owner_addr,
-        )?);
+        if !amount_to_refund.is_zero() {
+            msgs.push(build_transfer_asset_msg(
+                &asset,
+                amount_to_refund,
+                &owner_addr,
+            )?);
+        }
 
         // event log
         events.push(
