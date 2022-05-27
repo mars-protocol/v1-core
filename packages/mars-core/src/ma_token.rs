@@ -113,6 +113,12 @@ pub mod msg {
         },
         /// If set as the "marketing" role on the contract, upload a new URL, SVG, or PNG for the token
         UploadLogo(Logo),
+
+        /// Delete user records if their balance is zero; invoke this repeatedly to remove all such records
+        PurgeStorage {
+            start_after: Option<String>,
+            limit: Option<u32>,
+        },
     }
 
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

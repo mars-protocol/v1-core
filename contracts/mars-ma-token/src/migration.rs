@@ -1,57 +1,70 @@
 use cosmwasm_std::{
     attr, entry_point, Addr, Attribute, DepsMut, Empty, Env, Event, Order, Response, StdResult,
 };
-use cw20_base::state::BALANCES;
+use cw20_base::{state::BALANCES, ContractError};
 use cw_storage_plus::Bound;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 /// delete all user addresses whose balances are zero
-pub fn migrate(deps: DepsMut, _env: Env, _msg: Empty) -> StdResult<Response> {
-    let mut start_after: Option<Bound> = None;
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: Empty) -> StdResult<Response> {
+    Ok(Response::new())
+}
+
+pub fn purge_storage(
+    deps: DepsMut,
+    start_after: Option<String>,
+    limit: Option<u32>,
+) -> Result<Response, ContractError> {
+    let start_after = start_after.map(Bound::exclusive);
+    let limit = limit.unwrap_or(10) as usize;
+
     let mut attrs: Vec<Attribute> = vec![];
 
-    #[allow(while_true)]
-    while true {
-        // grab the addresses and balances of the first 10 users
-        let users_balances = BALANCES
-            .range(deps.storage, start_after, None, Order::Ascending)
-            .take(10)
-            .map(|item| -> StdResult<_> {
-                let (user_bytes, balance) = item?;
-                let user = String::from_utf8(user_bytes)?;
-                Ok((Addr::unchecked(user), balance))
-            })
-            .collect::<StdResult<Vec<_>>>()?;
+    // grab the addresses and balances of the first 30 users
+    let users_balances = BALANCES
+        .range(deps.storage, start_after, None, Order::Ascending)
+        .take(limit)
+        .map(|item| -> StdResult<_> {
+            let (user_bytes, balance) = item?;
+            let user = String::from_utf8(user_bytes)?;
+            Ok((Addr::unchecked(user), balance))
+        })
+        .collect::<StdResult<Vec<_>>>()?;
 
-        // exit the loop if there is no more user positions to handle
-        if users_balances.is_empty() {
-            break;
-        }
-
-        // split the `users_balances` vector into users with zero balances and those with non-zero balances
-        let (zeroes, nonzeroes): (Vec<_>, Vec<_>) = users_balances
-            .into_iter()
-            .partition(|(_, balance)| balance.is_zero());
-
-        // delete all users with zero balance
-        for (user, _) in &zeroes {
-            BALANCES.remove(deps.storage, user);
-            attrs.push(attr("user", user));
-        }
-
-        // update the pagination parameter
-        start_after = nonzeroes
-            .last()
-            .map(|(user, _)| Bound::Exclusive(user.as_bytes().to_vec()));
+    // if there is no more user balances to handle, then do nothing and return
+    if users_balances.is_empty() {
+        return Ok(Response::new());
     }
 
-    Ok(Response::new().add_event(Event::new("mars_ma_token/storage_purged").add_attributes(attrs)))
+    // split the `users_balances` vector into users with zero balances and those with non-zero balances
+    let (zeroes, nonzeroes): (Vec<_>, Vec<_>) = users_balances
+        .into_iter()
+        .partition(|(_, balance)| balance.is_zero());
+
+    // delete all users with zero balance
+    for (user, _) in &zeroes {
+        BALANCES.remove(deps.storage, user);
+        attrs.push(attr("user", user));
+    }
+
+    // update the pagination parameter
+    let next_start_after = if let Some((user, _)) = nonzeroes.last() {
+        user.to_string()
+    } else {
+        "none".to_string()
+    };
+
+    let event = Event::new("mars_ma_token/storage_purged")
+        .add_attributes(attrs)
+        .add_attribute("next_start_after", next_start_after);
+
+    Ok(Response::new().add_event(event))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env};
+    use cosmwasm_std::testing::mock_dependencies;
     use cosmwasm_std::Uint128;
     use cw20_base::enumerable::query_all_accounts;
 
@@ -101,8 +114,38 @@ mod tests {
                 .unwrap();
         }
 
-        // execute the migration
-        migrate(deps.as_mut(), mock_env(), Empty {}).unwrap();
+        // repeatedly invoke `purging_storage`
+        let mut start_after: Option<String> = None;
+        #[allow(while_true)]
+        while true {
+            let res = purge_storage(deps.as_mut(), start_after, None).unwrap();
+
+            // if the response does not have a `mars_ma_token/storage_purged` event, it means all
+            // zero balances have been purged
+            let event = res
+                .events
+                .iter()
+                .find(|event| event.ty == "mars_ma_token/storage_purged");
+
+            if event.is_none() {
+                break;
+            }
+
+            // if there is such an event, find what the `start_after` for the next iteration should be
+            let event = event.unwrap();
+            let next_start_after_str = &event
+                .attributes
+                .iter()
+                .find(|attr| attr.key == "next_start_after")
+                .unwrap()
+                .value;
+
+            start_after = if next_start_after_str == "none" {
+                None
+            } else {
+                Some(next_start_after_str.clone())
+            };
+        }
 
         // query all accounts after migration; should only return ones with non-zero balances
         let res = query_all_accounts(deps.as_ref(), None, Some(100)).unwrap();

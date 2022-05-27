@@ -22,6 +22,7 @@ use mars_core::red_bank;
 
 use crate::allowances::{execute_send_from, execute_transfer_from};
 use crate::core;
+use crate::migration::purge_storage;
 use crate::msg::{BalanceAndTotalSupplyResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::CONFIG;
 use crate::Config;
@@ -127,6 +128,7 @@ pub fn execute(
             marketing,
         } => execute_update_marketing(deps, env, info, project, description, marketing),
         ExecuteMsg::UploadLogo(logo) => execute_upload_logo(deps, env, info, logo),
+        ExecuteMsg::PurgeStorage { start_after, limit } => purge_storage(deps, start_after, limit),
     }
 }
 
