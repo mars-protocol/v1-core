@@ -1,6 +1,7 @@
 pub mod allowances;
 pub mod contract;
 pub mod core;
+pub mod migration;
 pub mod state;
 
 #[cfg(test)]

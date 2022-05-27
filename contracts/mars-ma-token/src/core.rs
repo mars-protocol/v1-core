@@ -70,7 +70,14 @@ pub fn decrease_balance(
 ) -> Result<Uint128, StdError> {
     let previous_balance = BALANCES.load(storage, address).unwrap_or_default();
     let new_balance = previous_balance.checked_sub(amount)?;
-    BALANCES.save(storage, address, &new_balance)?;
+
+    // if the balance is reduced to zero, simply delete the user's record from the storage
+    // otherwise, update the record
+    if new_balance.is_zero() {
+        BALANCES.remove(storage, address);
+    } else {
+        BALANCES.save(storage, address, &new_balance)?;
+    }
 
     Ok(previous_balance)
 }
@@ -126,4 +133,30 @@ pub fn balance_change_msg(
         })?,
         funds: vec![],
     }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use cosmwasm_std::testing::mock_dependencies;
+
+    #[test]
+    fn decreasing_balance() {
+        let mut deps = mock_dependencies(&[]);
+        let user = Addr::unchecked("user");
+
+        BALANCES
+            .save(deps.as_mut().storage, &user, &Uint128::new(88888))
+            .unwrap();
+
+        // decrease balance but not all the way to zero
+        decrease_balance(deps.as_mut().storage, &user, Uint128::new(69420)).unwrap();
+        let balance = BALANCES.load(deps.as_ref().storage, &user).unwrap();
+        assert_eq!(balance, Uint128::new(88888 - 69420));
+
+        // decrease balance all the way to zero; should purge the user's record from storage
+        decrease_balance(deps.as_mut().storage, &user, balance).unwrap();
+        let balance = BALANCES.may_load(deps.as_ref().storage, &user).unwrap();
+        assert_eq!(balance, None);
+    }
 }
