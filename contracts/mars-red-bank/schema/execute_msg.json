@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ExecuteMsg",
-  "anyOf": [
+  "oneOf": [
     {
       "description": "Implementation of cw20 receive msg",
       "type": "object",
@@ -196,6 +196,13 @@
             "denom": {
               "description": "Denom used in Terra (e.g: uluna, uusd)",
               "type": "string"
+            },
+            "on_behalf_of": {
+              "description": "Address that will receive the maTokens",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }
@@ -233,6 +240,13 @@
                   "$ref": "#/definitions/Asset"
                 }
               ]
+            },
+            "recipient": {
+              "description": "The address where the withdrawn amount is sent",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }
@@ -268,6 +282,13 @@
                   "$ref": "#/definitions/Asset"
                 }
               ]
+            },
+            "recipient": {
+              "description": "The address where the borrowed amount is sent",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }
@@ -290,6 +311,13 @@
             "denom": {
               "description": "Denom used in Terra (e.g: uluna, uusd)",
               "type": "string"
+            },
+            "on_behalf_of": {
+              "description": "Repay the funds for the user",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         }
@@ -438,7 +466,7 @@
     },
     "Asset": {
       "description": "Represents either a native asset or a cw20. Meant to be used as part of a msg in a contract call and not to be used internally",
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "required": [
@@ -712,7 +740,7 @@
       }
     },
     "InterestRateModelParams": {
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "required": [

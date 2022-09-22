@@ -255,7 +255,7 @@
       }
     },
     "InterestRateModel": {
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "required": [
