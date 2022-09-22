@@ -5,13 +5,13 @@ version = 3
 [[package]]
 name = "airdrops-registry"
 version = "0.1.0"
-source = "git+https://github.com/stader-labs/stader-liquid-token?tag=v0.2.1#acf69c8cf02c7fc2baf39962c68c1555dc4c5916"
+source = "git+https://github.com/sbnair/stader-liquid-token?rev=cafba59f7fcad69dd68e84c607dd5910921bad57#cafba59f7fcad69dd68e84c607dd5910921bad57"
 dependencies = [
  "cosmwasm-bignumber",
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw-storage-plus 0.8.1",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.8.1",
  "schemars",
  "serde",
@@ -267,18 +267,6 @@ dependencies = [
 
 [[package]]
 name = "cw2"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d48454f96494aa1018556cd457977375cc8c57ef3e5c767cfa2ea5ec24b0258"
-dependencies = [
- "cosmwasm-std",
- "cw-storage-plus 0.8.1",
- "schemars",
- "serde",
-]
-
-[[package]]
-name = "cw2"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c6380164fb236412ff43c7ca075d95847c6fa8c51b2d3a513c23127a0f2a8f6"
@@ -322,7 +310,7 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
  "cw0 0.9.1",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.9.1",
  "schemars",
  "serde",
@@ -513,7 +501,7 @@ dependencies = [
  "astroport",
  "basset",
  "cosmwasm-std",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.9.1",
  "cw20-base",
  "schemars",
@@ -559,7 +547,7 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
  "cw0 0.9.1",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.9.1",
  "cw20-base",
  "mars-core",
@@ -692,7 +680,7 @@ dependencies = [
  "cosmwasm-std",
  "cw-storage-plus 0.9.1",
  "cw0 0.9.1",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.9.1",
  "cw20-base",
  "mars-core",
@@ -756,12 +744,12 @@ dependencies = [
 [[package]]
 name = "reward"
 version = "0.1.0"
-source = "git+https://github.com/stader-labs/stader-liquid-token?tag=v0.2.1#acf69c8cf02c7fc2baf39962c68c1555dc4c5916"
+source = "git+https://github.com/sbnair/stader-liquid-token?rev=cafba59f7fcad69dd68e84c607dd5910921bad57#cafba59f7fcad69dd68e84c607dd5910921bad57"
 dependencies = [
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw-storage-plus 0.8.1",
- "cw2 0.9.1",
+ "cw2",
  "cw20 0.8.1",
  "schemars",
  "serde",
@@ -886,7 +874,7 @@ dependencies = [
 [[package]]
 name = "stader-utils"
 version = "0.1.0"
-source = "git+https://github.com/stader-labs/stader-liquid-token?tag=v0.2.1#acf69c8cf02c7fc2baf39962c68c1555dc4c5916"
+source = "git+https://github.com/sbnair/stader-liquid-token?rev=cafba59f7fcad69dd68e84c607dd5910921bad57#cafba59f7fcad69dd68e84c607dd5910921bad57"
 dependencies = [
  "cosmwasm-bignumber",
  "cosmwasm-std",
@@ -902,13 +890,12 @@ dependencies = [
 [[package]]
 name = "staking"
 version = "0.1.0"
-source = "git+https://github.com/stader-labs/stader-liquid-token?tag=v0.2.1#acf69c8cf02c7fc2baf39962c68c1555dc4c5916"
+source = "git+https://github.com/sbnair/stader-liquid-token?rev=cafba59f7fcad69dd68e84c607dd5910921bad57#cafba59f7fcad69dd68e84c607dd5910921bad57"
 dependencies = [
  "airdrops-registry",
  "cosmwasm-std",
  "cosmwasm-storage",
  "cw-storage-plus 0.8.1",
- "cw2 0.8.1",
  "cw20 0.9.1",
  "cw20-base",
  "reward",

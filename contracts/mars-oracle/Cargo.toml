@@ -40,7 +40,7 @@ astroport = "1.0"
 
 basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v1.0.2" }
 
-stader = { git = "https://github.com/stader-labs/stader-liquid-token", package = "staking", tag = "v0.2.1", features = ["library"] }
+stader = { git = "https://github.com/sbnair/stader-liquid-token", package = "staking", rev = "cafba59f7fcad69dd68e84c607dd5910921bad57", features = ["library"] }
 
 [dev-dependencies]
 cosmwasm-schema = "0.16.2"
