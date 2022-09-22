@@ -2,13 +2,14 @@
 members = ["contracts/*", "packages/*"]
 
 [profile.release.package.mars-core]
-opt-level = 3
-debug = false
-debug-assertions = false
 codegen-units = 1
 incremental = false
 
 [profile.release]
+opt-level = 3
 rpath = false
 lto = true
 overflow-checks = true
+debug-assertions = false
+debug = false
+panic = "abort"
