@@ -26,7 +26,7 @@ mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 mars-red-bank = { path = "../mars-red-bank", version = "1.0.0", features = ["library"] }
 
 cw20= { workspace = true }
-cw-storage-plus = "0.9.0"
+cw-storage-plus = { worksapce = true}
 
 cosmwasm-std = { workspace = true }
 

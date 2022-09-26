@@ -21,7 +21,7 @@ cosmwasm-std = "0.16.2"
 cosmwasm-schema = "0.16.2"
 cw2 = "0.9.0"
 cw20 = "0.9.0"
-
 cw20-base = { version = "0.9.0", features = ["library"] }
 cw0 = "0.9.0"
-cw-storage-plus = "0.9.0"
+
+cw-storage-plus = { worksapce = true}
