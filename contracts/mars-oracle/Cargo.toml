@@ -43,7 +43,7 @@ basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v
 stader = { git = "https://github.com/sbnair/stader-liquid-token", package = "staking", rev = "cafba59f7fcad69dd68e84c607dd5910921bad57", features = ["library"] }
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.2"
+cosmwasm-schema = { workspace = true }
 
 [profile.release]
 overflow-checks = true

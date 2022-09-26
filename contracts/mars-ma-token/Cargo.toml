@@ -35,7 +35,7 @@ serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.23"
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.2"
+cosmwasm-schema = { workspace = true }
 
 [profile.release]
 overflow-checks = true
