@@ -13,7 +13,7 @@ use cw20_base::contract::{
     create_accounts, execute_update_marketing, execute_upload_logo, query_balance,
     query_download_logo, query_marketing_info, query_minter, query_token_info,
 };
-use cw20_base::enumerable::{query_all_accounts, query_all_allowances};
+use cw20_base::enumerable::{query_all_accounts, query_owner_allowances, query_spender_allowances};
 use cw20_base::state::{BALANCES, TOKEN_INFO};
 use cw20_base::ContractError;
 
