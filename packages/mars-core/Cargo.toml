@@ -31,7 +31,8 @@ schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.23"
 
-astroport = "1.0"
+# has incompatible conflicting deps
+# astroport = {workspace = true}
 
 basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v1.0.2" }
 
