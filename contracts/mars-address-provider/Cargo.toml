@@ -28,7 +28,7 @@ terra-cosmwasm = "2.2.0"
 
 cw-storage-plus = "0.9.0"
 
-cosmwasm-std = "0.16.2"
+cosmwasm-std = { workspace = true }
 
 thiserror = "1.0.23"
 

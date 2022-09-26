@@ -14,3 +14,7 @@ debug-assertions = false
 debug = false
 panic = "abort"
 strip = true
+
+
+[workspace.dependencies]
+cosmwasm-std = "0.16.2"
