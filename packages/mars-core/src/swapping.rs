@@ -1,14 +1,11 @@
 use crate::helpers::cw20_get_balance;
-use astroport::{
-    asset::{Asset as AstroportAsset, AssetInfo, PairInfo},
-    pair::ExecuteMsg as AstroportPairExecuteMsg,
-    querier::query_pair_info,
-};
+
 use cosmwasm_std::{
     attr, to_binary, Addr, Coin, CosmosMsg, Decimal as StdDecimal, DepsMut, Empty, Env, Response,
     StdError, StdResult, Uint128, WasmMsg,
 };
 use cw20::Cw20ExecuteMsg;
+use terraswap::asset::{AssetInfo, PairInfo};
 
 /// Swap assets via Astroport
 pub fn execute_swap(
@@ -20,121 +17,9 @@ pub fn execute_swap(
     astroport_factory_addr: Addr,
     astroport_max_spread: Option<StdDecimal>,
 ) -> StdResult<Response> {
-    // Having the same asset as offer and ask asset doesn't make any sense
-    if offer_asset_info == ask_asset_info {
-        return Err(StdError::generic_err(format!(
-            "Cannot swap an asset into itself. Both offer and ask assets were specified as {}",
-            offer_asset_info
-        )));
-    }
-
-    let (contract_offer_asset_balance, offer_asset_label) = match offer_asset_info.clone() {
-        AssetInfo::NativeToken { denom } => (
-            deps.querier
-                .query_balance(env.contract.address, denom.as_str())?
-                .amount,
-            denom,
-        ),
-        AssetInfo::Token { contract_addr } => {
-            let asset_label = String::from(contract_addr.as_str());
-            (
-                cw20_get_balance(
-                    &deps.querier,
-                    deps.api.addr_validate(&contract_addr.to_string())?,
-                    env.contract.address,
-                )?,
-                asset_label,
-            )
-        }
-    };
-
-    let ask_asset_label = match ask_asset_info.clone() {
-        AssetInfo::NativeToken { denom } => denom,
-        AssetInfo::Token { contract_addr } => contract_addr.to_string(),
-    };
-
-    if contract_offer_asset_balance.is_zero() {
-        return Err(StdError::generic_err(format!(
-            "Contract has no balance for the asset {}",
-            offer_asset_label
-        )));
-    }
-
-    let amount_to_swap = match amount {
-        Some(amount) if amount > contract_offer_asset_balance => {
-            return Err(StdError::generic_err(format!(
-                "The amount requested for swap exceeds contract balance for the asset {}",
-                offer_asset_label
-            )));
-        }
-        Some(amount) => amount,
-        None => contract_offer_asset_balance,
-    };
-
-    let pair_info: PairInfo = query_pair_info(
-        &deps.querier,
-        astroport_factory_addr,
-        &[offer_asset_info.clone(), ask_asset_info],
-    )?;
-
-    let offer_asset = AstroportAsset {
-        info: offer_asset_info,
-        amount: amount_to_swap,
-    };
-    let send_msg = asset_into_swap_msg(
-        deps.api
-            .addr_validate(&pair_info.contract_addr.to_string())?,
-        offer_asset,
-        astroport_max_spread,
-    )?;
-
-    let response = Response::new().add_message(send_msg).add_attributes(vec![
-        attr("action", "swap"),
-        attr("offer_asset", offer_asset_label),
-        attr("ask_asset", ask_asset_label),
-        attr("offer_asset_amount", amount_to_swap),
-    ]);
-
-    Ok(response)
+    panic!("#238");
 }
 
-/// Construct Astroport message in order to swap assets
-fn asset_into_swap_msg(
-    pair_contract: Addr,
-    offer_asset: AstroportAsset,
-    max_spread: Option<StdDecimal>,
-) -> StdResult<CosmosMsg<Empty>> {
-    let message = match offer_asset.info.clone() {
-        AssetInfo::NativeToken { denom } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: pair_contract.to_string(),
-            msg: to_binary(&AstroportPairExecuteMsg::Swap {
-                offer_asset: offer_asset.clone(),
-                belief_price: None,
-                max_spread,
-                to: None,
-            })?,
-            funds: vec![Coin {
-                denom,
-                amount: offer_asset.amount,
-            }],
-        }),
-        AssetInfo::Token { contract_addr } => CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: contract_addr.to_string(),
-            msg: to_binary(&Cw20ExecuteMsg::Send {
-                contract: pair_contract.to_string(),
-                amount: offer_asset.amount,
-                msg: to_binary(&AstroportPairExecuteMsg::Swap {
-                    offer_asset,
-                    belief_price: None,
-                    max_spread,
-                    to: None,
-                })?,
-            })?,
-            funds: vec![],
-        }),
-    };
-    Ok(message)
-}
 
 #[cfg(test)]
 mod tests {
@@ -142,7 +27,6 @@ mod tests {
     use crate::testing::{
         assert_generic_error_message, mock_dependencies, mock_env, MockEnvParams,
     };
-    use astroport::factory::PairType;
     use cosmwasm_std::testing::MOCK_CONTRACT_ADDR;
     use cosmwasm_std::SubMsg;
 

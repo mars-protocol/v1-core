@@ -69,8 +69,6 @@ pub mod msg {
 
     use cosmwasm_std::{CosmosMsg, Decimal as StdDecimal, Uint128};
 
-    use astroport::asset::AssetInfo;
-
     use crate::asset::Asset;
     use crate::math::decimal::Decimal;
 
@@ -112,13 +110,7 @@ pub mod msg {
             asset: Asset,
             /// Amount to distribute to protocol contracts, defaults to contract balance if not specified
             amount: Option<Uint128>,
-        },
-
-        /// Swap any asset on the contract to uusd
-        SwapAssetToUusd {
-            offer_asset_info: AssetInfo,
-            amount: Option<Uint128>,
-        },
+        },        
 
         /// Execute Cosmos msg (only callable by owner)
         ExecuteCosmosMsg(CosmosMsg),

@@ -19,7 +19,6 @@ keywords = ["terra", "cosmwasm"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-terra-cosmwasm = "2.2.0"
 
 cw2 = { workspace = true }
 cw20= { workspace = true }
@@ -31,14 +30,8 @@ schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.23"
 
-# has incompatible conflicting deps
-# astroport = {workspace = true}
+terraswap = {workspace = true}
 
-basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v1.0.2" }
-
-stader = { git = "https://github.com/sbnair/stader-liquid-token", package = "staking", rev = "cafba59f7fcad69dd68e84c607dd5910921bad57", features = [
-  "library",
-] }
 
 [profile.release]
 overflow-checks = true

@@ -30,6 +30,9 @@ pub fn mock_env(mock_env_params: MockEnvParams) -> Env {
         contract: ContractInfo {
             address: Addr::unchecked(MOCK_CONTRACT_ADDR),
         },
+        transaction: Some(
+            cosmwasm_std::TransactionInfo { index: 42 }
+        )
     }
 }
 

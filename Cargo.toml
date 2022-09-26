@@ -17,12 +17,12 @@ strip = true
 
 
 [workspace.dependencies]
-cosmwasm-std = "1.0.0"
-cosmwasm-schema = "1.0.0"
+cosmwasm-std = "1.1.2"
+cosmwasm-schema = "1.1.2"
 cw2 = "0.15.0"
 cw20 = "0.15.0"
-cw20-base = { version = "0.9.1", features = ["library"] }
+cw20-base = { version = "0.15.0", features = ["library"] }
 cw0 = "0.10.3"
 cw-storage-plus = "0.15.0"
 
-astroport = "1.0.1"
+terraswap = "2.8.0"

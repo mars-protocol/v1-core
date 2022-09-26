@@ -24,8 +24,6 @@ library = []
 [dependencies]
 mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 
-terra-cosmwasm = "2.2.0"
-
 cw-storage-plus = { worksapce = true}
 
 cosmwasm-std = { workspace = true }
