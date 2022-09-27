@@ -1,3 +1,4 @@
+cargo-features = ["workspace-inheritance"]
 [package]
 name = "mars-protocol-rewards-collector"
 version = "1.0.0"
