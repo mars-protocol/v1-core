@@ -400,17 +400,13 @@ fn compute_user_unclaimed_rewards(
         .may_load(deps.storage, user_address)?
         .unwrap_or_else(Uint128::zero);
 
-    let result_asset_incentives: StdResult<Vec<_>> = ASSET_INCENTIVES
+    let result_asset_incentives: StdResult<Vec<(Addr, AssetIncentive)>> = ASSET_INCENTIVES
         .range(deps.storage, None, None, Order::Ascending)
         .collect();
 
     let mut user_asset_incentive_statuses_to_update: Vec<UserAssetIncentiveStatus> = vec![];
 
-    for (ma_token_address_bytes, mut asset_incentive) in result_asset_incentives? {
-        let ma_token_address = deps
-            .api
-            .addr_validate(&String::from_utf8(ma_token_address_bytes)?)?;
-
+    for (ma_token_address, mut asset_incentive) in result_asset_incentives? {
         // Get asset user balances and total supply
         let balance_and_total_supply: mars_core::ma_token::msg::BalanceAndTotalSupplyResponse =
             deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
