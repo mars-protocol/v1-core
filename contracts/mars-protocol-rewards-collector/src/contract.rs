@@ -5,8 +5,6 @@ use cosmwasm_std::{
     WasmMsg,
 };
 
-use astroport::asset::AssetInfo;
-
 use mars_core::asset::{build_send_asset_with_tax_deduction_msg, get_asset_balance, Asset};
 use mars_core::error::MarsError;
 use mars_core::helpers::{option_string_to_addr, zero_address};
@@ -96,15 +94,7 @@ pub fn execute(
         ExecuteMsg::DistributeProtocolRewards { asset, amount } => {
             execute_distribute_protocol_rewards(deps, env, info, asset, amount)
         }
-        ExecuteMsg::SwapAssetToUusd {
-            offer_asset_info,
-            amount,
-        } => Ok(execute_swap_asset_to_uusd(
-            deps,
-            env,
-            offer_asset_info,
-            amount,
-        )?),
+        // TODO: #328 ExecuteMsg::SwapAssetToUusd
         ExecuteMsg::ExecuteCosmosMsg(cosmos_msg) => {
             Ok(execute_execute_cosmos_msg(deps, env, info, cosmos_msg)?)
         }
@@ -323,31 +313,6 @@ pub fn execute_distribute_protocol_rewards(
     Ok(res)
 }
 
-/// Swap any asset on the contract to uusd
-pub fn execute_swap_asset_to_uusd(
-    deps: DepsMut,
-    env: Env,
-    offer_asset_info: AssetInfo,
-    amount: Option<Uint128>,
-) -> StdResult<Response> {
-    let config = CONFIG.load(deps.storage)?;
-
-    let ask_asset_info = AssetInfo::NativeToken {
-        denom: "uusd".to_string(),
-    };
-
-    let astroport_max_spread = Some(config.astroport_max_spread);
-
-    execute_swap(
-        deps,
-        env,
-        offer_asset_info,
-        ask_asset_info,
-        amount,
-        config.astroport_factory_address,
-        astroport_max_spread,
-    )
-}
 
 /// Execute Cosmos message
 pub fn execute_execute_cosmos_msg(

@@ -21,7 +21,7 @@ crate-type = ["cdylib", "rlib"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
+mars-core = { path = "../../packages/mars-core" }
 
 cw20= { workspace = true }
 cw-storage-plus = { worksapce = true}
