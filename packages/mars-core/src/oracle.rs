@@ -185,13 +185,14 @@ pub mod helpers {
         asset_type: AssetType,
     ) -> StdResult<Decimal> {
         // For UST, we skip the query and just return 1 to save gas
-        if asset_type == AssetType::Native && asset_label == "uusd" {
+        // #328
+        //if asset_type == AssetType::Native && asset_label == "uusd" {
             Ok(Decimal::one())
-        } else {
-            querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-                contract_addr: oracle_address.into(),
-                msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
-            }))
-        }
+        // } else {
+        //     querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        //         contract_addr: oracle_address.into(),
+        //         msg: to_binary(&QueryMsg::AssetPriceByReference { asset_reference })?,
+        //     }))
+        // }
     }
 }

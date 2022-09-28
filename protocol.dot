@@ -18,9 +18,13 @@ digraph mars_protocol {
 
 
   mars_red_bank_deposit -> mars_red_bank_contract
-  mars_red_bank_deposit -> mars_ma_token_address
-  mars_red_bank_deposit -> protocol_rewards_collector_address
+  mars_red_bank_deposit -> mars_ma_token_contract
+  mars_red_bank_deposit -> mars_protocol_rewards_collector_contract
+
+  mars_address_provider_address -> mars_protocol_rewards_collector_contract
+  mars_address_provider_address -> mars_incetives_contract
 
   mars_red_bank_init_asset -> mars_red_bank_contract
-
+  mars_red_bank_init_asset -> mars_incetives_contract
+  mars_red_bank_receive_cw20 -> mars_protocol_rewards_collector_contract
 }

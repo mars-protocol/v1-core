@@ -840,7 +840,7 @@ pub fn execute_withdraw(
         vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
-    let oracle_address = addresses_query.pop().unwrap();
+    let oracle_address = protocol_rewards_collector_address.clone() ;// "#328"; //addresses_query.pop().unwrap();
 
     let mut withdrawer = match USERS.may_load(deps.storage, &withdrawer_addr)? {
         Some(user) => user,
@@ -1014,7 +1014,7 @@ pub fn execute_borrow(
         vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
-    let oracle_address = addresses_query.pop().unwrap();
+    let oracle_address = protocol_rewards_collector_address.clone(); // "#328".into(); addresses_query.pop().unwrap();
 
     // Check if user can borrow specified amount
     let mut uncollateralized_debt = false;
@@ -1024,6 +1024,7 @@ pub fn execute_borrow(
             deps.as_ref(),
             env.block.time.seconds(),
             &borrower_address,
+            // ASD
             oracle_address.clone(),
             &user,
             global_state.market_count,
@@ -1035,6 +1036,7 @@ pub fn execute_borrow(
         } else {
             mars_core::oracle::helpers::query_price(
                 deps.querier,
+                // ASD
                 oracle_address,
                 &asset_label,
                 asset_reference.clone(),
