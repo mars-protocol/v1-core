@@ -837,7 +837,7 @@ pub fn execute_withdraw(
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+        vec![MarsContract::ProtocolRewardsCollector], //MarsContract::Oracle,
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
     let oracle_address = protocol_rewards_collector_address.clone() ;// "#328"; //addresses_query.pop().unwrap();
@@ -1011,7 +1011,7 @@ pub fn execute_borrow(
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+        vec![MarsContract::ProtocolRewardsCollector], // MarsContract::Oracle
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
     let oracle_address = protocol_rewards_collector_address.clone(); // "#328".into(); addresses_query.pop().unwrap();
