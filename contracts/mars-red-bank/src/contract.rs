@@ -8,7 +8,6 @@ use cosmwasm_std::{
 };
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg, MinterResponse};
 use cw20_base::msg::InstantiateMarketingInfo;
-use cw_storage_plus::U32Key;
 
 use mars_core::address_provider::{self, MarsContract};
 use mars_core::ma_token;
@@ -362,7 +361,7 @@ pub fn execute_init_asset(
             // Save index to reference mapping
             MARKET_REFERENCES_BY_INDEX.save(
                 deps.storage,
-                U32Key::new(market_idx),
+                market_idx,
                 &asset_reference.to_vec(),
             )?;
 
@@ -838,10 +837,10 @@ pub fn execute_withdraw(
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+        vec![MarsContract::ProtocolRewardsCollector], //MarsContract::Oracle,
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
-    let oracle_address = addresses_query.pop().unwrap();
+    let oracle_address = protocol_rewards_collector_address.clone() ;// "#328"; //addresses_query.pop().unwrap();
 
     let mut withdrawer = match USERS.may_load(deps.storage, &withdrawer_addr)? {
         Some(user) => user,
@@ -1012,10 +1011,10 @@ pub fn execute_borrow(
     let mut addresses_query = address_provider::helpers::query_addresses(
         &deps.querier,
         config.address_provider_address,
-        vec![MarsContract::Oracle, MarsContract::ProtocolRewardsCollector],
+        vec![MarsContract::ProtocolRewardsCollector], // MarsContract::Oracle
     )?;
     let protocol_rewards_collector_address = addresses_query.pop().unwrap();
-    let oracle_address = addresses_query.pop().unwrap();
+    let oracle_address = protocol_rewards_collector_address.clone(); // "#328".into(); addresses_query.pop().unwrap();
 
     // Check if user can borrow specified amount
     let mut uncollateralized_debt = false;
@@ -1025,6 +1024,7 @@ pub fn execute_borrow(
             deps.as_ref(),
             env.block.time.seconds(),
             &borrower_address,
+            // ASD
             oracle_address.clone(),
             &user,
             global_state.market_count,
@@ -1036,6 +1036,7 @@ pub fn execute_borrow(
         } else {
             mars_core::oracle::helpers::query_price(
                 deps.querier,
+                // ASD
                 oracle_address,
                 &asset_label,
                 asset_reference.clone(),
@@ -2304,7 +2305,7 @@ fn get_asset_denom(deps: Deps, asset_label: &str, asset_type: AssetType) -> StdR
 
 pub fn market_get_from_index(deps: &Deps, index: u32) -> StdResult<(Vec<u8>, Market)> {
     let asset_reference_vec =
-        match MARKET_REFERENCES_BY_INDEX.load(deps.storage, U32Key::new(index)) {
+        match MARKET_REFERENCES_BY_INDEX.load(deps.storage, index) {
             Ok(asset_reference_vec) => asset_reference_vec,
             Err(_) => {
                 return Err(StdError::generic_err(format!(
@@ -2802,7 +2803,7 @@ mod tests {
 
             // should store reference in market index
             let market_reference = MARKET_REFERENCES_BY_INDEX
-                .load(&deps.storage, U32Key::new(0))
+                .load(&deps.storage, u32::new(0))
                 .unwrap();
             assert_eq!(b"someasset", market_reference.as_slice());
 
@@ -2920,7 +2921,7 @@ mod tests {
 
             // should store reference in market index
             let market_reference = MARKET_REFERENCES_BY_INDEX
-                .load(&deps.storage, U32Key::new(1))
+                .load(&deps.storage, u32::new(1))
                 .unwrap();
             assert_eq!(cw20_addr.as_bytes(), market_reference.as_slice());
 
@@ -3365,7 +3366,7 @@ mod tests {
             );
 
             let new_market_reference = MARKET_REFERENCES_BY_INDEX
-                .load(&deps.storage, U32Key::new(0))
+                .load(&deps.storage, u32::new(0))
                 .unwrap();
             assert_eq!(b"someasset", new_market_reference.as_slice());
 
@@ -9612,7 +9613,7 @@ mod tests {
         MARKETS.save(deps.storage, key, &new_market).unwrap();
 
         MARKET_REFERENCES_BY_INDEX
-            .save(deps.storage, U32Key::new(index), &key.to_vec())
+            .save(deps.storage, u32::new(index), &key.to_vec())
             .unwrap();
 
         MARKET_REFERENCES_BY_MA_TOKEN

@@ -9,7 +9,7 @@ pub const BALANCE_SNAPSHOTS: Map<(&Addr, U64Key), Uint128> = Map::new("balance_s
 
 fn get_snapshot_value_at(
     storage: &dyn Storage,
-    prefix: Prefix<Uint128>,
+    prefix: Prefix<Uint128, u64>,
     block: u64,
 ) -> StdResult<Uint128> {
     // Look for the last value recorded before the current block (if none then value is zero)

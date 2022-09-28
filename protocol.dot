@@ -1,0 +1,30 @@
+digraph mars_protocol {
+  owner -> signer
+
+  mars_red_bank_code -> mars_red_bank_init
+
+  mars_red_bank_init -> mars_red_bank_contract
+  mars_red_bank_init -> mars_address_provider_contract [label="init"]
+  mars_red_bank_init -> mars_ma_token_code [label="init"]
+  mars_red_bank_init -> owner [label="init"]
+
+  mars_address_provider_init -> owner [label="init"]
+  mars_address_provider_init -> mars_address_provider_contract
+
+  mars_address_provider_update -> mars_address_provider_contract
+  mars_address_provider_update -> mars_token_address
+  mars_address_provider_update -> mars_oracle_address
+  mars_address_provider_update -> protocol_rewards_collector_address
+
+
+  mars_red_bank_deposit -> mars_red_bank_contract
+  mars_red_bank_deposit -> mars_ma_token_contract
+  mars_red_bank_deposit -> mars_protocol_rewards_collector_contract
+
+  mars_address_provider_address -> mars_protocol_rewards_collector_contract
+  mars_address_provider_address -> mars_incetives_contract
+
+  mars_red_bank_init_asset -> mars_red_bank_contract
+  mars_red_bank_init_asset -> mars_incetives_contract
+  mars_red_bank_receive_cw20 -> mars_protocol_rewards_collector_contract
+}

@@ -1,3 +1,4 @@
+cargo-features = ["workspace-inheritance"]
 [package]
 name = "mars-core"
 version = "1.0.2"
@@ -19,23 +20,19 @@ keywords = ["terra", "cosmwasm"]
 backtraces = ["cosmwasm-std/backtraces"]
 
 [dependencies]
-terra-cosmwasm = "2.2.0"
 
-cw2 = "0.9.0"
-cw20 = "0.9.0"
-cw20-base = { version = "0.9.0", features = ["library"] }
+cw2 = { workspace = true }
+cw20= { workspace = true }
+cw20-base = { worksapce = true, features = ["library"] }
 
-cosmwasm-std = "0.16.2"
+cosmwasm-std = { workspace = true }
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 thiserror = "1.0.23"
 
-astroport = "1.0"
+terraswap = {workspace = true}
 
-basset = { git = "https://github.com/lidofinance/lido-terra-contracts", tag = "v1.0.2" }
-
-stader = { git = "https://github.com/stader-labs/stader-liquid-token", package = "staking", tag = "v0.2.1", features = ["library"] }
 
 [profile.release]
 overflow-checks = true

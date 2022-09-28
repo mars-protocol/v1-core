@@ -1,3 +1,4 @@
+cargo-features = ["workspace-inheritance"]
 [package]
 name = "mars-treasury"
 version = "1.0.0"
@@ -22,15 +23,15 @@ backtraces = ["cosmwasm-std/backtraces"]
 [dependencies]
 mars-core = { path = "../../packages/mars-core", version = "1.0.0" }
 
-cw-storage-plus = "0.9.0"
+cw-storage-plus = { worksapce = true}
 
-cosmwasm-std = "0.16.2"
+cosmwasm-std = { workspace = true }
 
 schemars = "0.8.1"
 serde = { version = "1.0.103", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
-cosmwasm-schema = "0.16.2"
+cosmwasm-schema = { workspace = true }
 
 [profile.release]
 overflow-checks = true

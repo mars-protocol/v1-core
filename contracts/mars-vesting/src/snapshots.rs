@@ -1,10 +1,10 @@
 use cosmwasm_std::{Addr, Order, StdResult, Storage, Uint128};
-use cw_storage_plus::{Bound, Map, Prefix, U64Key};
+use cw_storage_plus::{Bound, Map, Prefix};
 
 // STATE
 
-pub const VOTING_POWER_SNAPSHOTS: Map<(&Addr, U64Key), Uint128> = Map::new("voting_powers");
-pub const TOTAL_VOTING_POWER_SNAPSHOTS: Map<U64Key, Uint128> = Map::new("total_voting_powers");
+pub const VOTING_POWER_SNAPSHOTS: Map<(&Addr, u64), Uint128> = Map::new("voting_powers");
+pub const TOTAL_VOTING_POWER_SNAPSHOTS: Map<u64, Uint128> = Map::new("total_voting_powers");
 
 // CORE
 
@@ -14,7 +14,7 @@ fn get_snapshot_value_at(
     block: u64,
 ) -> StdResult<Uint128> {
     // Look for the last value recorded before the current block (if none then value is zero)
-    let end = Bound::inclusive(U64Key::new(block));
+    let end = Bound::inclusive(u64::new(block));
     let last_value_up_to_block = prefix
         .range(storage, None, Some(end), Order::Descending)
         .next();

@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ExecuteMsg",
-  "anyOf": [
+  "oneOf": [
     {
       "description": "Update contract config",
       "type": "object",
@@ -76,7 +76,7 @@
   "definitions": {
     "Asset": {
       "description": "Represents either a native asset or a cw20. Meant to be used as part of a msg in a contract call and not to be used internally",
-      "anyOf": [
+      "oneOf": [
         {
           "type": "object",
           "required": [
@@ -124,7 +124,7 @@
       "type": "string"
     },
     "PriceSource_for_String": {
-      "anyOf": [
+      "oneOf": [
         {
           "description": "Returns a fixed value; used for UST",
           "type": "object",
@@ -240,6 +240,48 @@
               "properties": {
                 "pair_address": {
                   "description": "Address of the asset of interest",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "stLuna price calculated from stLuna/Luna exchange rate from Lido hub contract and Luna price from current price source",
+          "type": "object",
+          "required": [
+            "stluna"
+          ],
+          "properties": {
+            "stluna": {
+              "type": "object",
+              "required": [
+                "hub_address"
+              ],
+              "properties": {
+                "hub_address": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Lunax price calculated from Lunax/Luna exchange rate from Stader staking contract and Luna price from current price source",
+          "type": "object",
+          "required": [
+            "lunax"
+          ],
+          "properties": {
+            "lunax": {
+              "type": "object",
+              "required": [
+                "staking_address"
+              ],
+              "properties": {
+                "staking_address": {
                   "type": "string"
                 }
               }

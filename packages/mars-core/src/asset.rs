@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::helpers::cw20_get_balance;
 use crate::tax::deduct_tax;
-use astroport::asset::AssetInfo as AstroportAssetInfo;
 
 /// Represents either a native asset or a cw20. Meant to be used as part of a msg
 /// in a contract call and not to be used internally
@@ -43,19 +42,6 @@ impl Asset {
     }
 }
 
-// Cast astroport::asset::AssetInfo into mars_core::asset::Asset so that they can be compared
-impl From<&AstroportAssetInfo> for Asset {
-    fn from(info: &AstroportAssetInfo) -> Self {
-        match info {
-            AstroportAssetInfo::Token { contract_addr } => Asset::Cw20 {
-                contract_addr: contract_addr.to_string(),
-            },
-            AstroportAssetInfo::NativeToken { denom } => Asset::Native {
-                denom: denom.clone(),
-            },
-        }
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
