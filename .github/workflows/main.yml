@@ -73,6 +73,11 @@ jobs:
           components: clippy
           override: true
 
+      - name: Run cargo audit
+        run:
+          cargo install cargo-audit
+          cargo audit
+
       - name: Run cargo clippy
         uses: actions-rs/cargo@v1
         with:
